@@ -1,0 +1,45 @@
+# Build directories
+/build*/
+/cmake-build-*/
+/out/
+
+# Local git worktrees (one per in-flight change; see CLAUDE.md)
+/.worktrees/
+
+# Compiled shaders / Vulkan-compute kernels (built into the build tree)
+*.spv
+
+# CUDA/Metal compiled intermediates (interop / opt-in accelerator backends)
+*.ptx
+*.cubin
+*.fatbin
+
+# Calibration run artifacts (captured sessions, undistorted dumps, reports)
+*.png.actual
+/scratch/
+
+# CMake/user state
+CMakeUserPresets.json
+.cache/
+compile_commands.json
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# GPU debugging captures (RenderDoc / Xcode Metal frame capture)
+*.rdc
+*.cap
+*.gputrace
+
+# Xcode-generator output (Apple/MoltenVK builds)
+*.xcodeproj/
+DerivedData/
+
+# Logs
+*.log
+
+# Internal design/migration doc — kept local, not published
+/DESIGN.md
