@@ -40,7 +40,11 @@ option(VC_WITH_VULKAN
 option(VC_WITH_CUDA
        "Enable the CUDA desktop-accelerator backend (reserved; not yet wired)"
        OFF)
-option(VC_WARNINGS_AS_ERRORS "Treat first-party compiler warnings as errors" ON)
+# On by default only at the top level: a consumer that pulls us in via
+# FetchContent with a newer compiler should see our new warnings, not a broken
+# build.
+option(VC_WARNINGS_AS_ERRORS "Treat first-party compiler warnings as errors"
+       ${VC_IS_TOP_LEVEL})
 
 # Semicolon list of sanitizers (e.g. "address;undefined"); empty = off. Applied
 # globally — see cmake/vc_sanitizers.cmake for why.
