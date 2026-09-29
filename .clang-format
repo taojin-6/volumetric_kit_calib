@@ -1,0 +1,8 @@
+# Plain Google base, 80-column lines, left-aligned pointers, preserved include
+# blocks.
+Language: Cpp
+BasedOnStyle: Google
+ColumnLimit: 80
+IncludeBlocks: Preserve
+DerivePointerAlignment: false
+PointerAlignment: Left
