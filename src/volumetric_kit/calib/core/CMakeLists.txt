@@ -18,7 +18,7 @@ add_library(volumetric_kit::calib_core ALIAS calib_core)
 # TODO: result.cpp (error handling) and camera_model.cpp land with their tiers
 # in the following PRs; this PR establishes the build system with the version
 # API.
-target_sources(calib_core PRIVATE version.cpp)
+target_sources(calib_core PRIVATE camera_model.cpp result.cpp version.cpp)
 
 # Generated headers: the VC_CORE_API export macro + the configured version
 # header. The export header is per-tier (core/export.hpp + VC_CORE_API +
