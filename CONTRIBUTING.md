@@ -35,6 +35,9 @@ a branch in the primary checkout. Create it locally under `.worktrees/` (e.g.
 `git worktree add .worktrees/<branch> -b <branch>`) — never as a sibling in the
 parent folder — and remove it with `git worktree remove` once the PR merges.
 
+`DESIGN.md` is gitignored, so a worktree does not have it; read it from the
+primary checkout (`../../DESIGN.md` from `.worktrees/<branch>/`).
+
 ## Formatting and CI
 
 - clang-format is pinned (see `.pre-commit-config.yaml`) so local and CI

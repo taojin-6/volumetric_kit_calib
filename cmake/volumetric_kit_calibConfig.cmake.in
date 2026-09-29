@@ -5,9 +5,11 @@
 
 # Re-find the PUBLIC dependencies. Eigen is a PUBLIC dependency of calib_core
 # (its public headers — camera_model.hpp etc. — name Eigen types), so the
-# installed package re-finds it.
+# installed package re-finds it. CONFIG, as the build found it: a consumer's own
+# FindEigen3.cmake (common in older projects) sets only variables, not the
+# Eigen3::Eigen target our exported targets link.
 include(CMakeFindDependencyMacro)
-find_dependency(Eigen3)
+find_dependency(Eigen3 CONFIG)
 
 # TODO: as the detect/solve tiers land, re-find their public deps here
 # (OpenCV for detect, Ceres for solve) — mirroring the Eigen line above.
