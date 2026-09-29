@@ -8,16 +8,16 @@
 include(GNUInstallDirs)
 
 add_subdirectory(volumetric_kit/calib/core)
-# TODO: add_subdirectory() for compute / detect / solve / color / quality /
-# capture / viz / app as those tiers land (see DESIGN.md). compute needs the
-# Vulkan/CUDA backends; detect/solve need OpenCV/Ceres; viz/app need
-# volumetric_kit_gfx.
+add_subdirectory(volumetric_kit/calib/capture)
+# TODO: add_subdirectory() for compute / detect / solve / color / quality / viz
+# / app as those tiers land (see DESIGN.md). compute needs the Vulkan/CUDA
+# backends; detect/solve need OpenCV/Ceres; viz/app need volumetric_kit_gfx.
 
 # --- calib: umbrella alias ---------------------------------------------------
 # Consumers link `volumetric_kit::calib` and get whatever tiers are built.
 add_library(calib INTERFACE)
 add_library(volumetric_kit::calib ALIAS calib)
-target_link_libraries(calib INTERFACE calib_core)
+target_link_libraries(calib INTERFACE calib_core calib_capture)
 
 # --- Install / export --------------------------------------------------------
 # Tiers install their own targets into volumetric_kit_calibTargets (above); here

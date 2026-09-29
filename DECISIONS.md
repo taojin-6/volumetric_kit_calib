@@ -21,6 +21,9 @@ domain model and rationale remain in the intentionally gitignored local
   (parity target), then subsumed. They are a separate checkout beside the
   `volumetric_kit/` folder: `../../camera_calibration/` from the primary
   checkout.
+- **Capture sessions keep the legacy scripts' image names**
+  (`<serial>/calib_img_<serial>_<n>.png`), so the legacy bundle adjustment
+  reads a session unchanged.
 
 ## Open decisions
 

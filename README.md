@@ -10,12 +10,14 @@ adjustment, fisheye, cross-camera color, and the optics that gate quality
 are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 `volumetric_kit_gfx`, so it is not in a clone.
 
-> **Status:** Early scaffolding. The `core` tier — exception-free
-> `Status`/`Result`, the physically-parameterized data model (camera/lens/sensor
-> models, board target, observation), and the `PinholeBrownConrady` camera model
-> — builds and is tested (GoogleTest). The compute backends, detection, solve,
-> quality, color, capture, viz, and app tiers are not yet implemented; the
-> legacy `camera_calibration` Python scripts (a separate checkout beside the
+> **Status:** Early scaffolding. Two tiers build and are tested (GoogleTest):
+> `core` — exception-free `Status`/`Result`, the physically-parameterized data
+> model (camera/lens/sensor models, board target, observation), and the
+> `PinholeBrownConrady` camera model — and `capture` — the rig-source contract,
+> capture sessions on disk, their replay, and the recorder that averages a key
+> press's sets into one capture. The live camera source, compute backends,
+> detection, solve, quality, color, viz, and app tiers are not yet implemented;
+> the legacy `camera_calibration` Python scripts (a separate checkout beside the
 > `volumetric_kit/` folder) remain the reference oracle.
 
 [AGENTS.md](AGENTS.md) is the shared working guide for Codex and Claude Code;
