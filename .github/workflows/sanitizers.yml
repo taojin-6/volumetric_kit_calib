@@ -1,0 +1,43 @@
+name: sanitizers
+
+# AddressSanitizer + UndefinedBehaviorSanitizer + LeakSanitizer, Linux-only
+# (LeakSanitizer isn't available on macOS). A green normal build is necessary but
+# not sufficient — this is what turns the move-only / lifetime tests into actual
+# leak / use-after-free / double-free detectors.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: sanitizers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  asan-ubsan-lsan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake clang libeigen3-dev
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DVC_SANITIZE="address;undefined"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

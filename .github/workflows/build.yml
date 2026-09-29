@@ -1,0 +1,60 @@
+name: build
+
+# Build + test on the hosted runners. The core tier is pure CPU (Eigen only), so
+# no GPU/Vulkan toolchain is needed — unlike volumetric_kit_gfx. Both an
+# unoptimized Debug and an optimized Release/NDEBUG configuration are exercised,
+# so an NDEBUG-only or optimizer-exposed break is caught.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.os }} ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        build_type: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake build-essential libeigen3-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: brew install cmake eigen
+
+      # Cache the FetchContent dependency tree (googletest sources + build) so it
+      # is not re-cloned and recompiled every run.
+      - name: Cache third-party deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-${{ matrix.os }}-${{ matrix.build_type }}-${{ hashFiles('third_party/CMakeLists.txt') }}
+          restore-keys: |
+            deps-${{ matrix.os }}-${{ matrix.build_type }}-
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

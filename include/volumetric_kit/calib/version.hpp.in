@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Tao Jin
+
+#pragma once
+
+/// @file version.hpp
+/// @brief Compile-time and runtime accessors for the library version. Generated
+///        from version.hpp.in by CMake -- do not edit the generated copy.
+
+#include "volumetric_kit/calib/core/export.hpp"
+
+#define VC_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define VC_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define VC_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define VC_VERSION_STRING "@PROJECT_VERSION@"
+
+namespace volumetric_kit::calib {
+
+/// @return The library version as "MAJOR.MINOR.PATCH".
+VC_CORE_API const char* version_string() noexcept;
+
+/// @return The major version component.
+VC_CORE_API int version_major() noexcept;
+/// @return The minor version component.
+VC_CORE_API int version_minor() noexcept;
+/// @return The patch version component.
+VC_CORE_API int version_patch() noexcept;
+
+}  // namespace volumetric_kit::calib
