@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Tao Jin
+
+@PACKAGE_INIT@
+
+# Re-find the PUBLIC dependencies. Eigen is a PUBLIC dependency of calib_core
+# (its public headers — camera_model.hpp etc. — name Eigen types), so the
+# installed package re-finds it.
+include(CMakeFindDependencyMacro)
+find_dependency(Eigen3)
+
+# TODO: as the detect/solve tiers land, re-find their public deps here
+# (OpenCV for detect, Ceres for solve) — mirroring the Eigen line above.
+
+include("${CMAKE_CURRENT_LIST_DIR}/volumetric_kit_calibTargets.cmake")
+
+check_required_components(volumetric_kit_calib)
