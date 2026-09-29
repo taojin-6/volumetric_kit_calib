@@ -22,16 +22,34 @@
 namespace volumetric_kit::calib {
 
 /// @brief One detected target feature in image space.
+///
+/// @code
+/// DetectedPoint corner;
+/// corner.id = 17;
+/// corner.pixel = {812.4, 390.1};
+/// corner.weight = 1.0 / (0.05 * 0.05);  // refined to sigma = 0.05 px
+/// @endcode
 struct DetectedPoint {
   int id = -1;                  ///< Stable target-feature id (corner/marker).
   Eigen::Vector2d pixel{0, 0};  ///< Subpixel location (pixels).
-  double weight = 1.0;          ///< Inverse-variance weight from refinement.
+  /// Inverse-variance weight from refinement (1/px^2).
+  double weight = 1.0;
 };
 
 /// @brief All features one camera detected in one frame.
+///
+/// @code
+/// Observation obs;
+/// obs.camera_id = "bm-1";
+/// obs.frame_id = 42;  // the 43rd synchronized capture set
+/// obs.points.push_back(corner);
+/// @endcode
 struct Observation {
-  std::string camera_id;      ///< Stable camera identifier (e.g. serial).
-  std::int64_t frame_id = 0;  ///< Frame/timestamp index for multi-cam sync.
+  std::string camera_id;  ///< Stable camera identifier (e.g. serial).
+  /// Index of the capture set this frame belongs to; frames from different
+  /// cameras with the same index were captured together. An index, not a
+  /// timestamp.
+  std::int64_t frame_id = 0;
   std::vector<DetectedPoint> points;  ///< Detected features in this frame.
 
   /// @return The number of detected features.

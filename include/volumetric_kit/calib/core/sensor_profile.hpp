@@ -11,26 +11,42 @@
 /// this error good?" all require real sensor numbers. This struct is where they
 /// live, attached per camera alongside a @ref lens_profile.hpp "LensProfile".
 
+#include <optional>
+
 namespace volumetric_kit::calib {
 
 /// @brief Physical parameters of an image sensor.
 ///
-/// Defaults are intentionally zero/unset; a value of 0 means "unknown" and the
-/// quality analyses that need a given field report it as missing rather than
-/// silently assuming one.
+/// Every field is optional, and an empty one means "unknown": an analysis that
+/// needs it reports it as missing rather than assuming a value. A present zero
+/// is a real zero -- a global shutter's line time, or a negligible dark
+/// current -- never a stand-in for "unknown".
+///
+/// @code
+/// SensorProfile sensor;
+/// sensor.pixel_pitch_um = 3.45;
+/// sensor.width_px = 2448;
+/// sensor.height_px = 2048;
+/// sensor.rolling_shutter_line_time_us = 0.0;  // known: a global shutter
+/// if (!sensor.read_noise_e) {
+///   // the noise-floor verdict reports read noise as missing
+/// }
+/// @endcode
 struct SensorProfile {
-  double pixel_pitch_um = 0.0;        ///< Pixel pitch (micrometres).
-  int width_px = 0;                   ///< Active sensor width (pixels).
-  int height_px = 0;                  ///< Active sensor height (pixels).
-  double read_noise_e = 0.0;          ///< Read noise (electrons RMS).
-  double full_well_e = 0.0;           ///< Full-well capacity (electrons).
-  double gain_e_per_dn = 0.0;         ///< Conversion gain (electrons per DN).
-  double quantum_efficiency = 0.0;    ///< QE at the working wavelength (0..1).
-  double dark_current_e_per_s = 0.0;  ///< Dark current (electrons/pixel/s).
-  /// Rolling-shutter readout time per line (microseconds); 0 for global
+  std::optional<double> pixel_pitch_um;  ///< Pixel pitch (micrometres).
+  std::optional<int> width_px;           ///< Active sensor width (pixels).
+  std::optional<int> height_px;          ///< Active sensor height (pixels).
+  std::optional<double> read_noise_e;    ///< Read noise (electrons RMS).
+  std::optional<double> full_well_e;     ///< Full-well capacity (electrons).
+  std::optional<double> gain_e_per_dn;  ///< Conversion gain (electrons per DN).
+  /// QE at the working wavelength (0..1).
+  std::optional<double> quantum_efficiency;
+  /// Dark current (electrons/pixel/s).
+  std::optional<double> dark_current_e_per_s;
+  /// Rolling-shutter readout time per line (microseconds); 0 for a global
   /// shutter. A non-zero value means a moving target is geometrically sheared
   /// (see DESIGN.md image-quality gate).
-  double rolling_shutter_line_time_us = 0.0;
+  std::optional<double> rolling_shutter_line_time_us;
 };
 
 }  // namespace volumetric_kit::calib

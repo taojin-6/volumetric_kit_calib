@@ -15,9 +15,6 @@
 namespace volumetric_kit::calib {
 
 template <class T>
-Result<T>::Result(T value) : status_(), value_(std::move(value)) {}
-
-template <class T>
 Result<T>::Result(Status err) : status_(std::move(err)) {
   VC_CHECK(!status_.ok(), "Result(Status) requires a non-OK status");
 }

@@ -19,6 +19,10 @@
 /// early-return on failure, so they appear only inside functions that
 /// themselves return `Status` or `Result<T>`.
 ///
+/// Both types are `[[nodiscard]]`: dropping a returned `Status` or `Result` on
+/// the floor is a compiler warning (an error under `-Werror`), because with no
+/// exceptions an ignored return value is a silently lost failure.
+///
 /// Misuse -- reading the value of an error `Result` -- is a programmer error,
 /// not a runtime one: it fails fast via `VC_CHECK` (see check.hpp) rather than
 /// throwing.
@@ -32,6 +36,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 #include "volumetric_kit/calib/core/check.hpp"
@@ -54,7 +59,7 @@ namespace volumetric_kit::calib {
 ///   return s;
 /// }
 /// @endcode
-class Status {
+class [[nodiscard]] Status {
  public:
   /// @brief The kind of failure a non-OK `Status` reports.
   enum class Code {
@@ -124,9 +129,10 @@ VC_CORE_API std::string_view to_string(Status::Code code) noexcept;
 /// @brief A value of type `T` on success, or a non-OK @ref Status on failure.
 /// @tparam T  The success value type (must be movable).
 ///
-/// Constructs implicitly from either a `T` (success) or a `Status` (failure),
-/// so a function can `return value;` or `return some_error;` directly. Always
-/// check @ref ok (or the `bool` conversion) before reading @ref value.
+/// Constructs implicitly from anything convertible to `T` (success) or from a
+/// `Status` (failure), so a function can `return value;` or
+/// `return some_error;` directly. Always check @ref ok (or the `bool`
+/// conversion) before reading @ref value.
 ///
 /// @code
 /// Result<double> mean_reproj_error(const Dataset& d) {
@@ -135,11 +141,24 @@ VC_CORE_API std::string_view to_string(Status::Code code) noexcept;
 /// }
 /// @endcode
 template <class T>
-class Result {
+class [[nodiscard]] Result {
  public:
-  /// Construct a success Result holding @p value.
-  Result(T value);  // NOLINT(google-explicit-constructor) — ergonomic success
-                    // return
+  /// @brief Construct a success Result from anything convertible to `T`.
+  /// @param value  The success value: a `T`, or e.g. a string literal for a
+  ///               `Result<std::string>`.
+  ///
+  /// A template (rather than `Result(T)`) so a conversion to `T` does not use
+  /// up the one user-defined conversion an implicit `return` allows. Defined
+  /// here because its constraint would otherwise have to be restated
+  /// out-of-line.
+  template <class U = T,
+            std::enable_if_t<std::is_convertible_v<U&&, T> &&
+                                 !std::is_same_v<std::decay_t<U>, Result> &&
+                                 !std::is_same_v<std::decay_t<U>, Status>,
+                             int> = 0>
+  Result(U&& value)  // NOLINT(google-explicit-constructor) — ergonomic success
+                     // return
+      : value_(std::in_place, std::forward<U>(value)) {}
   /// Construct a failure Result; @p err must be non-OK (checked by VC_CHECK).
   Result(Status err);  // NOLINT(google-explicit-constructor) — ergonomic error
                        // return

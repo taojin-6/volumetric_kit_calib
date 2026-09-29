@@ -46,6 +46,39 @@ TEST(Result, HoldsStatusOnFailure) {
   EXPECT_EQ(r.status().domain(), Status::Code::Numerical);
 }
 
+Result<std::string> camera_name(bool known) {
+  if (!known) return Status::not_found("no such camera");
+  return "bm-1";  // a const char[5], converted to std::string
+}
+
+TEST(Result, ConvertsFromValuesConvertibleToT) {
+  const Result<std::string> name = camera_name(true);
+  ASSERT_TRUE(name.ok());
+  EXPECT_EQ(*name, "bm-1");
+  EXPECT_EQ(camera_name(false).status().domain(), Status::Code::NotFound);
+
+  const Result<double> widened = 3;  // int -> double
+  ASSERT_TRUE(widened.ok());
+  EXPECT_EQ(*widened, 3.0);
+}
+
+// Reading an error Result, or building an error Result from success, is a
+// programmer error: it aborts with a diagnostic instead of throwing.
+TEST(ResultDeathTest, ValueOfErrorResultAborts) {
+  Result<int> r = Status::numerical("singular");
+  EXPECT_DEATH(r.value(), "VC_CHECK");
+  EXPECT_DEATH(*r, "VC_CHECK");
+}
+
+TEST(ResultDeathTest, FailureFromOkStatusAborts) {
+  EXPECT_DEATH(
+      {
+        Result<int> r{Status{}};
+        (void)r;
+      },
+      "requires a non-OK status");
+}
+
 // --- VC_TRY / VC_ASSIGN exercise the propagation macros ---------------------
 
 Status fail_if_negative(int x) {
