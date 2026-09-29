@@ -30,10 +30,11 @@ option(VC_BUILD_EXAMPLES "Build example programs" ${VC_IS_TOP_LEVEL})
 option(VC_BUILD_TESTS "Build tests" ${VC_IS_TOP_LEVEL})
 option(VC_INSTALL "Generate install/export rules" ${VC_IS_TOP_LEVEL})
 # TODO: VC_WITH_VULKAN / VC_WITH_CUDA gate the compute-backend tiers and are not
-# consumed yet (no target reads them, so toggling them is a no-op). Wire them up
-# as those backends land. Per DESIGN.md: CPU + Vulkan is the portable floor
-# (Vulkan covers Apple via MoltenVK); CUDA is the opt-in desktop-NVIDIA
-# accelerator; native Metal is deferred (not an option here on purpose).
+# consumed yet (no target reads them, so toggling them is a no-op). How calib's
+# GPU work runs is under review (see CLAUDE.md "Open decisions"): its own Vulkan
+# (Apple via MoltenVK) + opt-in CUDA backends per DESIGN.md, or recon's core
+# over a shared VkDevice. Wire these up, or remove them, once that is settled.
+# Native Metal is deferred either way (not an option here on purpose).
 option(VC_WITH_VULKAN
        "Enable the portable Vulkan-compute backend (reserved; not yet wired)"
        OFF)

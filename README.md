@@ -6,15 +6,17 @@ guidance, physical diagnostics ("is this error good, given the sensor's noise
 floor?"), and a requirements solver (spec → binding hardware constraint →
 prescription). It covers single-camera intrinsics, stereo, multi-camera bundle
 adjustment, fisheye, cross-camera color, and the optics that gate quality
-(depth-of-field, diffraction, focus). See [`DESIGN.md`](./DESIGN.md) for the
-full architecture and the domain model.
+(depth-of-field, diffraction, focus). The full architecture and domain model
+are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
+`volumetric_kit_gfx`, so it is not in a clone.
 
 > **Status:** Early scaffolding. The `core` tier — exception-free
 > `Status`/`Result`, the physically-parameterized data model (camera/lens/sensor
 > models, board target, observation), and the `PinholeBrownConrady` camera model
 > — builds and is tested (GoogleTest). The compute backends, detection, solve,
 > quality, color, capture, viz, and app tiers are not yet implemented; the
-> existing `../camera_calibration/` Python scripts remain the reference oracle.
+> legacy `camera_calibration` Python scripts (a separate checkout beside the
+> `volumetric_kit/` folder) remain the reference oracle.
 
 ## Architecture (tiered)
 
@@ -23,8 +25,10 @@ full architecture and the domain model.
 headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no**
 `volumetric_kit_gfx` dependency; only the `viz`/`app` tiers pull in the renderer.
 
-- **Compute backends:** CPU (oracle) + Vulkan (portable; Apple via MoltenVK) +
-  CUDA (opt-in desktop-NVIDIA). Native Metal is deferred. See `DESIGN.md`.
+- **Compute backends:** a CPU backend is the correctness oracle. The GPU path
+  is under review: calib's own Vulkan (portable; Apple via MoltenVK) + opt-in
+  CUDA backends, or recon's core over a shared `VkDevice`. Native Metal is
+  deferred.
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
 
@@ -68,10 +72,12 @@ FetchContent_MakeAvailable(volumetric_kit_calib)
 target_link_libraries(your_app PRIVATE volumetric_kit::calib_core)
 ```
 
-`VC_BUILD_TESTS`, `VC_BUILD_EXAMPLES`, and `VC_INSTALL` default ON only when
-`volumetric_kit_calib` is the top-level project. `VC_WITH_VULKAN` / `VC_WITH_CUDA`
-are reserved for the compute-backend tiers (not yet wired). `VC_SANITIZE` is a
-semicolon list, empty (off) by default — e.g. `-DVC_SANITIZE="address;undefined"`.
+`VC_BUILD_TESTS`, `VC_BUILD_EXAMPLES`, `VC_INSTALL`, and `VC_WARNINGS_AS_ERRORS`
+default ON only when `volumetric_kit_calib` is the top-level project, so a
+FetchContent build of it never fails on a warning your compiler adds.
+`VC_WITH_VULKAN` / `VC_WITH_CUDA` are reserved for the compute-backend tiers
+(not yet wired). `VC_SANITIZE` is a semicolon list, empty (off) by default —
+e.g. `-DVC_SANITIZE="address;undefined"`.
 
 ## Development
 
