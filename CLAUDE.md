@@ -2,7 +2,9 @@
 
 A calibration **companion** for `volumetric_kit`: the intelligence layer around
 the calibration solve — live acquisition guidance, physical diagnostics, and a
-requirements solver. Full design + domain model in [`DESIGN.md`](./DESIGN.md).
+requirements solver. Full design + domain model in `DESIGN.md`, which is
+local-only (gitignored, as in gfx); from a worktree, read it at
+`../../DESIGN.md`.
 
 ## Naming conventions (use these consistently)
 
@@ -28,9 +30,6 @@ on tiers to its left. The headless **brain**
 
 - **Consume `volumetric_kit_gfx` for all rendering + UI; do not re-implement.**
   The 3D copilot + ImGui dashboards ride `vg::` pipelines.
-- **Compute backends: CPU (oracle) + Vulkan (portable backbone) + CUDA (opt-in
-  desktop-NVIDIA). Native Metal is deferred** — Apple is served by Vulkan via
-  MoltenVK, mirroring gfx's "single Vulkan path" posture.
 - **Mobile (Android + iOS) is first-class and fully on-device, solve included.**
   Target-based BA is small (a known board fixes structure → hundreds of sparse
   params → Ceres on an ARM CPU in tens of ms), so the solve runs on CPU
@@ -38,8 +37,19 @@ on tiers to its left. The headless **brain**
 - **The physically-parameterized sensor/lens model is the spine** — the quality
   tier is physical, not heuristic, so `SensorProfile`/`LensProfile` are required
   inputs, not optional metadata.
-- **The legacy `../camera_calibration/` Python scripts are the reference oracle**
-  (parity target), then subsumed.
+- **The legacy `camera_calibration` Python scripts are the reference oracle**
+  (parity target), then subsumed. They are a separate checkout beside the
+  `volumetric_kit/` folder: `../../camera_calibration/` from the primary
+  checkout.
+
+## Open decisions
+
+- **The GPU compute path is under review.** A CPU backend is the correctness
+  oracle either way. DESIGN.md plans calib's own Vulkan (portable; Apple via
+  MoltenVK) + opt-in desktop-NVIDIA CUDA backends; the alternative being weighed
+  is running calib's GPU work on recon's core over a shared `VkDevice`. Native
+  Metal is deferred in both. Don't build compute-backend code until this is
+  settled.
 
 ## Error handling (no exceptions cross the API)
 
@@ -74,3 +84,5 @@ legacy Python oracle; C3 `solve/intrinsics` + covariance; C4 the headline brain
 - Implement every change in a dedicated **git worktree** under `.worktrees/`
   (`git worktree add .worktrees/<branch> -b <branch>`) — never a sibling in the
   parent folder — and remove it with `git worktree remove` once the PR merges.
+  A worktree has no `DESIGN.md` (it is gitignored); read the primary
+  checkout's.
