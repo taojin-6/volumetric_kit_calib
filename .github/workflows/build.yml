@@ -59,7 +59,7 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
-  # Mobile consumers build with -fno-exceptions (CLAUDE.md), so the library and
+  # Mobile consumers build with -fno-exceptions (AGENTS.md), so the library and
   # its tests must build and pass without exceptions too.
   no-exceptions:
     name: ubuntu-latest Release -fno-exceptions

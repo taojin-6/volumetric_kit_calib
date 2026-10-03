@@ -3,7 +3,7 @@
 /cmake-build-*/
 /out/
 
-# Local git worktrees (one per in-flight change; see CLAUDE.md)
+# Local git worktrees (one per in-flight change; see AGENTS.md)
 /.worktrees/
 
 # Compiled shaders / Vulkan-compute kernels (built into the build tree)
