@@ -1,0 +1,128 @@
+# Shared repository instructions
+
+This is the canonical working guide for Codex, Claude Code, and other agents.
+Keep shared instructions here. `CLAUDE.md` imports this file with `@AGENTS.md`;
+do not duplicate rules there or create a circular reference.
+
+## Project and boundaries
+
+`volumetric_kit_calib` is the calibration companion: acquisition guidance,
+physical diagnostics, and a requirements solver around the calibration solve.
+The implemented core and planned tiers are distinguished in
+[README.md](README.md#architecture-tiered).
+
+- Use `volumetric_kit_gfx` for rendering and UI; keep the headless brain free
+  of that dependency.
+- Mobile is first-class and fully on-device; the board-constrained solve runs
+  on CPU. `SensorProfile` and `LensProfile` are required physical inputs.
+- The GPU backend is **unresolved**. Do not implement compute-backend code
+  until the [open decision](DECISIONS.md#open-decisions) is settled. A CPU
+  backend is the correctness oracle either way.
+- The legacy `camera_calibration` Python checkout is the parity oracle;
+  it sits beside the family directory (`../../camera_calibration/` from the
+  primary checkout). Keep this task's changes in this repository.
+
+## Read what the task needs
+
+| Task | Read |
+| --- | --- |
+| Architecture, implemented scope, prerequisites | [README.md](README.md) and the affected public headers |
+| Locked constraints or GPU backend choice | [DECISIONS.md](DECISIONS.md) |
+| Local detailed design and domain model | The primary checkout's gitignored `DESIGN.md`, when the task needs it |
+| Formatting and CI setup | [CONTRIBUTING.md](CONTRIBUTING.md), `.pre-commit-config.yaml`, relevant workflows |
+
+`DESIGN.md` is intentionally local-only and absent from clones/worktrees. From
+`.worktrees/<branch>/`, the primary copy is `../../DESIGN.md`. Do not force-add
+or publish it. The committed decision record remains available without it.
+Read only the sections needed for the current task.
+
+## Naming conventions
+
+- Package/repo: `volumetric_kit_calib`
+- Namespace: `volumetric_kit::calib`. In docs, `vc::` abbreviates
+  `volumetric_kit::calib::`; `vg::` abbreviates `volumetric_kit::gfx::`.
+- Headers: `include/volumetric_kit/calib/<tier>/…` → e.g.
+  `#include "volumetric_kit/calib/core/result.hpp"`
+- CMake: `find_package(volumetric_kit_calib)`; component targets
+  `volumetric_kit::calib_core`, `…_compute`, `…_detect`, `…_solve`, `…_quality`,
+  `…_color`, `…_capture`, `…_viz`, `…_app`; umbrella alias `volumetric_kit::calib`.
+- Macros/export: `VC_*` (e.g. `VC_TRY`, `VC_CHECK`, `VC_CORE_API`).
+
+## Architecture
+
+`core` → `compute` → {`detect`, `solve`, `color`} → `quality` → `viz` → `app`
+(+ `capture` off `core`). The dependency rule is strict: a tier may depend only
+on tiers to its left. The headless **brain**
+(`core`+`compute`+`detect`+`solve`+`quality`) builds with **no**
+`volumetric_kit_gfx` dependency; only `viz`/`app` pull in the renderer.
+
+## Error handling
+
+Mobile consumers build with `-fno-exceptions`. Fallible calls return `Status`
+(success or an error domain + message) or `Result<T>` (a value or a `Status`).
+Propagate with `VC_TRY` / `VC_ASSIGN`. Programmer errors (reading an error
+`Result`'s value) fail fast via `VC_CHECK`, never throw. Solver failures use the
+`Status::Code::Numerical` domain.
+
+## Conventions
+
+C++17, with no compiler extensions.
+
+- **Doxygen on every public class/function**, matching
+  `include/volumetric_kit/calib/core/result.hpp`: `@file`/`@brief` on the header,
+  `@brief` + a `@code … @endcode` example per class, and `@brief`/`@param`/
+  `@return` (`@pre` where relevant) on methods; accessors may be a single
+  `/// @return`.
+- **Mark deferred work inline with a greppable `// TODO:`** rather than tracking
+  it only in prose or commits.
+- Prefer plain, behavior-level tests over friend-class backdoors into private
+  state; the `core` tier is pure CPU so its tests run on every machine.
+
+## Working with Git
+
+- Implement each task in a dedicated branch and git worktree under
+  `.worktrees/`; never create a sibling worktree in the parent folder.
+  Concurrent Claude/Codex tasks use separate worktrees.
+- Preserve unrelated local changes and other worktrees. Remove your worktree
+  with `git worktree remove` after its PR merges.
+- Use absolute paths for `git -C`, `cmake -S/-B`, and file operations so work
+  cannot spill into a sibling checkout.
+- Use Conventional Commits, e.g. `feat(core): …`, `fix(core): …`, `docs: …`.
+- Assign PRs to the authenticated user (`gh pr create --assignee @me`).
+- Commit shared decisions and handoff context with the project so either agent
+  can continue the task.
+
+## Build and validation
+
+Run from the task's worktree. The build requires CMake ≥ 3.21, a C++17 compiler, and Eigen;
+see README and CI for platform dependencies.
+
+```sh
+calib_root="$(git rev-parse --show-toplevel)"
+cmake -S "$calib_root" -B "$calib_root/build" \
+  -DCMAKE_BUILD_TYPE=Release -DVC_BUILD_TESTS=ON
+cmake --build "$calib_root/build" --parallel
+ctest --test-dir "$calib_root/build" --output-on-failure
+pre-commit run --all-files --show-diff-on-failure
+git -C "$calib_root" diff --check
+```
+
+- Use the pinned formatting tools in `.pre-commit-config.yaml`; CI runs the
+  same hooks. Set the build type explicitly and report it with measurements.
+- For code changes, build affected targets and run relevant tests, with
+  regression coverage for changed behavior. Broaden validation when shared
+  contracts or the change's scope warrant it.
+- Documentation-only changes need formatting, link, and consistency checks;
+  no build is needed. Hooks can be scoped with `pre-commit run --files`.
+- Core tests are CPU-only. `VC_WITH_VULKAN` / `VC_WITH_CUDA` are reserved
+  options, not implemented backends; do not describe them as tested support.
+
+## Keeping guidance current
+
+- Keep this guide concise (roughly 100–200 lines). Put detailed contracts and
+  rationale in DECISIONS.md or the relevant committed integration document.
+- Update a changed decision and its rationale in the same commit as the code,
+  then update any essential rule here and affected README/contributor guidance.
+  Preserve the distinction between locked choices, open questions, and plans.
+- Keep local-only DESIGN.md local. `CLAUDE.md` stays an import; add only
+  Claude-specific instructions below it if a concrete need arises.

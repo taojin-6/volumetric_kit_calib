@@ -1,5 +1,9 @@
 # Contributing
 
+[AGENTS.md](AGENTS.md) is the canonical shared guide for contributors, Codex,
+and Claude Code. It owns the working rules, validation commands, and task map;
+`CLAUDE.md` imports it. [DECISIONS.md](DECISIONS.md) keeps the recorded choices.
+
 ## One-time setup
 
 Install [`pre-commit`](https://pre-commit.com) (`pipx install pre-commit`, or
@@ -20,23 +24,21 @@ lives in `.git/` and is **not** tracked, so each clone must run this once.
 Out-of-source CMake build (needs Eigen — see the README prerequisites):
 
 ```sh
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build
+calib_root="$(git rev-parse --show-toplevel)"
+cmake -S "$calib_root" -B "$calib_root/build" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$calib_root/build" --parallel
+ctest --test-dir "$calib_root/build" --output-on-failure
 ```
 
 The `core` tier is pure CPU, so the suite runs on any machine — no GPU or device
 required.
 
-## Work in a git worktree
+## Working guidance
 
-Implement each change in a dedicated **git worktree**, not by `git checkout`-ing
-a branch in the primary checkout. Create it locally under `.worktrees/` (e.g.
-`git worktree add .worktrees/<branch> -b <branch>`) — never as a sibling in the
-parent folder — and remove it with `git worktree remove` once the PR merges.
-
-`DESIGN.md` is gitignored, so a worktree does not have it; read it from the
-primary checkout (`../../DESIGN.md` from `.worktrees/<branch>/`).
+Follow [Working with Git](AGENTS.md#working-with-git) for worktrees and PRs.
+`DESIGN.md` remains gitignored; from a standard `.worktrees/<branch>/`, read
+the primary checkout's `../../DESIGN.md` only when the task needs it. Do not
+publish it with a documentation change.
 
 ## Formatting and CI
 

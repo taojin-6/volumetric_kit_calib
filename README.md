@@ -18,6 +18,10 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > legacy `camera_calibration` Python scripts (a separate checkout beside the
 > `volumetric_kit/` folder) remain the reference oracle.
 
+[AGENTS.md](AGENTS.md) is the shared working guide for Codex and Claude Code;
+`CLAUDE.md` imports it. [DECISIONS.md](DECISIONS.md) records the locked
+constraints and open GPU-backend choice without publishing the local design.
+
 ## Architecture (tiered)
 
 `core` → `compute` → {`detect`, `solve`, `color`} → `quality` → `viz` → `app`
@@ -47,9 +51,10 @@ brew install cmake eigen          # macOS
 ## Build and test
 
 ```bash
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build
+calib_root="$(git rev-parse --show-toplevel)"
+cmake -S "$calib_root" -B "$calib_root/build" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$calib_root/build" --parallel
+ctest --test-dir "$calib_root/build" --output-on-failure
 ```
 
 Run the demo:
