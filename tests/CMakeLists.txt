@@ -10,7 +10,7 @@ target_link_libraries(vc_version_test PRIVATE volumetric_kit::calib_core
 vc_target_warnings(vc_version_test)
 gtest_discover_tests(vc_version_test)
 
-# core: exception-free error handling (Status / Result / VC_TRY / VC_ASSIGN).
+# core: calib names volumetric_kit_core's Status / Result as its own.
 add_executable(vc_result_test result_test.cpp)
 target_link_libraries(vc_result_test PRIVATE volumetric_kit::calib_core
                                              GTest::gtest_main)

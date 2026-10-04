@@ -44,12 +44,13 @@ struct ImageSize {
 ///
 /// @code
 /// Result<Eigen::Vector2d> ray_through(const Eigen::Vector3d& point) {
-///   VC_ASSIGN(const PinholeBrownConrady cam,
-///             PinholeBrownConrady::create(
-///                 {1280, 720}, {/*fx=*/1000, /*fy=*/1000, /*cx=*/640,
-///                               /*cy=*/360},
-///                 {/*k1=*/-0.28, /*k2=*/0.10, /*p1=*/0, /*p2=*/0, /*k3=*/0}));
-///   VC_ASSIGN(const Eigen::Vector2d pixel, cam.project(point));
+///   VKC_ASSIGN(const PinholeBrownConrady cam,
+///              PinholeBrownConrady::create(
+///                  {1280, 720},
+///                  {/*fx=*/1000, /*fy=*/1000, /*cx=*/640, /*cy=*/360},
+///                  {/*k1=*/-0.28, /*k2=*/0.10, /*p1=*/0, /*p2=*/0,
+///                   /*k3=*/0}));
+///   VKC_ASSIGN(const Eigen::Vector2d pixel, cam.project(point));
 ///   return cam.unproject(pixel);  // point.head<2>() / point.z(), recovered
 /// }
 /// @endcode

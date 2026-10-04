@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- calib builds on `volumetric_kit_core`, fetched pinned by commit, and its
+  installed package re-finds it. `Status` and `Result` are the core's types
+  (using-declarations in `volumetric_kit::calib`), so they pass to `recon` and
+  `gfx` unchanged. Migrating code on `main`: `VC_TRY` / `VC_ASSIGN` /
+  `VC_CHECK` → `VKC_TRY` / `VKC_ASSIGN` / `VKC_CHECK`;
+  `volumetric_kit/calib/core/check.hpp` is gone (include the core's
+  `volumetric_kit/core/base/check.hpp`); a failed check now reports through the
+  core's log sink, which prints to stderr by default; `std::move(r).value()`
+  returns the value rather than a reference into `r`.
+- The reserved `VC_WITH_VULKAN` / `VC_WITH_CUDA` options are removed: GPU work
+  runs on the core's vulkan tier (DECISIONS.md).
+- clang-format is pinned to 22.1.8, as in the sibling repositories.
+
 ### Added
 
 - Build-system foundation: top-level CMake (C++17), tiered component layout, the
@@ -15,9 +30,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Dependency strategy: Eigen from the system (the linear-algebra spine, a PUBLIC
   dep); googletest vendored via pinned FetchContent for the test suite only.
 - `core` tier:
-  - Exception-free error handling — `Status` (with a `Numerical` domain for
-    solver failures) and `Result<T>`, both `[[nodiscard]]`, plus the `VC_TRY` /
-    `VC_ASSIGN` propagation macros and the `VC_CHECK` fail-fast contract check.
+  - Exception-free error handling from `volumetric_kit_core`'s base tier:
+    `Status` (with a `Numerical` domain for solver failures) and `Result<T>`,
+    both `[[nodiscard]]`, named in calib's namespace, plus the core's `VKC_TRY`
+    / `VKC_ASSIGN` propagation macros and `VKC_CHECK` fail-fast contract check.
   - Physically-parameterized data model: `SensorProfile`, `LensProfile`,
     `Target`, `Observation` — the inputs the quality tier needs to be physical
     rather than heuristic. Profile fields are `std::optional`, so "unknown" is

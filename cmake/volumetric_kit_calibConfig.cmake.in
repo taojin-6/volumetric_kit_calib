@@ -10,6 +10,9 @@
 # Eigen3::Eigen target our exported targets link.
 include(CMakeFindDependencyMacro)
 find_dependency(Eigen3 CONFIG)
+# volumetric_kit_core is PUBLIC too (Status / Result in every signature), at
+# the minor version this package was built against.
+find_dependency(volumetric_kit_core @VC_CORE_MAJOR_MINOR@ CONFIG)
 
 # TODO: as the detect/solve tiers land, re-find their public deps here
 # (OpenCV for detect, Ceres for solve) — mirroring the Eigen line above.

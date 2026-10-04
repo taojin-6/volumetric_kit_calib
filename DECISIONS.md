@@ -1,7 +1,7 @@
 # Calibration decisions
 
-This record preserves the constraints and unresolved choice previously
-committed in `CLAUDE.md`. [AGENTS.md](AGENTS.md) is the shared working guide;
+This record preserves the constraints previously committed in `CLAUDE.md`,
+and the choices made since. [AGENTS.md](AGENTS.md) is the shared working guide;
 [README.md](README.md) describes the implemented scope. The more extensive
 domain model and rationale remain in the intentionally gitignored local
 `DESIGN.md`; this change does not publish that document.
@@ -22,14 +22,46 @@ domain model and rationale remain in the intentionally gitignored local
   `volumetric_kit/` folder: `../../camera_calibration/` from the primary
   checkout.
 
+- **Build on `volumetric_kit_core`.** calib uses the family's shared
+  foundation ([volumetric_kit_core](https://github.com/taojin-6/volumetric_kit_core))
+  instead of a bottom layer of its own: `Status`, `Result`, `VKC_TRY`,
+  `VKC_ASSIGN`, `VKC_CHECK` and the log sink from its base tier now, and the
+  camera models (its camera tier) and capture drivers (its sensor tier) as
+  those land. `vc::Status` and `vc::Result` are using-declarations of the
+  core's types, not copies, so a calib error passes to `recon` or `gfx`
+  unchanged. The core is fetched pinned by commit (`third_party/`), and the
+  installed package re-finds it at the minor version it was built with. Why:
+  `recon`'s and `gfx`'s copies of the same bottom layer had drifted (the core's
+  DECISIONS.md has the evidence); one copy means a fix lands once.
+- **GPU work runs on the core's vulkan tier, on a `VkDevice` shared with
+  `recon` and `gfx`** (MoltenVK on Apple). calib carries no GPU backend of its
+  own, so the reserved `VC_WITH_VULKAN` / `VC_WITH_CUDA` options are gone. Why:
+  frames `recon`'s decoders leave in Vulkan buffers can be read in place only
+  on the same device -- a calib device of its own would copy every frame
+  through the host -- and the family keeps one Vulkan core, not three. CUDA is
+  added per kernel only where profiling shows a need, in the core; native Metal
+  stays deferred. A CPU backend remains the correctness oracle. Until the
+  vulkan tier lands there is no GPU code to write in calib.
+- **The rational lens model comes first; fisheye is planned, not built.** The
+  Orbbec Femto Mega reports its factory lens in the rational model (k1–k6,
+  p1, p2), which `recon`'s rig calibration file also stores, so that model is
+  next. Fisheye (Kannala-Brandt) waits, but unprojection returns unit 3D rays
+  and stored lenses carry a model name, so it can be added without breaking
+  either.
+
 ## Open decisions
 
-- **The GPU compute path is under review.** A CPU backend is the correctness
-  oracle either way. DESIGN.md plans calib's own Vulkan (portable; Apple via
-  MoltenVK) + opt-in desktop-NVIDIA CUDA backends; the alternative being weighed
-  is running calib's GPU work on recon's core over a shared `VkDevice`. Native
-  Metal is deferred in both. Don't build compute-backend code until this is
-  settled.
+None at present. (The GPU compute path, open until 2026-10-03, is now the
+locked decision above.)
+
+## 2026-10-03 — The shared core and the GPU path
+
+A review of the repository against the goals -- generic hardware support,
+compute on the right processor, and few memory transfers on both discrete
+and unified-memory GPUs -- found the family's Vulkan cores already drifting.
+The family created `volumetric_kit_core` and settled the GPU path on its
+vulkan tier over a shared `VkDevice`. calib adopts the core's base tier
+first; its camera model moves to the core's camera tier when that lands.
 
 ## 2026-10-02 — Shared agent guidance
 
