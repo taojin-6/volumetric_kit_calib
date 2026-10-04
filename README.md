@@ -29,16 +29,22 @@ constraints and open GPU-backend choice without publishing the local design.
 headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no**
 `volumetric_kit_gfx` dependency; only the `viz`/`app` tiers pull in the renderer.
 
-- **Compute backends:** a CPU backend is the correctness oracle. The GPU path
-  is under review: calib's own Vulkan (portable; Apple via MoltenVK) + opt-in
-  CUDA backends, or recon's core over a shared `VkDevice`. Native Metal is
-  deferred.
+- **Shared core:** every tier builds on
+  [`volumetric_kit_core`](https://github.com/taojin-6/volumetric_kit_core), the
+  family's shared foundation. Its base tier supplies calib's `Status`/`Result`
+  today; its camera, vulkan and sensor tiers will supply camera models, GPU
+  compute and capture drivers.
+- **Compute:** a CPU backend is the correctness oracle. GPU work runs on the
+  core's vulkan tier, on a `VkDevice` shared with `recon` and `gfx`, so frames
+  pass between them without copies (MoltenVK on Apple; native Metal deferred).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
 
 ## Prerequisites
 
-The `core` tier needs a C++17 compiler, CMake ≥ 3.21, and Eigen:
+The `core` tier needs a C++17 compiler, CMake ≥ 3.21, and Eigen. The first
+configure fetches `volumetric_kit_core` (pinned by commit) and, for tests,
+googletest, so it needs network access:
 
 ```bash
 brew install cmake eigen          # macOS
@@ -46,7 +52,9 @@ brew install cmake eigen          # macOS
 ```
 
 (Later tiers add OpenCV for `detect`, Ceres for `solve`, and
-`volumetric_kit_gfx` for `viz`/`app`.)
+`volumetric_kit_gfx` for `viz`/`app`.) To build against a local core checkout
+instead of the pinned one, pass
+`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>`.
 
 ## Build and test
 
@@ -80,9 +88,9 @@ target_link_libraries(your_app PRIVATE volumetric_kit::calib_core)
 `VC_BUILD_TESTS`, `VC_BUILD_EXAMPLES`, `VC_INSTALL`, and `VC_WARNINGS_AS_ERRORS`
 default ON only when `volumetric_kit_calib` is the top-level project, so a
 FetchContent build of it never fails on a warning your compiler adds.
-`VC_WITH_VULKAN` / `VC_WITH_CUDA` are reserved for the compute-backend tiers
-(not yet wired). `VC_SANITIZE` is a semicolon list, empty (off) by default —
-e.g. `-DVC_SANITIZE="address;undefined"`.
+`VC_SANITIZE` is a semicolon list, empty (off) by default —
+e.g. `-DVC_SANITIZE="address;undefined"`. An installed calib carries the core
+beside it, and `find_package(volumetric_kit_calib)` finds both.
 
 ## Development
 
