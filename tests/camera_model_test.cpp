@@ -26,7 +26,7 @@ constexpr double kInf = std::numeric_limits<double>::infinity();
 
 PinholeBrownConrady make(const ImageSize& size, const Intrinsics& intrinsics,
                          const Distortion& distortion = {}) {
-  Result<PinholeBrownConrady> cam =
+  core::Result<PinholeBrownConrady> cam =
       PinholeBrownConrady::create(size, intrinsics, distortion);
   EXPECT_TRUE(cam.ok()) << cam.status().message();
   return std::move(cam).value();
@@ -40,10 +40,11 @@ void expect_round_trips_across_image(const PinholeBrownConrady& cam) {
     for (int k = 0; k <= 18; ++k) {
       const Eigen::Vector2d pixel{size.width * i / 32.0,
                                   size.height * k / 18.0};
-      const Result<Eigen::Vector2d> ray = cam.unproject(pixel);
+      const core::Result<Eigen::Vector2d> ray = cam.unproject(pixel);
       ASSERT_TRUE(ray.ok()) << "pixel (" << pixel.x() << ", " << pixel.y()
                             << "): " << ray.status().message();
-      const Result<Eigen::Vector2d> back = cam.project({ray->x(), ray->y(), 1});
+      const core::Result<Eigen::Vector2d> back =
+          cam.project({ray->x(), ray->y(), 1});
       ASSERT_TRUE(back.ok());
       EXPECT_LT((*back - pixel).norm(), 1e-8)
           << "pixel (" << pixel.x() << ", " << pixel.y() << ")";
@@ -64,21 +65,21 @@ TEST(CameraModel, RejectsNonPositiveImageSize) {
 }
 
 TEST(CameraModel, RejectsNonFiniteParameters) {
-  const auto domain = [](const Result<PinholeBrownConrady>& r) {
+  const auto domain = [](const core::Result<PinholeBrownConrady>& r) {
     return r.status().domain();
   };
   EXPECT_EQ(
       domain(PinholeBrownConrady::create(kHd, {1000.0, 1000.0, kNaN, 360.0})),
-      Status::Code::InvalidArgument);
+      core::Status::Code::InvalidArgument);
   EXPECT_EQ(
       domain(PinholeBrownConrady::create(kHd, {1000.0, kInf, 640.0, 360.0})),
-      Status::Code::InvalidArgument);
+      core::Status::Code::InvalidArgument);
   EXPECT_EQ(domain(PinholeBrownConrady::create(kHd, kHdIntrinsics,
                                                {kNaN, 0.0, 0.0, 0.0, 0.0})),
-            Status::Code::InvalidArgument);
+            core::Status::Code::InvalidArgument);
   EXPECT_EQ(domain(PinholeBrownConrady::create(kHd, kHdIntrinsics,
                                                {0.0, 0.0, 0.0, 0.0, -kInf})),
-            Status::Code::InvalidArgument);
+            core::Status::Code::InvalidArgument);
 }
 
 TEST(CameraModel, KeepsItsImageSize) {
@@ -90,7 +91,7 @@ TEST(CameraModel, KeepsItsImageSize) {
 // --- project ----------------------------------------------------------------
 
 TEST(CameraModel, ProjectsPrincipalRayToPrincipalPoint) {
-  const Result<Eigen::Vector2d> px =
+  const core::Result<Eigen::Vector2d> px =
       make(kHd, kHdIntrinsics).project({0.0, 0.0, 1.0});
   ASSERT_TRUE(px.ok());
   EXPECT_NEAR(px->x(), 640.0, 1e-9);
@@ -99,7 +100,7 @@ TEST(CameraModel, ProjectsPrincipalRayToPrincipalPoint) {
 
 TEST(CameraModel, ProjectsKnownPointWithoutDistortion) {
   // (0.1, -0.2, 2) -> normalized (0.05, -0.1) -> (640+50, 360-100).
-  const Result<Eigen::Vector2d> px =
+  const core::Result<Eigen::Vector2d> px =
       make(kHd, kHdIntrinsics).project({0.1, -0.2, 2.0});
   ASSERT_TRUE(px.ok());
   EXPECT_NEAR(px->x(), 690.0, 1e-9);
@@ -129,7 +130,7 @@ TEST(CameraModel, ProjectMatchesOpenCv) {
       {{-1.2, -0.7, 2.5}, {103.5545417229, 50.2966316084}},
   };
   for (const Case& c : cases) {
-    const Result<Eigen::Vector2d> px = cam.project(c.point);
+    const core::Result<Eigen::Vector2d> px = cam.project(c.point);
     ASSERT_TRUE(px.ok());
     EXPECT_NEAR(px->x(), c.pixel.x(), 1e-8);
     EXPECT_NEAR(px->y(), c.pixel.y(), 1e-8);
@@ -141,9 +142,9 @@ TEST(CameraModel, ProjectRejectsPointsNotInFrontOfTheCamera) {
   for (const Eigen::Vector3d& p :
        {Eigen::Vector3d{0.1, 0.2, 0.0}, Eigen::Vector3d{0.1, 0.2, -1.0},
         Eigen::Vector3d{0.1, 0.2, kNaN}, Eigen::Vector3d{kInf, 0.2, 1.0}}) {
-    const Result<Eigen::Vector2d> px = cam.project(p);
+    const core::Result<Eigen::Vector2d> px = cam.project(p);
     EXPECT_FALSE(px.ok());
-    EXPECT_EQ(px.status().domain(), Status::Code::InvalidArgument);
+    EXPECT_EQ(px.status().domain(), core::Status::Code::InvalidArgument);
   }
 }
 
@@ -151,7 +152,7 @@ TEST(CameraModel, ProjectRejectsPointsNotInFrontOfTheCamera) {
 
 TEST(CameraModel, UnprojectInvertsProjectWithoutDistortion) {
   const PinholeBrownConrady cam = make(kHd, kHdIntrinsics);
-  const Result<Eigen::Vector2d> back = cam.unproject({690.0, 260.0});
+  const core::Result<Eigen::Vector2d> back = cam.unproject({690.0, 260.0});
   ASSERT_TRUE(back.ok());
   EXPECT_NEAR(back->x(), 0.05, 1e-12);
   EXPECT_NEAR(back->y(), -0.1, 1e-12);
@@ -162,9 +163,9 @@ TEST(CameraModel, UnprojectRecoversRaysWithDistortion) {
   // Rays out to the image corner (normalized radius ~0.87 once undistorted).
   for (double x : {-0.7, -0.3, 0.0, 0.15, 0.7}) {
     for (double y : {-0.45, 0.0, 0.2, 0.45}) {
-      const Result<Eigen::Vector2d> px = cam.project({x, y, 1.0});
+      const core::Result<Eigen::Vector2d> px = cam.project({x, y, 1.0});
       ASSERT_TRUE(px.ok());
-      const Result<Eigen::Vector2d> back = cam.unproject(*px);
+      const core::Result<Eigen::Vector2d> back = cam.unproject(*px);
       ASSERT_TRUE(back.ok()) << back.status().message();
       EXPECT_NEAR(back->x(), x, 1e-11);
       EXPECT_NEAR(back->y(), y, 1e-11);
@@ -192,14 +193,14 @@ TEST(CameraModel, UnprojectReportsPixelsPastTheDistortionFold) {
   const PinholeBrownConrady cam =
       make(kHd, {600.0, 600.0, 640.0, 360.0},
            {/*k1=*/-0.40, /*k2=*/0.15, /*p1=*/0.0, /*p2=*/0.0, /*k3=*/-0.03});
-  const Result<Eigen::Vector2d> corner = cam.unproject({1280.0, 720.0});
+  const core::Result<Eigen::Vector2d> corner = cam.unproject({1280.0, 720.0});
   EXPECT_FALSE(corner.ok());
-  EXPECT_EQ(corner.status().domain(), Status::Code::Numerical);
+  EXPECT_EQ(corner.status().domain(), core::Status::Code::Numerical);
 
   // Inside the fold the same model still inverts: distorted radius 0.5.
-  const Result<Eigen::Vector2d> inside = cam.unproject({940.0, 360.0});
+  const core::Result<Eigen::Vector2d> inside = cam.unproject({940.0, 360.0});
   ASSERT_TRUE(inside.ok()) << inside.status().message();
-  const Result<Eigen::Vector2d> back =
+  const core::Result<Eigen::Vector2d> back =
       cam.project({inside->x(), inside->y(), 1.0});
   ASSERT_TRUE(back.ok());
   EXPECT_NEAR(back->x(), 940.0, 1e-8);
@@ -208,9 +209,9 @@ TEST(CameraModel, UnprojectReportsPixelsPastTheDistortionFold) {
 
 TEST(CameraModel, UnprojectRejectsNonFinitePixels) {
   const PinholeBrownConrady cam = make(kHd, kHdIntrinsics, kBarrel);
-  const Result<Eigen::Vector2d> r = cam.unproject({kNaN, 100.0});
+  const core::Result<Eigen::Vector2d> r = cam.unproject({kNaN, 100.0});
   EXPECT_FALSE(r.ok());
-  EXPECT_EQ(r.status().domain(), Status::Code::InvalidArgument);
+  EXPECT_EQ(r.status().domain(), core::Status::Code::InvalidArgument);
 }
 
 }  // namespace

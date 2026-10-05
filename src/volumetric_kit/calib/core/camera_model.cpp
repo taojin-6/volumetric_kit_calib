@@ -107,39 +107,42 @@ PinholeBrownConrady::PinholeBrownConrady(const ImageSize& image_size,
       distortion_(distortion),
       fold_r2_(first_fold_r2(distortion)) {}
 
-Result<PinholeBrownConrady> PinholeBrownConrady::create(
+core::Result<PinholeBrownConrady> PinholeBrownConrady::create(
     const ImageSize& image_size, const Intrinsics& intrinsics,
     const Distortion& distortion) {
   if (image_size.width <= 0 || image_size.height <= 0) {
-    return Status::invalid_argument("image width and height must be positive");
+    return core::Status::invalid_argument(
+        "image width and height must be positive");
   }
   if (!std::isfinite(intrinsics.fx) || !std::isfinite(intrinsics.fy) ||
       !std::isfinite(intrinsics.cx) || !std::isfinite(intrinsics.cy)) {
-    return Status::invalid_argument("intrinsics must be finite");
+    return core::Status::invalid_argument("intrinsics must be finite");
   }
   if (intrinsics.fx <= 0.0 || intrinsics.fy <= 0.0) {
-    return Status::invalid_argument("focal lengths fx, fy must be positive");
+    return core::Status::invalid_argument(
+        "focal lengths fx, fy must be positive");
   }
   if (!std::isfinite(distortion.k1) || !std::isfinite(distortion.k2) ||
       !std::isfinite(distortion.p1) || !std::isfinite(distortion.p2) ||
       !std::isfinite(distortion.k3)) {
-    return Status::invalid_argument("distortion coefficients must be finite");
+    return core::Status::invalid_argument(
+        "distortion coefficients must be finite");
   }
   return PinholeBrownConrady{image_size, intrinsics, distortion};
 }
 
-Result<PinholeBrownConrady> PinholeBrownConrady::create(
+core::Result<PinholeBrownConrady> PinholeBrownConrady::create(
     const ImageSize& image_size, const Intrinsics& intrinsics) {
   return create(image_size, intrinsics, Distortion{});
 }
 
-Result<Eigen::Vector2d> PinholeBrownConrady::project(
+core::Result<Eigen::Vector2d> PinholeBrownConrady::project(
     const Eigen::Vector3d& point_camera) const {
   if (!point_camera.allFinite()) {
-    return Status::invalid_argument("project() needs a finite point");
+    return core::Status::invalid_argument("project() needs a finite point");
   }
   if (point_camera.z() <= 0.0) {
-    return Status::invalid_argument(
+    return core::Status::invalid_argument(
         "project() needs a point in front of the camera (z > 0)");
   }
   const Eigen::Vector2d distorted =
@@ -147,15 +150,16 @@ Result<Eigen::Vector2d> PinholeBrownConrady::project(
   const Eigen::Vector2d pixel{intrinsics_.fx * distorted.x() + intrinsics_.cx,
                               intrinsics_.fy * distorted.y() + intrinsics_.cy};
   if (!pixel.allFinite()) {
-    return Status::numerical("project() overflowed: point is too far off-axis");
+    return core::Status::numerical(
+        "project() overflowed: point is too far off-axis");
   }
   return pixel;
 }
 
-Result<Eigen::Vector2d> PinholeBrownConrady::unproject(
+core::Result<Eigen::Vector2d> PinholeBrownConrady::unproject(
     const Eigen::Vector2d& pixel) const {
   if (!pixel.allFinite()) {
-    return Status::invalid_argument("unproject() needs a finite pixel");
+    return core::Status::invalid_argument("unproject() needs a finite pixel");
   }
   const Eigen::Vector2d target{(pixel.x() - intrinsics_.cx) / intrinsics_.fx,
                                (pixel.y() - intrinsics_.cy) / intrinsics_.fy};
@@ -203,7 +207,7 @@ Result<Eigen::Vector2d> PinholeBrownConrady::unproject(
     }
     if (!improved) break;
   }
-  return Status::numerical(
+  return core::Status::numerical(
       "unproject(): no ray inside the distortion's invertible region maps to "
       "this pixel");
 }

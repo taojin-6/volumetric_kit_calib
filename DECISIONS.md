@@ -27,9 +27,10 @@ domain model and rationale remain in the intentionally gitignored local
   instead of a bottom layer of its own: `Status`, `Result`, `VKC_TRY`,
   `VKC_ASSIGN`, `VKC_CHECK` and the log sink from its base tier now, and the
   camera models (its camera tier) and capture drivers (its sensor tier) as
-  those land. `vc::Status` and `vc::Result` are using-declarations of the
-  core's types, not copies, so a calib error passes to `recon` or `gfx`
-  unchanged. The core is fetched pinned by commit (`third_party/`), and the
+  those land. calib names them as the core does -- `core::Status` in calib's
+  namespaces, `vkc::Status` outside -- with no `vc::` re-exports (amended
+  2026-10-05; see the dated entry), so a calib error passes to `recon` or
+  `gfx` unchanged. The core is fetched pinned by commit (`third_party/`), and the
   installed package re-finds it at the minor version it was built with. Why:
   `recon`'s and `gfx`'s copies of the same bottom layer had drifted (the core's
   DECISIONS.md has the evidence); one copy means a fix lands once.
@@ -67,6 +68,26 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
+
+## 2026-10-05 — calib writes the core's names
+
+calib named the core's `Status`, `Result` and `to_string` in its own
+namespace through using-declarations in `calib/core/result.hpp`, as recon and
+gfx did in theirs. recon (its #167) and gfx (its #106) have since dropped
+their re-exports: two spellings of one type cost every reader, and each
+re-export header is one more file to keep in step with the core's. calib
+follows, so the family writes the core's names one way.
+
+- **The rule.** calib's namespaces write `core::Status`, `core::Result` and
+  `core::to_string`; tests, examples and consumers write
+  `volumetric_kit::core::` (a `vkc` alias). calib already used the core's
+  `VKC_*` macros, so no macro moves. calib declares no `core` namespace of its
+  own, so `core::Status` in its namespaces finds `volumetric_kit::core`.
+- **What goes.** `calib/core/result.hpp`, whose includers now include the
+  core's `volumetric_kit/core/base/result.hpp`, and `result_test`, which only
+  checked that calib's names were the core's types.
+- **What it costs.** A consumer writing `vc::Status` or `vc::Result` writes
+  `vkc::` on its next pin bump; calib's own names are unchanged.
 
 ## 2026-10-03 — The shared core and the GPU path
 

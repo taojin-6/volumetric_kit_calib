@@ -15,11 +15,12 @@
 #include "volumetric_kit/calib/version.hpp"
 
 namespace vc = volumetric_kit::calib;
+namespace vkc = volumetric_kit::core;
 
 namespace {
 
 // Everything fallible lives here, so VKC_ASSIGN can hand failures to main().
-vc::Status run() {
+vkc::Status run() {
   const vc::ImageSize image_size{1280, 720};
   const vc::PinholeBrownConrady::Intrinsics intrinsics{
       /*fx=*/1000.0, /*fy=*/1000.0, /*cx=*/640.0, /*cy=*/360.0};
@@ -47,10 +48,10 @@ vc::Status run() {
 int main() {
   std::printf("volumetric_kit_calib %s — project/unproject demo\n\n",
               vc::version_string());
-  const vc::Status status = run();
+  const vkc::Status status = run();
   if (!status) {
     std::fprintf(stderr, "error: %s: %s\n",
-                 std::string(vc::to_string(status.domain())).c_str(),
+                 std::string(vkc::to_string(status.domain())).c_str(),
                  status.message().c_str());
     return 1;
   }
