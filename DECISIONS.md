@@ -40,8 +40,10 @@ domain model and rationale remain in the intentionally gitignored local
   on the same device -- a calib device of its own would copy every frame
   through the host -- and the family keeps one Vulkan core, not three. CUDA is
   added per kernel only where profiling shows a need, in the core; native Metal
-  stays deferred. A CPU backend remains the correctness oracle. Until the
-  vulkan tier lands there is no GPU code to write in calib.
+  stays deferred. A CPU backend remains the correctness oracle. The core's
+  vulkan tier has landed, and calib's pin carries it; calib's build leaves it
+  off (`VKC_WITH_VULKAN`), and so needs no Vulkan SDK, until calib writes GPU
+  code.
 - **The rational lens model comes first; fisheye is planned, not built.** The
   Orbbec Femto Mega reports its factory lens in the rational model (k1–k6,
   p1, p2), which `recon`'s rig calibration file also stores, so that model is

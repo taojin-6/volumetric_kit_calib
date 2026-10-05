@@ -25,16 +25,21 @@ include(FetchContent)
 # Work on both checkouts at once with
 # -DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<core checkout>.
 #
-# The core's tests and -Werror stay off in a subproject; its install rules stay
-# on, so calib's install carries the core its exported targets link.
+# The core's tests, -Werror and vulkan tier stay off in a subproject; its
+# install rules stay on, so calib's install carries the core its exported
+# targets link. calib needs only the base tier, so it builds with no Vulkan SDK.
+# It leaves VKC_WITH_VULKAN unset rather than OFF, so an application that turns
+# the tier on for recon or gfx keeps it.
 #
-# The pin is main after core PR #1, which landed the base tier.
+# The pin is main after core PR #13. Since PR #1, which landed the base tier,
+# the core has gained its vulkan tier; the base tier kept its API (the core's
+# CHANGELOG.md).
 #
 # TODO: pin a release tag once the core tags one (v0.1.0).
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG 7fb874932462abbd95a15f3fab73e671c48a1d7d)
+  GIT_TAG a60398b7aeb2cad722a3f79cb71696bda10fc054)
 FetchContent_MakeAvailable(volumetric_kit_core)
 
 if(VC_BUILD_TESTS)

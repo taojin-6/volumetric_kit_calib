@@ -17,6 +17,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `volumetric_kit/core/base/check.hpp`); a failed check now reports through the
   core's log sink, which prints to stderr by default; `std::move(r).value()`
   returns the value rather than a reference into `r`.
+- `volumetric_kit_core` is pinned at main after its PR #13 (was PR #1). The
+  base tier calib uses kept its API, so calib's code is unchanged and its
+  consumers have nothing to migrate. What reaches them:
+  - The core supports only GCC and Clang -- it dropped Windows and MSVC -- and
+    calib's public headers include its `result.hpp`, so calib does too. No
+    calib CI leg built on Windows; nothing changes on Linux, macOS, iOS or
+    Android.
+  - Replacing the log handler from inside a handler call no longer deadlocks
+    when another thread finishes a call on the old handler.
+  - The base tier adds `StageMetrics` and `StageScope`, the family's named
+    host and device spans; calib does not report in them yet.
+  - The core now has a vulkan tier, which calib's build leaves off
+    (`VKC_WITH_VULKAN` defaults OFF in a subproject, and calib does not set
+    it): calib still builds with no Vulkan SDK, and its installed core neither
+    ships the tier's headers nor re-finds Vulkan. An application that also
+    fetches recon or gfx declares the core first, with `VKC_WITH_VULKAN` ON,
+    so the tier is built whichever library it adds first.
 - The reserved `VC_WITH_VULKAN` / `VC_WITH_CUDA` options are removed: GPU work
   runs on the core's vulkan tier (DECISIONS.md).
 - clang-format is pinned to 22.1.8, as in the sibling repositories.
