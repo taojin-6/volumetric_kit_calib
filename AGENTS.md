@@ -48,7 +48,10 @@ Read only the sections needed for the current task.
 - Namespace: `volumetric_kit::calib`. In docs, `vc::` abbreviates
   `volumetric_kit::calib::`; `vg::` abbreviates `volumetric_kit::gfx::`.
 - Headers: `include/volumetric_kit/calib/<tier>/…` → e.g.
-  `#include "volumetric_kit/calib/core/result.hpp"`
+  `#include "volumetric_kit/calib/core/camera_model.hpp"`
+- volumetric_kit_core's types, functions and macros keep the core's names:
+  `core::Status` inside calib's namespaces, `vkc::Status` in tests and
+  examples, from the core's own headers. calib re-exports none of them.
 - CMake: `find_package(volumetric_kit_calib)`; component targets
   `volumetric_kit::calib_core`, `…_compute`, `…_detect`, `…_solve`, `…_quality`,
   `…_color`, `…_capture`, `…_viz`, `…_app`; umbrella alias `volumetric_kit::calib`.
@@ -68,11 +71,11 @@ on tiers to its left. The headless **brain**
 
 Mobile consumers build with `-fno-exceptions`. Fallible calls return `Status`
 (success or an error domain + message) or `Result<T>` (a value or a `Status`)
--- the core's types, named in calib's namespace by
-`volumetric_kit/calib/core/result.hpp`. Propagate with `VKC_TRY` /
+-- the core's `core::Status` and `core::Result<T>`, from
+`volumetric_kit/core/base/result.hpp`. Propagate with `VKC_TRY` /
 `VKC_ASSIGN`. Programmer errors (reading an error `Result`'s value) fail fast
 via `VKC_CHECK`, never throw. Solver failures use the
-`Status::Code::Numerical` domain.
+`core::Status::Code::Numerical` domain.
 
 ## Conventions
 

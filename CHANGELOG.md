@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- calib writes volumetric_kit_core's names as the core does, and its
+  re-exports of them are gone. Migrating: `vc::Status`, `vc::Result` and
+  `vc::to_string` → `vkc::` (`volumetric_kit::core::`); include the core's
+  `volumetric_kit/core/base/result.hpp` instead of
+  `volumetric_kit/calib/core/result.hpp`, which is removed. Code inside
+  `volumetric_kit::calib` writes `core::Status`.
 - calib builds on `volumetric_kit_core`, fetched pinned by commit, and its
   installed package re-finds it. `Status` and `Result` are the core's types
   (using-declarations in `volumetric_kit::calib`), so they pass to `recon` and
