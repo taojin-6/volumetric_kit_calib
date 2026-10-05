@@ -43,7 +43,9 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
 
 ## Prerequisites
 
-The `core` tier needs a C++17 compiler, CMake ≥ 3.21, and Eigen. The first
+The `core` tier needs a C++17 compiler -- GCC or Clang; Windows and MSVC are
+not supported ([DECISIONS.md](DECISIONS.md#platforms)) -- CMake ≥ 3.21, and
+Eigen. The first
 configure fetches `volumetric_kit_core` (pinned by commit) and, for tests,
 googletest, so it needs network access:
 

@@ -21,9 +21,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   base tier calib uses kept its API, so calib's code is unchanged and its
   consumers have nothing to migrate. What reaches them:
   - The core supports only GCC and Clang -- it dropped Windows and MSVC -- and
-    calib's public headers include its `result.hpp`, so calib does too. No
-    calib CI leg built on Windows; nothing changes on Linux, macOS, iOS or
-    Android.
+    calib's public headers include its `result.hpp`, so calib does too.
   - Replacing the log handler from inside a handler call no longer deadlocks
     when another thread finishes a call on the old handler.
   - The base tier adds `StageMetrics` and `StageScope`, the family's named
@@ -65,3 +63,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `examples/01_project_point` CLI.
 - Lint/CI hygiene: `.clang-format`, `.cmake-format.yaml`, and a pre-commit
   config (clang-format, cmake-format, trailing-whitespace, end-of-file-fixer).
+
+### Removed
+
+- Windows and MSVC support, which no calib target or CI leg used
+  (DECISIONS.md, "Platforms"): calib builds with GCC or Clang for Linux,
+  macOS, iOS and Android, as the core does. The MSVC warning flags
+  (`/W4`, `/WX`) and the sanitizer option's MSVC refusal are gone.

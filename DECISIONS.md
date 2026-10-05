@@ -44,12 +44,24 @@ domain model and rationale remain in the intentionally gitignored local
   vulkan tier has landed, and calib's pin carries it; calib's build leaves it
   off (`VKC_WITH_VULKAN`), and so needs no Vulkan SDK, until calib writes GPU
   code.
+- **Linux, macOS, iOS and Android, with GCC or Clang; never Windows or MSVC**
+  (2026-10-04). See "Platforms" below.
 - **The rational lens model comes first; fisheye is planned, not built.** The
   Orbbec Femto Mega reports its factory lens in the rational model (k1–k6,
   p1, p2), which `recon`'s rig calibration file also stores, so that model is
   next. Fisheye (Kannala-Brandt) waits, but unprojection returns unit 3D rays
   and stored lenses carry a model name, so it can be added without breaking
   either.
+
+### Platforms
+
+calib builds for Linux, macOS, iOS and Android, with GCC or Clang (Apple's
+included), as the family's core does (its DECISIONS.md, "Platforms"). Windows
+and MSVC are not supported: the core, whose headers calib's public headers
+include, builds nowhere else; no calib target or CI leg runs on Windows; and a
+Windows branch could only rot untested. The code and build assume POSIX and those compilers
+outright, with no `_WIN32` or `_MSC_VER` paths and no MSVC flags. Supporting
+Windows would be a new decision, landing with its CI leg -- and the core's.
 
 ## Open decisions
 
