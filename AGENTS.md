@@ -76,7 +76,10 @@ via `VKC_CHECK`, never throw. Solver failures use the
 
 ## Conventions
 
-C++17, with no compiler extensions.
+C++17, with no compiler extensions, built with GCC or Clang for Linux, macOS,
+iOS and Android. Windows and MSVC are unsupported
+([DECISIONS.md](DECISIONS.md#platforms)): add no `_WIN32`/`_MSC_VER` paths or
+MSVC flags.
 
 - **Doxygen on every public class/function**, matching
   `include/volumetric_kit/calib/core/camera_model.hpp`: `@file`/`@brief` on the header,

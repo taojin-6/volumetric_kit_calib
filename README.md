@@ -32,8 +32,9 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
 - **Shared core:** every tier builds on
   [`volumetric_kit_core`](https://github.com/taojin-6/volumetric_kit_core), the
   family's shared foundation. Its base tier supplies calib's `Status`/`Result`
-  today; its camera, vulkan and sensor tiers will supply camera models, GPU
-  compute and capture drivers.
+  today. Its vulkan tier will supply GPU compute -- calib's build leaves it off
+  until calib writes GPU code, so it needs no Vulkan SDK -- and its planned
+  camera and sensor tiers, camera models and capture drivers.
 - **Compute:** a CPU backend is the correctness oracle. GPU work runs on the
   core's vulkan tier, on a `VkDevice` shared with `recon` and `gfx`, so frames
   pass between them without copies (MoltenVK on Apple; native Metal deferred).
@@ -42,7 +43,9 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
 
 ## Prerequisites
 
-The `core` tier needs a C++17 compiler, CMake ≥ 3.21, and Eigen. The first
+The `core` tier needs a C++17 compiler -- GCC or Clang; Windows and MSVC are
+not supported ([DECISIONS.md](DECISIONS.md#platforms)) -- CMake ≥ 3.21, and
+Eigen. The first
 configure fetches `volumetric_kit_core` (pinned by commit) and, for tests,
 googletest, so it needs network access:
 
