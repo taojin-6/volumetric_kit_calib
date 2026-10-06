@@ -10,10 +10,10 @@ adjustment, fisheye, cross-camera color, and the optics that gate quality
 are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 `volumetric_kit_gfx`, so it is not in a clone.
 
-> **Status:** Early scaffolding. The `core` tier — exception-free
-> `Status`/`Result`, the physically-parameterized data model (camera/lens/sensor
-> models, board target, observation), and the `PinholeBrownConrady` camera model
-> — builds and is tested (GoogleTest). The compute backends, detection, solve,
+> **Status:** Early scaffolding. The `core` tier — the physically-parameterized
+> data model (lens and sensor profiles, board target, observation) over
+> `volumetric_kit_core`'s `Status`/`Result` and `volumetric_kit_recon`'s camera
+> model — builds and is tested (GoogleTest). The compute backends, detection, solve,
 > quality, color, capture, viz, and app tiers are not yet implemented; the
 > legacy `camera_calibration` Python scripts (a separate checkout beside the
 > `volumetric_kit/` folder) remain the reference oracle.
@@ -32,9 +32,11 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
 - **Shared core:** every tier builds on
   [`volumetric_kit_core`](https://github.com/taojin-6/volumetric_kit_core), the
   family's shared foundation. Its base tier supplies calib's `Status`/`Result`
-  today. Its vulkan tier will supply GPU compute -- calib's build leaves it off
-  until calib writes GPU code, so it needs no Vulkan SDK -- and its planned
-  camera and sensor tiers, camera models and capture drivers.
+  and its vulkan tier GPU compute.
+- **Camera model and sensors:** from
+  [`volumetric_kit_recon`](https://github.com/taojin-6/volumetric_kit_recon):
+  its camera tier is calib's camera model and the calibration file calib
+  writes (`recon_camera`), and its sensor tier the capture drivers.
 - **Compute:** a CPU backend is the correctness oracle. GPU work runs on the
   core's vulkan tier, on a `VkDevice` shared with `recon` and `gfx`, so frames
   pass between them without copies (MoltenVK on Apple; native Metal deferred).
@@ -44,20 +46,24 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
 ## Prerequisites
 
 The `core` tier needs a C++17 compiler -- GCC or Clang; Windows and MSVC are
-not supported ([DECISIONS.md](DECISIONS.md#platforms)) -- CMake ≥ 3.21, and
-Eigen. The first
-configure fetches `volumetric_kit_core` (pinned by commit) and, for tests,
-googletest, so it needs network access:
+not supported ([DECISIONS.md](DECISIONS.md#platforms)) -- CMake ≥ 3.21, Eigen
+and GLM. The first configure fetches `volumetric_kit_core` and
+`volumetric_kit_recon` (each pinned by commit) and, for tests, googletest, so
+it needs network access; configuring recon also finds the Vulkan headers and
+loader and a GLSL compiler, which recon's other tiers build with (no GPU is
+needed):
 
 ```bash
-brew install cmake eigen          # macOS
-# sudo apt-get install cmake libeigen3-dev   # Ubuntu
+brew install cmake eigen glm vulkan-headers vulkan-loader shaderc   # macOS
+# sudo apt-get install cmake libeigen3-dev libglm-dev libvulkan-dev \
+#   glslang-tools                                                  # Ubuntu
 ```
 
 (Later tiers add OpenCV for `detect`, Ceres for `solve`, and
-`volumetric_kit_gfx` for `viz`/`app`.) To build against a local core checkout
-instead of the pinned one, pass
-`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>`.
+`volumetric_kit_gfx` for `viz`/`app`.) To build against a local core or recon
+checkout instead of the pinned one, pass
+`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>` or
+`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>`.
 
 ## Build and test
 

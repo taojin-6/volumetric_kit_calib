@@ -8,6 +8,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- calib's camera model is `volumetric_kit_recon`'s camera tier
+  (`recon_camera`), which `calib_core` links: `camera::CameraModel`,
+  `CameraProjection` and the calibration file calib writes. Configuring calib
+  now needs GLM, the Vulkan headers and loader, and a GLSL compiler, for
+  recon. Migrating: `vc::PinholeBrownConrady::create(size, k, d)` is
+  `camera::CameraProjection::create({size, k, d})`, its `project` and
+  `unproject` taking and returning GLM's double vectors; `vc::ImageSize` is
+  `camera::ImageSize` (unsigned sides).
+
 - calib writes volumetric_kit_core's names as the core does, and its
   re-exports of them are gone. Migrating: `vc::Status`, `vc::Result` and
   `vc::to_string` → `vkc::` (`volumetric_kit::core::`); include the core's
@@ -59,13 +68,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `Target`, `Observation` — the inputs the quality tier needs to be physical
     rather than heuristic. Profile fields are `std::optional`, so "unknown" is
     never confused with a real zero (e.g. a global shutter's line time).
-  - `PinholeBrownConrady` camera model with validated construction (image size,
-    intrinsics and distortion), closed-form `project`, and a Newton `unproject`
-    that returns an error rather than a wrong ray past the distortion's fold.
-    Both return `Result`, so a point behind the camera is an error, not an
-    abort.
+  - The camera model: `volumetric_kit_recon`'s camera tier (`recon_camera`),
+    linked by `calib_core` -- `CameraModel`, `CameraProjection` and the
+    calibration file calib writes.
 - GoogleTest `tests/` (version smoke test, `Status`/`Result` incl. death tests,
-  camera model against OpenCV `projectPoints` values, data model) and an
+  the camera model as calib uses it, data model) and an
   `examples/01_project_point` CLI.
 - Lint/CI hygiene: `.clang-format`, `.cmake-format.yaml`, and a pre-commit
   config (clang-format, cmake-format, trailing-whitespace, end-of-file-fixer).

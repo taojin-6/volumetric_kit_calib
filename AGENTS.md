@@ -48,7 +48,7 @@ Read only the sections needed for the current task.
 - Namespace: `volumetric_kit::calib`. In docs, `vc::` abbreviates
   `volumetric_kit::calib::`; `vg::` abbreviates `volumetric_kit::gfx::`.
 - Headers: `include/volumetric_kit/calib/<tier>/…` → e.g.
-  `#include "volumetric_kit/calib/core/camera_model.hpp"`
+  `#include "volumetric_kit/calib/core/observation.hpp"`
 - volumetric_kit_core's types, functions and macros keep the core's names:
   `core::Status` inside calib's namespaces, `vkc::Status` in tests and
   examples, from the core's own headers. calib re-exports none of them.
@@ -85,7 +85,7 @@ iOS and Android. Windows and MSVC are unsupported
 MSVC flags.
 
 - **Doxygen on every public class/function**, matching
-  `include/volumetric_kit/calib/core/camera_model.hpp`: `@file`/`@brief` on the header,
+  `include/volumetric_kit/calib/core/observation.hpp`: `@file`/`@brief` on the header,
   `@brief` + a `@code … @endcode` example per class, and `@brief`/`@param`/
   `@return` (`@pre` where relevant) on methods; accessors may be a single
   `/// @return`.
@@ -111,8 +111,10 @@ MSVC flags.
 ## Build and validation
 
 Run from the task's worktree. The build requires CMake ≥ 3.21, a C++17
-compiler, Eigen, and network access on the first configure (the core and
-googletest are fetched); see README and CI for platform dependencies.
+compiler, Eigen, GLM, the Vulkan headers and loader and a GLSL compiler (for
+recon's configure), and network access on the first configure (the core,
+recon and googletest are fetched); see README and CI for platform
+dependencies.
 
 ```sh
 calib_root="$(git rev-parse --show-toplevel)"
