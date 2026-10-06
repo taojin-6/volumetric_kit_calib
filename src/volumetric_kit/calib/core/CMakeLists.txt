@@ -16,7 +16,7 @@ set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 add_library(calib_core)
 add_library(volumetric_kit::calib_core ALIAS calib_core)
 
-target_sources(calib_core PRIVATE camera_model.cpp version.cpp)
+target_sources(calib_core PRIVATE version.cpp)
 
 # Generated headers: the VC_CORE_API export macro + the configured version
 # header. The export header is per-tier (core/export.hpp + VC_CORE_API +
@@ -58,7 +58,11 @@ target_include_directories(
 # Both are PUBLIC: the public headers name the core's Status / Result and Eigen
 # types in their signatures, so consumers compile against them too. The
 # installed package re-finds both (find_dependency in the package config).
-target_link_libraries(calib_core PUBLIC volumetric_kit::core_base Eigen3::Eigen)
+# PUBLIC: the data model is written in Eigen and the core's Status, and the
+# camera model is recon's (camera/camera_model.hpp), which calib's headers name.
+target_link_libraries(
+  calib_core PUBLIC volumetric_kit::core_base volumetric_kit::recon_camera
+                    Eigen3::Eigen)
 
 vc_target_warnings(calib_core)
 

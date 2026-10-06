@@ -1,9 +1,11 @@
 name: build
 
-# Build + test on the hosted runners. The core tier is pure CPU (Eigen only), so
-# no GPU/Vulkan toolchain is needed — unlike volumetric_kit_gfx. Both an
-# unoptimized Debug and an optimized Release/NDEBUG configuration are exercised,
-# so an NDEBUG-only or optimizer-exposed break is caught.
+# Build + test on the hosted runners. calib's tiers run on the CPU, but its
+# camera model is volumetric_kit_recon's, and configuring recon finds the Vulkan
+# headers and loader and a GLSL compiler for its other tiers, so those are
+# installed (no GPU is needed; nothing runs on one). Both an unoptimized Debug
+# and an optimized Release/NDEBUG configuration are exercised, so an NDEBUG-only
+# or optimizer-exposed break is caught.
 on:
   pull_request:
   push:
@@ -31,14 +33,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake build-essential libeigen3-dev
+            cmake build-essential libeigen3-dev libglm-dev libvulkan-dev \
+            glslang-tools
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
           HOMEBREW_NO_INSTALL_CLEANUP: '1'
-        run: brew install cmake eigen
+        run: brew install cmake eigen glm vulkan-headers vulkan-loader shaderc
 
       # Cache the FetchContent dependency tree (googletest sources + build) so it
       # is not re-cloned and recompiled every run.
@@ -72,12 +75,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake build-essential libeigen3-dev
+            cmake build-essential libeigen3-dev libglm-dev libvulkan-dev \
+            glslang-tools
 
+      # VC_INSTALL off, as an application embedding calib builds it: only the
+      # recon targets calib links are built, recon_camera, which builds without
+      # exceptions; recon's GPU tiers are not.
       - name: Configure
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_FLAGS=-fno-exceptions
+            -DCMAKE_CXX_FLAGS=-fno-exceptions -DVC_INSTALL=OFF
 
       - name: Build
         run: cmake --build build --parallel
