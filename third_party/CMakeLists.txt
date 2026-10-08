@@ -21,8 +21,9 @@ include(FetchContent)
 # come from its base tier (DECISIONS.md, "Build on volumetric_kit_core"). Pinned
 # by commit, never main, so every consumer builds the same core. An application
 # that also fetches recon or gfx declares the core first; FetchContent keeps the
-# first declaration of a name, so this pin then yields to the application's.
-# Work on both checkouts at once with
+# first declaration of a name, so this pin then yields to the application's, and
+# vkc_require_core refuses that core if it is older than the oldest calib builds
+# with. Work on both checkouts at once with
 # -DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<core checkout>.
 #
 # The core's tests, -Werror and vulkan tier stay off in a subproject; its
@@ -31,16 +32,15 @@ include(FetchContent)
 # It leaves VKC_WITH_VULKAN unset rather than OFF, so an application that turns
 # the tier on for recon or gfx keeps it.
 #
-# The pin is main after core PR #13. Since PR #1, which landed the base tier,
-# the core has gained its vulkan tier; the base tier kept its API (the core's
-# CHANGELOG.md).
+# The pin is core 0.1.0, the head of core PR #20.
 #
-# TODO: pin a release tag once the core tags one (v0.1.0).
+# TODO: pin the v0.1.0 tag once the core tags it.
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG a60398b7aeb2cad722a3f79cb71696bda10fc054)
+  GIT_TAG d02a2d20ccd245521b536c9bf41b31d3c0f3cb8f)
 FetchContent_MakeAvailable(volumetric_kit_core)
+vkc_require_core(0.1.0)
 
 if(VC_BUILD_TESTS)
   # googletest is only needed when building the test suite.

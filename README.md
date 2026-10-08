@@ -95,6 +95,10 @@ FetchContent build of it never fails on a warning your compiler adds.
 e.g. `-DVC_SANITIZE="address;undefined"`. An installed calib carries the core
 beside it, and `find_package(volumetric_kit_calib)` finds both.
 
+calib needs `volumetric_kit_core` 0.1.0 or newer. An application that declares
+the core before calib, to share it with `recon` or `gfx`, pins at least that:
+on an older core, calib's configure fails at `vkc_require_core`.
+
 ## Development
 
 ```bash

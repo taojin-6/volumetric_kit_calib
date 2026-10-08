@@ -23,13 +23,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `volumetric_kit/core/base/check.hpp`); a failed check now reports through the
   core's log sink, which prints to stderr by default; `std::move(r).value()`
   returns the value rather than a reference into `r`.
-- `volumetric_kit_core` is pinned at main after its PR #13 (was PR #1). The
-  base tier calib uses kept its API, so calib's code is unchanged and its
-  consumers have nothing to migrate. What reaches them:
+- `volumetric_kit_core` is pinned at 0.1.0 (its PR #20; was PR #1), and
+  calib's configure requires 0.1.0 or newer (`vkc_require_core`). calib's code
+  is unchanged. What reaches its consumers:
+  - An application that declares the core before calib pins 0.1.0 or newer;
+    on an older one, calib's configure fails at `vkc_require_core`.
+  - The installed package re-finds the core at 0.1, whose soname is `0.1`:
+    rebuild against it.
   - The core supports only GCC and Clang -- it dropped Windows and MSVC -- and
     calib's public headers include its `result.hpp`, so calib does too.
   - Replacing the log handler from inside a handler call no longer deadlocks
-    when another thread finishes a call on the old handler.
+    when another thread finishes a call on the old handler, and a handler that
+    throws out of a failed `VKC_CHECK` no longer makes the thread's next failed
+    check bypass it.
+  - `Status::backend_error` takes the backend whose call failed; calib makes no
+    such call.
   - The base tier adds `StageMetrics` and `StageScope`, the family's named
     host and device spans; calib does not report in them yet.
   - The core now has a vulkan tier, which calib's build leaves off
@@ -65,7 +73,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     Both return `Result`, so a point behind the camera is an error, not an
     abort.
 - GoogleTest `tests/` (version smoke test, `Status`/`Result` incl. death tests,
-  camera model against OpenCV `projectPoints` values, data model) and an
+  camera model against OpenCV `projectPoints` values, data model), configure
+  tests of the core version calib requires (`tests/core_requirement/`), and an
   `examples/01_project_point` CLI.
 - Lint/CI hygiene: `.clang-format`, `.cmake-format.yaml`, and a pre-commit
   config (clang-format, cmake-format, trailing-whitespace, end-of-file-fixer).
