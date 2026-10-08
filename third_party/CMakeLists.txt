@@ -10,9 +10,11 @@
 #
 # TODO (as tiers land, mirroring gfx's hybrid system/vendored strategy): OpenCV
 # via find_package for the detect tier (pattern detection + subpixel); Ceres via
-# find_package for the solve tier (intrinsics / stereo / BA); and
-# volumetric_kit_gfx via FetchContent for the viz / app tiers. GPU work comes
-# from volumetric_kit_core's vulkan tier, not a Vulkan dependency of calib's.
+# find_package for the solve tier (intrinsics / stereo / BA);
+# volumetric_kit_recon via FetchContent for the capture tier (its sensor tier's
+# drivers); and volumetric_kit_gfx via FetchContent for the viz / app tiers. GPU
+# work comes from volumetric_kit_core's vulkan tier, not a Vulkan dependency of
+# calib's.
 
 include(FetchContent)
 

@@ -16,10 +16,10 @@ The implemented core and planned tiers are distinguished in
 - Mobile is first-class and fully on-device; the board-constrained solve runs
   on CPU. `SensorProfile` and `LensProfile` are required physical inputs.
 - calib builds on [`volumetric_kit_core`](https://github.com/taojin-6/volumetric_kit_core)
-  (fetched, pinned by commit): error handling now, then camera models and
-  capture drivers. Code two or more siblings need belongs in the core, as a
-  task in that repository. From the primary checkout it is
-  `../volumetric_kit_core/`.
+  (fetched, pinned by commit). Code two or more siblings need belongs in the
+  core, as a task in that repository; cameras and sensors do not
+  ([DECISIONS.md](DECISIONS.md#locked-decisions)). From the primary checkout
+  it is `../volumetric_kit_core/`.
 - GPU work runs on the core's vulkan tier, on a `VkDevice` shared with `recon`
   and `gfx` ([DECISIONS.md](DECISIONS.md#locked-decisions)); calib keeps no
   GPU backend of its own. A CPU backend is the correctness oracle.

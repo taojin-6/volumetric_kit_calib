@@ -25,13 +25,12 @@ domain model and rationale remain in the intentionally gitignored local
 - **Build on `volumetric_kit_core`.** calib uses the family's shared
   foundation ([volumetric_kit_core](https://github.com/taojin-6/volumetric_kit_core))
   instead of a bottom layer of its own: `Status`, `Result`, `VKC_TRY`,
-  `VKC_ASSIGN`, `VKC_CHECK` and the log sink from its base tier now, and the
-  camera models (its camera tier) and capture drivers (its sensor tier) as
-  those land. calib names them as the core does -- `core::Status` in calib's
-  namespaces, `vkc::Status` outside -- with no `vc::` re-exports (amended
-  2026-10-05; see the dated entry), so a calib error passes to `recon` or
-  `gfx` unchanged. The core is fetched pinned by commit (`third_party/`), and the
-  installed package re-finds it at the minor version it was built with. Why:
+  `VKC_ASSIGN`, `VKC_CHECK` and the log sink from its base tier. calib names
+  them as the core does -- `core::Status` in calib's namespaces, `vkc::Status`
+  outside -- with no `vc::` re-exports (amended 2026-10-05; see the dated
+  entry), so a calib error passes to `recon` or `gfx` unchanged. The core is
+  fetched pinned by commit (`third_party/`), and the installed package
+  re-finds it at the minor version it was built with. Why:
   `recon`'s and `gfx`'s copies of the same bottom layer had drifted (the core's
   DECISIONS.md has the evidence); one copy means a fix lands once.
 - **GPU work runs on the core's vulkan tier, on a `VkDevice` shared with
@@ -45,6 +44,16 @@ domain model and rationale remain in the intentionally gitignored local
   vulkan tier has landed, and calib's pin carries it; calib's build leaves it
   off (`VKC_WITH_VULKAN`), and so needs no Vulkan SDK, until calib writes GPU
   code.
+- **The camera model is calib's own; capture drivers come from
+  `volumetric_kit_recon`'s sensor tier** (2026-10-08). calib's `core` tier
+  keeps `PinholeBrownConrady` and the rational model below; its `capture` tier
+  will take frames from recon's `IRgbdSensor` and `SensorArray` rather than
+  drive a device itself. Why: the core has no camera or sensor tier (core
+  PR #14 proposed one and was closed), and recon's DECISIONS.md (2026-10-06,
+  "The family's camera vocabulary is recon's `camera` tier", amended the same
+  day) makes recon what calib builds on for sensors, while its camera tier
+  keeps only what a capture uses: the forward distortion, without the
+  projection and unprojection calib's solver needs.
 - **Linux, macOS, iOS and Android, with GCC or Clang; never Windows or MSVC**
   (2026-10-04). See "Platforms" below.
 - **The rational lens model comes first; fisheye is planned, not built.** The
@@ -96,7 +105,8 @@ compute on the right processor, and few memory transfers on both discrete
 and unified-memory GPUs -- found the family's Vulkan cores already drifting.
 The family created `volumetric_kit_core` and settled the GPU path on its
 vulkan tier over a shared `VkDevice`. calib adopts the core's base tier
-first; its camera model moves to the core's camera tier when that lands.
+first. (Amended 2026-10-08: the camera model stays calib's own; see the locked
+decisions.)
 
 ## 2026-10-02 — Shared agent guidance
 
