@@ -24,6 +24,10 @@ domain model and rationale remain in the intentionally gitignored local
 - **Capture sessions keep the legacy scripts' image names**
   (`<serial>/calib_img_<serial>_<n>.png`), so the legacy bundle adjustment
   reads a session unchanged.
+- **The solve's world frame is the rig's sync primary** (2026-09-28), which a
+  session records as its reference camera. The legacy solve gauged on
+  another camera (CL2A141000G), so its extrinsics differ by that rigid
+  transform.
 
 - **Build on `volumetric_kit_core`.** calib uses the family's shared
   foundation ([volumetric_kit_core](https://github.com/taojin-6/volumetric_kit_core))

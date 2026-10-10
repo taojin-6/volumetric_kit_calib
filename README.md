@@ -13,10 +13,10 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > **Status:** Early scaffolding. Two tiers build and are tested (GoogleTest):
 > `core` — exception-free `Status`/`Result`, the physically-parameterized data
 > model (camera/lens/sensor models, board target, observation), and the
-> `PinholeBrownConrady` camera model — and `capture` — the rig-source contract,
-> capture sessions on disk, their replay, and the recorder that averages a key
-> press's sets into one capture. The live camera source, compute backends,
-> detection, solve, quality, color, viz, and app tiers are not yet implemented;
+> `PinholeBrownConrady` camera model — and `capture` — capture sessions on disk
+> and the recorder that averages a key press's sets into one capture. The live
+> capture app (on recon's `SensorArray`), compute backends, detection, solve,
+> quality, color, viz, and app tiers are not yet implemented;
 > the legacy `camera_calibration` Python scripts (a separate checkout beside the
 > `volumetric_kit/` folder) remain the reference oracle.
 

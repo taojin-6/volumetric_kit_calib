@@ -40,38 +40,35 @@ void CaptureRecorder::cancel() noexcept {
 }
 
 core::Result<std::optional<std::size_t>> CaptureRecorder::on_set(
-    const SetInfo& set, IRigSource& source) {
-  const std::vector<CameraInfo>& cameras = writer_.session().cameras;
-  if (set.present.size() != cameras.size()) {
+    std::uint64_t trigger_ns, const std::vector<const LumaImage*>& images) {
+  const std::vector<SessionCamera>& cameras = writer_.session().cameras;
+  if (images.size() != cameras.size()) {
     return core::Status::invalid_argument(
-        "a set of " + std::to_string(set.present.size()) +
+        "a set of " + std::to_string(images.size()) +
         " cameras for a session of " + std::to_string(cameras.size()));
   }
   if (!armed_) return std::optional<std::size_t>{};
-  if (!set.complete()) {
-    ++skipped_;
-    return std::optional<std::size_t>{};
+  for (const LumaImage* image : images) {
+    if (image == nullptr) {
+      ++skipped_;
+      return std::optional<std::size_t>{};
+    }
   }
 
   if (collected_ == 0) {
-    first_trigger_ns_ = set.trigger_ns;
+    first_trigger_ns_ = trigger_ns;
     sums_.assign(cameras.size(), {});
   }
   for (std::size_t i = 0; i < cameras.size(); ++i) {
-    core::Result<LumaImage> image = source.read_luma(i);
-    if (!image) {
-      cancel();
-      return image.status();
-    }
-    const ImageSize& want = cameras[i].lens->image_size();
+    const LumaImage* image = images[i];
+    const ImageSize& want = cameras[i].lens.image_size();
     const std::size_t pixels = static_cast<std::size_t>(want.width) *
                                static_cast<std::size_t>(want.height);
     if (image->size.width != want.width || image->size.height != want.height ||
         image->pixels.size() != pixels) {
       cancel();
       return core::Status::invalid_argument(
-          cameras[i].serial + ": the source read a " +
-          std::to_string(image->size.width) + "x" +
+          cameras[i].serial + ": a " + std::to_string(image->size.width) + "x" +
           std::to_string(image->size.height) + " image, its lens is " +
           std::to_string(want.width) + "x" + std::to_string(want.height));
     }
@@ -85,19 +82,20 @@ core::Result<std::optional<std::size_t>> CaptureRecorder::on_set(
   }
 
   // Every set is in; write their average, rounded to the nearest level.
-  std::vector<LumaImage> images(cameras.size());
+  std::vector<LumaImage> averaged(cameras.size());
   const std::uint32_t n = collected_;
   for (std::size_t i = 0; i < cameras.size(); ++i) {
-    images[i].size = cameras[i].lens->image_size();
-    images[i].pixels.resize(sums_[i].size());
+    averaged[i].size = cameras[i].lens.image_size();
+    averaged[i].pixels.resize(sums_[i].size());
     for (std::size_t p = 0; p < sums_[i].size(); ++p) {
-      images[i].pixels[p] =
+      averaged[i].pixels[p] =
           static_cast<std::uint8_t>((sums_[i][p] + n / 2) / n);
     }
   }
-  const std::uint64_t trigger_ns = first_trigger_ns_;
+  const std::uint64_t first_trigger_ns = first_trigger_ns_;
   cancel();
-  VKC_ASSIGN(const std::size_t index, writer_.add(trigger_ns, n, images));
+  VKC_ASSIGN(const std::size_t index,
+             writer_.add(first_trigger_ns, n, averaged));
   return std::optional<std::size_t>{index};
 }
 

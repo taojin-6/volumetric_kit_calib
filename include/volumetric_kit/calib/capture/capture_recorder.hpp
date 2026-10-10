@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "volumetric_kit/calib/capture/export.hpp"
-#include "volumetric_kit/calib/capture/rig_source.hpp"
+#include "volumetric_kit/calib/capture/luma_image.hpp"
 #include "volumetric_kit/calib/capture/session.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 
@@ -29,24 +29,35 @@ struct RecorderOptions {
 };
 
 /// @brief Collects captures into a session: @ref arm on the capture key, then
-///        @ref on_set with every set the source hands out.
+///        @ref on_set with every set the rig hands out.
 ///
-/// Once armed, the recorder reads every camera's luma from each complete set
-/// and adds it to a per-camera sum. A set missing a camera is skipped, not
-/// counted, since a capture is only useful to the solve with every camera in
-/// it; @ref skipped says how many were. After
-/// @ref RecorderOptions::frames_to_average complete sets it writes their
-/// average as one capture, and disarms. Sets that arrive while it is not armed
-/// cost nothing: no pixel is read.
+/// Once armed, the recorder adds every camera's luma of each complete set to a
+/// per-camera sum. A set missing a camera is skipped, not counted, since a
+/// capture is only useful to the solve with every camera in it; @ref skipped
+/// says how many were. After @ref RecorderOptions::frames_to_average complete
+/// sets it writes their average as one capture, and disarms.
+///
+/// The caller reads a set's luma back only while @ref armed, and only for a
+/// complete set: a live rig's frames (recon's `SensorArray` sets) then stay on
+/// the GPU between captures.
 ///
 /// @code
 /// VKC_ASSIGN(CaptureRecorder recorder,
-/// CaptureRecorder::create(std::move(writer))); if (key == Key::Capture)
-/// recorder.arm(); if (key == Key::Back) VKC_TRY(recorder.undo());
-/// VKC_ASSIGN(const std::optional<SetInfo> set, source.poll_set());
-/// if (set) {
+///            CaptureRecorder::create(std::move(writer)));
+/// if (key == Key::Capture) recorder.arm();
+/// if (key == Key::Back) VKC_TRY(recorder.undo());
+/// if (set && recorder.armed()) {
+///   // One per camera, in the session's order; null where the set has none.
+///   std::vector<LumaImage> luma(cameras);
+///   std::vector<const LumaImage*> images(cameras, nullptr);
+///   if (set->complete()) {
+///     for (std::size_t i = 0; i < cameras; ++i) {
+///       VKC_ASSIGN(luma[i], read_back_luma(*set, i));  // the app's readback
+///       images[i] = &luma[i];
+///     }
+///   }
 ///   VKC_ASSIGN(const std::optional<std::size_t> written,
-///             recorder.on_set(*set, source));
+///              recorder.on_set(set->timestamp_ns, images));
 ///   if (written) announce_capture(*written);
 /// }
 /// @endcode
@@ -65,19 +76,21 @@ class VC_CAPTURE_API CaptureRecorder {
   /// @brief Drop the capture being collected, if any, and disarm.
   void cancel() noexcept;
 
-  /// @brief Take in one set the source just handed out.
-  /// @param set     The set @p source's last @ref IRigSource::poll_set
-  ///                returned.
-  /// @param source  The source it came from, whose cameras are the
-  ///                session's, in its order; read only when armed and the
-  ///                set is complete.
+  /// @brief Take in one set the rig just handed out.
+  /// @param trigger_ns  The set's trigger time (ns).
+  /// @param images      Per camera of the session, in its order, the
+  ///                    camera's luma at the size of its lens; null where the
+  ///                    set has no frame from that camera. Read only when
+  ///                    armed and none is null.
   /// @return The index of the capture this set completed and wrote; empty
-  ///         otherwise; @ref core::Status::Code::InvalidArgument if @p set does
-  ///         not have one entry per camera of the session; or a read or write
-  ///         failure, after which the capture being collected is dropped and
-  ///         the recorder disarmed.
-  core::Result<std::optional<std::size_t>> on_set(const SetInfo& set,
-                                                  IRigSource& source);
+  ///         otherwise; @ref core::Status::Code::InvalidArgument if @p images
+  ///         does not have one entry per camera of the session, or, when
+  ///         read, one is not the size of its camera's lens; or a write
+  ///         failure. After an image of the wrong size or a write failure,
+  ///         the capture being collected is dropped and the recorder
+  ///         disarmed.
+  core::Result<std::optional<std::size_t>> on_set(
+      std::uint64_t trigger_ns, const std::vector<const LumaImage*>& images);
 
   /// @brief Take back the last capture: drop one being collected if armed,
   ///        otherwise remove the last one written.

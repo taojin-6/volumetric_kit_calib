@@ -16,7 +16,8 @@
 
 #include <gtest/gtest.h>
 
-#include "volumetric_kit/calib/capture/rig_source.hpp"
+#include "volumetric_kit/calib/capture/luma_image.hpp"
+#include "volumetric_kit/calib/capture/session.hpp"
 #include "volumetric_kit/calib/core/camera_model.hpp"
 
 namespace volumetric_kit::calib::capture::testing {
@@ -56,11 +57,7 @@ class ScratchDir {
 };
 
 /// A camera of @p width x @p height with a distinct, lensed model.
-inline CameraInfo make_camera(std::string serial, SyncRole role, int width,
-                              int height) {
-  CameraInfo camera;
-  camera.serial = std::move(serial);
-  camera.role = role;
+inline SessionCamera make_camera(std::string serial, int width, int height) {
   // Values with long binary expansions, so a lossy round trip shows.
   auto lens = PinholeBrownConrady::create(
       {width, height},
@@ -71,8 +68,7 @@ inline CameraInfo make_camera(std::string serial, SyncRole role, int width,
        /*p1=*/-0.00046360507258214056, /*p2=*/-5.1091061322949827e-05,
        /*k3=*/0.040595322847366333});
   EXPECT_TRUE(lens.ok()) << lens.status().message();
-  if (lens.ok()) camera.lens = std::move(lens).value();
-  return camera;
+  return {std::move(serial), std::move(lens).value()};
 }
 
 /// An image whose every pixel is @p level.

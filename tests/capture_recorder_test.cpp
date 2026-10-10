@@ -22,87 +22,65 @@ using testing::flat_image;
 using testing::make_camera;
 using testing::ScratchDir;
 
-// A rig whose camera i reads back a flat image at `level + i`, counting reads;
-// the test drives on_set with sets it builds itself.
-class FakeRig final : public IRigSource {
- public:
-  explicit FakeRig(std::vector<CameraInfo> cameras)
-      : cameras_(std::move(cameras)) {}
-
-  const std::vector<CameraInfo>& cameras() const noexcept override {
-    return cameras_;
-  }
-  core::Status start() override { return {}; }
-  void stop() noexcept override {}
-  core::Result<std::optional<SetInfo>> poll_set() override { return no_set(); }
-  core::Result<LumaImage> read_luma(std::size_t camera) override {
-    ++reads;
-    if (fail_camera && *fail_camera == camera) {
-      return core::Status::io_error("camera unplugged");
-    }
-    ImageSize size = cameras_[camera].lens->image_size();
-    if (wrong_size) size.width += 1;
-    return flat_image(size, static_cast<std::uint8_t>(level + camera));
-  }
-
-  int level = 0;
-  std::size_t reads = 0;
-  std::optional<std::size_t> fail_camera;
-  bool wrong_size = false;
-
- private:
-  std::vector<CameraInfo> cameras_;
-};
-
-std::vector<CameraInfo> rig_cameras() {
-  return {make_camera("CL2A141000N", SyncRole::Primary, 24, 16),
-          make_camera("CL2A141000G", SyncRole::Secondary, 12, 8)};
+std::vector<SessionCamera> rig_cameras() {
+  return {make_camera("CL2A141000N", 24, 16),
+          make_camera("CL2A141000G", 12, 8)};
 }
 
-SetInfo set_of(std::uint64_t trigger_ns, std::vector<bool> present) {
-  SetInfo set;
-  set.trigger_ns = trigger_ns;
-  set.present = std::move(present);
-  return set;
-}
-
+// A session of rig_cameras(), and sets fed to a recorder of it: camera i's
+// image is flat at `level + i`.
 struct Rig {
   ScratchDir dir;
-  FakeRig source{rig_cameras()};
+  std::vector<SessionCamera> cameras = rig_cameras();
+  // Set to make the next set's image of camera 0 one column too wide.
+  bool wrong_size = false;
 
   CaptureRecorder recorder(std::uint32_t frames) {
-    auto writer = SessionWriter::create(dir.str(), source.cameras());
+    auto writer = SessionWriter::create(dir.str(), cameras, 0);
     EXPECT_TRUE(writer.ok()) << writer.status().message();
     auto made = CaptureRecorder::create(std::move(writer).value(), {frames});
     EXPECT_TRUE(made.ok()) << made.status().message();
     return std::move(made).value();
   }
 
-  // Feed one set at `level`; returns what on_set returned.
+  // Feed one set at `level`, with a frame from each camera `present` names;
+  // returns what on_set returned.
   core::Result<std::optional<std::size_t>> feed(CaptureRecorder& r, int level,
                                                 std::uint64_t trigger_ns,
                                                 std::vector<bool> present = {
                                                     true, true}) {
-    source.level = level;
-    return r.on_set(set_of(trigger_ns, std::move(present)), source);
+    std::vector<LumaImage> luma;
+    std::vector<const LumaImage*> images(present.size(), nullptr);
+    luma.reserve(present.size());
+    for (std::size_t i = 0; i < present.size(); ++i) {
+      ImageSize size = cameras[i % cameras.size()].lens.image_size();
+      if (i == 0 && wrong_size) size.width += 1;
+      luma.push_back(flat_image(size, static_cast<std::uint8_t>(level + i)));
+      if (present[i]) images[i] = &luma.back();
+    }
+    return r.on_set(trigger_ns, images);
   }
 
   std::uint8_t pixel(std::size_t camera, std::size_t index) {
-    auto image =
-        read_session_image(dir.str(), source.cameras()[camera].serial, index);
+    auto image = read_session_image(dir.str(), cameras[camera].serial, index);
     EXPECT_TRUE(image.ok()) << image.status().message();
     return image.ok() ? image->pixels.front() : 0;
   }
 };
 
-TEST(CaptureRecorder, ReadsNothingUntilArmed) {
+TEST(CaptureRecorder, IgnoresSetsUntilArmed) {
   Rig rig;
-  CaptureRecorder recorder = rig.recorder(3);
+  CaptureRecorder recorder = rig.recorder(1);
   auto result = rig.feed(recorder, 10, 1);
   ASSERT_TRUE(result.ok());
   EXPECT_FALSE(result->has_value());
-  EXPECT_EQ(rig.source.reads, 0u);
+  EXPECT_EQ(recorder.collected(), 0u);
   EXPECT_TRUE(recorder.writer().session().captures.empty());
+
+  // Nor does a set with no images, which is how a caller that reads nothing
+  // while disarmed passes one, count as skipped.
+  ASSERT_TRUE(rig.feed(recorder, 10, 2, {false, false}).ok());
+  EXPECT_EQ(recorder.skipped(), 0u);
 }
 
 TEST(CaptureRecorder, AveragesTheNextCompleteSetsIntoOneCapture) {
@@ -148,8 +126,7 @@ TEST(CaptureRecorder, SkipsASetMissingACamera) {
   auto written = rig.feed(recorder, 22, 3);
   ASSERT_TRUE(written.ok());
   ASSERT_TRUE(written->has_value());
-  EXPECT_EQ(rig.pixel(0, 0), 21);   // the skipped set's 90 is not in it
-  EXPECT_EQ(rig.source.reads, 4u);  // two sets, two cameras; none skipped
+  EXPECT_EQ(rig.pixel(0, 0), 21);  // the skipped set's 90 is not in it
 }
 
 TEST(CaptureRecorder, ArmingTwiceCollectsOneCapture) {
@@ -193,25 +170,18 @@ TEST(CaptureRecorder, UndoWhileArmedOnlyDisarms) {
   EXPECT_EQ(recorder.undo().domain(), core::Status::Code::NotFound);
 }
 
-TEST(CaptureRecorder, AReadFailureDropsTheCaptureAndDisarms) {
+TEST(CaptureRecorder, RefusesAnImageTheWrongSize) {
   Rig rig;
   CaptureRecorder recorder = rig.recorder(2);
   recorder.arm();
-  rig.source.fail_camera = 1;
-  auto failed = rig.feed(recorder, 10, 1);
-  EXPECT_EQ(failed.status().domain(), core::Status::Code::IoError);
-  EXPECT_FALSE(recorder.armed());
-  EXPECT_TRUE(recorder.writer().session().captures.empty());
-}
-
-TEST(CaptureRecorder, RefusesAnImageTheWrongSize) {
-  Rig rig;
-  CaptureRecorder recorder = rig.recorder(1);
-  recorder.arm();
-  rig.source.wrong_size = true;
-  EXPECT_EQ(rig.feed(recorder, 10, 1).status().domain(),
+  ASSERT_TRUE(rig.feed(recorder, 10, 1).ok());  // one collected
+  rig.wrong_size = true;
+  EXPECT_EQ(rig.feed(recorder, 10, 2).status().domain(),
             core::Status::Code::InvalidArgument);
+  // The capture being collected is dropped, and nothing was written.
   EXPECT_FALSE(recorder.armed());
+  EXPECT_EQ(recorder.collected(), 0u);
+  EXPECT_TRUE(recorder.writer().session().captures.empty());
 }
 
 TEST(CaptureRecorder, RefusesASetOfAnotherRig) {
@@ -223,7 +193,7 @@ TEST(CaptureRecorder, RefusesASetOfAnotherRig) {
 
 TEST(CaptureRecorder, CreateRefusesNoFramesToAverage) {
   const ScratchDir dir;
-  auto writer = SessionWriter::create(dir.str(), rig_cameras());
+  auto writer = SessionWriter::create(dir.str(), rig_cameras(), 0);
   ASSERT_TRUE(writer.ok());
   EXPECT_EQ(
       CaptureRecorder::create(std::move(writer).value(), {0}).status().domain(),

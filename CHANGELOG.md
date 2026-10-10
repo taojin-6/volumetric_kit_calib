@@ -64,17 +64,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     that returns an error rather than a wrong ray past the distortion's fold.
     Both return `Result`, so a point behind the camera is an error, not an
     abort.
-- `capture` tier (`volumetric_kit::calib_capture`):
-  - `IRigSource`, the capture contract: a rig polled for sets of frames one
-    trigger apart, each camera's luma read on demand, and its factory lens
-    (`CameraInfo`) for the image as captured.
-  - Sessions on disk: a `session.json` of the cameras, their lenses and the
-    captures, and one 8-bit grey PNG per camera per capture under the legacy
-    scripts' names. `SessionWriter` writes and takes back captures;
+- `capture` tier (`volumetric_kit::calib_capture`), with no live source of its
+  own: the rig is recon's `SensorArray`.
+  - Sessions on disk: a `session.json` of the cameras (`SessionCamera`: serial
+    and factory lens, the lens naming its model), the reference camera and the
+    captures, and one 8-bit grey PNG (`LumaImage`) per camera per capture under
+    the legacy scripts' names. `SessionWriter` writes and takes back captures;
     `read_session` refuses a malformed file field by field.
-  - `SessionReplay`, a session played back as a rig.
-  - `CaptureRecorder`: a key press becomes one capture, the next complete sets
-    averaged pixel by pixel; a set missing a camera is skipped.
+  - `CaptureRecorder`: a key press becomes one capture, the next complete sets'
+    luma averaged pixel by pixel; a set missing a camera is skipped.
   - nlohmann/json and stb, pinned as in `volumetric_kit_recon`, as PRIVATE
     includes. stb is compiled with internal linkage, so a program that links
     another stb (gfx's glTF loader) still links.

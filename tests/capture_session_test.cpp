@@ -32,16 +32,16 @@ void write_file(const std::string& path, const std::string& text) {
 }
 
 // Two cameras of different sizes, so a mixed-up image or lens shows.
-std::vector<CameraInfo> two_cameras() {
-  return {make_camera("CL2A141000N", SyncRole::Primary, 64, 48),
-          make_camera("CL2A141000G", SyncRole::Secondary, 32, 24)};
+std::vector<SessionCamera> two_cameras() {
+  return {make_camera("CL2A141000N", 64, 48),
+          make_camera("CL2A141000G", 32, 24)};
 }
 
-std::vector<LumaImage> images_for(const std::vector<CameraInfo>& cameras,
+std::vector<LumaImage> images_for(const std::vector<SessionCamera>& cameras,
                                   unsigned seed) {
   std::vector<LumaImage> images;
-  for (const CameraInfo& camera : cameras) {
-    images.push_back(pattern_image(camera.lens->image_size(), seed++));
+  for (const SessionCamera& camera : cameras) {
+    images.push_back(pattern_image(camera.lens.image_size(), seed++));
   }
   return images;
 }
@@ -63,8 +63,9 @@ void expect_same_lens(const PinholeBrownConrady& a,
 
 TEST(CaptureSession, WritesAndReadsBackASession) {
   const ScratchDir dir;
-  const std::vector<CameraInfo> cameras = two_cameras();
-  auto writer = SessionWriter::create(dir.str(), cameras);
+  const std::vector<SessionCamera> cameras = two_cameras();
+  // The second camera is the reference, so the default of 0 cannot pass.
+  auto writer = SessionWriter::create(dir.str(), cameras, 1);
   ASSERT_TRUE(writer.ok()) << writer.status().message();
   auto first = writer->add(1000, 5, images_for(cameras, 1));
   auto second = writer->add(2000, 1, images_for(cameras, 7));
@@ -76,12 +77,11 @@ TEST(CaptureSession, WritesAndReadsBackASession) {
   auto session = read_session(dir.str());
   ASSERT_TRUE(session.ok()) << session.status().message();
   ASSERT_EQ(session->cameras.size(), 2u);
+  EXPECT_EQ(session->reference, 1u);
   for (std::size_t i = 0; i < 2; ++i) {
     EXPECT_EQ(session->cameras[i].serial, cameras[i].serial);
-    EXPECT_EQ(session->cameras[i].role, cameras[i].role);
-    ASSERT_TRUE(session->cameras[i].lens.has_value());
     // Exactly: the JSON must round-trip every double.
-    expect_same_lens(*session->cameras[i].lens, *cameras[i].lens);
+    expect_same_lens(session->cameras[i].lens, cameras[i].lens);
   }
   ASSERT_EQ(session->captures.size(), 2u);
   EXPECT_EQ(session->captures[0].index, 0u);
@@ -94,8 +94,8 @@ TEST(CaptureSession, WritesAndReadsBackASession) {
 
 TEST(CaptureSession, StoresEachImageLosslesslyUnderTheLegacyName) {
   const ScratchDir dir;
-  const std::vector<CameraInfo> cameras = two_cameras();
-  auto writer = SessionWriter::create(dir.str(), cameras);
+  const std::vector<SessionCamera> cameras = two_cameras();
+  auto writer = SessionWriter::create(dir.str(), cameras, 0);
   ASSERT_TRUE(writer.ok()) << writer.status().message();
   const std::vector<LumaImage> images = images_for(cameras, 3);
   ASSERT_TRUE(writer->add(42, 1, images).ok());
@@ -115,15 +115,15 @@ TEST(CaptureSession, StoresEachImageLosslesslyUnderTheLegacyName) {
 
 TEST(CaptureSession, RemoveLastDeletesTheCaptureAndReusesItsIndex) {
   const ScratchDir dir;
-  const std::vector<CameraInfo> cameras = two_cameras();
-  auto writer = SessionWriter::create(dir.str(), cameras);
+  const std::vector<SessionCamera> cameras = two_cameras();
+  auto writer = SessionWriter::create(dir.str(), cameras, 0);
   ASSERT_TRUE(writer.ok());
   ASSERT_TRUE(writer->add(1, 1, images_for(cameras, 1)).ok());
   ASSERT_TRUE(writer->add(2, 1, images_for(cameras, 2)).ok());
 
   ASSERT_TRUE(writer->remove_last().ok());
   ASSERT_EQ(writer->session().captures.size(), 1u);
-  for (const CameraInfo& camera : cameras) {
+  for (const SessionCamera& camera : cameras) {
     EXPECT_TRUE(exists(session_image_path(dir.str(), camera.serial, 0)));
     EXPECT_FALSE(exists(session_image_path(dir.str(), camera.serial, 1)));
   }
@@ -139,30 +139,29 @@ TEST(CaptureSession, RemoveLastDeletesTheCaptureAndReusesItsIndex) {
 
 TEST(CaptureSession, RemoveLastWithNoCaptureIsNotFound) {
   const ScratchDir dir;
-  auto writer = SessionWriter::create(dir.str(), two_cameras());
+  auto writer = SessionWriter::create(dir.str(), two_cameras(), 0);
   ASSERT_TRUE(writer.ok());
   EXPECT_EQ(writer->remove_last().domain(), core::Status::Code::NotFound);
 }
 
 TEST(CaptureSession, CreateRefusesCamerasASessionCannotHold) {
   const ScratchDir dir;
-  EXPECT_EQ(SessionWriter::create(dir.str(), {}).status().domain(),
+  EXPECT_EQ(SessionWriter::create(dir.str(), {}, 0).status().domain(),
             core::Status::Code::InvalidArgument);
 
-  std::vector<CameraInfo> no_lens = two_cameras();
-  no_lens[1].lens.reset();
-  EXPECT_EQ(SessionWriter::create(dir.str(), no_lens).status().domain(),
-            core::Status::Code::InvalidArgument);
+  EXPECT_EQ(
+      SessionWriter::create(dir.str(), two_cameras(), 2).status().domain(),
+      core::Status::Code::InvalidArgument);
 
-  std::vector<CameraInfo> repeated = two_cameras();
+  std::vector<SessionCamera> repeated = two_cameras();
   repeated[1].serial = repeated[0].serial;
-  EXPECT_EQ(SessionWriter::create(dir.str(), repeated).status().domain(),
+  EXPECT_EQ(SessionWriter::create(dir.str(), repeated, 0).status().domain(),
             core::Status::Code::InvalidArgument);
 
   for (const char* serial : {"", ".", "..", "a/b", "a\\b", "a b", "../x"}) {
-    std::vector<CameraInfo> bad = two_cameras();
+    std::vector<SessionCamera> bad = two_cameras();
     bad[0].serial = serial;
-    EXPECT_EQ(SessionWriter::create(dir.str(), bad).status().domain(),
+    EXPECT_EQ(SessionWriter::create(dir.str(), bad, 0).status().domain(),
               core::Status::Code::InvalidArgument)
         << "serial \"" << serial << "\"";
   }
@@ -172,15 +171,16 @@ TEST(CaptureSession, CreateRefusesCamerasASessionCannotHold) {
 
 TEST(CaptureSession, CreateRefusesADirectoryThatHoldsASession) {
   const ScratchDir dir;
-  ASSERT_TRUE(SessionWriter::create(dir.str(), two_cameras()).ok());
-  EXPECT_EQ(SessionWriter::create(dir.str(), two_cameras()).status().domain(),
-            core::Status::Code::InvalidArgument);
+  ASSERT_TRUE(SessionWriter::create(dir.str(), two_cameras(), 0).ok());
+  EXPECT_EQ(
+      SessionWriter::create(dir.str(), two_cameras(), 0).status().domain(),
+      core::Status::Code::InvalidArgument);
 }
 
 TEST(CaptureSession, AddRefusesImagesThatDoNotFitTheCameras) {
   const ScratchDir dir;
-  const std::vector<CameraInfo> cameras = two_cameras();
-  auto writer = SessionWriter::create(dir.str(), cameras);
+  const std::vector<SessionCamera> cameras = two_cameras();
+  auto writer = SessionWriter::create(dir.str(), cameras, 0);
   ASSERT_TRUE(writer.ok());
 
   std::vector<LumaImage> one = images_for(cameras, 1);
@@ -203,7 +203,7 @@ TEST(CaptureSession, AddRefusesImagesThatDoNotFitTheCameras) {
 
   // Nothing was written for any refused capture.
   EXPECT_TRUE(writer->session().captures.empty());
-  for (const CameraInfo& camera : cameras) {
+  for (const SessionCamera& camera : cameras) {
     EXPECT_FALSE(exists(session_image_path(dir.str(), camera.serial, 0)));
   }
 }
@@ -217,50 +217,58 @@ TEST(CaptureSession, ReadSessionOfAMissingDirectoryIsNotFound) {
 // A valid session.json, and single-edit breakages of it, each refused.
 TEST(CaptureSession, ReadSessionRefusesMalformedFiles) {
   const ScratchDir dir;
-  ASSERT_TRUE(SessionWriter::create(dir.str(), two_cameras()).ok());
-  const std::string lens =
-      R"("lens": {"width": 64, "height": 48, "fx": 57.6, "fy": 57.6,
-                  "cx": 31.5, "cy": 23.5, "k1": 0, "k2": 0, "p1": 0, "p2": 0,
-                  "k3": 0})";
-  const auto doc = [](const std::string& format, const std::string& role,
+  ASSERT_TRUE(SessionWriter::create(dir.str(), two_cameras(), 0).ok());
+  const auto lens = [](const std::string& model) {
+    return R"("lens": {)" + model +
+           R"("width": 64, "height": 48, "fx": 57.6, "fy": 57.6,
+                       "cx": 31.5, "cy": 23.5, "k1": 0, "k2": 0, "p1": 0,
+                       "p2": 0, "k3": 0})";
+  };
+  const std::string good_lens = lens(R"("model": "brown_conrady", )");
+  const auto doc = [](const std::string& format, const std::string& reference,
                       const std::string& lens_json,
                       const std::string& captures) {
-    return R"({"format": )" + format + R"(, "version": 1, "cameras": [
-               {"serial": "CL2A141000N", "role": )" +
-           role + ", " + lens_json + R"(}], "captures": )" + captures + "}";
+    return R"({"format": )" + format + R"(, "version": 1, "reference": )" +
+           reference + R"(, "cameras": [{"serial": "CL2A141000N", )" +
+           lens_json + R"(}], "captures": )" + captures + "}";
   };
   const std::string good_format = R"("volumetric_kit_calib.session")";
+  const std::string good_reference = R"("CL2A141000N")";
   const std::string good_capture =
       R"([{"index": 0, "trigger_ns": 5, "frames_averaged": 1}])";
 
   write_file(dir / "session.json",
-             doc(good_format, R"("primary")", lens, good_capture));
+             doc(good_format, good_reference, good_lens, good_capture));
   ASSERT_TRUE(read_session(dir.str()).ok())
       << read_session(dir.str()).status().message();
 
   const std::vector<std::string> broken = {
       "not json at all",
       "[1, 2, 3]",
-      doc(R"("something.else")", R"("primary")", lens, good_capture),
-      doc(good_format, R"("leader")", lens, good_capture),
-      doc(good_format, R"("primary")", R"("lens": {"width": 64})",
+      doc(R"("something.else")", good_reference, good_lens, good_capture),
+      doc(good_format, R"("CL2A141000G")", good_lens, good_capture),
+      doc(good_format, "0", good_lens, good_capture),
+      doc(good_format, good_reference, lens(""), good_capture),
+      doc(good_format, good_reference, lens(R"("model": "rational", )"),
           good_capture),
-      doc(good_format, R"("primary")",
-          R"("lens": {"width": 64, "height": 48, "fx": -1, "fy": 57.6,
-                      "cx": 31.5, "cy": 23.5, "k1": 0, "k2": 0, "p1": 0,
-                      "p2": 0, "k3": 0})",
+      doc(good_format, good_reference,
+          R"("lens": {"model": "brown_conrady", "width": 64})", good_capture),
+      doc(good_format, good_reference,
+          R"("lens": {"model": "brown_conrady", "width": 64, "height": 48,
+                      "fx": -1, "fy": 57.6, "cx": 31.5, "cy": 23.5, "k1": 0,
+                      "k2": 0, "p1": 0, "p2": 0, "k3": 0})",
           good_capture),
-      doc(good_format, R"("primary")", lens,
+      doc(good_format, good_reference, good_lens,
           R"([{"index": 1, "trigger_ns": 5, "frames_averaged": 1},
               {"index": 1, "trigger_ns": 6, "frames_averaged": 1}])"),
-      doc(good_format, R"("primary")", lens,
+      doc(good_format, good_reference, good_lens,
           R"([{"index": 0, "trigger_ns": 5, "frames_averaged": 0}])"),
-      doc(good_format, R"("primary")", lens,
+      doc(good_format, good_reference, good_lens,
           R"([{"index": -1, "trigger_ns": 5, "frames_averaged": 1}])"),
       R"({"format": "volumetric_kit_calib.session", "version": 2,
-          "cameras": [], "captures": []})",
+          "reference": "CL2A141000N", "cameras": [], "captures": []})",
       R"({"format": "volumetric_kit_calib.session", "version": 1,
-          "cameras": [], "captures": []})",
+          "reference": "CL2A141000N", "cameras": [], "captures": []})",
   };
   for (const std::string& text : broken) {
     write_file(dir / "session.json", text);
@@ -272,8 +280,8 @@ TEST(CaptureSession, ReadSessionRefusesMalformedFiles) {
 
 TEST(CaptureSession, ReadSessionImageNamesWhatIsWrong) {
   const ScratchDir dir;
-  const std::vector<CameraInfo> cameras = two_cameras();
-  ASSERT_TRUE(SessionWriter::create(dir.str(), cameras).ok());
+  const std::vector<SessionCamera> cameras = two_cameras();
+  ASSERT_TRUE(SessionWriter::create(dir.str(), cameras, 0).ok());
   EXPECT_EQ(
       read_session_image(dir.str(), cameras[0].serial, 0).status().domain(),
       core::Status::Code::NotFound);
@@ -299,12 +307,12 @@ TEST(CaptureSession, AFlatImageRoundTrips) {
   // The recorder's averages are often near-flat; make sure the smallest PNG
   // stb writes still decodes to the same bytes.
   const ScratchDir dir;
-  const std::vector<CameraInfo> cameras = two_cameras();
-  auto writer = SessionWriter::create(dir.str(), cameras);
+  const std::vector<SessionCamera> cameras = two_cameras();
+  auto writer = SessionWriter::create(dir.str(), cameras, 0);
   ASSERT_TRUE(writer.ok());
   std::vector<LumaImage> images;
-  for (const CameraInfo& camera : cameras) {
-    images.push_back(flat_image(camera.lens->image_size(), 200));
+  for (const SessionCamera& camera : cameras) {
+    images.push_back(flat_image(camera.lens.image_size(), 200));
   }
   ASSERT_TRUE(writer->add(9, 3, images).ok());
   auto read = read_session_image(dir.str(), cameras[1].serial, 0);

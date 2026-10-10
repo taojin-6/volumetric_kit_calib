@@ -24,9 +24,9 @@ target_link_libraries(vc_data_model_test PRIVATE volumetric_kit::calib_core
 vc_target_warnings(vc_data_model_test)
 gtest_discover_tests(vc_data_model_test)
 
-# capture: sessions on disk, their replay, and the recorder. Each test works in
-# a scratch directory of its own under the system temp directory.
-foreach(_vc_capture_test capture_session capture_replay capture_recorder)
+# capture: sessions on disk and the recorder. Each test works in a scratch
+# directory of its own under the system temp directory.
+foreach(_vc_capture_test capture_session capture_recorder)
   add_executable(vc_${_vc_capture_test}_test ${_vc_capture_test}_test.cpp)
   target_link_libraries(vc_${_vc_capture_test}_test
                         PRIVATE volumetric_kit::calib_capture GTest::gtest_main)

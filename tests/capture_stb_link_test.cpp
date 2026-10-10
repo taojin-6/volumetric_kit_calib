@@ -26,11 +26,10 @@ using testing::ScratchDir;
 
 TEST(CaptureStbLink, CoexistsWithTheProgramsOwnStbImage) {
   const ScratchDir dir;
-  const CameraInfo camera =
-      make_camera("CL2A141000N", SyncRole::Primary, 16, 8);
-  auto writer = SessionWriter::create(dir.str(), {camera});
+  const SessionCamera camera = make_camera("CL2A141000N", 16, 8);
+  auto writer = SessionWriter::create(dir.str(), {camera}, 0);
   ASSERT_TRUE(writer.ok()) << writer.status().message();
-  const LumaImage image = pattern_image(camera.lens->image_size(), 5);
+  const LumaImage image = pattern_image(camera.lens.image_size(), 5);
   ASSERT_TRUE(writer->add(1, 1, {image}).ok());
 
   // The program's own stb reads calib's file, and calib's reads it too.

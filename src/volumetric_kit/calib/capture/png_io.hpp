@@ -10,7 +10,7 @@
 
 #include <string>
 
-#include "volumetric_kit/calib/capture/rig_source.hpp"
+#include "volumetric_kit/calib/capture/luma_image.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib::capture::detail {

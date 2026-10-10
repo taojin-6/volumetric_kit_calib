@@ -2,11 +2,9 @@
 # Copyright (c) 2026 Tao Jin
 
 # --- calib_capture: Tier 1, off core -----------------------------------------
-# The capture contract (IRigSource: sets of frames one trigger apart, pixels
-# read on demand), sessions on disk (session.json + one PNG per camera per
-# capture), a replay source over a session, and the recorder that turns a key
-# press into an averaged capture. Pure CPU: a live source that keeps its frames
-# on the GPU implements IRigSource in a target of its own.
+# Sessions on disk (session.json + one PNG per camera per capture) and the
+# recorder that turns a key press into an averaged capture. Pure CPU: the live
+# rig is recon's SensorArray, and the app that reads its sets back links recon.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
@@ -15,9 +13,8 @@ set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 add_library(calib_capture)
 add_library(volumetric_kit::calib_capture ALIAS calib_capture)
 
-target_sources(
-  calib_capture PRIVATE capture_recorder.cpp png_io.cpp rig_source.cpp
-                        session.cpp session_replay.cpp)
+target_sources(calib_capture PRIVATE capture_recorder.cpp png_io.cpp
+                                     session.cpp)
 
 # png_io.cpp compiles stb's implementation, which is third-party: build it with
 # warnings off, apart from the tier's -Werror surface (png_io.cpp explains).

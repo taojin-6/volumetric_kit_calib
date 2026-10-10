@@ -17,19 +17,24 @@
 /// Each PNG is 8-bit grey: the camera's luma as captured, before
 /// undistortion, at the size of its lens. The image names are the ones the
 /// legacy `camera_calibration` scripts read, so their bundle adjustment runs
-/// on a session as it is. `session.json` holds each camera's serial, role and
-/// factory lens, and each capture's index, trigger time and how many frames
-/// were averaged into it:
+/// on a session as it is. `session.json` holds each camera's serial and
+/// factory lens, which camera is the reference, and each capture's index,
+/// trigger time and how many frames were averaged into it:
 ///
 /// @code{.json}
 /// {"format": "volumetric_kit_calib.session", "version": 1,
-///  "cameras": [{"serial": "CL2A141000N", "role": "primary",
-///               "lens": {"width": 3840, "height": 2160,
+///  "reference": "CL2A141000N",
+///  "cameras": [{"serial": "CL2A141000N",
+///               "lens": {"model": "brown_conrady",
+///                        "width": 3840, "height": 2160,
 ///                        "fx": 2240.0, "fy": 2239.4, "cx": 1913.2,
 ///                        "cy": 1039.2, "k1": 0.073, "k2": -0.10,
 ///                        "p1": -0.0005, "p2": -0.00005, "k3": 0.041}}],
 ///  "captures": [{"index": 0, "trigger_ns": 1234, "frames_averaged": 5}]}
 /// @endcode
+///
+/// A lens names its model, so a session can hold another model once calib has
+/// one (DECISIONS.md: the rational model is next) without a new version.
 
 #include <cstddef>
 #include <cstdint>
@@ -38,10 +43,28 @@
 #include <vector>
 
 #include "volumetric_kit/calib/capture/export.hpp"
-#include "volumetric_kit/calib/capture/rig_source.hpp"
+#include "volumetric_kit/calib/capture/luma_image.hpp"
+#include "volumetric_kit/calib/core/camera_model.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib::capture {
+
+/// @brief One camera of a session.
+///
+/// @code
+/// VKC_ASSIGN(PinholeBrownConrady lens,
+///            PinholeBrownConrady::create(size, intrinsics, distortion));
+/// const SessionCamera camera{"CL2A141000N", std::move(lens)};
+/// @endcode
+struct SessionCamera {
+  /// Its serial -- recon's `SensorInfo::id` for a sensor recon drives -- which
+  /// names its directory and images (@ref is_session_serial).
+  std::string serial;
+  /// The factory model of its images as captured: their size, intrinsics and
+  /// distortion. Detection and the solve then see the lens itself rather than
+  /// an image resampled through it.
+  PinholeBrownConrady lens;
+};
 
 /// @brief One capture of a session: an image from every camera.
 struct Capture {
@@ -50,20 +73,28 @@ struct Capture {
   std::uint32_t frames_averaged = 1;  ///< Sets averaged into each image.
 };
 
-/// @brief What `session.json` says: the cameras, each with its lens, and the
-///        captures in the order they were taken.
+/// @brief What `session.json` says: the cameras, each with its lens, the
+///        reference among them, and the captures in the order they were
+///        taken.
+///
+/// Replaying a session is reading it: an application loops over
+/// @ref captures and reads each camera's image.
 ///
 /// @code
 /// VKC_ASSIGN(const Session session, read_session(dir));
 /// for (const Capture& capture : session.captures) {
-///   VKC_ASSIGN(const LumaImage image,
-///             read_session_image(dir, session.cameras[0].serial,
-///                                capture.index));
+///   for (const SessionCamera& camera : session.cameras) {
+///     VKC_ASSIGN(const LumaImage image,
+///                read_session_image(dir, camera.serial, capture.index));
+///   }
 /// }
 /// @endcode
 struct Session {
-  std::vector<CameraInfo> cameras;  ///< Every one with its lens.
-  std::vector<Capture> captures;    ///< In capture order, indices ascending.
+  std::vector<SessionCamera> cameras;  ///< At least one; serials distinct.
+  /// The index in @ref cameras of the reference camera, whose frame is the
+  /// solve's world frame: the rig's sync primary.
+  std::size_t reference = 0;
+  std::vector<Capture> captures;  ///< In capture order, indices ascending.
 };
 
 /// @return `true` if @p serial can name a camera's directory and images: one
@@ -82,10 +113,10 @@ VC_CAPTURE_API std::string session_image_path(const std::string& dir,
 ///         `session.json`; @ref core::Status::Code::IoError if it cannot be
 ///         read; or @ref core::Status::Code::InvalidArgument naming what is
 ///         wrong: not JSON, another format or version, no camera, a serial
-///         @ref is_session_serial refuses (or a repeated one), an unknown
-///         role, a lens
-///         `PinholeBrownConrady::create` refuses, or a capture whose index is
-///         not above the one before it or that averaged no frames.
+///         @ref is_session_serial refuses (or a repeated one), a reference
+///         that names no camera, a lens of a model calib does not read or
+///         that `PinholeBrownConrady::create` refuses, or a capture whose
+///         index is not above the one before it or that averaged no frames.
 VC_CAPTURE_API core::Result<Session> read_session(const std::string& dir);
 
 /// @brief Read one image of the session in @p dir.
@@ -104,27 +135,31 @@ VC_CAPTURE_API core::Result<LumaImage> read_session_image(
 ///
 /// @code
 /// VKC_ASSIGN(SessionWriter writer,
-///           SessionWriter::create("sessions/2026-09-29", source.cameras()));
+///            SessionWriter::create("sessions/2026-09-29", cameras,
+///                                  /*reference=*/primary));
 /// VKC_ASSIGN(const std::size_t index,
-///           writer.add(set.trigger_ns, /*frames_averaged=*/5, images));
+///            writer.add(trigger_ns, /*frames_averaged=*/5, images));
 /// VKC_TRY(writer.remove_last());  // the clicker's "back"
 /// @endcode
 class VC_CAPTURE_API SessionWriter {
  public:
   /// @brief Start a session of @p cameras in @p dir, creating the directory
   ///        and writing a `session.json` with no captures.
-  /// @param dir      The session's directory: new, or one without a
-  ///                 `session.json`.
-  /// @param cameras  The rig's cameras, every one with its lens.
+  /// @param dir        The session's directory: new, or one without a
+  ///                   `session.json`.
+  /// @param cameras    The rig's cameras, in the order every capture gives
+  ///                   their images.
+  /// @param reference  The index in @p cameras of the reference camera
+  ///                   (@ref Session::reference).
   /// @return The writer; @ref core::Status::Code::InvalidArgument for no
-  /// cameras,
-  ///         one without a lens, a serial that is not a plain file name
-  ///         (@ref is_session_serial), a repeated serial, or a @p dir that
-  ///         already holds a session; or
-  ///         @ref core::Status::Code::IoError if a directory or `session.json`
-  ///         cannot be written.
+  ///         cameras, a serial that is not a plain file name
+  ///         (@ref is_session_serial), a repeated serial, a @p reference out
+  ///         of range, or a @p dir that already holds a session; or
+  ///         @ref core::Status::Code::IoError if a directory or
+  ///         `session.json` cannot be written.
   static core::Result<SessionWriter> create(std::string dir,
-                                            std::vector<CameraInfo> cameras);
+                                            std::vector<SessionCamera> cameras,
+                                            std::size_t reference);
 
   /// @brief Write one capture: every camera's image, then `session.json`.
   /// @param trigger_ns       The capture's first set's trigger time.

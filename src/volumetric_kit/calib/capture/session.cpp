@@ -17,10 +17,9 @@
 
 #include "png_io.hpp"
 
-// Everything here is exception-free, since the library is also built with
-// -fno-exceptions: the JSON is parsed with exceptions off and every value is
-// type-checked before it is read, and std::filesystem is called through its
-// std::error_code overloads.
+// No exception leaves here: the JSON is parsed with exceptions off and every
+// value is type-checked before it is read, and std::filesystem is called
+// through its std::error_code overloads.
 
 namespace volumetric_kit::calib::capture {
 namespace {
@@ -32,6 +31,8 @@ using ordered_json = nlohmann::ordered_json;
 constexpr const char* kFormat = "volumetric_kit_calib.session";
 constexpr int kVersion = 1;
 constexpr const char* kSessionFile = "session.json";
+// The one lens model calib has; a lens names its model (session.hpp).
+constexpr const char* kBrownConrady = "brown_conrady";
 
 std::string session_file(const std::string& dir) {
   return (fs::path(dir) / kSessionFile).string();
@@ -43,6 +44,7 @@ ordered_json lens_json(const PinholeBrownConrady& lens) {
   const PinholeBrownConrady::Intrinsics& k = lens.intrinsics();
   const PinholeBrownConrady::Distortion& d = lens.distortion();
   ordered_json j;
+  j["model"] = kBrownConrady;
   j["width"] = lens.image_size().width;
   j["height"] = lens.image_size().height;
   j["fx"] = k.fx;
@@ -61,12 +63,12 @@ std::string session_text(const Session& session) {
   ordered_json doc;
   doc["format"] = kFormat;
   doc["version"] = kVersion;
+  doc["reference"] = session.cameras[session.reference].serial;
   ordered_json cameras = ordered_json::array();
-  for (const CameraInfo& camera : session.cameras) {
+  for (const SessionCamera& camera : session.cameras) {
     ordered_json c;
     c["serial"] = camera.serial;
-    c["role"] = to_string(camera.role);
-    c["lens"] = lens_json(*camera.lens);  // every session camera has one
+    c["lens"] = lens_json(camera.lens);
     cameras.push_back(std::move(c));
   }
   doc["cameras"] = std::move(cameras);
@@ -157,20 +159,14 @@ core::Result<int> size_at(const json& obj, const char* key,
   return static_cast<int>(n);
 }
 
-core::Result<SyncRole> parse_role(const std::string& text,
-                                  const std::string& where) {
-  for (const SyncRole role :
-       {SyncRole::Standalone, SyncRole::Primary, SyncRole::Secondary}) {
-    if (text == to_string(role)) return role;
-  }
-  return bad(where, "role \"" + text +
-                        "\" is not one of standalone, "
-                        "primary, secondary");
-}
-
 core::Result<PinholeBrownConrady> parse_lens(const json& j,
                                              const std::string& where) {
   if (!j.is_object()) return bad(where, "is not an object");
+  VKC_ASSIGN(const std::string model, string_at(j, "model", where));
+  if (model != kBrownConrady) {
+    return bad(where, "model \"" + model + "\" is not one calib reads (" +
+                          kBrownConrady + ")");
+  }
   VKC_ASSIGN(const int width, size_at(j, "width", where));
   VKC_ASSIGN(const int height, size_at(j, "height", where));
   PinholeBrownConrady::Intrinsics k;
@@ -217,25 +213,27 @@ core::Result<Session> parse_session(const std::string& text,
     const json& c = (*cameras)[i];
     const std::string where = file + ": camera " + std::to_string(i);
     if (!c.is_object()) return bad(where, "is not an object");
-    CameraInfo camera;
-    VKC_ASSIGN(camera.serial, string_at(c, "serial", where));
-    if (!is_session_serial(camera.serial)) {
-      return bad(where,
-                 "serial \"" + camera.serial + "\" is not a plain file name");
+    VKC_ASSIGN(std::string serial, string_at(c, "serial", where));
+    if (!is_session_serial(serial)) {
+      return bad(where, "serial \"" + serial + "\" is not a plain file name");
     }
-    for (const CameraInfo& earlier : session.cameras) {
-      if (earlier.serial == camera.serial) {
-        return bad(where, "serial " + camera.serial + " is repeated");
+    for (const SessionCamera& earlier : session.cameras) {
+      if (earlier.serial == serial) {
+        return bad(where, "serial " + serial + " is repeated");
       }
     }
-    VKC_ASSIGN(const std::string role, string_at(c, "role", where));
-    VKC_ASSIGN(camera.role, parse_role(role, where));
     const json* lens = member(c, "lens");
     if (lens == nullptr) return bad(where, "has no lens");
     VKC_ASSIGN(PinholeBrownConrady model, parse_lens(*lens, where + ": lens"));
-    camera.lens = std::move(model);
-    session.cameras.push_back(std::move(camera));
+    session.cameras.push_back({std::move(serial), std::move(model)});
   }
+  VKC_ASSIGN(const std::string reference, string_at(doc, "reference", file));
+  bool named = false;
+  for (std::size_t i = 0; i < session.cameras.size() && !named; ++i) {
+    named = session.cameras[i].serial == reference;
+    if (named) session.reference = i;
+  }
+  if (!named) return bad(file, "reference " + reference + " is no camera");
 
   const json* captures = member(doc, "captures");
   if (captures == nullptr || !captures->is_array()) {
@@ -312,16 +310,21 @@ core::Result<LumaImage> read_session_image(const std::string& dir,
 }
 
 core::Result<SessionWriter> SessionWriter::create(
-    std::string dir, std::vector<CameraInfo> cameras) {
+    std::string dir, std::vector<SessionCamera> cameras,
+    std::size_t reference) {
   if (cameras.empty()) return core::Status::invalid_argument("no cameras");
+  if (reference >= cameras.size()) {
+    return core::Status::invalid_argument(
+        "reference " + std::to_string(reference) + " of " +
+        std::to_string(cameras.size()) + " cameras");
+  }
   for (std::size_t i = 0; i < cameras.size(); ++i) {
-    const CameraInfo& camera = cameras[i];
+    const SessionCamera& camera = cameras[i];
     const std::string where = "camera " + std::to_string(i);
     if (!is_session_serial(camera.serial)) {
       return bad(where,
                  "serial \"" + camera.serial + "\" is not a plain file name");
     }
-    if (!camera.lens) return bad(where, camera.serial + " has no lens");
     for (std::size_t j = 0; j < i; ++j) {
       if (cameras[j].serial == camera.serial) {
         return bad(where, "serial " + camera.serial + " is repeated");
@@ -332,7 +335,7 @@ core::Result<SessionWriter> SessionWriter::create(
   if (fs::exists(session_file(dir), ec)) {
     return core::Status::invalid_argument(dir + ": already holds a session");
   }
-  for (const CameraInfo& camera : cameras) {
+  for (const SessionCamera& camera : cameras) {
     const fs::path camera_dir = fs::path(dir) / camera.serial;
     fs::create_directories(camera_dir, ec);
     if (ec) {
@@ -342,6 +345,7 @@ core::Result<SessionWriter> SessionWriter::create(
   }
   Session session;
   session.cameras = std::move(cameras);
+  session.reference = reference;
   VKC_TRY(write_session_file(dir, session));
   return SessionWriter{std::move(dir), std::move(session)};
 }
@@ -349,7 +353,7 @@ core::Result<SessionWriter> SessionWriter::create(
 core::Result<std::size_t> SessionWriter::add(
     std::uint64_t trigger_ns, std::uint32_t frames_averaged,
     const std::vector<LumaImage>& images) {
-  const std::vector<CameraInfo>& cameras = session_.cameras;
+  const std::vector<SessionCamera>& cameras = session_.cameras;
   if (frames_averaged == 0) {
     return core::Status::invalid_argument(
         "a capture averages at least one frame");
@@ -360,7 +364,7 @@ core::Result<std::size_t> SessionWriter::add(
         std::to_string(cameras.size()) + " cameras");
   }
   for (std::size_t i = 0; i < cameras.size(); ++i) {
-    const ImageSize& want = cameras[i].lens->image_size();
+    const ImageSize& want = cameras[i].lens.image_size();
     const LumaImage& image = images[i];
     const std::size_t pixels = static_cast<std::size_t>(want.width) *
                                static_cast<std::size_t>(want.height);
@@ -416,7 +420,7 @@ core::Status SessionWriter::remove_last() {
     return status;
   }
   std::string left;
-  for (const CameraInfo& camera : session_.cameras) {
+  for (const SessionCamera& camera : session_.cameras) {
     const std::string path =
         session_image_path(dir_, camera.serial, last.index);
     std::error_code ec;
