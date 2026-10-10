@@ -58,29 +58,3 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
-
-  # Mobile consumers build with -fno-exceptions (AGENTS.md), so the library and
-  # its tests must build and pass without exceptions too.
-  no-exceptions:
-    name: ubuntu-latest Release -fno-exceptions
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake build-essential libeigen3-dev
-
-      - name: Configure
-        run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_FLAGS=-fno-exceptions
-
-      - name: Build
-        run: cmake --build build --parallel
-
-      - name: Test
-        run: ctest --test-dir build --output-on-failure

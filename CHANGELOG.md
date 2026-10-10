@@ -8,6 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- calib builds with C++ exceptions enabled, as recon and the core do: CI no
+  longer builds it with `-fno-exceptions`, and a consumer builds it with
+  exceptions on. No exception crosses its API; fallible calls still return
+  `Status` or `Result`.
 - calib writes volumetric_kit_core's names as the core does, and its
   re-exports of them are gone. Migrating: `vc::Status`, `vc::Result` and
   `vc::to_string` → `vkc::` (`volumetric_kit::core::`); include the core's

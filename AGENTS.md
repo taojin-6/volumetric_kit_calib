@@ -69,7 +69,9 @@ on tiers to its left. The headless **brain**
 
 ## Error handling
 
-Mobile consumers build with `-fno-exceptions`. Fallible calls return `Status`
+calib builds with C++ exceptions enabled, as its siblings do
+([DECISIONS.md](DECISIONS.md#2026-10-10--calib-builds-with-exceptions-enabled)),
+and no exception crosses its API. Fallible calls return `Status`
 (success or an error domain + message) or `Result<T>` (a value or a `Status`)
 -- the core's `core::Status` and `core::Result<T>`, from
 `volumetric_kit/core/base/result.hpp`. Propagate with `VKC_TRY` /

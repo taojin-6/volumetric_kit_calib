@@ -79,6 +79,21 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-10 — calib builds with exceptions enabled
+
+The family stopped building with `-fno-exceptions`: recon's CI builds with
+exceptions (its DECISIONS, 2026-10-10) and keeps the handlers that turn a
+backend's or an allocator's throw into a `Status`, and the core has no
+`-fno-exceptions` leg. calib follows, and drops its own.
+
+- **What stays.** Fallible calls return `core::Status` / `core::Result`, and
+  no exception crosses calib's API. Code may catch what a standard-library or
+  third-party call throws (`std::bad_alloc`, `std::system_error` from
+  `std::thread`) and return it as a `Status`.
+- **What goes.** CI's `-fno-exceptions` job, and the rule that calib's code
+  compile without exceptions. A consumer builds calib with exceptions
+  enabled.
+
 ## 2026-10-05 — calib writes the core's names
 
 calib named the core's `Status`, `Result` and `to_string` in its own
