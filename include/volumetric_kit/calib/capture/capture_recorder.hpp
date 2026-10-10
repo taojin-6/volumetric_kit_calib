@@ -16,7 +16,7 @@
 #include "volumetric_kit/calib/capture/export.hpp"
 #include "volumetric_kit/calib/capture/rig_source.hpp"
 #include "volumetric_kit/calib/capture/session.hpp"
-#include "volumetric_kit/calib/core/result.hpp"
+#include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib::capture {
 
@@ -40,12 +40,12 @@ struct RecorderOptions {
 /// cost nothing: no pixel is read.
 ///
 /// @code
-/// VC_ASSIGN(CaptureRecorder recorder,
+/// VKC_ASSIGN(CaptureRecorder recorder,
 /// CaptureRecorder::create(std::move(writer))); if (key == Key::Capture)
-/// recorder.arm(); if (key == Key::Back) VC_TRY(recorder.undo());
-/// VC_ASSIGN(const std::optional<SetInfo> set, source.poll_set());
+/// recorder.arm(); if (key == Key::Back) VKC_TRY(recorder.undo());
+/// VKC_ASSIGN(const std::optional<SetInfo> set, source.poll_set());
 /// if (set) {
-///   VC_ASSIGN(const std::optional<std::size_t> written,
+///   VKC_ASSIGN(const std::optional<std::size_t> written,
 ///             recorder.on_set(*set, source));
 ///   if (written) announce_capture(*written);
 /// }
@@ -54,9 +54,9 @@ class VC_CAPTURE_API CaptureRecorder {
  public:
   /// @brief Record into @p writer's session.
   /// @return The recorder, not armed; or
-  ///         @ref Status::Code::InvalidArgument for no frames to average.
-  static Result<CaptureRecorder> create(SessionWriter writer,
-                                        RecorderOptions options = {});
+  ///         @ref core::Status::Code::InvalidArgument for no frames to average.
+  static core::Result<CaptureRecorder> create(SessionWriter writer,
+                                              RecorderOptions options = {});
 
   /// @brief Start collecting a capture from the next complete set. Arming an
   ///        armed recorder changes nothing.
@@ -72,17 +72,17 @@ class VC_CAPTURE_API CaptureRecorder {
   ///                session's, in its order; read only when armed and the
   ///                set is complete.
   /// @return The index of the capture this set completed and wrote; empty
-  ///         otherwise; @ref Status::Code::InvalidArgument if @p set does not
-  ///         have one entry per camera of the session; or a read or write
+  ///         otherwise; @ref core::Status::Code::InvalidArgument if @p set does
+  ///         not have one entry per camera of the session; or a read or write
   ///         failure, after which the capture being collected is dropped and
   ///         the recorder disarmed.
-  Result<std::optional<std::size_t>> on_set(const SetInfo& set,
-                                            IRigSource& source);
+  core::Result<std::optional<std::size_t>> on_set(const SetInfo& set,
+                                                  IRigSource& source);
 
   /// @brief Take back the last capture: drop one being collected if armed,
   ///        otherwise remove the last one written.
   /// @return OK; or what @ref SessionWriter::remove_last returns.
-  Status undo();
+  core::Status undo();
 
   /// @return `true` while a capture is being collected.
   bool armed() const noexcept { return armed_; }

@@ -15,9 +15,14 @@ The implemented core and planned tiers are distinguished in
   of that dependency.
 - Mobile is first-class and fully on-device; the board-constrained solve runs
   on CPU. `SensorProfile` and `LensProfile` are required physical inputs.
-- The GPU backend is **unresolved**. Do not implement compute-backend code
-  until the [open decision](DECISIONS.md#open-decisions) is settled. A CPU
-  backend is the correctness oracle either way.
+- calib builds on [`volumetric_kit_core`](https://github.com/taojin-6/volumetric_kit_core)
+  (fetched, pinned by commit): error handling now, then camera models and
+  capture drivers. Code two or more siblings need belongs in the core, as a
+  task in that repository. From the primary checkout it is
+  `../volumetric_kit_core/`.
+- GPU work runs on the core's vulkan tier, on a `VkDevice` shared with `recon`
+  and `gfx` ([DECISIONS.md](DECISIONS.md#locked-decisions)); calib keeps no
+  GPU backend of its own. A CPU backend is the correctness oracle.
 - The legacy `camera_calibration` Python checkout is the parity oracle;
   it sits beside the family directory (`../../camera_calibration/` from the
   primary checkout). Keep this task's changes in this repository.
@@ -28,6 +33,7 @@ The implemented core and planned tiers are distinguished in
 | --- | --- |
 | Architecture, implemented scope, prerequisites | [README.md](README.md) and the affected public headers |
 | Locked constraints or GPU backend choice | [DECISIONS.md](DECISIONS.md) |
+| `Status`/`Result`, the shared tiers | The core's README.md, DECISIONS.md and `include/volumetric_kit/core/` |
 | Local detailed design and domain model | The primary checkout's gitignored `DESIGN.md`, when the task needs it |
 | Formatting and CI setup | [CONTRIBUTING.md](CONTRIBUTING.md), `.pre-commit-config.yaml`, relevant workflows |
 
@@ -42,11 +48,16 @@ Read only the sections needed for the current task.
 - Namespace: `volumetric_kit::calib`. In docs, `vc::` abbreviates
   `volumetric_kit::calib::`; `vg::` abbreviates `volumetric_kit::gfx::`.
 - Headers: `include/volumetric_kit/calib/<tier>/…` → e.g.
-  `#include "volumetric_kit/calib/core/result.hpp"`
+  `#include "volumetric_kit/calib/core/camera_model.hpp"`
+- volumetric_kit_core's types, functions and macros keep the core's names:
+  `core::Status` inside calib's namespaces, `vkc::Status` in tests and
+  examples, from the core's own headers. calib re-exports none of them.
 - CMake: `find_package(volumetric_kit_calib)`; component targets
   `volumetric_kit::calib_core`, `…_compute`, `…_detect`, `…_solve`, `…_quality`,
   `…_color`, `…_capture`, `…_viz`, `…_app`; umbrella alias `volumetric_kit::calib`.
-- Macros/export: `VC_*` (e.g. `VC_TRY`, `VC_CHECK`, `VC_CORE_API`).
+- Macros/export: `VC_*` for calib's own (e.g. `VC_CORE_API`, `VC_BUILD_TESTS`);
+  the error-handling macros are the core's (`VKC_TRY`, `VKC_ASSIGN`,
+  `VKC_CHECK`).
 
 ## Architecture
 
@@ -59,17 +70,22 @@ on tiers to its left. The headless **brain**
 ## Error handling
 
 Mobile consumers build with `-fno-exceptions`. Fallible calls return `Status`
-(success or an error domain + message) or `Result<T>` (a value or a `Status`).
-Propagate with `VC_TRY` / `VC_ASSIGN`. Programmer errors (reading an error
-`Result`'s value) fail fast via `VC_CHECK`, never throw. Solver failures use the
-`Status::Code::Numerical` domain.
+(success or an error domain + message) or `Result<T>` (a value or a `Status`)
+-- the core's `core::Status` and `core::Result<T>`, from
+`volumetric_kit/core/base/result.hpp`. Propagate with `VKC_TRY` /
+`VKC_ASSIGN`. Programmer errors (reading an error `Result`'s value) fail fast
+via `VKC_CHECK`, never throw. Solver failures use the
+`core::Status::Code::Numerical` domain.
 
 ## Conventions
 
-C++17, with no compiler extensions.
+C++17, with no compiler extensions, built with GCC or Clang for Linux, macOS,
+iOS and Android. Windows and MSVC are unsupported
+([DECISIONS.md](DECISIONS.md#platforms)): add no `_WIN32`/`_MSC_VER` paths or
+MSVC flags.
 
 - **Doxygen on every public class/function**, matching
-  `include/volumetric_kit/calib/core/result.hpp`: `@file`/`@brief` on the header,
+  `include/volumetric_kit/calib/core/camera_model.hpp`: `@file`/`@brief` on the header,
   `@brief` + a `@code … @endcode` example per class, and `@brief`/`@param`/
   `@return` (`@pre` where relevant) on methods; accessors may be a single
   `/// @return`.
@@ -94,8 +110,9 @@ C++17, with no compiler extensions.
 
 ## Build and validation
 
-Run from the task's worktree. The build requires CMake ≥ 3.21, a C++17 compiler, and Eigen;
-see README and CI for platform dependencies.
+Run from the task's worktree. The build requires CMake ≥ 3.21, a C++17
+compiler, Eigen, and network access on the first configure (the core and
+googletest are fetched); see README and CI for platform dependencies.
 
 ```sh
 calib_root="$(git rev-parse --show-toplevel)"
@@ -114,8 +131,7 @@ git -C "$calib_root" diff --check
   contracts or the change's scope warrant it.
 - Documentation-only changes need formatting, link, and consistency checks;
   no build is needed. Hooks can be scoped with `pre-commit run --files`.
-- Core tests are CPU-only. `VC_WITH_VULKAN` / `VC_WITH_CUDA` are reserved
-  options, not implemented backends; do not describe them as tested support.
+- Core tests are CPU-only.
 
 ## Keeping guidance current
 

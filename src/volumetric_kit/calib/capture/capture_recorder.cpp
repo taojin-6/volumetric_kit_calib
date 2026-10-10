@@ -17,12 +17,12 @@ constexpr std::uint32_t kMaxFramesToAverage = 1u << 24;
 
 }  // namespace
 
-Result<CaptureRecorder> CaptureRecorder::create(SessionWriter writer,
-                                                RecorderOptions options) {
+core::Result<CaptureRecorder> CaptureRecorder::create(SessionWriter writer,
+                                                      RecorderOptions options) {
   if (options.frames_to_average == 0 ||
       options.frames_to_average > kMaxFramesToAverage) {
-    return Status::invalid_argument("frames_to_average must be 1 to " +
-                                    std::to_string(kMaxFramesToAverage));
+    return core::Status::invalid_argument("frames_to_average must be 1 to " +
+                                          std::to_string(kMaxFramesToAverage));
   }
   return CaptureRecorder{std::move(writer), options};
 }
@@ -39,11 +39,11 @@ void CaptureRecorder::cancel() noexcept {
   sums_.clear();
 }
 
-Result<std::optional<std::size_t>> CaptureRecorder::on_set(const SetInfo& set,
-                                                           IRigSource& source) {
+core::Result<std::optional<std::size_t>> CaptureRecorder::on_set(
+    const SetInfo& set, IRigSource& source) {
   const std::vector<CameraInfo>& cameras = writer_.session().cameras;
   if (set.present.size() != cameras.size()) {
-    return Status::invalid_argument(
+    return core::Status::invalid_argument(
         "a set of " + std::to_string(set.present.size()) +
         " cameras for a session of " + std::to_string(cameras.size()));
   }
@@ -58,7 +58,7 @@ Result<std::optional<std::size_t>> CaptureRecorder::on_set(const SetInfo& set,
     sums_.assign(cameras.size(), {});
   }
   for (std::size_t i = 0; i < cameras.size(); ++i) {
-    Result<LumaImage> image = source.read_luma(i);
+    core::Result<LumaImage> image = source.read_luma(i);
     if (!image) {
       cancel();
       return image.status();
@@ -69,7 +69,7 @@ Result<std::optional<std::size_t>> CaptureRecorder::on_set(const SetInfo& set,
     if (image->size.width != want.width || image->size.height != want.height ||
         image->pixels.size() != pixels) {
       cancel();
-      return Status::invalid_argument(
+      return core::Status::invalid_argument(
           cameras[i].serial + ": the source read a " +
           std::to_string(image->size.width) + "x" +
           std::to_string(image->size.height) + " image, its lens is " +
@@ -97,11 +97,11 @@ Result<std::optional<std::size_t>> CaptureRecorder::on_set(const SetInfo& set,
   }
   const std::uint64_t trigger_ns = first_trigger_ns_;
   cancel();
-  VC_ASSIGN(const std::size_t index, writer_.add(trigger_ns, n, images));
+  VKC_ASSIGN(const std::size_t index, writer_.add(trigger_ns, n, images));
   return std::optional<std::size_t>{index};
 }
 
-Status CaptureRecorder::undo() {
+core::Status CaptureRecorder::undo() {
   if (armed_) {
     cancel();
     return {};

@@ -21,8 +21,7 @@ target_sources(
 
 # png_io.cpp compiles stb's implementation, which is third-party: build it with
 # warnings off, apart from the tier's -Werror surface (png_io.cpp explains).
-set_source_files_properties(
-  png_io.cpp PROPERTIES COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/w,-w>")
+set_source_files_properties(png_io.cpp PROPERTIES COMPILE_OPTIONS -w)
 
 generate_export_header(
   calib_capture

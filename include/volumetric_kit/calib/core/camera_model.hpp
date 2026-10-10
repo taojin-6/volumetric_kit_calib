@@ -17,7 +17,7 @@
 #include <Eigen/Core>
 
 #include "volumetric_kit/calib/core/export.hpp"
-#include "volumetric_kit/calib/core/result.hpp"
+#include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib {
 
@@ -43,13 +43,14 @@ struct ImageSize {
 /// model can vouch for.
 ///
 /// @code
-/// Result<Eigen::Vector2d> ray_through(const Eigen::Vector3d& point) {
-///   VC_ASSIGN(const PinholeBrownConrady cam,
-///             PinholeBrownConrady::create(
-///                 {1280, 720}, {/*fx=*/1000, /*fy=*/1000, /*cx=*/640,
-///                               /*cy=*/360},
-///                 {/*k1=*/-0.28, /*k2=*/0.10, /*p1=*/0, /*p2=*/0, /*k3=*/0}));
-///   VC_ASSIGN(const Eigen::Vector2d pixel, cam.project(point));
+/// core::Result<Eigen::Vector2d> ray_through(const Eigen::Vector3d& point) {
+///   VKC_ASSIGN(const PinholeBrownConrady cam,
+///              PinholeBrownConrady::create(
+///                  {1280, 720},
+///                  {/*fx=*/1000, /*fy=*/1000, /*cx=*/640, /*cy=*/360},
+///                  {/*k1=*/-0.28, /*k2=*/0.10, /*p1=*/0, /*p2=*/0,
+///                   /*k3=*/0}));
+///   VKC_ASSIGN(const Eigen::Vector2d pixel, cam.project(point));
 ///   return cam.unproject(pixel);  // point.head<2>() / point.z(), recovered
 /// }
 /// @endcode
@@ -82,9 +83,9 @@ class VC_CORE_API PinholeBrownConrady {
   /// @param distortion  Distortion coefficients; all finite.
   /// @return The model, or @ref Status::Code::InvalidArgument naming the
   ///         parameter that failed validation.
-  static Result<PinholeBrownConrady> create(const ImageSize& image_size,
-                                            const Intrinsics& intrinsics,
-                                            const Distortion& distortion);
+  static core::Result<PinholeBrownConrady> create(const ImageSize& image_size,
+                                                  const Intrinsics& intrinsics,
+                                                  const Distortion& distortion);
 
   /// @brief Build a validated, distortion-free camera model.
   /// @param image_size  The calibrated resolution; both sides must be > 0.
@@ -94,8 +95,8 @@ class VC_CORE_API PinholeBrownConrady {
   /// @note A nested aggregate's default-member-initializer cannot appear in a
   ///       `= {}` default argument here, so this is a separate overload rather
   ///       than a default parameter.
-  static Result<PinholeBrownConrady> create(const ImageSize& image_size,
-                                            const Intrinsics& intrinsics);
+  static core::Result<PinholeBrownConrady> create(const ImageSize& image_size,
+                                                  const Intrinsics& intrinsics);
 
   /// @brief Project a camera-space point to a pixel.
   /// @param point_camera  A point in camera coordinates.
@@ -103,7 +104,8 @@ class VC_CORE_API PinholeBrownConrady {
   ///         @ref Status::Code::InvalidArgument if the point is non-finite or
   ///         not in front of the camera (`z <= 0`), or
   ///         @ref Status::Code::Numerical if the projection overflows.
-  Result<Eigen::Vector2d> project(const Eigen::Vector3d& point_camera) const;
+  core::Result<Eigen::Vector2d> project(
+      const Eigen::Vector3d& point_camera) const;
 
   /// @brief Recover the undistorted normalized image point for a pixel.
   /// @param pixel  A pixel coordinate.
@@ -114,7 +116,7 @@ class VC_CORE_API PinholeBrownConrady {
   ///         radius where the radial distortion folds back on itself. Past
   ///         that fold, strong distortion maps several rays to one pixel, so
   ///         the model cannot say which is right.
-  Result<Eigen::Vector2d> unproject(const Eigen::Vector2d& pixel) const;
+  core::Result<Eigen::Vector2d> unproject(const Eigen::Vector2d& pixel) const;
 
   /// @return The resolution the model is calibrated at.
   const ImageSize& image_size() const noexcept { return image_size_; }

@@ -11,15 +11,15 @@
 #include <string>
 
 #include "volumetric_kit/calib/capture/rig_source.hpp"
-#include "volumetric_kit/calib/core/result.hpp"
+#include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib::capture::detail {
 
 // Write @p image to @p path as an 8-bit grey PNG; IoError if it cannot be.
-Status write_png(const std::string& path, const LumaImage& image);
+core::Status write_png(const std::string& path, const LumaImage& image);
 
 // Read the PNG at @p path as one 8-bit channel, converting colour or 16-bit
 // images; IoError if it does not decode.
-Result<LumaImage> read_png(const std::string& path);
+core::Result<LumaImage> read_png(const std::string& path);
 
 }  // namespace volumetric_kit::calib::capture::detail

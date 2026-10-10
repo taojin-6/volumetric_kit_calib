@@ -21,23 +21,23 @@
 
 namespace volumetric_kit::calib::capture::detail {
 
-Status write_png(const std::string& path, const LumaImage& image) {
+core::Status write_png(const std::string& path, const LumaImage& image) {
   const int w = image.size.width;
   if (stbi_write_png(path.c_str(), w, image.size.height, 1, image.pixels.data(),
                      w) == 0) {
-    return Status::io_error(path + ": PNG write failed");
+    return core::Status::io_error(path + ": PNG write failed");
   }
   return {};
 }
 
-Result<LumaImage> read_png(const std::string& path) {
+core::Result<LumaImage> read_png(const std::string& path) {
   int w = 0;
   int h = 0;
   int channels = 0;
   unsigned char* data = stbi_load(path.c_str(), &w, &h, &channels, 1);
   if (data == nullptr) {
-    return Status::io_error(path + ": not a PNG it can decode (" +
-                            std::string(stbi_failure_reason()) + ")");
+    return core::Status::io_error(path + ": not a PNG it can decode (" +
+                                  std::string(stbi_failure_reason()) + ")");
   }
   LumaImage image;
   image.size = {w, h};

@@ -98,19 +98,19 @@ TEST(CaptureReplay, ReadLumaNeedsAPolledSetAndACamera) {
   auto replay = SessionReplay::open(dir.str());
   ASSERT_TRUE(replay.ok());
   EXPECT_EQ(replay->read_luma(0).status().domain(),
-            Status::Code::InvalidArgument);  // not started
+            core::Status::Code::InvalidArgument);  // not started
 
   ASSERT_TRUE(replay->start().ok());
   EXPECT_EQ(replay->read_luma(0).status().domain(),
-            Status::Code::InvalidArgument);  // started, nothing polled
+            core::Status::Code::InvalidArgument);  // started, nothing polled
   ASSERT_TRUE(replay->poll_set().ok());
   EXPECT_TRUE(replay->read_luma(1).ok());
   EXPECT_EQ(replay->read_luma(2).status().domain(),
-            Status::Code::InvalidArgument);  // no third camera
+            core::Status::Code::InvalidArgument);  // no third camera
 
   replay->stop();
   EXPECT_EQ(replay->read_luma(0).status().domain(),
-            Status::Code::InvalidArgument);  // stopped
+            core::Status::Code::InvalidArgument);  // stopped
 }
 
 TEST(CaptureReplay, AnEmptySessionIsExhaustedOnStart) {
@@ -128,7 +128,7 @@ TEST(CaptureReplay, AnEmptySessionIsExhaustedOnStart) {
 TEST(CaptureReplay, OpeningAMissingSessionIsNotFound) {
   const ScratchDir dir;
   EXPECT_EQ(SessionReplay::open(dir.str()).status().domain(),
-            Status::Code::NotFound);
+            core::Status::Code::NotFound);
 }
 
 }  // namespace

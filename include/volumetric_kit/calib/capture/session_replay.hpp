@@ -16,7 +16,7 @@
 #include "volumetric_kit/calib/capture/export.hpp"
 #include "volumetric_kit/calib/capture/rig_source.hpp"
 #include "volumetric_kit/calib/capture/session.hpp"
-#include "volumetric_kit/calib/core/result.hpp"
+#include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib::capture {
 
@@ -30,19 +30,19 @@ namespace volumetric_kit::calib::capture {
 /// @ref exhausted; @ref start again replays from the first.
 ///
 /// @code
-/// VC_ASSIGN(SessionReplay replay, SessionReplay::open("sessions/2026-09-29"));
-/// VC_TRY(replay.start());
-/// while (!replay.exhausted()) {
-///   VC_ASSIGN(const std::optional<SetInfo> set, replay.poll_set());
+/// VKC_ASSIGN(SessionReplay replay,
+/// SessionReplay::open("sessions/2026-09-29")); VKC_TRY(replay.start()); while
+/// (!replay.exhausted()) {
+///   VKC_ASSIGN(const std::optional<SetInfo> set, replay.poll_set());
 ///   if (!set) continue;
-///   VC_ASSIGN(const LumaImage image, replay.read_luma(0));
+///   VKC_ASSIGN(const LumaImage image, replay.read_luma(0));
 /// }
 /// @endcode
 class VC_CAPTURE_API SessionReplay final : public IRigSource {
  public:
   /// @brief Read the session in @p dir. Opens no image yet.
   /// @return The replay, not started; or what @ref read_session returns.
-  static Result<SessionReplay> open(std::string dir);
+  static core::Result<SessionReplay> open(std::string dir);
 
   SessionReplay(SessionReplay&&) noexcept = default;
   SessionReplay& operator=(SessionReplay&&) noexcept = default;
@@ -55,7 +55,7 @@ class VC_CAPTURE_API SessionReplay final : public IRigSource {
 
   /// @brief Rewind to the first capture and start handing captures out.
   /// @return OK.
-  Status start() override;
+  core::Status start() override;
 
   /// @brief Stop handing captures out. The next @ref start replays from the
   ///        first.
@@ -63,13 +63,13 @@ class VC_CAPTURE_API SessionReplay final : public IRigSource {
 
   /// @return The next capture as a complete set; empty when not started or
   ///         when every capture has been handed out.
-  Result<std::optional<SetInfo>> poll_set() override;
+  core::Result<std::optional<SetInfo>> poll_set() override;
 
   /// @return Camera @p camera's image of the capture last handed out, as
   ///         @ref read_session_image reads it, checked against the camera's
-  ///         lens size (@ref Status::Code::InvalidArgument if it differs); or
-  ///         as @ref IRigSource::read_luma says.
-  Result<LumaImage> read_luma(std::size_t camera) override;
+  ///         lens size (@ref core::Status::Code::InvalidArgument if it
+  ///         differs); or as @ref IRigSource::read_luma says.
+  core::Result<LumaImage> read_luma(std::size_t camera) override;
 
   /// @return `true` once every capture has been handed out.
   bool exhausted() const noexcept override;

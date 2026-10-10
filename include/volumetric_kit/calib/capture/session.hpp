@@ -39,7 +39,7 @@
 
 #include "volumetric_kit/calib/capture/export.hpp"
 #include "volumetric_kit/calib/capture/rig_source.hpp"
-#include "volumetric_kit/calib/core/result.hpp"
+#include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib::capture {
 
@@ -54,9 +54,9 @@ struct Capture {
 ///        captures in the order they were taken.
 ///
 /// @code
-/// VC_ASSIGN(const Session session, read_session(dir));
+/// VKC_ASSIGN(const Session session, read_session(dir));
 /// for (const Capture& capture : session.captures) {
-///   VC_ASSIGN(const LumaImage image,
+///   VKC_ASSIGN(const LumaImage image,
 ///             read_session_image(dir, session.cameras[0].serial,
 ///                                capture.index));
 /// }
@@ -78,23 +78,22 @@ VC_CAPTURE_API std::string session_image_path(const std::string& dir,
                                               std::size_t index);
 
 /// @brief Read the `session.json` of the session in @p dir.
-/// @return The session; @ref Status::Code::NotFound if there is no
-///         `session.json`; @ref Status::Code::IoError if it cannot be read;
-///         or @ref Status::Code::InvalidArgument naming what is wrong: not
-///         JSON, another format or version, no camera, a serial
+/// @return The session; @ref core::Status::Code::NotFound if there is no
+///         `session.json`; @ref core::Status::Code::IoError if it cannot be
+///         read; or @ref core::Status::Code::InvalidArgument naming what is
+///         wrong: not JSON, another format or version, no camera, a serial
 ///         @ref is_session_serial refuses (or a repeated one), an unknown
 ///         role, a lens
 ///         `PinholeBrownConrady::create` refuses, or a capture whose index is
 ///         not above the one before it or that averaged no frames.
-VC_CAPTURE_API Result<Session> read_session(const std::string& dir);
+VC_CAPTURE_API core::Result<Session> read_session(const std::string& dir);
 
 /// @brief Read one image of the session in @p dir.
 /// @return The image, converted to one channel if it was stored with more;
-///         @ref Status::Code::NotFound if the file does not exist; or
-///         @ref Status::Code::IoError if it does not decode as a PNG.
-VC_CAPTURE_API Result<LumaImage> read_session_image(const std::string& dir,
-                                                    const std::string& serial,
-                                                    std::size_t index);
+///         @ref core::Status::Code::NotFound if the file does not exist; or
+///         @ref core::Status::Code::IoError if it does not decode as a PNG.
+VC_CAPTURE_API core::Result<LumaImage> read_session_image(
+    const std::string& dir, const std::string& serial, std::size_t index);
 
 /// @brief Writes a session: creates its directory, adds captures, and takes
 ///        the last one back.
@@ -104,11 +103,11 @@ VC_CAPTURE_API Result<LumaImage> read_session_image(const std::string& dir,
 /// with every capture completed before the interruption.
 ///
 /// @code
-/// VC_ASSIGN(SessionWriter writer,
+/// VKC_ASSIGN(SessionWriter writer,
 ///           SessionWriter::create("sessions/2026-09-29", source.cameras()));
-/// VC_ASSIGN(const std::size_t index,
+/// VKC_ASSIGN(const std::size_t index,
 ///           writer.add(set.trigger_ns, /*frames_averaged=*/5, images));
-/// VC_TRY(writer.remove_last());  // the clicker's "back"
+/// VKC_TRY(writer.remove_last());  // the clicker's "back"
 /// @endcode
 class VC_CAPTURE_API SessionWriter {
  public:
@@ -117,14 +116,15 @@ class VC_CAPTURE_API SessionWriter {
   /// @param dir      The session's directory: new, or one without a
   ///                 `session.json`.
   /// @param cameras  The rig's cameras, every one with its lens.
-  /// @return The writer; @ref Status::Code::InvalidArgument for no cameras,
+  /// @return The writer; @ref core::Status::Code::InvalidArgument for no
+  /// cameras,
   ///         one without a lens, a serial that is not a plain file name
   ///         (@ref is_session_serial), a repeated serial, or a @p dir that
   ///         already holds a session; or
-  ///         @ref Status::Code::IoError if a directory or `session.json`
+  ///         @ref core::Status::Code::IoError if a directory or `session.json`
   ///         cannot be written.
-  static Result<SessionWriter> create(std::string dir,
-                                      std::vector<CameraInfo> cameras);
+  static core::Result<SessionWriter> create(std::string dir,
+                                            std::vector<CameraInfo> cameras);
 
   /// @brief Write one capture: every camera's image, then `session.json`.
   /// @param trigger_ns       The capture's first set's trigger time.
@@ -133,21 +133,22 @@ class VC_CAPTURE_API SessionWriter {
   /// @param images           One image per camera, in @ref Session::cameras
   ///                         order, each the size of that camera's lens.
   /// @return The capture's index, one above the last capture's (zero for the
-  ///         first); @ref Status::Code::InvalidArgument for a wrong number of
-  ///         images, an image of the wrong size or pixel count, or no frames
-  ///         averaged -- nothing is written then; or
-  ///         @ref Status::Code::IoError if a file cannot be written, in which
-  ///         case the images already written are removed and the session is
-  ///         as it was.
-  Result<std::size_t> add(std::uint64_t trigger_ns,
-                          std::uint32_t frames_averaged,
-                          const std::vector<LumaImage>& images);
+  ///         first); @ref core::Status::Code::InvalidArgument for a wrong
+  ///         number of images, an image of the wrong size or pixel count, or no
+  ///         frames averaged -- nothing is written then; or
+  ///         @ref core::Status::Code::IoError if a file cannot be written, in
+  ///         which case the images already written are removed and the session
+  ///         is as it was.
+  core::Result<std::size_t> add(std::uint64_t trigger_ns,
+                                std::uint32_t frames_averaged,
+                                const std::vector<LumaImage>& images);
 
   /// @brief Take back the last capture: delete its images and its entry. The
   ///        next @ref add reuses its index, so indices stay contiguous.
-  /// @return OK; @ref Status::Code::NotFound when there is no capture; or
-  ///         @ref Status::Code::IoError if `session.json` cannot be written.
-  Status remove_last();
+  /// @return OK; @ref core::Status::Code::NotFound when there is no capture; or
+  ///         @ref core::Status::Code::IoError if `session.json` cannot be
+  ///         written.
+  core::Status remove_last();
 
   /// @return The session as written so far.
   const Session& session() const noexcept { return session_; }

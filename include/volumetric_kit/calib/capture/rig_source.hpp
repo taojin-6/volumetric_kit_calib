@@ -26,7 +26,7 @@
 
 #include "volumetric_kit/calib/capture/export.hpp"
 #include "volumetric_kit/calib/core/camera_model.hpp"
-#include "volumetric_kit/calib/core/result.hpp"
+#include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib::capture {
 
@@ -107,15 +107,15 @@ struct LumaImage {
 /// @ref read_luma fetches one camera's pixels from the set last polled.
 ///
 /// @code
-/// VC_TRY(source.start());
+/// VKC_TRY(source.start());
 /// for (;;) {
-///   VC_ASSIGN(const std::optional<SetInfo> set, source.poll_set());
+///   VKC_ASSIGN(const std::optional<SetInfo> set, source.poll_set());
 ///   if (!set) {
 ///     if (source.exhausted()) break;  // a replay's end
 ///     continue;                       // a live rig's "not yet"
 ///   }
 ///   if (set->complete()) {
-///     VC_ASSIGN(const LumaImage primary, source.read_luma(0));
+///     VKC_ASSIGN(const LumaImage primary, source.read_luma(0));
 ///   }
 /// }
 /// @endcode
@@ -136,7 +136,7 @@ class VC_CAPTURE_API IRigSource {
   /// @brief Begin producing sets. Idempotent: starting a running source is OK.
   /// @return OK once running (every camera's lens then known), or why the
   ///         source could not start.
-  virtual Status start() = 0;
+  virtual core::Status start() = 0;
 
   /// @brief Stop producing sets. Idempotent, and safe on a source that never
   ///        started.
@@ -145,15 +145,16 @@ class VC_CAPTURE_API IRigSource {
   /// @brief Take the newest set not yet returned.
   /// @return The set; an empty optional (@ref no_set) when none is ready or
   ///         the source is not started -- not an error; or a device failure.
-  virtual Result<std::optional<SetInfo>> poll_set() = 0;
+  virtual core::Result<std::optional<SetInfo>> poll_set() = 0;
 
   /// @brief Read camera @p camera's luma from the set @ref poll_set last
   ///        returned, at the size of its @ref CameraInfo::lens.
   /// @param camera  An index into @ref cameras.
-  /// @return The image; @ref Status::Code::InvalidArgument when no set has
+  /// @return The image; @ref core::Status::Code::InvalidArgument when no set
+  /// has
   ///         been polled since @ref start, @p camera is out of range, or that
   ///         camera is absent from the set; or a read failure.
-  virtual Result<LumaImage> read_luma(std::size_t camera) = 0;
+  virtual core::Result<LumaImage> read_luma(std::size_t camera) = 0;
 
   /// @brief Whether this source will never hand out another set.
   ///
@@ -165,17 +166,17 @@ class VC_CAPTURE_API IRigSource {
 
   /// @brief The "no set this tick" return. `return std::nullopt;` needs two
   ///        user-defined conversions and does not compile, and
-  ///        `return Status{};` aborts (@ref Result refuses an OK status), so
-  ///        implementations return this.
+  ///        `return core::Status{};` aborts (@ref Result refuses an OK status),
+  ///        so implementations return this.
   /// @return An OK @ref Result holding an empty optional.
-  static Result<std::optional<SetInfo>> no_set() {
+  static core::Result<std::optional<SetInfo>> no_set() {
     return std::optional<SetInfo>{};
   }
 
   /// @brief The "here is the set" return, the counterpart to @ref no_set.
   /// @param set  The set to hand over.
   /// @return An OK @ref Result holding @p set.
-  static Result<std::optional<SetInfo>> some_set(SetInfo set) {
+  static core::Result<std::optional<SetInfo>> some_set(SetInfo set) {
     return std::optional<SetInfo>{std::move(set)};
   }
 

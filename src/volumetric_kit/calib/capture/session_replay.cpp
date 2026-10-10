@@ -9,12 +9,12 @@
 
 namespace volumetric_kit::calib::capture {
 
-Result<SessionReplay> SessionReplay::open(std::string dir) {
-  VC_ASSIGN(Session session, read_session(dir));
+core::Result<SessionReplay> SessionReplay::open(std::string dir) {
+  VKC_ASSIGN(Session session, read_session(dir));
   return SessionReplay{std::move(dir), std::move(session)};
 }
 
-Status SessionReplay::start() {
+core::Status SessionReplay::start() {
   started_ = true;
   next_ = 0;
   current_.reset();
@@ -26,7 +26,7 @@ void SessionReplay::stop() noexcept {
   current_.reset();
 }
 
-Result<std::optional<SetInfo>> SessionReplay::poll_set() {
+core::Result<std::optional<SetInfo>> SessionReplay::poll_set() {
   if (!started_ || next_ >= session_.captures.size()) return no_set();
   SetInfo set;
   set.trigger_ns = session_.captures[next_].trigger_ns;
@@ -35,23 +35,23 @@ Result<std::optional<SetInfo>> SessionReplay::poll_set() {
   return some_set(std::move(set));
 }
 
-Result<LumaImage> SessionReplay::read_luma(std::size_t camera) {
+core::Result<LumaImage> SessionReplay::read_luma(std::size_t camera) {
   if (!started_ || !current_) {
-    return Status::invalid_argument(
+    return core::Status::invalid_argument(
         "read_luma: no set has been polled since start");
   }
   if (camera >= session_.cameras.size()) {
-    return Status::invalid_argument("read_luma: camera " +
-                                    std::to_string(camera) + " of " +
-                                    std::to_string(session_.cameras.size()));
+    return core::Status::invalid_argument(
+        "read_luma: camera " + std::to_string(camera) + " of " +
+        std::to_string(session_.cameras.size()));
   }
   const CameraInfo& info = session_.cameras[camera];
-  VC_ASSIGN(LumaImage image,
-            read_session_image(dir_, info.serial,
-                               session_.captures[*current_].index));
+  VKC_ASSIGN(LumaImage image,
+             read_session_image(dir_, info.serial,
+                                session_.captures[*current_].index));
   const ImageSize& want = info.lens->image_size();
   if (image.size.width != want.width || image.size.height != want.height) {
-    return Status::invalid_argument(
+    return core::Status::invalid_argument(
         info.serial + ": image is " + std::to_string(image.size.width) + "x" +
         std::to_string(image.size.height) + ", its lens " +
         std::to_string(want.width) + "x" + std::to_string(want.height));

@@ -86,21 +86,23 @@ std::string session_text(const Session& session) {
 
 // Write `session.json` through a temporary renamed into place, so a reader
 // never sees half a file.
-Status write_session_file(const std::string& dir, const Session& session) {
+core::Status write_session_file(const std::string& dir,
+                                const Session& session) {
   const std::string path = session_file(dir);
   const std::string tmp = path + ".tmp";
   {
     std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-    if (!out) return Status::io_error(tmp + ": cannot be opened for writing");
+    if (!out)
+      return core::Status::io_error(tmp + ": cannot be opened for writing");
     out << session_text(session);
     out.flush();
-    if (!out) return Status::io_error(tmp + ": write failed");
+    if (!out) return core::Status::io_error(tmp + ": write failed");
   }
   std::error_code ec;
   fs::rename(tmp, path, ec);
   if (ec) {
     fs::remove(tmp, ec);
-    return Status::io_error(path + ": cannot be replaced");
+    return core::Status::io_error(path + ": cannot be replaced");
   }
   return {};
 }
@@ -113,12 +115,12 @@ const json* member(const json& obj, const char* key) {
   return it == obj.end() ? nullptr : &*it;
 }
 
-Status bad(const std::string& where, const std::string& what) {
-  return Status::invalid_argument(where + ": " + what);
+core::Status bad(const std::string& where, const std::string& what) {
+  return core::Status::invalid_argument(where + ": " + what);
 }
 
-Result<double> number_at(const json& obj, const char* key,
-                         const std::string& where) {
+core::Result<double> number_at(const json& obj, const char* key,
+                               const std::string& where) {
   const json* v = member(obj, key);
   if (v == nullptr || !v->is_number()) {
     return bad(where, std::string(key) + " is missing or not a number");
@@ -126,8 +128,8 @@ Result<double> number_at(const json& obj, const char* key,
   return v->get<double>();
 }
 
-Result<std::uint64_t> unsigned_at(const json& obj, const char* key,
-                                  const std::string& where) {
+core::Result<std::uint64_t> unsigned_at(const json& obj, const char* key,
+                                        const std::string& where) {
   const json* v = member(obj, key);
   if (v == nullptr || !v->is_number_unsigned()) {
     return bad(where,
@@ -136,8 +138,8 @@ Result<std::uint64_t> unsigned_at(const json& obj, const char* key,
   return v->get<std::uint64_t>();
 }
 
-Result<std::string> string_at(const json& obj, const char* key,
-                              const std::string& where) {
+core::Result<std::string> string_at(const json& obj, const char* key,
+                                    const std::string& where) {
   const json* v = member(obj, key);
   if (v == nullptr || !v->is_string()) {
     return bad(where, std::string(key) + " is missing or not a string");
@@ -145,9 +147,9 @@ Result<std::string> string_at(const json& obj, const char* key,
   return v->get<std::string>();
 }
 
-Result<int> size_at(const json& obj, const char* key,
-                    const std::string& where) {
-  VC_ASSIGN(const std::uint64_t n, unsigned_at(obj, key, where));
+core::Result<int> size_at(const json& obj, const char* key,
+                          const std::string& where) {
+  VKC_ASSIGN(const std::uint64_t n, unsigned_at(obj, key, where));
   if (n == 0 ||
       n > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) {
     return bad(where, std::string(key) + " is out of range");
@@ -155,7 +157,8 @@ Result<int> size_at(const json& obj, const char* key,
   return static_cast<int>(n);
 }
 
-Result<SyncRole> parse_role(const std::string& text, const std::string& where) {
+core::Result<SyncRole> parse_role(const std::string& text,
+                                  const std::string& where) {
   for (const SyncRole role :
        {SyncRole::Standalone, SyncRole::Primary, SyncRole::Secondary}) {
     if (text == to_string(role)) return role;
@@ -165,30 +168,30 @@ Result<SyncRole> parse_role(const std::string& text, const std::string& where) {
                         "primary, secondary");
 }
 
-Result<PinholeBrownConrady> parse_lens(const json& j,
-                                       const std::string& where) {
+core::Result<PinholeBrownConrady> parse_lens(const json& j,
+                                             const std::string& where) {
   if (!j.is_object()) return bad(where, "is not an object");
-  VC_ASSIGN(const int width, size_at(j, "width", where));
-  VC_ASSIGN(const int height, size_at(j, "height", where));
+  VKC_ASSIGN(const int width, size_at(j, "width", where));
+  VKC_ASSIGN(const int height, size_at(j, "height", where));
   PinholeBrownConrady::Intrinsics k;
-  VC_ASSIGN(k.fx, number_at(j, "fx", where));
-  VC_ASSIGN(k.fy, number_at(j, "fy", where));
-  VC_ASSIGN(k.cx, number_at(j, "cx", where));
-  VC_ASSIGN(k.cy, number_at(j, "cy", where));
+  VKC_ASSIGN(k.fx, number_at(j, "fx", where));
+  VKC_ASSIGN(k.fy, number_at(j, "fy", where));
+  VKC_ASSIGN(k.cx, number_at(j, "cx", where));
+  VKC_ASSIGN(k.cy, number_at(j, "cy", where));
   PinholeBrownConrady::Distortion d;
-  VC_ASSIGN(d.k1, number_at(j, "k1", where));
-  VC_ASSIGN(d.k2, number_at(j, "k2", where));
-  VC_ASSIGN(d.p1, number_at(j, "p1", where));
-  VC_ASSIGN(d.p2, number_at(j, "p2", where));
-  VC_ASSIGN(d.k3, number_at(j, "k3", where));
-  Result<PinholeBrownConrady> lens =
+  VKC_ASSIGN(d.k1, number_at(j, "k1", where));
+  VKC_ASSIGN(d.k2, number_at(j, "k2", where));
+  VKC_ASSIGN(d.p1, number_at(j, "p1", where));
+  VKC_ASSIGN(d.p2, number_at(j, "p2", where));
+  VKC_ASSIGN(d.k3, number_at(j, "k3", where));
+  core::Result<PinholeBrownConrady> lens =
       PinholeBrownConrady::create({width, height}, k, d);
   if (!lens) return bad(where, lens.status().message());
   return lens;
 }
 
-Result<Session> parse_session(const std::string& text,
-                              const std::string& file) {
+core::Result<Session> parse_session(const std::string& text,
+                                    const std::string& file) {
   const json doc = json::parse(text, nullptr, /*allow_exceptions=*/false);
   if (doc.is_discarded()) return bad(file, "is not JSON");
   if (!doc.is_object()) return bad(file, "is not a JSON object");
@@ -215,7 +218,7 @@ Result<Session> parse_session(const std::string& text,
     const std::string where = file + ": camera " + std::to_string(i);
     if (!c.is_object()) return bad(where, "is not an object");
     CameraInfo camera;
-    VC_ASSIGN(camera.serial, string_at(c, "serial", where));
+    VKC_ASSIGN(camera.serial, string_at(c, "serial", where));
     if (!is_session_serial(camera.serial)) {
       return bad(where,
                  "serial \"" + camera.serial + "\" is not a plain file name");
@@ -225,11 +228,11 @@ Result<Session> parse_session(const std::string& text,
         return bad(where, "serial " + camera.serial + " is repeated");
       }
     }
-    VC_ASSIGN(const std::string role, string_at(c, "role", where));
-    VC_ASSIGN(camera.role, parse_role(role, where));
+    VKC_ASSIGN(const std::string role, string_at(c, "role", where));
+    VKC_ASSIGN(camera.role, parse_role(role, where));
     const json* lens = member(c, "lens");
     if (lens == nullptr) return bad(where, "has no lens");
-    VC_ASSIGN(PinholeBrownConrady model, parse_lens(*lens, where + ": lens"));
+    VKC_ASSIGN(PinholeBrownConrady model, parse_lens(*lens, where + ": lens"));
     camera.lens = std::move(model);
     session.cameras.push_back(std::move(camera));
   }
@@ -243,7 +246,7 @@ Result<Session> parse_session(const std::string& text,
     const std::string where = file + ": capture " + std::to_string(i);
     if (!c.is_object()) return bad(where, "is not an object");
     Capture capture;
-    VC_ASSIGN(const std::uint64_t index, unsigned_at(c, "index", where));
+    VKC_ASSIGN(const std::uint64_t index, unsigned_at(c, "index", where));
     if (index > std::numeric_limits<std::size_t>::max()) {
       return bad(where, "index is out of range");
     }
@@ -253,9 +256,9 @@ Result<Session> parse_session(const std::string& text,
       return bad(where, "index " + std::to_string(capture.index) +
                             " is not above the capture before it");
     }
-    VC_ASSIGN(capture.trigger_ns, unsigned_at(c, "trigger_ns", where));
-    VC_ASSIGN(const std::uint64_t averaged,
-              unsigned_at(c, "frames_averaged", where));
+    VKC_ASSIGN(capture.trigger_ns, unsigned_at(c, "trigger_ns", where));
+    VKC_ASSIGN(const std::uint64_t averaged,
+               unsigned_at(c, "frames_averaged", where));
     if (averaged == 0 || averaged > std::numeric_limits<std::uint32_t>::max()) {
       return bad(where, "frames_averaged is out of range");
     }
@@ -285,30 +288,32 @@ std::string session_image_path(const std::string& dir,
       .string();
 }
 
-Result<Session> read_session(const std::string& dir) {
+core::Result<Session> read_session(const std::string& dir) {
   const std::string path = session_file(dir);
   std::error_code ec;
-  if (!fs::exists(path, ec)) return Status::not_found(path + ": not found");
+  if (!fs::exists(path, ec))
+    return core::Status::not_found(path + ": not found");
   std::ifstream in(path, std::ios::binary);
-  if (!in) return Status::io_error(path + ": cannot be opened");
+  if (!in) return core::Status::io_error(path + ": cannot be opened");
   std::ostringstream text;
   text << in.rdbuf();
-  if (in.bad()) return Status::io_error(path + ": read failed");
+  if (in.bad()) return core::Status::io_error(path + ": read failed");
   return parse_session(text.str(), path);
 }
 
-Result<LumaImage> read_session_image(const std::string& dir,
-                                     const std::string& serial,
-                                     std::size_t index) {
+core::Result<LumaImage> read_session_image(const std::string& dir,
+                                           const std::string& serial,
+                                           std::size_t index) {
   const std::string path = session_image_path(dir, serial, index);
   std::error_code ec;
-  if (!fs::exists(path, ec)) return Status::not_found(path + ": not found");
+  if (!fs::exists(path, ec))
+    return core::Status::not_found(path + ": not found");
   return detail::read_png(path);
 }
 
-Result<SessionWriter> SessionWriter::create(std::string dir,
-                                            std::vector<CameraInfo> cameras) {
-  if (cameras.empty()) return Status::invalid_argument("no cameras");
+core::Result<SessionWriter> SessionWriter::create(
+    std::string dir, std::vector<CameraInfo> cameras) {
+  if (cameras.empty()) return core::Status::invalid_argument("no cameras");
   for (std::size_t i = 0; i < cameras.size(); ++i) {
     const CameraInfo& camera = cameras[i];
     const std::string where = "camera " + std::to_string(i);
@@ -325,31 +330,32 @@ Result<SessionWriter> SessionWriter::create(std::string dir,
   }
   std::error_code ec;
   if (fs::exists(session_file(dir), ec)) {
-    return Status::invalid_argument(dir + ": already holds a session");
+    return core::Status::invalid_argument(dir + ": already holds a session");
   }
   for (const CameraInfo& camera : cameras) {
     const fs::path camera_dir = fs::path(dir) / camera.serial;
     fs::create_directories(camera_dir, ec);
     if (ec) {
-      return Status::io_error(camera_dir.string() + ": cannot be created (" +
-                              ec.message() + ")");
+      return core::Status::io_error(
+          camera_dir.string() + ": cannot be created (" + ec.message() + ")");
     }
   }
   Session session;
   session.cameras = std::move(cameras);
-  VC_TRY(write_session_file(dir, session));
+  VKC_TRY(write_session_file(dir, session));
   return SessionWriter{std::move(dir), std::move(session)};
 }
 
-Result<std::size_t> SessionWriter::add(std::uint64_t trigger_ns,
-                                       std::uint32_t frames_averaged,
-                                       const std::vector<LumaImage>& images) {
+core::Result<std::size_t> SessionWriter::add(
+    std::uint64_t trigger_ns, std::uint32_t frames_averaged,
+    const std::vector<LumaImage>& images) {
   const std::vector<CameraInfo>& cameras = session_.cameras;
   if (frames_averaged == 0) {
-    return Status::invalid_argument("a capture averages at least one frame");
+    return core::Status::invalid_argument(
+        "a capture averages at least one frame");
   }
   if (images.size() != cameras.size()) {
-    return Status::invalid_argument(
+    return core::Status::invalid_argument(
         std::to_string(images.size()) + " images for " +
         std::to_string(cameras.size()) + " cameras");
   }
@@ -360,7 +366,7 @@ Result<std::size_t> SessionWriter::add(std::uint64_t trigger_ns,
                                static_cast<std::size_t>(want.height);
     if (image.size.width != want.width || image.size.height != want.height ||
         image.pixels.size() != pixels) {
-      return Status::invalid_argument(
+      return core::Status::invalid_argument(
           cameras[i].serial + ": image is " + std::to_string(image.size.width) +
           "x" + std::to_string(image.size.height) + " with " +
           std::to_string(image.pixels.size()) + " pixels, its lens " +
@@ -377,7 +383,7 @@ Result<std::size_t> SessionWriter::add(std::uint64_t trigger_ns,
   };
   for (std::size_t i = 0; i < cameras.size(); ++i) {
     const std::string path = session_image_path(dir_, cameras[i].serial, index);
-    const Status status = detail::write_png(path, images[i]);
+    const core::Status status = detail::write_png(path, images[i]);
     if (!status) {
       unwind();
       return status;
@@ -386,7 +392,7 @@ Result<std::size_t> SessionWriter::add(std::uint64_t trigger_ns,
   }
 
   session_.captures.push_back({index, trigger_ns, frames_averaged});
-  const Status status = write_session_file(dir_, session_);
+  const core::Status status = write_session_file(dir_, session_);
   if (!status) {
     session_.captures.pop_back();
     unwind();
@@ -395,16 +401,16 @@ Result<std::size_t> SessionWriter::add(std::uint64_t trigger_ns,
   return index;
 }
 
-Status SessionWriter::remove_last() {
+core::Status SessionWriter::remove_last() {
   if (session_.captures.empty()) {
-    return Status::not_found(dir_ + ": no capture to remove");
+    return core::Status::not_found(dir_ + ": no capture to remove");
   }
   // The listing first, so the session never names a capture it lacks images
   // for; an image left behind is overwritten by the next add, which reuses
   // the index.
   const Capture last = session_.captures.back();
   session_.captures.pop_back();
-  const Status status = write_session_file(dir_, session_);
+  const core::Status status = write_session_file(dir_, session_);
   if (!status) {
     session_.captures.push_back(last);
     return status;
@@ -418,7 +424,8 @@ Status SessionWriter::remove_last() {
     if (ec) left += (left.empty() ? "" : ", ") + path;
   }
   if (!left.empty()) {
-    return Status::io_error("capture removed, but not its images: " + left);
+    return core::Status::io_error("capture removed, but not its images: " +
+                                  left);
   }
   return {};
 }

@@ -141,29 +141,29 @@ TEST(CaptureSession, RemoveLastWithNoCaptureIsNotFound) {
   const ScratchDir dir;
   auto writer = SessionWriter::create(dir.str(), two_cameras());
   ASSERT_TRUE(writer.ok());
-  EXPECT_EQ(writer->remove_last().domain(), Status::Code::NotFound);
+  EXPECT_EQ(writer->remove_last().domain(), core::Status::Code::NotFound);
 }
 
 TEST(CaptureSession, CreateRefusesCamerasASessionCannotHold) {
   const ScratchDir dir;
   EXPECT_EQ(SessionWriter::create(dir.str(), {}).status().domain(),
-            Status::Code::InvalidArgument);
+            core::Status::Code::InvalidArgument);
 
   std::vector<CameraInfo> no_lens = two_cameras();
   no_lens[1].lens.reset();
   EXPECT_EQ(SessionWriter::create(dir.str(), no_lens).status().domain(),
-            Status::Code::InvalidArgument);
+            core::Status::Code::InvalidArgument);
 
   std::vector<CameraInfo> repeated = two_cameras();
   repeated[1].serial = repeated[0].serial;
   EXPECT_EQ(SessionWriter::create(dir.str(), repeated).status().domain(),
-            Status::Code::InvalidArgument);
+            core::Status::Code::InvalidArgument);
 
   for (const char* serial : {"", ".", "..", "a/b", "a\\b", "a b", "../x"}) {
     std::vector<CameraInfo> bad = two_cameras();
     bad[0].serial = serial;
     EXPECT_EQ(SessionWriter::create(dir.str(), bad).status().domain(),
-              Status::Code::InvalidArgument)
+              core::Status::Code::InvalidArgument)
         << "serial \"" << serial << "\"";
   }
   // Nothing was created for any refused session.
@@ -174,7 +174,7 @@ TEST(CaptureSession, CreateRefusesADirectoryThatHoldsASession) {
   const ScratchDir dir;
   ASSERT_TRUE(SessionWriter::create(dir.str(), two_cameras()).ok());
   EXPECT_EQ(SessionWriter::create(dir.str(), two_cameras()).status().domain(),
-            Status::Code::InvalidArgument);
+            core::Status::Code::InvalidArgument);
 }
 
 TEST(CaptureSession, AddRefusesImagesThatDoNotFitTheCameras) {
@@ -186,20 +186,20 @@ TEST(CaptureSession, AddRefusesImagesThatDoNotFitTheCameras) {
   std::vector<LumaImage> one = images_for(cameras, 1);
   one.pop_back();
   EXPECT_EQ(writer->add(1, 1, one).status().domain(),
-            Status::Code::InvalidArgument);
+            core::Status::Code::InvalidArgument);
 
   std::vector<LumaImage> swapped = images_for(cameras, 1);
   std::swap(swapped[0], swapped[1]);  // each the other camera's size
   EXPECT_EQ(writer->add(1, 1, swapped).status().domain(),
-            Status::Code::InvalidArgument);
+            core::Status::Code::InvalidArgument);
 
   std::vector<LumaImage> short_image = images_for(cameras, 1);
   short_image[0].pixels.pop_back();
   EXPECT_EQ(writer->add(1, 1, short_image).status().domain(),
-            Status::Code::InvalidArgument);
+            core::Status::Code::InvalidArgument);
 
   EXPECT_EQ(writer->add(1, 0, images_for(cameras, 1)).status().domain(),
-            Status::Code::InvalidArgument);
+            core::Status::Code::InvalidArgument);
 
   // Nothing was written for any refused capture.
   EXPECT_TRUE(writer->session().captures.empty());
@@ -210,7 +210,8 @@ TEST(CaptureSession, AddRefusesImagesThatDoNotFitTheCameras) {
 
 TEST(CaptureSession, ReadSessionOfAMissingDirectoryIsNotFound) {
   const ScratchDir dir;
-  EXPECT_EQ(read_session(dir.str()).status().domain(), Status::Code::NotFound);
+  EXPECT_EQ(read_session(dir.str()).status().domain(),
+            core::Status::Code::NotFound);
 }
 
 // A valid session.json, and single-edit breakages of it, each refused.
@@ -264,7 +265,7 @@ TEST(CaptureSession, ReadSessionRefusesMalformedFiles) {
   for (const std::string& text : broken) {
     write_file(dir / "session.json", text);
     EXPECT_EQ(read_session(dir.str()).status().domain(),
-              Status::Code::InvalidArgument)
+              core::Status::Code::InvalidArgument)
         << text;
   }
 }
@@ -275,12 +276,12 @@ TEST(CaptureSession, ReadSessionImageNamesWhatIsWrong) {
   ASSERT_TRUE(SessionWriter::create(dir.str(), cameras).ok());
   EXPECT_EQ(
       read_session_image(dir.str(), cameras[0].serial, 0).status().domain(),
-      Status::Code::NotFound);
+      core::Status::Code::NotFound);
 
   write_file(session_image_path(dir.str(), cameras[0].serial, 0), "not a png");
   EXPECT_EQ(
       read_session_image(dir.str(), cameras[0].serial, 0).status().domain(),
-      Status::Code::IoError);
+      core::Status::Code::IoError);
 }
 
 TEST(CaptureSession, SerialsAreKeptToPlainFileNames) {

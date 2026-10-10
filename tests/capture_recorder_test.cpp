@@ -32,13 +32,13 @@ class FakeRig final : public IRigSource {
   const std::vector<CameraInfo>& cameras() const noexcept override {
     return cameras_;
   }
-  Status start() override { return {}; }
+  core::Status start() override { return {}; }
   void stop() noexcept override {}
-  Result<std::optional<SetInfo>> poll_set() override { return no_set(); }
-  Result<LumaImage> read_luma(std::size_t camera) override {
+  core::Result<std::optional<SetInfo>> poll_set() override { return no_set(); }
+  core::Result<LumaImage> read_luma(std::size_t camera) override {
     ++reads;
     if (fail_camera && *fail_camera == camera) {
-      return Status::io_error("camera unplugged");
+      return core::Status::io_error("camera unplugged");
     }
     ImageSize size = cameras_[camera].lens->image_size();
     if (wrong_size) size.width += 1;
@@ -79,10 +79,10 @@ struct Rig {
   }
 
   // Feed one set at `level`; returns what on_set returned.
-  Result<std::optional<std::size_t>> feed(CaptureRecorder& r, int level,
-                                          std::uint64_t trigger_ns,
-                                          std::vector<bool> present = {true,
-                                                                       true}) {
+  core::Result<std::optional<std::size_t>> feed(CaptureRecorder& r, int level,
+                                                std::uint64_t trigger_ns,
+                                                std::vector<bool> present = {
+                                                    true, true}) {
     source.level = level;
     return r.on_set(set_of(trigger_ns, std::move(present)), source);
   }
@@ -190,7 +190,7 @@ TEST(CaptureRecorder, UndoWhileArmedOnlyDisarms) {
   EXPECT_TRUE(recorder.writer().session().captures.empty());
 
   // With no capture and nothing armed, there is nothing to take back.
-  EXPECT_EQ(recorder.undo().domain(), Status::Code::NotFound);
+  EXPECT_EQ(recorder.undo().domain(), core::Status::Code::NotFound);
 }
 
 TEST(CaptureRecorder, AReadFailureDropsTheCaptureAndDisarms) {
@@ -199,7 +199,7 @@ TEST(CaptureRecorder, AReadFailureDropsTheCaptureAndDisarms) {
   recorder.arm();
   rig.source.fail_camera = 1;
   auto failed = rig.feed(recorder, 10, 1);
-  EXPECT_EQ(failed.status().domain(), Status::Code::IoError);
+  EXPECT_EQ(failed.status().domain(), core::Status::Code::IoError);
   EXPECT_FALSE(recorder.armed());
   EXPECT_TRUE(recorder.writer().session().captures.empty());
 }
@@ -210,7 +210,7 @@ TEST(CaptureRecorder, RefusesAnImageTheWrongSize) {
   recorder.arm();
   rig.source.wrong_size = true;
   EXPECT_EQ(rig.feed(recorder, 10, 1).status().domain(),
-            Status::Code::InvalidArgument);
+            core::Status::Code::InvalidArgument);
   EXPECT_FALSE(recorder.armed());
 }
 
@@ -218,7 +218,7 @@ TEST(CaptureRecorder, RefusesASetOfAnotherRig) {
   Rig rig;
   CaptureRecorder recorder = rig.recorder(1);
   EXPECT_EQ(rig.feed(recorder, 10, 1, {true, true, true}).status().domain(),
-            Status::Code::InvalidArgument);
+            core::Status::Code::InvalidArgument);
 }
 
 TEST(CaptureRecorder, CreateRefusesNoFramesToAverage) {
@@ -227,7 +227,7 @@ TEST(CaptureRecorder, CreateRefusesNoFramesToAverage) {
   ASSERT_TRUE(writer.ok());
   EXPECT_EQ(
       CaptureRecorder::create(std::move(writer).value(), {0}).status().domain(),
-      Status::Code::InvalidArgument);
+      core::Status::Code::InvalidArgument);
 }
 
 }  // namespace

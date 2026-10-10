@@ -29,19 +29,9 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 option(VC_BUILD_EXAMPLES "Build example programs" ${VC_IS_TOP_LEVEL})
 option(VC_BUILD_TESTS "Build tests" ${VC_IS_TOP_LEVEL})
 option(VC_INSTALL "Generate install/export rules" ${VC_IS_TOP_LEVEL})
-# TODO: VC_WITH_VULKAN / VC_WITH_CUDA gate the compute-backend tiers and are not
-# consumed yet (no target reads them, so toggling them is a no-op). How calib's
-# GPU work runs is under review (see DECISIONS.md "Open decisions"): its own
-# Vulkan (Apple via MoltenVK) + opt-in CUDA backends per DESIGN.md, or recon's
-# core over a shared VkDevice. Wire these up, or remove them, once that is
-# settled. Native Metal is deferred either way (not an option here on purpose).
-option(VC_WITH_VULKAN
-       "Enable the portable Vulkan-compute backend (reserved; not yet wired)"
-       OFF)
-option(VC_WITH_CUDA
-       "Enable the CUDA desktop-accelerator backend (reserved; not yet wired)"
-       OFF)
-# On by default only at the top level: a consumer that pulls us in via
+# No GPU options: calib's GPU work runs on volumetric_kit_core's vulkan tier, on
+# a VkDevice shared with recon and gfx (DECISIONS.md), not on a backend of its
+# own. On by default only at the top level: a consumer that pulls us in via
 # FetchContent with a newer compiler should see our new warnings, not a broken
 # build.
 option(VC_WARNINGS_AS_ERRORS "Treat first-party compiler warnings as errors"
