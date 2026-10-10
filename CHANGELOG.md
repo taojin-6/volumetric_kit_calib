@@ -23,11 +23,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `volumetric_kit/core/base/check.hpp`); a failed check now reports through the
   core's log sink, which prints to stderr by default; `std::move(r).value()`
   returns the value rather than a reference into `r`.
-- `volumetric_kit_core` is pinned at 0.1.0 (its PR #20; was PR #1), and
-  calib's configure requires 0.1.0 or newer (`vkc_require_core`). calib's code
-  is unchanged. What reaches its consumers:
+- `volumetric_kit_core` is pinned at 0.1.0 (main after its PR #21; was PR #13),
+  and calib requires 0.1.0 or newer (`vkc_require_core`). calib's code is
+  unchanged. What reaches its consumers:
   - An application that declares the core before calib pins 0.1.0 or newer;
     on an older one, calib's configure fails at `vkc_require_core`.
+  - The installed package config makes the same check after it re-finds the
+    core: beside an older core, `find_package(volumetric_kit_calib)` reports
+    the package not found, naming the core, as a failed `find_dependency`
+    does.
   - The installed package re-finds the core at 0.1, whose soname is `0.1`:
     rebuild against it.
   - The core supports only GCC and Clang -- it dropped Windows and MSVC -- and

@@ -34,15 +34,16 @@ include(FetchContent)
 # It leaves VKC_WITH_VULKAN unset rather than OFF, so an application that turns
 # the tier on for recon or gfx keeps it.
 #
-# The pin is core 0.1.0, the head of core PR #20.
+# The pin is core 0.1.0: main after core PR #21, which gave vkc_require_core the
+# PACKAGE mode calib's package config uses.
 #
 # TODO: pin the v0.1.0 tag once the core tags it.
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG d02a2d20ccd245521b536c9bf41b31d3c0f3cb8f)
+  GIT_TAG ce76978a9b829313e911b7a47b4110e2a02ed69f)
 FetchContent_MakeAvailable(volumetric_kit_core)
-vkc_require_core(0.1.0)
+vkc_require_core(${VC_CORE_MIN_VERSION})
 
 if(VC_BUILD_TESTS)
   # googletest is only needed when building the test suite.

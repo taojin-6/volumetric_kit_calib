@@ -27,7 +27,8 @@ gtest_discover_tests(vc_data_model_test)
 # The core calib requires (third_party/CMakeLists.txt): calib's configure
 # against a stand-in core of each version (core_requirement/) refuses one older
 # than 0.1.0 -- before 0.1.0 the core has no vkc_require_core -- and accepts
-# 0.1.0 or newer, re-finding it at its MAJOR.MINOR.
+# 0.1.0 or newer, its package config re-finding the core at its MAJOR.MINOR and
+# requiring VC_CORE_MIN_VERSION of it.
 include(FetchContent)
 FetchContent_GetProperties(volumetric_kit_core)
 function(vc_add_core_requirement_test name core_version expect)
@@ -37,7 +38,8 @@ function(vc_add_core_requirement_test name core_version expect)
       ${CMAKE_COMMAND} -DCALIB_SOURCE=${PROJECT_SOURCE_DIR}
       -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/core_requirement/${name}
       -DCORE_VERSION=${core_version}
-      -DCORE_MODULES=${volumetric_kit_core_SOURCE_DIR}/cmake ${expect}
+      -DCORE_MODULES=${volumetric_kit_core_SOURCE_DIR}/cmake
+      -DMIN_VERSION=${VC_CORE_MIN_VERSION} ${expect}
       -DGENERATOR=${CMAKE_GENERATOR} -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} -DEIGEN3_DIR=${Eigen3_DIR} -P
       ${CMAKE_CURRENT_SOURCE_DIR}/core_requirement/configure.cmake)

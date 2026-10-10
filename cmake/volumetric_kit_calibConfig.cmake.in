@@ -13,6 +13,9 @@ find_dependency(Eigen3 CONFIG)
 # volumetric_kit_core is PUBLIC too (Status / Result in every signature), at
 # the minor version this package was built against.
 find_dependency(volumetric_kit_core @VC_CORE_MAJOR_MINOR@ CONFIG)
+# That minor may still be older than the core calib needs: then the package is
+# not found, as a failed find_dependency leaves it.
+vkc_require_core(@VC_CORE_MIN_VERSION@ PACKAGE volumetric_kit_calib)
 
 # TODO: as the detect/solve tiers land, re-find their public deps here
 # (OpenCV for detect, Ceres for solve) — mirroring the Eigen line above.

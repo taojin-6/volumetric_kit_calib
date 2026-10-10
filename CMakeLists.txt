@@ -63,6 +63,9 @@ include(vc_sanitizers)
 find_package(Eigen3 REQUIRED CONFIG)
 
 # --- Dependencies + library --------------------------------------------------
+# The oldest volumetric_kit_core calib builds with: checked in the core that
+# arrives (third_party/) and again by the installed package config.
+set(VC_CORE_MIN_VERSION 0.1.0)
 add_subdirectory(third_party)
 add_subdirectory(src)
 

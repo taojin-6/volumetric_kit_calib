@@ -30,7 +30,8 @@ domain model and rationale remain in the intentionally gitignored local
   outside -- with no `vc::` re-exports (amended 2026-10-05; see the dated
   entry), so a calib error passes to `recon` or `gfx` unchanged. The core is
   fetched pinned by commit (`third_party/`), and the installed package
-  re-finds it at the minor version it was built with. Why:
+  re-finds it at the minor version it was built with and requires calib's
+  floor of it (`vkc_require_core`). Why:
   `recon`'s and `gfx`'s copies of the same bottom layer had drifted (the core's
   DECISIONS.md has the evidence); one copy means a fix lands once.
 - **GPU work runs on the core's vulkan tier, on a `VkDevice` shared with

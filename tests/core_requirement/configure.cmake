@@ -6,9 +6,11 @@
 # and checks the outcome. With EXPECT_ERROR, the configure must fail with output
 # matching that regex, blanks and line breaks counting as one space. With
 # EXPECT_CONFIG_VERSION, it must succeed, and calib's package config must
-# re-find the core at that MAJOR.MINOR. GENERATOR, CXX_COMPILER, MAKE_PROGRAM
-# and EIGEN3_DIR repeat the calling build's (tests/CMakeLists.txt).
-foreach(_var CALIB_SOURCE BINARY_DIR CORE_VERSION CORE_MODULES GENERATOR)
+# re-find the core at that MAJOR.MINOR and then require MIN_VERSION, calib's
+# floor, of it. GENERATOR, CXX_COMPILER, MAKE_PROGRAM and EIGEN3_DIR repeat the
+# calling build's (tests/CMakeLists.txt).
+foreach(_var CALIB_SOURCE BINARY_DIR CORE_VERSION CORE_MODULES MIN_VERSION
+             GENERATOR)
   if(NOT DEFINED ${_var})
     message(FATAL_ERROR "configure.cmake: ${_var} is not set")
   endif()
@@ -60,4 +62,13 @@ set(_find
 string(FIND "${_config_text}" "${_find}" _at)
 if(_at EQUAL -1)
   message(FATAL_ERROR "${_config} lacks '${_find}':\n${_config_text}")
+endif()
+# The floor is checked once the core is found, so it reads the found core's
+# version.
+set(_require "vkc_require_core(${MIN_VERSION} PACKAGE volumetric_kit_calib)")
+string(FIND "${_config_text}" "${_require}" _require_at)
+if(_require_at LESS_EQUAL _at)
+  message(
+    FATAL_ERROR
+      "${_config} lacks '${_require}' after '${_find}':\n${_config_text}")
 endif()
