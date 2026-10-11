@@ -131,3 +131,15 @@ decisions.)
 previously committed constraints available to both agents without copying the
 local-only design document. Update shared rules here and in AGENTS.md as
 appropriate when a decision changes; keep tool-specific configuration separate.
+
+## 2026-10-11 — Scenario configuration belongs to core
+
+Applications use the shared versioned JSON format from core_config. Core owns
+parsing, typed settings, defaults, and static validation, including unsupported
+fields and cross-field constraints. Each application maps validated settings to
+its runtime APIs; existing camera/model invariants and runtime resource checks
+stay with their owners. The implemented projection demo uses this contract now.
+Future calibration applications will extend it when their behavior exists.
+
+The optional examples link core_config privately. calib_core still needs only
+core_base and Eigen, and public engine headers expose no JSON types.

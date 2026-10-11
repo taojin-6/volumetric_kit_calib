@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The projection demo now reads a versioned JSON scenario via core_config,
+  which owns parsing, defaults, and static validation. Run it with
+  `--config config/project_point.json`; the library API is unchanged.
+
+### Changed
+
 - calib builds with C++ exceptions enabled, as recon and the core do: CI no
   longer builds it with `-fno-exceptions`, and a consumer builds it with
   exceptions on. No exception crosses its API; fallible calls still return

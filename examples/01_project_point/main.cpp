@@ -13,6 +13,7 @@
 
 #include "volumetric_kit/calib/core/camera_model.hpp"
 #include "volumetric_kit/calib/version.hpp"
+#include "volumetric_kit/core/config/config.hpp"
 
 namespace vc = volumetric_kit::calib;
 namespace vkc = volumetric_kit::core;
@@ -20,18 +21,21 @@ namespace vkc = volumetric_kit::core;
 namespace {
 
 // Everything fallible lives here, so VKC_ASSIGN can hand failures to main().
-vkc::Status run() {
-  const vc::ImageSize image_size{1280, 720};
+vkc::Status run(const vkc::config::Calibration& settings) {
+  const vc::ImageSize image_size{settings.image_width, settings.image_height};
   const vc::PinholeBrownConrady::Intrinsics intrinsics{
-      /*fx=*/1000.0, /*fy=*/1000.0, /*cx=*/640.0, /*cy=*/360.0};
+      settings.intrinsics[0], settings.intrinsics[1], settings.intrinsics[2],
+      settings.intrinsics[3]};
   const vc::PinholeBrownConrady::Distortion distortion{
-      /*k1=*/-0.28, /*k2=*/0.10, /*p1=*/0.001, /*p2=*/-0.0005, /*k3=*/0.0};
+      settings.distortion[0], settings.distortion[1], settings.distortion[2],
+      settings.distortion[3], settings.distortion[4]};
 
   VKC_ASSIGN(
       const vc::PinholeBrownConrady camera,
       vc::PinholeBrownConrady::create(image_size, intrinsics, distortion));
 
-  const Eigen::Vector3d point_camera{0.1, -0.2, 2.0};
+  const Eigen::Vector3d point_camera{settings.point[0], settings.point[1],
+                                     settings.point[2]};
   VKC_ASSIGN(const Eigen::Vector2d pixel, camera.project(point_camera));
   VKC_ASSIGN(const Eigen::Vector2d normalized, camera.unproject(pixel));
 
@@ -43,12 +47,24 @@ vkc::Status run() {
   return {};
 }
 
-}  // namespace
-
-int main() {
+vkc::Status launch(int argc, const char* const* argv) {
+  VKC_ASSIGN(const auto arguments, vkc::config::parse_args(argc, argv));
+  if (arguments.help) {
+    std::printf("%s", vkc::config::usage());
+    return {};
+  }
+  VKC_ASSIGN(const auto config,
+             vkc::config::load(arguments.config_path,
+                               vkc::config::Application::CalibProjectPoint));
   std::printf("volumetric_kit_calib %s — project/unproject demo\n\n",
               vc::version_string());
-  const vkc::Status status = run();
+  return run(config.calibration);
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+  const vkc::Status status = launch(argc, argv);
   if (!status) {
     std::fprintf(stderr, "error: %s: %s\n",
                  std::string(vkc::to_string(status.domain())).c_str(),
