@@ -45,7 +45,7 @@ endif()
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG afaa844b41cf21b98d5b412b5e70e3708e1e71ef)
+  GIT_TAG 84c2cb4bfff0bc184c70c5754e9dfa63c819e196)
 FetchContent_MakeAvailable(volumetric_kit_core)
 vkc_require_core(${VC_CORE_MIN_VERSION})
 if(VC_BUILD_EXAMPLES AND NOT TARGET volumetric_kit::core_config)
