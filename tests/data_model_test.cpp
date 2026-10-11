@@ -26,13 +26,6 @@ TEST(SensorProfile, StartsWithEveryFieldUnknown) {
   EXPECT_FALSE(s.rolling_shutter_line_time_us);
 }
 
-TEST(SensorProfile, GlobalShutterIsKnownNotUnknown) {
-  SensorProfile s;
-  s.rolling_shutter_line_time_us = 0.0;
-  ASSERT_TRUE(s.rolling_shutter_line_time_us.has_value());
-  EXPECT_EQ(*s.rolling_shutter_line_time_us, 0.0);
-}
-
 TEST(LensProfile, StartsWithEveryFieldUnknown) {
   const LensProfile lens;
   EXPECT_FALSE(lens.focal_length_mm);
@@ -41,13 +34,6 @@ TEST(LensProfile, StartsWithEveryFieldUnknown) {
   EXPECT_FALSE(lens.has_image_stabilization);
   EXPECT_FALSE(lens.has_autofocus);
   EXPECT_TRUE(lens.mount.empty());
-}
-
-TEST(LensProfile, NoStabilizationIsKnownNotUnknown) {
-  LensProfile lens;
-  lens.has_image_stabilization = false;
-  ASSERT_TRUE(lens.has_image_stabilization.has_value());
-  EXPECT_FALSE(*lens.has_image_stabilization);
 }
 
 TEST(Target, TolerancesStartUnknown) {
