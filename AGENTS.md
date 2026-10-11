@@ -16,10 +16,10 @@ The implemented core and planned tiers are distinguished in
 - Mobile is first-class and fully on-device; the board-constrained solve runs
   on CPU. `SensorProfile` and `LensProfile` are required physical inputs.
 - calib builds on [`volumetric_kit_core`](https://github.com/taojin-6/volumetric_kit_core)
-  (fetched, pinned by commit): error handling now, then camera models and
-  capture drivers. Code two or more siblings need belongs in the core, as a
-  task in that repository. From the primary checkout it is
-  `../volumetric_kit_core/`.
+  (fetched, pinned by commit). Code two or more siblings need belongs in the
+  core, as a task in that repository; cameras and sensors do not
+  ([DECISIONS.md](DECISIONS.md#locked-decisions)). From the primary checkout
+  it is `../volumetric_kit_core/`.
 - GPU work runs on the core's vulkan tier, on a `VkDevice` shared with `recon`
   and `gfx` ([DECISIONS.md](DECISIONS.md#locked-decisions)); calib keeps no
   GPU backend of its own. A CPU backend is the correctness oracle.
@@ -69,7 +69,9 @@ on tiers to its left. The headless **brain**
 
 ## Error handling
 
-Mobile consumers build with `-fno-exceptions`. Fallible calls return `Status`
+calib builds with C++ exceptions enabled, as its siblings do
+([DECISIONS.md](DECISIONS.md#2026-10-10--calib-builds-with-exceptions-enabled)),
+and no exception crosses its API. Fallible calls return `Status`
 (success or an error domain + message) or `Result<T>` (a value or a `Status`)
 -- the core's `core::Status` and `core::Result<T>`, from
 `volumetric_kit/core/base/result.hpp`. Propagate with `VKC_TRY` /

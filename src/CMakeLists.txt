@@ -39,12 +39,7 @@ if(VC_INSTALL)
 
   # The installed package re-finds the core at the MAJOR.MINOR this build
   # fetched: the core's version file accepts only the same minor before 1.0.
-  get_target_property(_vc_core_version volumetric_kit::core_base VERSION)
-  string(REGEX MATCH "^[0-9]+\\.[0-9]+" VC_CORE_MAJOR_MINOR
-               "${_vc_core_version}")
-  if(NOT VC_CORE_MAJOR_MINOR)
-    message(FATAL_ERROR "volumetric_kit::core_base has no VERSION to require")
-  endif()
+  vkc_core_version(VC_CORE_MAJOR_MINOR MAJOR_MINOR)
 
   include(CMakePackageConfigHelpers)
   configure_package_config_file(

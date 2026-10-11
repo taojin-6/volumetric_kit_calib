@@ -33,8 +33,11 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
   [`volumetric_kit_core`](https://github.com/taojin-6/volumetric_kit_core), the
   family's shared foundation. Its base tier supplies calib's `Status`/`Result`
   today. Its vulkan tier will supply GPU compute -- calib's build leaves it off
-  until calib writes GPU code, so it needs no Vulkan SDK -- and its planned
-  camera and sensor tiers, camera models and capture drivers.
+  until calib writes GPU code, so it needs no Vulkan SDK.
+- **Cameras and sensors:** the camera model is calib's own, in its `core`
+  tier; the `capture` tier will take frames from `volumetric_kit_recon`'s
+  sensor tier and its drivers
+  ([DECISIONS.md](DECISIONS.md#locked-decisions)).
 - **Compute:** a CPU backend is the correctness oracle. GPU work runs on the
   core's vulkan tier, on a `VkDevice` shared with `recon` and `gfx`, so frames
   pass between them without copies (MoltenVK on Apple; native Metal deferred).
@@ -77,12 +80,11 @@ Run the demo:
 ## Use it in your project
 
 ```cmake
-# FetchContent (pin GIT_TAG to a release tag or commit SHA):
 include(FetchContent)
 FetchContent_Declare(
   volumetric_kit_calib
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_calib.git
-  GIT_TAG main)
+  GIT_TAG <tag-or-sha>)
 FetchContent_MakeAvailable(volumetric_kit_calib)
 
 target_link_libraries(your_app PRIVATE volumetric_kit::calib_core)
@@ -94,6 +96,11 @@ FetchContent build of it never fails on a warning your compiler adds.
 `VC_SANITIZE` is a semicolon list, empty (off) by default —
 e.g. `-DVC_SANITIZE="address;undefined"`. An installed calib carries the core
 beside it, and `find_package(volumetric_kit_calib)` finds both.
+
+calib needs `volumetric_kit_core` 0.1.0 or newer. An application that declares
+the core before calib, to share it with `recon` or `gfx`, pins at least that:
+on an older core, calib's configure fails at `vkc_require_core`, and an
+installed calib is not found.
 
 ## Development
 
