@@ -4,7 +4,9 @@
 // An application's use of calib's brain from an installed package: it includes
 // each of calib_core's public headers, so each must compile from the install,
 // and checks the rig's board and an observation in recon's types, so it links
-// calib_core, recon_camera and the core's base tier.
+// calib_core, recon_camera and the core's base tier. With compute
+// (VC_CONSUMER_COMPUTE) it includes compute's headers too, and builds the
+// board and the camera in OpenCV's types, so it links calib_compute and OpenCV.
 
 #include "volumetric_kit/calib/core/capture_meta.hpp"
 #include "volumetric_kit/calib/core/lens_profile.hpp"
@@ -14,6 +16,13 @@
 #include "volumetric_kit/calib/core/view_check.hpp"
 #include "volumetric_kit/calib/version.hpp"
 #include "volumetric_kit/recon/camera/camera_model.hpp"
+
+#ifdef VC_CONSUMER_COMPUTE
+#include "volumetric_kit/calib/compute/board.hpp"
+#include "volumetric_kit/calib/compute/cv_camera.hpp"
+#include "volumetric_kit/calib/compute/cv_pose.hpp"
+#include "volumetric_kit/calib/compute/guarded.hpp"
+#endif
 
 int main() {
   namespace vc = volumetric_kit::calib;
@@ -25,5 +34,17 @@ int main() {
   const bool ok = vc::check_target(vc::legacy_femto_board()).ok() &&
                   camera::check_camera_model(color).ok() && seen.size() == 1 &&
                   vc::version_string()[0] != '\0';
+#ifdef VC_CONSUMER_COMPUTE
+  namespace compute = vc::compute;
+  const bool bridged =
+      compute::Board::create(vc::legacy_femto_board()).ok() &&
+      compute::cv_camera(color).ok() &&
+      compute::cv_pose(compute::matrix_from_cv_pose({})).ok() &&
+      compute::guarded("consumer", [] {
+        return volumetric_kit::core::Status{};
+      }).ok();
+  return ok && bridged ? 0 : 1;
+#else
   return ok ? 0 : 1;
+#endif
 }

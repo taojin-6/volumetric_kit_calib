@@ -1,0 +1,126 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Tao Jin
+
+#pragma once
+
+/// @file synthetic_rig.hpp
+/// @brief The one synthetic source for calib's tests: lenses like the Femto
+///        Mega's, a four-camera rig, a plan of board placements, and an
+///        exact-inverse renderer of the board.
+///
+/// World: z up, the floor at z = 0. Poses are recon's `Mat4d`s, named by what
+/// they map (`world_to_camera` is OpenCV's extrinsic). Projections are exact:
+/// a point is moved into the camera in double, then through the lens with
+/// `cv::projectPoints`, with no Rodrigues round trip.
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include <opencv2/core.hpp>
+
+#include "volumetric_kit/calib/compute/board.hpp"
+#include "volumetric_kit/recon/camera/camera_model.hpp"
+#include "volumetric_kit/recon/camera/geometry.hpp"
+
+namespace volumetric_kit::calib::testing {
+
+/// @brief A 4K colour lens with a Femto Mega's magnitudes: Brown-Conrady with
+///        small k4-k6, so the rational denominator is exercised.
+/// @return The model, which recon's `check_camera_model` accepts.
+recon::camera::CameraModel color_like_lens();
+
+/// @brief A 640x576 depth lens like the Femto Mega's NFOV unbinned one:
+///        large, nearly cancelling k1 and k4 (k1 = 29.29, k6 = 3.77).
+/// @return The model, which recon's `check_camera_model` accepts.
+recon::camera::CameraModel depth_like_lens();
+
+/// @brief One colour camera of the synthetic rig.
+struct SyntheticCamera {
+  std::string id;                        ///< A stand-in serial.
+  recon::camera::CameraModel model;      ///< Its lens, at 3840x2160.
+  recon::camera::Mat4d world_to_camera;  ///< T_cw.
+};
+
+/// @brief Four 4K colour cameras about 2.5 m up in an outside-in ring of about
+///        1.9 m, each looking near the middle of the floor with its own
+///        variation of @ref color_like_lens; camera 0 is the reference.
+/// @return The cameras.
+std::vector<SyntheticCamera> synthetic_rig();
+
+/// @brief Where a camera images points.
+/// @param model      The camera's lens.
+/// @param to_camera  The points' frame to the camera's.
+/// @param points     The points.
+/// @return Each point's pixel, OpenCV's convention (centres at integers).
+std::vector<cv::Point2d> project(const recon::camera::CameraModel& model,
+                                 const recon::camera::Mat4d& to_camera,
+                                 const std::vector<cv::Point3d>& points);
+
+/// @brief One placement of the board, and who sees it.
+struct Placement {
+  recon::camera::Mat4d board_to_world;  ///< T_wb.
+  /// The rig's cameras (indices) that see the whole board (@ref PlanOptions).
+  std::vector<std::size_t> cameras;
+};
+
+/// @brief What @ref synthetic_plan places, and what counts as seeing a board.
+struct PlanOptions {
+  std::size_t count = 60;       ///< Placements to make.
+  std::uint32_t seed = 1;       ///< The random sequence's seed.
+  std::size_t min_cameras = 2;  ///< Fewer cameras seeing a board drop it.
+  double max_tilt_deg = 70.0;   ///< Printed face to camera ray, at most.
+  double margin_px = 40.0;      ///< The board's outline inside the image.
+  double min_depth_m = 0.3;     ///< The board's outline in front, at least.
+};
+
+/// @brief Placements as a person makes them: 40 % on the floor, the rest on
+///        stands at 0.5, 1.0 and 1.5 m, half of those tilted 5-15 degrees
+///        toward a camera; each at a random yaw, kept when at least
+///        `min_cameras` see it.
+/// @param rig      The cameras.
+/// @param board    The board placed.
+/// @param options  How many, and what counts as seeing one.
+/// @return Up to `options.count` placements, the same for the same options.
+std::vector<Placement> synthetic_plan(const std::vector<SyntheticCamera>& rig,
+                                      const compute::Board& board,
+                                      const PlanOptions& options = {});
+
+/// @brief The renderer's inverse map: pixels to normalized pinhole
+///        coordinates (`x = X / Z`), through `cv::undistortPoints` iterated
+///        until the round trip through the lens is below 1e-9 px.
+/// @param model   The lens.
+/// @param pixels  Pixels, OpenCV's convention.
+/// @return Each pixel's normalized coordinates.
+std::vector<cv::Point2d> undistort_pixels(
+    const recon::camera::CameraModel& model,
+    const std::vector<cv::Point2d>& pixels);
+
+/// @brief How @ref render_board draws.
+struct RenderOptions {
+  double texture_px_per_m = 6000.0;  ///< The board texture's resolution.
+  double margin_m = 0.02;            ///< White margin around the chessboard.
+  float black = 30.0f;               ///< A black square's level.
+  float white = 220.0f;              ///< A white square's level.
+  float background = 110.0f;         ///< Everything off the board.
+  int supersampling = 3;             ///< Samples per pixel on each axis.
+};
+
+/// @brief The board as @p model images it at @p board_to_camera: a clean,
+///        geometric render (no blur, noise or compression).
+///
+/// Each sample is a pixel's ray (@ref undistort_pixels) meeting the board's
+/// plane, read from the board's texture, so the lens is inverted exactly
+/// rather than approximated by a forward warp.
+/// @param model            The lens.
+/// @param board_to_camera  T_cb.
+/// @param board            The board drawn.
+/// @param options          Levels and sampling.
+/// @return An 8-bit luma image of `model.size`.
+cv::Mat render_board(const recon::camera::CameraModel& model,
+                     const recon::camera::Mat4d& board_to_camera,
+                     const compute::Board& board,
+                     const RenderOptions& options = {});
+
+}  // namespace volumetric_kit::calib::testing

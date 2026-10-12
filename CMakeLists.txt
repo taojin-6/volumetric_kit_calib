@@ -36,6 +36,12 @@ option(VC_INSTALL "Generate install/export rules" ${VC_IS_TOP_LEVEL})
 # build.
 option(VC_WARNINGS_AS_ERRORS "Treat first-party compiler warnings as errors"
        ${VC_IS_TOP_LEVEL})
+# OFF by default: OpenCV 5 is a prerequisite you install, not a vendored
+# dependency, and a build without it still has the core tier.
+option(
+  VC_WITH_OPENCV
+  "Build the OpenCV tiers, from compute on (requires an installed OpenCV 5)"
+  OFF)
 
 # Semicolon list of sanitizers (e.g. "address;undefined"); empty = off. Applied
 # globally — see cmake/vc_sanitizers.cmake for why.
@@ -47,9 +53,18 @@ include(vc_warnings)
 include(vc_sanitizers)
 
 # --- Dependencies + library --------------------------------------------------
-# The oldest volumetric_kit_core calib builds with: checked in the core that
+# The oldest volumetric_kit_core calib builds with (0.2.0 brings
+# exception_status, which compute's guarded() takes): checked in the core that
 # arrives (third_party/) and again by the installed package config.
-set(VC_CORE_MIN_VERSION 0.1.0)
+set(VC_CORE_MIN_VERSION 0.2.0)
+# OpenCV, for the compute tier and those built on it: a prerequisite, installed
+# (brew install opencv) and found, never fetched; found here so its imported
+# targets reach every tier. 5.0, whose geometry module calib calls, split from
+# 4.x's calib3d; Ubuntu's packages are OpenCV 4.
+if(VC_WITH_OPENCV)
+  find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS core imgproc objdetect
+                                                     geometry)
+endif()
 add_subdirectory(third_party)
 add_subdirectory(src)
 

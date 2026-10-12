@@ -8,16 +8,21 @@
 include(GNUInstallDirs)
 
 add_subdirectory(volumetric_kit/calib/core)
-# TODO: add_subdirectory() for compute / detect / solve / color / quality /
-# capture / viz / app as those tiers land (see DESIGN.md). compute needs the
-# Vulkan/CUDA backends; detect/solve need OpenCV/Ceres; viz/app need
-# volumetric_kit_gfx.
+if(VC_WITH_OPENCV)
+  add_subdirectory(volumetric_kit/calib/compute)
+endif()
+# TODO: add_subdirectory() for detect / solve / color / quality / capture / viz
+# / app as those tiers land (see DESIGN.md). detect/solve build on compute;
+# viz/app need volumetric_kit_gfx.
 
 # --- calib: umbrella alias ---------------------------------------------------
 # Consumers link `volumetric_kit::calib` and get whatever tiers are built.
 add_library(calib INTERFACE)
 add_library(volumetric_kit::calib ALIAS calib)
 target_link_libraries(calib INTERFACE calib_core)
+if(VC_WITH_OPENCV)
+  target_link_libraries(calib INTERFACE calib_compute)
+endif()
 
 # --- Install / export --------------------------------------------------------
 # Tiers install their own targets into volumetric_kit_calibTargets (above); here
@@ -26,11 +31,16 @@ target_link_libraries(calib INTERFACE calib_core)
 if(VC_INSTALL)
   install(TARGETS calib EXPORT volumetric_kit_calibTargets)
 
+  # A tier's headers ship only when the tier is built.
+  set(_vc_unbuilt_headers)
+  if(NOT VC_WITH_OPENCV)
+    list(APPEND _vc_unbuilt_headers PATTERN "compute" EXCLUDE)
+  endif()
   install(
     DIRECTORY "${PROJECT_SOURCE_DIR}/include/"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
     FILES_MATCHING
-    PATTERN "*.hpp")
+    PATTERN "*.hpp" ${_vc_unbuilt_headers})
 
   install(
     EXPORT volumetric_kit_calibTargets

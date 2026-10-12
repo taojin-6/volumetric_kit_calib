@@ -80,7 +80,9 @@ and no exception crosses its API. Fallible calls return `Status`
 `volumetric_kit/core/base/result.hpp`. Propagate with `VKC_TRY` /
 `VKC_ASSIGN`. Programmer errors (reading an error `Result`'s value) fail fast
 via `VKC_CHECK`, never throw. Solver failures use the
-`core::Status::Code::Numerical` domain.
+`core::Status::Code::Numerical` domain. A public function that calls OpenCV
+runs its body once through `compute::guarded`, which returns what OpenCV (or
+anything else) throws as a `Status`.
 
 ## Conventions
 
@@ -117,12 +119,13 @@ MSVC flags.
 
 Run from the task's worktree. The build requires CMake ≥ 3.21, a C++17
 compiler, GLM, and network access on the first configure (the core, recon and
-googletest are fetched); see README and CI for platform dependencies.
+googletest are fetched); `VC_WITH_OPENCV` needs an installed OpenCV 5. See
+README and CI for platform dependencies.
 
 ```sh
 calib_root="$(git rev-parse --show-toplevel)"
 cmake -S "$calib_root" -B "$calib_root/build" \
-  -DCMAKE_BUILD_TYPE=Release -DVC_BUILD_TESTS=ON
+  -DCMAKE_BUILD_TYPE=Release -DVC_BUILD_TESTS=ON -DVC_WITH_OPENCV=ON
 cmake --build "$calib_root/build" --parallel
 ctest --test-dir "$calib_root/build" --output-on-failure
 pre-commit run --all-files --show-diff-on-failure

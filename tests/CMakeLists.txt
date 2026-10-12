@@ -25,12 +25,33 @@ target_link_libraries(vc_data_model_test PRIVATE volumetric_kit::calib_core
 vc_target_warnings(vc_data_model_test)
 gtest_discover_tests(vc_data_model_test)
 
+if(VC_WITH_OPENCV)
+  # The synthetic source every calib test draws on (support/): lenses, a rig, a
+  # plan of placements and an exact-inverse renderer, over compute's bridge.
+  add_library(vc_synthetic_rig STATIC EXCLUDE_FROM_ALL
+              support/synthetic_rig.cpp)
+  target_include_directories(vc_synthetic_rig
+                             PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/support")
+  target_link_libraries(vc_synthetic_rig PUBLIC volumetric_kit::calib_compute
+                                                opencv_geometry opencv_imgproc)
+  vc_target_warnings(vc_synthetic_rig)
+
+  # compute: the OpenCV bridge, and the synthetic source itself.
+  foreach(_vc_test cv_camera cv_pose board guarded synthetic_rig)
+    add_executable(vc_${_vc_test}_test ${_vc_test}_test.cpp)
+    target_link_libraries(vc_${_vc_test}_test PRIVATE vc_synthetic_rig
+                                                      GTest::gtest_main)
+    vc_target_warnings(vc_${_vc_test}_test)
+    gtest_discover_tests(vc_${_vc_test}_test)
+  endforeach()
+endif()
+
 # The core calib requires (third_party/CMakeLists.txt): calib's configure
 # against a stand-in core of each version (core_requirement/) refuses one older
-# than 0.1.0 -- before 0.1.0 the core has no vkc_require_core -- and accepts
-# 0.1.0 or newer, its package config re-finding recon, whose package config
-# re-finds the core, and holding that core to its MAJOR.MINOR and
-# VC_CORE_MIN_VERSION.
+# than VC_CORE_MIN_VERSION, 0.2.0 -- before 0.1.0 the core has no
+# vkc_require_core -- and accepts 0.2.0 or newer, its package config re-finding
+# recon, whose package config re-finds the core, and holding that core to its
+# MAJOR.MINOR and VC_CORE_MIN_VERSION.
 #
 # Those configures, and the one below, take the fetched sources this build used
 # (FETCHCONTENT_SOURCE_DIR_<NAME>), so they need no network.
@@ -59,18 +80,21 @@ endfunction()
 vc_add_core_requirement_test(
   before_0_1_0 none "-DEXPECT_ERROR=Unknown CMake command \"vkc_require_core\"")
 vc_add_core_requirement_test(
-  0_0_9 0.0.9 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.1\\.0 or newer")
-vc_add_core_requirement_test(0_1_0 0.1.0 -DEXPECT_CONFIG_VERSION=0.1)
+  0_0_9 0.0.9 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.2\\.0 or newer")
+vc_add_core_requirement_test(
+  0_1_0 0.1.0 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.2\\.0 or newer")
+vc_add_core_requirement_test(0_2_0 0.2.0 -DEXPECT_CONFIG_VERSION=0.2)
 vc_add_core_requirement_test(0_3_2 0.3.2 -DEXPECT_CONFIG_VERSION=0.3)
 
-# The brain needs no Vulkan (no_vulkan/): calib configures, builds and installs
-# with find_package(Vulkan) disabled, and a consumer builds against the
-# installed package with it disabled too; the installed package refuses a core
-# of another minor version.
+# The brain needs no Vulkan (no_vulkan/): calib, with OpenCV as this build has
+# it, configures, builds and installs with find_package(Vulkan) disabled, and a
+# consumer builds against the installed package with it disabled too; the
+# installed package refuses a core of another minor version.
 add_test(
   NAME no_vulkan.brain
   COMMAND
     ${CMAKE_COMMAND} -DCALIB_SOURCE=${PROJECT_SOURCE_DIR}
     -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/no_vulkan
-    -DCORE_SOURCE=${volumetric_kit_core_SOURCE_DIR} ${_vc_fetched_sources} -P
+    -DCORE_SOURCE=${volumetric_kit_core_SOURCE_DIR} ${_vc_fetched_sources}
+    -DWITH_OPENCV=${VC_WITH_OPENCV} -DOPENCV_DIR=${OpenCV_DIR} -P
     ${CMAKE_CURRENT_SOURCE_DIR}/no_vulkan/configure.cmake)

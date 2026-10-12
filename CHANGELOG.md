@@ -8,6 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- calib requires `volumetric_kit_core` 0.2.0 or newer (was 0.1.0), for its
+  `exception_status`; the pinned core is unchanged.
 - calib's camera model is recon's (DECISIONS.md, 2026-10-12). Migrating:
   `PinholeBrownConrady`, `ImageSize` and `calib/core/camera_model.hpp` are
   removed; use `volumetric_kit::recon::camera::CameraModel` and
@@ -79,6 +81,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The `compute` tier, `volumetric_kit::calib_compute`, built with
+  `VC_WITH_OPENCV` (OFF by default; needs an installed OpenCV 5.0 or newer):
+  OpenCV behind recon's and calib's types (DECISIONS.md, 2026-10-12).
+  `cv_camera` gives a `CameraModel` as OpenCV's camera matrix and eight
+  coefficients; `cv_matrix`, `matrix_from_cv`, `cv_pose` and
+  `matrix_from_cv_pose` convert rigid transforms; `Board` builds a ChArUco
+  `Target` as OpenCV's board with its corners by id; `guarded` and
+  `current_exception_status` return what OpenCV throws as a `Status`. With it,
+  the installed package re-finds OpenCV.
 - Build-system foundation: top-level CMake (C++17), tiered component layout, the
   `volumetric_kit::calib_core` library target + `volumetric_kit::calib` umbrella
   alias, and first-class install/export so the library is consumable via both
