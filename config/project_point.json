@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "operation": "project",
+  "calibration": {
+    "image_width": 1280,
+    "image_height": 720,
+    "intrinsics": [1000, 1000, 640, 360],
+    "distortion": [-0.28, 0.10, 0.001, -0.0005, 0],
+    "point": [0.1, -0.2, 2.0]
+  }
+}

@@ -18,6 +18,12 @@
 
 include(FetchContent)
 
+# Only applications need the common JSON format. The calibration library keeps
+# its dependency on core_base and Eigen alone.
+if(VC_BUILD_EXAMPLES)
+  set(VKC_WITH_CONFIG ON)
+endif()
+
 # --- volumetric_kit_core -----------------------------------------------------
 # The family's shared foundation: calib's Status / Result / VKC_CHECK / log sink
 # come from its base tier (DECISIONS.md, "Build on volumetric_kit_core"). Pinned
@@ -34,16 +40,18 @@ include(FetchContent)
 # It leaves VKC_WITH_VULKAN unset rather than OFF, so an application that turns
 # the tier on for recon or gfx keeps it.
 #
-# The pin is core 0.1.0: main after core PR #21, which gave vkc_require_core the
-# PACKAGE mode calib's package config uses.
-#
-# TODO: pin the v0.1.0 tag once the core tags it.
+# The pin includes core_config (0.3.0). Only examples opt into this optional
+# tier; library-only consumers still require only core_base >= 0.1.0.
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG ce76978a9b829313e911b7a47b4110e2a02ed69f)
+  GIT_TAG 7857a6d4b9973b32461af09062d0bb894c86c751)
 FetchContent_MakeAvailable(volumetric_kit_core)
 vkc_require_core(${VC_CORE_MIN_VERSION})
+if(VC_BUILD_EXAMPLES AND NOT TARGET volumetric_kit::core_config)
+  message(
+    FATAL_ERROR "calib examples require volumetric_kit_core with core_config")
+endif()
 
 if(VC_BUILD_TESTS)
   # googletest is only needed when building the test suite.

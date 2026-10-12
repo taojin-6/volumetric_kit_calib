@@ -74,8 +74,14 @@ ctest --test-dir "$calib_root/build" --output-on-failure
 Run the demo:
 
 ```bash
-./build/examples/example_01_project_point
+./build/examples/example_01_project_point --config config/project_point.json
 ```
+
+The demo reads the family's versioned JSON scenario format through
+`volumetric_kit::core_config`. Core owns defaults and static validation, including
+unknown fields and application compatibility. Edit `config/project_point.json`
+to change the camera and point. The demo accepts only `--config PATH` and `--help`;
+the calibration library itself keeps its core_base/Eigen dependency.
 
 ## Use it in your project
 
