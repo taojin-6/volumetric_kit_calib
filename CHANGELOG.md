@@ -8,6 +8,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- calib's camera model is recon's (DECISIONS.md, 2026-10-12). Migrating:
+  `PinholeBrownConrady`, `ImageSize` and `calib/core/camera_model.hpp` are
+  removed; use `volumetric_kit::recon::camera::CameraModel` and
+  `check_camera_model` from `volumetric_kit/recon/camera/camera_model.hpp`.
+  `DetectedPoint::pixel` is recon's `camera::Vec2d` (`glm::dvec2`), not an
+  Eigen vector. calib fetches recon's camera tier alone (`VR_CAMERA_ONLY`) and
+  installs it beside itself; its package finds recon, and the core through it.
+  The build needs GLM instead of Eigen, and still no Vulkan SDK.
+- `Target` names its markers: `dictionary` (`MarkerDictionary`, OpenCV's
+  predefined ArUco and AprilTag dictionaries), `first_marker_id` and
+  `legacy_pattern` (OpenCV's pre-4.6 ChArUco layout).
+- The projection demo projects through recon's lens and no longer unprojects.
 - The projection demo now reads a versioned JSON scenario via core_config,
   which owns parsing, defaults, and static validation. Run it with
   `--config config/project_point.json`; the library API is unchanged.
@@ -70,8 +82,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `volumetric_kit::calib_core` library target + `volumetric_kit::calib` umbrella
   alias, and first-class install/export so the library is consumable via both
   FetchContent and `find_package(volumetric_kit_calib)`.
-- Dependency strategy: Eigen from the system (the linear-algebra spine, a PUBLIC
-  dep); googletest vendored via pinned FetchContent for the test suite only.
+- Dependency strategy: googletest vendored via pinned FetchContent for the test
+  suite only.
 - `core` tier:
   - Exception-free error handling from `volumetric_kit_core`'s base tier:
     `Status` (with a `Numerical` domain for solver failures) and `Result<T>`,
@@ -81,14 +93,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `Target`, `Observation` — the inputs the quality tier needs to be physical
     rather than heuristic. Profile fields are `std::optional`, so "unknown" is
     never confused with a real zero (e.g. a global shutter's line time).
-  - `PinholeBrownConrady` camera model with validated construction (image size,
-    intrinsics and distortion), closed-form `project`, and a Newton `unproject`
-    that returns an error rather than a wrong ray past the distortion's fold.
-    Both return `Result`, so a point behind the camera is an error, not an
-    abort.
-- GoogleTest `tests/` (version smoke test, `Status`/`Result` incl. death tests,
-  camera model against OpenCV `projectPoints` values, data model), configure
-  tests of the core version calib requires (`tests/core_requirement/`), and an
+  - `check_target`, which refuses a board a detector cannot use, naming the
+    field, and `legacy_femto_board()`, the rig's 5 x 3 ChArUco board.
+  - Plain records for the tiers to come: `ViewCheck` (one camera's view of the
+    board: corners, markers, pose measures, `ViewVerdict`) and `CaptureMeta`
+    (one capture's set-level facts).
+- GoogleTest `tests/` (version smoke test, the board and its check, data
+  model), configure tests of the core version calib requires
+  (`tests/core_requirement/`) and of a brain with no Vulkan
+  (`tests/no_vulkan/`, through an installed package), and an
   `examples/01_project_point` CLI.
 - Lint/CI hygiene: `.clang-format`, `.cmake-format.yaml`, and a pre-commit
   config (clang-format, cmake-format, trailing-whitespace, end-of-file-fixer).

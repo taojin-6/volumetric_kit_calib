@@ -20,6 +20,9 @@ The implemented core and planned tiers are distinguished in
   core, as a task in that repository; cameras and sensors do not
   ([DECISIONS.md](DECISIONS.md#locked-decisions)). From the primary checkout
   it is `../volumetric_kit_core/`.
+- Cameras are `volumetric_kit_recon`'s camera tier (`CameraModel`, rigid
+  transforms), fetched alone (`VR_CAMERA_ONLY`) so the brain needs no Vulkan;
+  calib keeps no camera model of its own.
 - GPU work runs on the core's vulkan tier, on a `VkDevice` shared with `recon`
   and `gfx` ([DECISIONS.md](DECISIONS.md#locked-decisions)); calib keeps no
   GPU backend of its own. A CPU backend is the correctness oracle.
@@ -48,7 +51,7 @@ Read only the sections needed for the current task.
 - Namespace: `volumetric_kit::calib`. In docs, `vc::` abbreviates
   `volumetric_kit::calib::`; `vg::` abbreviates `volumetric_kit::gfx::`.
 - Headers: `include/volumetric_kit/calib/<tier>/…` → e.g.
-  `#include "volumetric_kit/calib/core/camera_model.hpp"`
+  `#include "volumetric_kit/calib/core/target.hpp"`
 - volumetric_kit_core's types, functions and macros keep the core's names:
   `core::Status` inside calib's namespaces, `vkc::Status` in tests and
   examples, from the core's own headers. calib re-exports none of them.
@@ -87,7 +90,7 @@ iOS and Android. Windows and MSVC are unsupported
 MSVC flags.
 
 - **Doxygen on every public class/function**, matching
-  `include/volumetric_kit/calib/core/camera_model.hpp`: `@file`/`@brief` on the header,
+  `include/volumetric_kit/calib/core/target.hpp`: `@file`/`@brief` on the header,
   `@brief` + a `@code … @endcode` example per class, and `@brief`/`@param`/
   `@return` (`@pre` where relevant) on methods; accessors may be a single
   `/// @return`.
@@ -113,7 +116,7 @@ MSVC flags.
 ## Build and validation
 
 Run from the task's worktree. The build requires CMake ≥ 3.21, a C++17
-compiler, Eigen, and network access on the first configure (the core and
+compiler, GLM, and network access on the first configure (the core, recon and
 googletest are fetched); see README and CI for platform dependencies.
 
 ```sh

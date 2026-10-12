@@ -45,24 +45,17 @@ domain model and rationale remain in the intentionally gitignored local
   vulkan tier has landed, and calib's pin carries it; calib's build leaves it
   off (`VKC_WITH_VULKAN`), and so needs no Vulkan SDK, until calib writes GPU
   code.
-- **The camera model is calib's own; capture drivers come from
-  `volumetric_kit_recon`'s sensor tier** (2026-10-08). calib's `core` tier
-  keeps `PinholeBrownConrady` and the rational model below; its `capture` tier
-  will take frames from recon's `IRgbdSensor` and `SensorArray` rather than
-  drive a device itself. Why: the core has no camera or sensor tier (core
-  PR #14 proposed one and was closed), and recon's DECISIONS.md (2026-10-06,
-  "The family's camera vocabulary is recon's `camera` tier", amended the same
-  day) makes recon what calib builds on for sensors, while its camera tier
-  keeps only what a capture uses: the forward distortion, without the
-  projection and unprojection calib's solver needs.
+- **The camera model is recon's; capture drivers come from
+  `volumetric_kit_recon`'s sensor tier** (2026-10-08, amended 2026-10-12; see
+  the dated entry). calib's cameras are recon's `camera::CameraModel`, from its
+  camera tier, and its `capture` tier will take frames from recon's
+  `IRgbdSensor` and `SensorArray` rather than drive a device itself. Why: the
+  core has no camera or sensor tier (core PR #14 proposed one and was
+  closed), and recon's DECISIONS.md (2026-10-06, "The family's camera
+  vocabulary is recon's `camera` tier") makes recon what calib builds on for
+  cameras and sensors.
 - **Linux, macOS, iOS and Android, with GCC or Clang; never Windows or MSVC**
   (2026-10-04). See "Platforms" below.
-- **The rational lens model comes first; fisheye is planned, not built.** The
-  Orbbec Femto Mega reports its factory lens in the rational model (k1–k6,
-  p1, p2), which `recon`'s rig calibration file also stores, so that model is
-  next. Fisheye (Kannala-Brandt) waits, but unprojection returns unit 3D rays
-  and stored lenses carry a model name, so it can be added without breaking
-  either.
 
 ### Platforms
 
@@ -78,6 +71,35 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
+
+## 2026-10-12 — The camera model is recon's
+
+calib's 2026-10-08 entry kept a camera model of its own, because recon's camera
+tier has no projection or unprojection for a solver. calib's solver will take
+its lens maths from OpenCV instead, so that reason is gone, and calib takes
+recon's `camera::CameraModel` (image size, pinhole intrinsics, OpenCV's
+eight-coefficient rational lens) and its rigid transforms.
+
+- **Why.** The factory models arrive as recon's `SensorInfo::color` and
+  `::depth`, so a calib model would be a second record of the same fact; and
+  calib's five-coefficient model could not hold the Femto Mega's depth lens,
+  whose k4–k6 are not zero.
+- **What goes.** `PinholeBrownConrady`, `ImageSize` and their Newton
+  projection and unprojection; Eigen, whose last use was
+  `DetectedPoint::pixel`, now recon's `Vec2d`. The projection example maps the
+  scenario's camera into `CameraModel` and projects through recon's
+  `distort_rational`.
+- **How recon arrives.** Fetched camera-only (`VR_CAMERA_ONLY`): recon_camera
+  over the core's base tier and GLM, so the brain still builds with no Vulkan
+  SDK (the `no_vulkan.brain` test). `EXCLUDE_FROM_ALL` also drops a
+  subproject's install rules, so recon takes it only when calib installs
+  nothing. calib installs recon beside itself, and its package config finds
+  the core through recon's, since a core package found twice in one scope
+  recurses in `vkc_require_core`.
+- **The board names its dictionary.** `Target` adds `dictionary`,
+  `first_marker_id` and `legacy_pattern`, so a board is fully described without
+  OpenCV; `check_target` validates one and `legacy_femto_board()` is the rig's
+  5 x 3 ChArUco board.
 
 ## 2026-10-10 — calib builds with exceptions enabled
 
@@ -121,7 +143,7 @@ compute on the right processor, and few memory transfers on both discrete
 and unified-memory GPUs -- found the family's Vulkan cores already drifting.
 The family created `volumetric_kit_core` and settled the GPU path on its
 vulkan tier over a shared `VkDevice`. calib adopts the core's base tier
-first. (Amended 2026-10-08: the camera model stays calib's own; see the locked
+first. (Amended 2026-10-12: the camera model is recon's; see the locked
 decisions.)
 
 ## 2026-10-02 — Shared agent guidance
@@ -142,4 +164,4 @@ stay with their owners. The implemented projection demo uses this contract now.
 Future calibration applications will extend it when their behavior exists.
 
 The optional examples link core_config privately. calib_core still needs only
-core_base and Eigen, and public engine headers expose no JSON types.
+core_base and recon_camera, and public engine headers expose no JSON types.

@@ -10,13 +10,13 @@ adjustment, fisheye, cross-camera color, and the optics that gate quality
 are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 `volumetric_kit_gfx`, so it is not in a clone.
 
-> **Status:** Early scaffolding. The `core` tier — exception-free
-> `Status`/`Result`, the physically-parameterized data model (camera/lens/sensor
-> models, board target, observation), and the `PinholeBrownConrady` camera model
-> — builds and is tested (GoogleTest). The compute backends, detection, solve,
-> quality, color, capture, viz, and app tiers are not yet implemented; the
-> legacy `camera_calibration` Python scripts (a separate checkout beside the
-> `volumetric_kit/` folder) remain the reference oracle.
+> **Status:** Early scaffolding. The `core` tier — the data model (the board
+> and its check, observations, view and capture records, lens and sensor
+> profiles) over recon's camera model and the core's exception-free
+> `Status`/`Result` — builds and is tested (GoogleTest). The compute backends,
+> detection, solve, quality, color, capture, viz, and app tiers are not yet
+> implemented; the legacy `camera_calibration` Python scripts (a separate
+> checkout beside the `volumetric_kit/` folder) remain the reference oracle.
 
 [AGENTS.md](AGENTS.md) is the shared working guide for Codex and Claude Code;
 `CLAUDE.md` imports it. [DECISIONS.md](DECISIONS.md) records the locked
@@ -34,10 +34,10 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
   family's shared foundation. Its base tier supplies calib's `Status`/`Result`
   today. Its vulkan tier will supply GPU compute -- calib's build leaves it off
   until calib writes GPU code, so it needs no Vulkan SDK.
-- **Cameras and sensors:** the camera model is calib's own, in its `core`
-  tier; the `capture` tier will take frames from `volumetric_kit_recon`'s
-  sensor tier and its drivers
-  ([DECISIONS.md](DECISIONS.md#locked-decisions)).
+- **Cameras and sensors:** cameras are `volumetric_kit_recon`'s
+  `CameraModel`, from its camera tier, which calib fetches alone so the brain
+  still needs no Vulkan SDK; the `capture` tier will take frames from recon's
+  sensor tier and its drivers ([DECISIONS.md](DECISIONS.md#locked-decisions)).
 - **Compute:** a CPU backend is the correctness oracle. GPU work runs on the
   core's vulkan tier, on a `VkDevice` shared with `recon` and `gfx`, so frames
   pass between them without copies (MoltenVK on Apple; native Metal deferred).
@@ -48,19 +48,20 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
 
 The `core` tier needs a C++17 compiler -- GCC or Clang; Windows and MSVC are
 not supported ([DECISIONS.md](DECISIONS.md#platforms)) -- CMake ≥ 3.21, and
-Eigen. The first
-configure fetches `volumetric_kit_core` (pinned by commit) and, for tests,
-googletest, so it needs network access:
+GLM. The first configure fetches `volumetric_kit_core` and
+`volumetric_kit_recon` (pinned by commit) and, for tests, googletest, so it
+needs network access:
 
 ```bash
-brew install cmake eigen          # macOS
-# sudo apt-get install cmake libeigen3-dev   # Ubuntu
+brew install cmake glm          # macOS
+# sudo apt-get install cmake libglm-dev   # Ubuntu
 ```
 
 (Later tiers add OpenCV for `detect`, Ceres for `solve`, and
-`volumetric_kit_gfx` for `viz`/`app`.) To build against a local core checkout
-instead of the pinned one, pass
-`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>`.
+`volumetric_kit_gfx` for `viz`/`app`.) To build against a local core or recon
+checkout instead of the pinned one, pass
+`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>` or
+`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>`.
 
 ## Build and test
 
@@ -81,7 +82,7 @@ The demo reads the family's versioned JSON scenario format through
 `volumetric_kit::core_config`. Core owns defaults and static validation, including
 unknown fields and application compatibility. Edit `config/project_point.json`
 to change the camera and point. The demo accepts only `--config PATH` and `--help`;
-the calibration library itself keeps its core_base/Eigen dependency.
+the calibration library itself keeps its core_base/recon_camera dependency.
 
 ## Use it in your project
 
@@ -101,7 +102,8 @@ default ON only when `volumetric_kit_calib` is the top-level project, so a
 FetchContent build of it never fails on a warning your compiler adds.
 `VC_SANITIZE` is a semicolon list, empty (off) by default —
 e.g. `-DVC_SANITIZE="address;undefined"`. An installed calib carries the core
-beside it, and `find_package(volumetric_kit_calib)` finds both.
+and recon's camera tier beside it, and `find_package(volumetric_kit_calib)`
+finds all three.
 
 calib needs `volumetric_kit_core` 0.1.0 or newer. An application that declares
 the core before calib, to share it with `recon` or `gfx`, pins at least that:
