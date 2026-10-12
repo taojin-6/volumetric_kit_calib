@@ -29,7 +29,8 @@ gtest_discover_tests(vc_data_model_test)
 # against a stand-in core of each version (core_requirement/) refuses one older
 # than 0.1.0 -- before 0.1.0 the core has no vkc_require_core -- and accepts
 # 0.1.0 or newer, its package config re-finding recon, whose package config
-# re-finds the core at its MAJOR.MINOR, and requiring VC_CORE_MIN_VERSION of it.
+# re-finds the core, and holding that core to its MAJOR.MINOR and
+# VC_CORE_MIN_VERSION.
 #
 # Those configures, and the one below, take the fetched sources this build used
 # (FETCHCONTENT_SOURCE_DIR_<NAME>), so they need no network.
@@ -64,7 +65,8 @@ vc_add_core_requirement_test(0_3_2 0.3.2 -DEXPECT_CONFIG_VERSION=0.3)
 
 # The brain needs no Vulkan (no_vulkan/): calib configures, builds and installs
 # with find_package(Vulkan) disabled, and a consumer builds against the
-# installed package with it disabled too.
+# installed package with it disabled too; the installed package refuses a core
+# of another minor version.
 add_test(
   NAME no_vulkan.brain
   COMMAND

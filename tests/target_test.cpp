@@ -18,7 +18,7 @@ namespace {
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 constexpr double kInf = std::numeric_limits<double>::infinity();
 
-// The status is an InvalidArgument whose message names `field`.
+// The status is an InvalidArgument whose message is about `target.<field>`.
 ::testing::AssertionResult RefusedNaming(const core::Status& status,
                                          const std::string& field) {
   if (status.ok()) return ::testing::AssertionFailure() << "accepted";
@@ -27,9 +27,9 @@ constexpr double kInf = std::numeric_limits<double>::infinity();
            << "refused as " << core::to_string(status.domain()) << ": "
            << status.message();
   }
-  if (status.message().find(field) == std::string::npos) {
+  if (status.message().rfind("target." + field + " ", 0) != 0) {
     return ::testing::AssertionFailure()
-           << "message does not name " << field << ": " << status.message();
+           << "message is not about " << field << ": " << status.message();
   }
   return ::testing::AssertionSuccess();
 }
@@ -51,7 +51,7 @@ TEST(Target, LegacyFemtoBoardIsTheRigsBoard) {
   EXPECT_EQ(board.rows, 2);
   EXPECT_EQ(board.square_size_m, 0.15);
   EXPECT_EQ(board.marker_size_m, 0.112);
-  EXPECT_EQ(board.dictionary, MarkerDictionary::Aruco4x4_100);
+  EXPECT_EQ(board.dictionary, MarkerDictionary::ArUco4x4_100);
   EXPECT_EQ(board.first_marker_id, 0);
   EXPECT_TRUE(board.legacy_pattern);
   EXPECT_FALSE(board.square_size_tolerance_m);
@@ -154,6 +154,69 @@ TEST(Target, MarkerIdsStayInsideTheDictionary) {
   EXPECT_TRUE(RefusedNaming(check_target(board), "first_marker_id"));
 }
 
+// Each dictionary holds as many codes as OpenCV's predefined one: a one-tag
+// AprilGrid takes the last id and refuses the next.
+TEST(Target, EachDictionaryHoldsItsCodes) {
+  struct DictionaryCodes {
+    MarkerDictionary dictionary;
+    int codes;
+  };
+  constexpr DictionaryCodes kSizes[] = {
+      {MarkerDictionary::ArUco4x4_50, 50},
+      {MarkerDictionary::ArUco4x4_100, 100},
+      {MarkerDictionary::ArUco4x4_250, 250},
+      {MarkerDictionary::ArUco4x4_1000, 1000},
+      {MarkerDictionary::ArUco5x5_50, 50},
+      {MarkerDictionary::ArUco5x5_100, 100},
+      {MarkerDictionary::ArUco5x5_250, 250},
+      {MarkerDictionary::ArUco5x5_1000, 1000},
+      {MarkerDictionary::ArUco6x6_50, 50},
+      {MarkerDictionary::ArUco6x6_100, 100},
+      {MarkerDictionary::ArUco6x6_250, 250},
+      {MarkerDictionary::ArUco6x6_1000, 1000},
+      {MarkerDictionary::ArUco7x7_50, 50},
+      {MarkerDictionary::ArUco7x7_100, 100},
+      {MarkerDictionary::ArUco7x7_250, 250},
+      {MarkerDictionary::ArUco7x7_1000, 1000},
+      {MarkerDictionary::ArUcoOriginal, 1024},
+      {MarkerDictionary::AprilTag16h5, 30},
+      {MarkerDictionary::AprilTag25h9, 35},
+      {MarkerDictionary::AprilTag36h10, 2320},
+      {MarkerDictionary::AprilTag36h11, 587},
+      {MarkerDictionary::ArUcoMip36h12, 250},
+  };
+  // One entry per dictionary after None; ArUcoMip36h12 is the last.
+  static_assert(sizeof(kSizes) / sizeof(kSizes[0]) ==
+                    static_cast<int>(MarkerDictionary::ArUcoMip36h12),
+                "a MarkerDictionary is missing from the table");
+  for (const DictionaryCodes& size : kSizes) {
+    Target tag;
+    tag.kind = TargetKind::AprilGrid;
+    tag.rows = 1;
+    tag.cols = 1;
+    tag.square_size_m = 0.1;
+    tag.marker_size_m = 0.08;
+    tag.dictionary = size.dictionary;
+    tag.first_marker_id = size.codes - 1;
+    EXPECT_TRUE(check_target(tag).ok())
+        << size.codes << ": " << check_target(tag).message();
+    tag.first_marker_id = size.codes;
+    EXPECT_TRUE(RefusedNaming(check_target(tag), "first_marker_id"))
+        << size.codes;
+  }
+}
+
+// A value outside an enum is refused, naming its field.
+TEST(Target, RefusesAValueOutsideItsEnum) {
+  Target kind = checkerboard();
+  kind.kind = static_cast<TargetKind>(42);
+  EXPECT_TRUE(RefusedNaming(check_target(kind), "kind"));
+
+  Target dictionary = legacy_femto_board();
+  dictionary.dictionary = static_cast<MarkerDictionary>(99);
+  EXPECT_TRUE(RefusedNaming(check_target(dictionary), "dictionary"));
+}
+
 TEST(Target, AprilGridCarriesOneTagPerFeature) {
   Target grid;
   grid.kind = TargetKind::AprilGrid;
@@ -180,7 +243,7 @@ TEST(Target, PatternWithoutMarkersTakesNone) {
     EXPECT_TRUE(check_target(board).ok()) << static_cast<int>(kind);
 
     Target dictionary = board;
-    dictionary.dictionary = MarkerDictionary::Aruco4x4_50;
+    dictionary.dictionary = MarkerDictionary::ArUco4x4_50;
     EXPECT_TRUE(RefusedNaming(check_target(dictionary), "dictionary"));
     Target marker = board;
     marker.marker_size_m = 0.01;

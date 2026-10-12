@@ -108,7 +108,14 @@ finds all three.
 calib needs `volumetric_kit_core` 0.1.0 or newer. An application that declares
 the core before calib, to share it with `recon` or `gfx`, pins at least that:
 on an older core, calib's configure fails at `vkc_require_core`, and an
-installed calib is not found.
+installed calib is not found. calib makes recon available camera-only, so an
+application that uses recon beyond its camera tier makes recon available, with
+its options, before calib.
+
+Until [volumetric_kit_core#31](https://github.com/taojin-6/volumetric_kit_core/issues/31)
+is fixed, a second read of the core's package in one scope recurses in
+`vkc_require_core`. So a consumer of an installed calib finds the core only
+through it, and finds calib and recon both `REQUIRED`.
 
 ## Development
 

@@ -41,31 +41,33 @@ enum class TargetKind {
 ///
 /// A marker is decoded only against the dictionary it was printed from, so a
 /// board with markers names its own. The ArUco ones are named by their bits and
-/// code count, as OpenCV's `DICT_4X4_100` is `Aruco4x4_100`.
+/// code count, as OpenCV's `DICT_4X4_100` is `ArUco4x4_100`. The values are not
+/// OpenCV's `PredefinedDictionaryType` (`None` comes first), so a bridge maps
+/// them by name, never by value.
 enum class MarkerDictionary {
   None,           ///< No markers: a pattern that has none.
-  Aruco4x4_50,    ///< ArUco, 4x4 bits, 50 codes.
-  Aruco4x4_100,   ///< ArUco, 4x4 bits, 100 codes.
-  Aruco4x4_250,   ///< ArUco, 4x4 bits, 250 codes.
-  Aruco4x4_1000,  ///< ArUco, 4x4 bits, 1000 codes.
-  Aruco5x5_50,    ///< ArUco, 5x5 bits, 50 codes.
-  Aruco5x5_100,   ///< ArUco, 5x5 bits, 100 codes.
-  Aruco5x5_250,   ///< ArUco, 5x5 bits, 250 codes.
-  Aruco5x5_1000,  ///< ArUco, 5x5 bits, 1000 codes.
-  Aruco6x6_50,    ///< ArUco, 6x6 bits, 50 codes.
-  Aruco6x6_100,   ///< ArUco, 6x6 bits, 100 codes.
-  Aruco6x6_250,   ///< ArUco, 6x6 bits, 250 codes.
-  Aruco6x6_1000,  ///< ArUco, 6x6 bits, 1000 codes.
-  Aruco7x7_50,    ///< ArUco, 7x7 bits, 50 codes.
-  Aruco7x7_100,   ///< ArUco, 7x7 bits, 100 codes.
-  Aruco7x7_250,   ///< ArUco, 7x7 bits, 250 codes.
-  Aruco7x7_1000,  ///< ArUco, 7x7 bits, 1000 codes.
-  ArucoOriginal,  ///< The original ArUco library's, 1024 codes.
+  ArUco4x4_50,    ///< ArUco, 4x4 bits, 50 codes.
+  ArUco4x4_100,   ///< ArUco, 4x4 bits, 100 codes.
+  ArUco4x4_250,   ///< ArUco, 4x4 bits, 250 codes.
+  ArUco4x4_1000,  ///< ArUco, 4x4 bits, 1000 codes.
+  ArUco5x5_50,    ///< ArUco, 5x5 bits, 50 codes.
+  ArUco5x5_100,   ///< ArUco, 5x5 bits, 100 codes.
+  ArUco5x5_250,   ///< ArUco, 5x5 bits, 250 codes.
+  ArUco5x5_1000,  ///< ArUco, 5x5 bits, 1000 codes.
+  ArUco6x6_50,    ///< ArUco, 6x6 bits, 50 codes.
+  ArUco6x6_100,   ///< ArUco, 6x6 bits, 100 codes.
+  ArUco6x6_250,   ///< ArUco, 6x6 bits, 250 codes.
+  ArUco6x6_1000,  ///< ArUco, 6x6 bits, 1000 codes.
+  ArUco7x7_50,    ///< ArUco, 7x7 bits, 50 codes.
+  ArUco7x7_100,   ///< ArUco, 7x7 bits, 100 codes.
+  ArUco7x7_250,   ///< ArUco, 7x7 bits, 250 codes.
+  ArUco7x7_1000,  ///< ArUco, 7x7 bits, 1000 codes.
+  ArUcoOriginal,  ///< The original ArUco library's, 1024 codes.
   AprilTag16h5,   ///< AprilTag 16h5, 30 codes.
   AprilTag25h9,   ///< AprilTag 25h9, 35 codes.
   AprilTag36h10,  ///< AprilTag 36h10, 2320 codes.
   AprilTag36h11,  ///< AprilTag 36h11, 587 codes.
-  ArucoMip36h12,  ///< ArUco MIP 36h12, 250 codes.
+  ArUcoMip36h12,  ///< ArUco MIP 36h12, 250 codes.
 };
 
 /// @brief A calibration board: pattern, layout, markers, and physical
@@ -112,13 +114,14 @@ struct Target {
 
 /// @brief Whether @p target describes a board a detector can use.
 ///
-/// Every board needs at least one feature row and column, a finite positive
-/// square size, and known tolerances finite and not negative. A ChArUco board
-/// or AprilGrid needs a dictionary, a marker size between 0 and the square
-/// size, and marker ids, from @ref Target::first_marker_id on, that the
-/// dictionary holds: half the squares, rounded down, for a ChArUco board, and
-/// every tag of an AprilGrid. Any other pattern takes no dictionary, marker
-/// size or first id. Only a ChArUco board takes @ref Target::legacy_pattern.
+/// Every board needs a @ref TargetKind, at least one feature row and column, a
+/// finite positive square size, and known tolerances finite and not negative.
+/// A ChArUco board or AprilGrid needs a @ref MarkerDictionary, a marker size
+/// between 0 and the square size, and marker ids, from
+/// @ref Target::first_marker_id on, that the dictionary holds: half the
+/// squares, rounded down, for a ChArUco board, and every tag of an AprilGrid.
+/// Any other pattern takes no dictionary, marker size or first id. Only a
+/// ChArUco board takes @ref Target::legacy_pattern.
 /// @param target  The board.
 /// @return OK; or `Status::Code::InvalidArgument` naming the field.
 VC_CORE_API core::Status check_target(const Target& target);

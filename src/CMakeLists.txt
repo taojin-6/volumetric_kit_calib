@@ -37,6 +37,10 @@ if(VC_INSTALL)
     NAMESPACE volumetric_kit::
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/volumetric_kit_calib")
 
+  # The installed package holds the core to the MAJOR.MINOR this build fetched:
+  # the core's version file accepts only the same minor before 1.0.
+  vkc_core_version(VC_CORE_MAJOR_MINOR MAJOR_MINOR)
+
   include(CMakePackageConfigHelpers)
   configure_package_config_file(
     "${PROJECT_SOURCE_DIR}/cmake/volumetric_kit_calibConfig.cmake.in"

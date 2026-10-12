@@ -57,8 +57,8 @@ target_include_directories(
 
 # Both are PUBLIC: the public headers name the core's Status / Result and
 # recon's camera types in their signatures, so consumers compile against them
-# too. The installed package re-finds both (find_dependency in the package
-# config).
+# too. The installed package re-finds recon, and the core through recon's
+# package config.
 target_link_libraries(calib_core PUBLIC volumetric_kit::core_base
                                         volumetric_kit::recon_camera)
 

@@ -17,6 +17,10 @@ namespace volumetric_kit::calib {
 
 /// @brief The set-level facts of one capture.
 ///
+/// How many of the capture's views are usable is not stored here: it is
+/// counted from its cameras' @ref ViewCheck verdicts when the capture is
+/// written.
+///
 /// @code
 /// CaptureMeta meta;
 /// meta.index = 12;

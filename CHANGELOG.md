@@ -15,7 +15,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `DetectedPoint::pixel` is recon's `camera::Vec2d` (`glm::dvec2`), not an
   Eigen vector. calib fetches recon's camera tier alone (`VR_CAMERA_ONLY`) and
   installs it beside itself; its package finds recon, and the core through it.
-  The build needs GLM instead of Eigen, and still no Vulkan SDK.
+  An application that uses recon beyond its camera tier makes recon available
+  before calib. The build needs GLM instead of Eigen, and still no Vulkan SDK.
 - `Target` names its markers: `dictionary` (`MarkerDictionary`, OpenCV's
   predefined ArUco and AprilTag dictionaries), `first_marker_id` and
   `legacy_pattern` (OpenCV's pre-4.6 ChArUco layout).

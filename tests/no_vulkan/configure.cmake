@@ -1,15 +1,24 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Tao Jin
 
-# calib's brain with no Vulkan: run by the no_vulkan.brain test
-# (tests/CMakeLists.txt), in BINARY_DIR, with find_package(Vulkan) disabled
-# throughout, so a configure that reaches for Vulkan -- recon beyond its camera
-# tier, or the core's vulkan tier -- fails rather than finds one.
+# calib's brain with no Vulkan, and its installed package: run by the
+# no_vulkan.brain test (tests/CMakeLists.txt), in BINARY_DIR, with
+# find_package(Vulkan) disabled throughout, so a configure that reaches for
+# Vulkan -- recon beyond its camera tier, or the core's vulkan tier -- fails
+# rather than finds one.
 #
-# 1. calib configures from CALIB_SOURCE, builds and installs to
+# 1. With VR_CAMERA_ONLY OFF, as an application that needs the rest of recon sets
+#    it, calib's configure keeps it, and so reaches for Vulkan and fails.
+# 2. calib configures from CALIB_SOURCE, builds and installs to
 #    BINARY_DIR/prefix.
-# 2. The consumer (consumer/) finds that installed package, and with it the core
-#    and recon installed beside it, and builds and runs against calib_core.
+# 3. The consumer (consumer/) finds that installed package, and with it the core
+#    and recon installed beside it, and builds and runs against calib_core. It
+#    finds them by CMAKE_PREFIX_PATH, and again by volumetric_kit_calib_DIR
+#    alone.
+# 4. CMAKE_PREFIX_PATH, which takes precedence over calib's prefix, holds the
+#    same recon and core, relabelled to the core's next minor version: the
+#    consumer, given calib's directory, does not find calib, which names both
+#    minors.
 #
 # CORE_SOURCE, RECON_SOURCE and JSON_SOURCE are the sources the calling build
 # fetched, so this needs no network; GENERATOR, CXX_COMPILER, MAKE_PROGRAM and
@@ -34,6 +43,31 @@ function(_vc_cmake what)
   endif()
 endfunction()
 
+# Runs `cmake <ARGN>`; fails unless it fails with output matching `expected`,
+# each run of blanks and line breaks counting as one space.
+function(_vc_cmake_refuses what expected)
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}" ${ARGN}
+    RESULT_VARIABLE _result
+    OUTPUT_VARIABLE _output
+    ERROR_VARIABLE _output)
+  string(REGEX REPLACE "[ \n]+" " " _flat "${_output}")
+  if(_result EQUAL 0 OR NOT _flat MATCHES "${expected}")
+    message(FATAL_ERROR "${what} did not fail with '${expected}':\n${_output}")
+  endif()
+endfunction()
+
+# Replaces `from` with `to` in `file`; fails unless `from` is there.
+function(_vc_relabel file from to)
+  file(READ "${file}" _text)
+  string(FIND "${_text}" "${from}" _at)
+  if(_at EQUAL -1)
+    message(FATAL_ERROR "${file} lacks '${from}':\n${_text}")
+  endif()
+  string(REPLACE "${from}" "${to}" _text "${_text}")
+  file(WRITE "${file}" "${_text}")
+endfunction()
+
 set(_common
     -G
     "${GENERATOR}"
@@ -45,6 +79,21 @@ set(_common
 set(_prefix "${BINARY_DIR}/prefix")
 
 file(REMOVE_RECURSE "${BINARY_DIR}")
+_vc_cmake_refuses(
+  "Configuring calib with VR_CAMERA_ONLY OFF"
+  "CMAKE_DISABLE_FIND_PACKAGE_Vulkan"
+  -S
+  "${CALIB_SOURCE}"
+  -B
+  "${BINARY_DIR}/recon_whole"
+  ${_common}
+  "-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=${CORE_SOURCE}"
+  "-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=${RECON_SOURCE}"
+  "-DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=${JSON_SOURCE}"
+  -DVR_CAMERA_ONLY=OFF
+  -DVC_BUILD_TESTS=OFF
+  -DVC_BUILD_EXAMPLES=OFF)
+
 _vc_cmake(
   "Configuring calib with no Vulkan"
   -S
@@ -85,3 +134,50 @@ execute_process(
 if(NOT _result EQUAL 0)
   message(FATAL_ERROR "the consumer failed (${_result}):\n${_output}")
 endif()
+
+set(_calib_dir "${_prefix}/lib/cmake/volumetric_kit_calib")
+_vc_cmake(
+  "Configuring against the installed calib by its directory alone"
+  -S
+  "${CMAKE_CURRENT_LIST_DIR}/consumer"
+  -B
+  "${BINARY_DIR}/consumer_by_dir"
+  ${_common}
+  "-Dvolumetric_kit_calib_DIR=${_calib_dir}")
+
+# The other prefix: calib's, less calib, with the core relabelled.
+set(_other "${BINARY_DIR}/other_core")
+file(COPY "${_prefix}/" DESTINATION "${_other}")
+file(REMOVE_RECURSE "${_other}/lib/cmake/volumetric_kit_calib")
+set(_core_dir "${_other}/lib/cmake/volumetric_kit_core")
+file(READ "${_core_dir}/volumetric_kit_coreConfigVersion.cmake" _text)
+if(NOT _text MATCHES
+   "set\\(PACKAGE_VERSION \"(([0-9]+)\\.([0-9]+))(\\.[0-9]+)\"\\)")
+  message(FATAL_ERROR "the installed core's version file names no version")
+endif()
+set(_version "${CMAKE_MATCH_1}${CMAKE_MATCH_4}")
+set(_minor "${CMAKE_MATCH_1}")
+set(_major "${CMAKE_MATCH_2}")
+math(EXPR _next "${CMAKE_MATCH_3} + 1")
+set(_next_minor "${_major}.${_next}")
+_vc_relabel("${_core_dir}/volumetric_kit_coreConfigVersion.cmake"
+            "\"${_version}\"" "\"${_next_minor}.0\"")
+_vc_relabel(
+  "${_core_dir}/volumetric_kit_coreTargets.cmake"
+  "VKC_CORE_VERSION \"${_version}\"" "VKC_CORE_VERSION \"${_next_minor}.0\"")
+_vc_relabel(
+  "${_other}/lib/cmake/volumetric_kit_recon/volumetric_kit_reconConfig.cmake"
+  "find_dependency(volumetric_kit_core ${_minor} CONFIG"
+  "find_dependency(volumetric_kit_core ${_next_minor} CONFIG")
+string(REPLACE "." "\\." _minor_re "${_minor}")
+string(REPLACE "." "\\." _next_minor_re "${_next_minor}")
+_vc_cmake_refuses(
+  "Configuring against calib behind a recon with another core"
+  "built against volumetric_kit_core ${_minor_re}, but the volumetric_kit_recon at .* brings volumetric_kit_core ${_next_minor_re}"
+  -S
+  "${CMAKE_CURRENT_LIST_DIR}/consumer"
+  -B
+  "${BINARY_DIR}/consumer_other_core"
+  ${_common}
+  "-DCMAKE_PREFIX_PATH=${_other}"
+  "-Dvolumetric_kit_calib_DIR=${_calib_dir}")

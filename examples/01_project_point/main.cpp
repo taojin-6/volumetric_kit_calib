@@ -6,6 +6,7 @@
 // and project a camera-space point to a pixel through its lens. Demonstrates
 // the exception-free Result/Status API and its VKC_TRY propagation.
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -45,6 +46,11 @@ vkc::Status run(const vkc::config::Calibration& settings) {
   const camera::PinholeIntrinsics& k = model.intrinsics;
   const camera::Vec2d pixel{k.fx * distorted.x + k.cx,
                             k.fy * distorted.y + k.cy};
+  // A valid lens can still overflow far enough off-axis, and
+  // distort_rational checks nothing.
+  if (!std::isfinite(pixel.x) || !std::isfinite(pixel.y)) {
+    return vkc::Status::numerical("the point is too far off-axis for the lens");
+  }
 
   std::printf("  point (camera) : (%.3f, %.3f, %.3f)\n", point.x, point.y,
               point.z);

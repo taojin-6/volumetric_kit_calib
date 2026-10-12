@@ -5,11 +5,12 @@
 # (fake_core/) at CORE_VERSION, with the real core's modules from CORE_MODULES,
 # and checks the outcome. With EXPECT_ERROR, the configure must fail with output
 # matching that regex, blanks and line breaks counting as one space. With
-# EXPECT_CONFIG_VERSION, it must succeed, and calib's package config must
-# re-find recon, whose package config re-finds the core at that MAJOR.MINOR, and
-# then require MIN_VERSION, calib's floor, of it. RECON_SOURCE and JSON_SOURCE
-# are the sources the calling build fetched; GENERATOR, CXX_COMPILER,
-# MAKE_PROGRAM and GLM_DIR repeat its settings (tests/CMakeLists.txt).
+# EXPECT_CONFIG_VERSION, it must succeed: recon's package config must re-find
+# the core at that MAJOR.MINOR, and calib's must re-find recon, hinted at its
+# own prefix, refuse a core of another MAJOR.MINOR, and then require
+# MIN_VERSION, calib's floor, of it. RECON_SOURCE and JSON_SOURCE are the
+# sources the calling build fetched; GENERATOR, CXX_COMPILER, MAKE_PROGRAM and
+# GLM_DIR repeat its settings (tests/CMakeLists.txt).
 foreach(
   _var
   CALIB_SOURCE
@@ -81,17 +82,20 @@ endif()
 
 set(_config "${BINARY_DIR}/src/volumetric_kit_calibConfig.cmake")
 file(READ "${_config}" _config_text)
-set(_find "find_dependency(volumetric_kit_recon CONFIG)")
-string(FIND "${_config_text}" "${_find}" _at)
-if(_at EQUAL -1)
-  message(FATAL_ERROR "${_config} lacks '${_find}':\n${_config_text}")
-endif()
-# The floor is checked once recon has found the core, so it reads the found
-# core's version.
-set(_require "vkc_require_core(${MIN_VERSION} PACKAGE volumetric_kit_calib)")
-string(FIND "${_config_text}" "${_require}" _require_at)
-if(_require_at LESS_EQUAL _at)
-  message(
-    FATAL_ERROR
-      "${_config} lacks '${_require}' after '${_find}':\n${_config_text}")
-endif()
+# Each must follow the one before it: the version check reads the core recon
+# found, and the floor is checked once the minor is.
+set(_after -1)
+foreach(
+  _expected
+  [[find_dependency(volumetric_kit_recon CONFIG HINTS "${PACKAGE_PREFIX_DIR}")]]
+  "vkc_core_version(_vc_core_found MAJOR_MINOR)"
+  "if(NOT _vc_core_found STREQUAL \"${EXPECT_CONFIG_VERSION}\")"
+  "vkc_require_core(${MIN_VERSION} PACKAGE volumetric_kit_calib)")
+  string(FIND "${_config_text}" "${_expected}" _at)
+  if(_at LESS_EQUAL _after)
+    message(
+      FATAL_ERROR
+        "${_config} lacks '${_expected}' where expected:\n${_config_text}")
+  endif()
+  set(_after ${_at})
+endforeach()

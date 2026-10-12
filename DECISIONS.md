@@ -30,8 +30,8 @@ domain model and rationale remain in the intentionally gitignored local
   outside -- with no `vc::` re-exports (amended 2026-10-05; see the dated
   entry), so a calib error passes to `recon` or `gfx` unchanged. The core is
   fetched pinned by commit (`third_party/`), and the installed package
-  re-finds it at the minor version it was built with and requires calib's
-  floor of it (`vkc_require_core`). Why:
+  re-finds it, through recon's, holds it to the minor version calib was built
+  with, and requires calib's floor of it (`vkc_require_core`). Why:
   `recon`'s and `gfx`'s copies of the same bottom layer had drifted (the core's
   DECISIONS.md has the evidence); one copy means a fix lands once.
 - **GPU work runs on the core's vulkan tier, on a `VkDevice` shared with
@@ -88,14 +88,15 @@ eight-coefficient rational lens) and its rigid transforms.
   projection and unprojection; Eigen, whose last use was
   `DetectedPoint::pixel`, now recon's `Vec2d`. The projection example maps the
   scenario's camera into `CameraModel` and projects through recon's
-  `distort_rational`.
+  `distort_rational`. The locked "rational lens model first, fisheye later"
+  goes too: lens models are recon's camera tier's to choose, and calib plans no
+  unprojection of its own.
 - **How recon arrives.** Fetched camera-only (`VR_CAMERA_ONLY`): recon_camera
   over the core's base tier and GLM, so the brain still builds with no Vulkan
-  SDK (the `no_vulkan.brain` test). `EXCLUDE_FROM_ALL` also drops a
-  subproject's install rules, so recon takes it only when calib installs
-  nothing. calib installs recon beside itself, and its package config finds
-  the core through recon's, since a core package found twice in one scope
-  recurses in `vkc_require_core`.
+  SDK (the `no_vulkan.brain` test). calib installs recon beside itself, and its
+  package config finds the core through recon's, as a second read of the
+  core's package recurses
+  ([volumetric_kit_core#31](https://github.com/taojin-6/volumetric_kit_core/issues/31)).
 - **The board names its dictionary.** `Target` adds `dictionary`,
   `first_marker_id` and `legacy_pattern`, so a board is fully described without
   OpenCV; `check_target` validates one and `legacy_femto_board()` is the rig's

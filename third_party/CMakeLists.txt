@@ -59,21 +59,15 @@ endif()
 # with no Vulkan SDK. Pinned by commit, never main, and declared after the core,
 # so recon's own core pin yields to calib's. recon's tests, examples and -Werror
 # stay off in a subproject; its install follows calib's, as calib's exported
-# targets link recon_camera.
-#
-# EXCLUDE_FROM_ALL (CMake 3.28+) builds only the recon targets calib links. It
-# also drops the subproject's install rules, so it is used only when calib
-# installs nothing.
-set(_vc_recon_exclude)
-if(NOT VC_INSTALL AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
-  set(_vc_recon_exclude EXCLUDE_FROM_ALL)
-endif()
+# targets link recon_camera. It leaves an application's VR_CAMERA_ONLY as set,
+# so an application that turns it off keeps the rest of recon.
 FetchContent_Declare(
   volumetric_kit_recon
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_recon.git
-  GIT_TAG 8b8b19856c474e0fc61e03c9534c529dbd71414c
-  ${_vc_recon_exclude})
-set(VR_CAMERA_ONLY ON)
+  GIT_TAG 8b8b19856c474e0fc61e03c9534c529dbd71414c)
+if(NOT DEFINED VR_CAMERA_ONLY)
+  set(VR_CAMERA_ONLY ON)
+endif()
 set(VR_INSTALL ${VC_INSTALL})
 FetchContent_MakeAvailable(volumetric_kit_recon)
 
