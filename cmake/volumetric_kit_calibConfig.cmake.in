@@ -3,22 +3,23 @@
 
 @PACKAGE_INIT@
 
-# Re-find the PUBLIC dependencies. Eigen is a PUBLIC dependency of calib_core
-# (its public headers — camera_model.hpp etc. — name Eigen types), so the
-# installed package re-finds it. CONFIG, as the build found it: a consumer's own
-# FindEigen3.cmake (common in older projects) sets only variables, not the
-# Eigen3::Eigen target our exported targets link.
+# Re-find the PUBLIC dependencies: volumetric_kit_recon, whose camera tier
+# calib's headers name, and through it volumetric_kit_core, whose Status and
+# Result are in every signature. calib installs both beside itself, from one
+# build, so recon's package re-finds the core calib was built against, at its
+# minor version.
+#
+# TODO: find the core here too, ahead of recon, once the core's package can be
+# found twice in one scope: a second include of its vkc_require_core.cmake
+# redefines vkc_require_core, which then recurses.
 include(CMakeFindDependencyMacro)
-find_dependency(Eigen3 CONFIG)
-# volumetric_kit_core is PUBLIC too (Status / Result in every signature), at
-# the minor version this package was built against.
-find_dependency(volumetric_kit_core @VC_CORE_MAJOR_MINOR@ CONFIG)
+find_dependency(volumetric_kit_recon CONFIG)
 # That minor may still be older than the core calib needs: then the package is
 # not found, as a failed find_dependency leaves it.
 vkc_require_core(@VC_CORE_MIN_VERSION@ PACKAGE volumetric_kit_calib)
 
-# TODO: as the detect/solve tiers land, re-find their public deps here
-# (OpenCV for detect, Ceres for solve) — mirroring the Eigen line above.
+# TODO: as the detect/solve tiers land, re-find their public deps here (OpenCV
+# for detect, Ceres for solve).
 
 include("${CMAKE_CURRENT_LIST_DIR}/volumetric_kit_calibTargets.cmake")
 

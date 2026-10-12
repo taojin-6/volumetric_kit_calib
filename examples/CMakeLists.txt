@@ -5,12 +5,14 @@
 # volumetric_kit_gfx there is no GLFW gate here. The viz/app examples that
 # consume volumetric_kit_gfx will add that dependency when those tiers land.
 
-# 01_project_point: construct a PinholeBrownConrady camera and round-trip a
-# point through project/unproject — the smallest end-to-end use of calib_core.
+# 01_project_point: map the scenario's camera into recon's CameraModel and
+# project a point through its lens -- the smallest end-to-end use of calib's
+# camera model.
 add_executable(example_01_project_point 01_project_point/main.cpp)
 target_link_libraries(
-  example_01_project_point PRIVATE volumetric_kit::calib_core
-                                   volumetric_kit::core_config)
+  example_01_project_point
+  PRIVATE volumetric_kit::calib_core volumetric_kit::recon_camera
+          volumetric_kit::core_config)
 vc_target_warnings(example_01_project_point)
 
 if(VC_BUILD_TESTS)

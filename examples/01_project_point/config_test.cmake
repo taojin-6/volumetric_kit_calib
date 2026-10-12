@@ -18,6 +18,24 @@ if(NOT result EQUAL 0 OR NOT output MATCHES "35\\.000, 120\\.000")
   message(
     FATAL_ERROR "Configured projection failed: ${result}: ${output}${error}")
 endif()
+# Each coefficient lands in its own place in recon's lens: OpenCV's order, k1,
+# k2, p1, p2, k3 (cv::projectPoints gives this pixel).
+file(
+  WRITE "${WORK_DIR}/distorted.json"
+  [[
+{"version":1,"operation":"project","calibration":{"intrinsics":[100,200,10,20],
+"distortion":[0.1,0.01,0.001,0.002,0.05],"point":[1,2,4]}}
+]])
+execute_process(
+  COMMAND "${EXECUTABLE}" --config distorted.json
+  WORKING_DIRECTORY "${WORK_DIR}"
+  RESULT_VARIABLE result
+  OUTPUT_VARIABLE output
+  ERROR_VARIABLE error)
+if(NOT result EQUAL 0 OR NOT output MATCHES "35\\.956, 123\\.638")
+  message(
+    FATAL_ERROR "Distorted projection failed: ${result}: ${output}${error}")
+endif()
 file(
   WRITE "${WORK_DIR}/invalid.json"
   [[

@@ -46,22 +46,6 @@ set(VC_SANITIZE
 include(vc_warnings)
 include(vc_sanitizers)
 
-# --- Public dependencies -----------------------------------------------------
-# Resolved at the top level so their imported targets are visible to every
-# subdirectory, not just the one find_package() ran in. Eigen is the
-# linear-algebra spine of the calibration data model and solvers; its config
-# defines the Eigen3::Eigen interface target.
-#
-# No version pin: Eigen's ConfigVersion file is SameMajorVersion-compatible, so
-# a minimum like "3.3" is rejected against a 4.x/5.x system install. The public
-# usage here is just <Eigen/Core> (stable across major versions), so accept
-# whatever is installed.
-#
-# TODO: add a pinned vendored FetchContent fallback (mirroring how gfx vendors
-# glm) so CI runners without a system Eigen stay self-contained. Today a system
-# Eigen is required (macOS: `brew install eigen`; Ubuntu: `libeigen3-dev`).
-find_package(Eigen3 REQUIRED CONFIG)
-
 # --- Dependencies + library --------------------------------------------------
 # The oldest volumetric_kit_core calib builds with: checked in the core that
 # arrives (third_party/) and again by the installed package config.

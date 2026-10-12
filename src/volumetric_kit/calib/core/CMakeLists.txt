@@ -2,12 +2,12 @@
 # Copyright (c) 2026 Tao Jin
 
 # --- calib_core: Tier 0 ------------------------------------------------------
-# Foundation tier: the version API and the physically-parameterized data model
-# (camera/lens/sensor models, board target, observation), with error handling
-# from volumetric_kit_core's base tier. Every other tier depends on this; it
-# depends only on the core's base tier and Eigen, which its public headers name.
-# Pure CPU, no GPU and no OpenCV/Ceres, so it stays usable from a tool or a
-# device-less test.
+# Foundation tier: the version API and the data model (board target,
+# observation, view and capture records, lens and sensor profiles), with error
+# handling from volumetric_kit_core's base tier. Every other tier depends on
+# this; it depends only on the core's base tier and recon's camera tier, which
+# its public headers name. Pure CPU, no GPU and no OpenCV/Ceres, so it stays
+# usable from a tool or a device-less test.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
@@ -16,7 +16,7 @@ set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 add_library(calib_core)
 add_library(volumetric_kit::calib_core ALIAS calib_core)
 
-target_sources(calib_core PRIVATE camera_model.cpp version.cpp)
+target_sources(calib_core PRIVATE target.cpp version.cpp)
 
 # Generated headers: the VC_CORE_API export macro + the configured version
 # header. The export header is per-tier (core/export.hpp + VC_CORE_API +
@@ -55,10 +55,12 @@ target_include_directories(
          "$<BUILD_INTERFACE:${_vc_generated_inc}>"
          "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
-# Both are PUBLIC: the public headers name the core's Status / Result and Eigen
-# types in their signatures, so consumers compile against them too. The
-# installed package re-finds both (find_dependency in the package config).
-target_link_libraries(calib_core PUBLIC volumetric_kit::core_base Eigen3::Eigen)
+# Both are PUBLIC: the public headers name the core's Status / Result and
+# recon's camera types in their signatures, so consumers compile against them
+# too. The installed package re-finds both (find_dependency in the package
+# config).
+target_link_libraries(calib_core PUBLIC volumetric_kit::core_base
+                                        volumetric_kit::recon_camera)
 
 vc_target_warnings(calib_core)
 
