@@ -31,9 +31,10 @@ double radial_map(const camera::RationalDistortion& d, double r) {
          (1.0 + r2 * (d.k4 + r2 * (d.k5 + r2 * d.k6)));
 }
 
-// The largest normalized radius, up to `limit`, below which the radial map
-// keeps increasing; past it the lens folds over and stops being a camera.
-double monotonic_radius(const camera::RationalDistortion& d, double limit) {
+// The normalized radius past which the radial map stops increasing: the
+// lens folds over there and stops being a camera. `limit` if it does not
+// fold before it.
+double fold_radius(const camera::RationalDistortion& d, double limit) {
   constexpr double kStep = 1e-4;
   double previous = 0.0;
   for (double r = kStep; r <= limit; r += kStep) {
@@ -44,8 +45,9 @@ double monotonic_radius(const camera::RationalDistortion& d, double limit) {
   return limit;
 }
 
-// The normalized radius of the image's farthest corner, as a pinhole sees it.
-double corner_radius(const camera::CameraModel& model) {
+// The distorted normalized radius of the image's farthest corner: where a
+// pinhole with the model's intrinsics puts it.
+double corner_distorted_radius(const camera::CameraModel& model) {
   const camera::PinholeIntrinsics& k = model.intrinsics;
   double radius = 0.0;
   for (const double u : {-0.5, model.size.width - 0.5}) {
@@ -57,12 +59,33 @@ double corner_radius(const camera::CameraModel& model) {
   return radius;
 }
 
-void expect_projects_as_recon(const camera::CameraModel& model) {
+// The radius the radial map takes to `distorted`, by bisection below the
+// fold, where the map increases.
+double undistorted_radius(const camera::RationalDistortion& d, double distorted,
+                          double fold) {
+  double low = 0.0;
+  double high = fold;
+  for (int i = 0; i < 100; ++i) {
+    const double mid = 0.5 * (low + high);
+    (radial_map(d, mid) < distorted ? low : high) = mid;
+  }
+  return high;
+}
+
+// cv::projectPoints with the model equals recon's distort_rational out to
+// the image's corners, which the lens takes from `expected_corner`, an
+// undistorted normalized radius below its fold.
+void expect_projects_as_recon(const camera::CameraModel& model,
+                              double expected_corner) {
   const core::Result<CvCamera> cam = cv_camera(model);
   ASSERT_TRUE(cam.ok()) << cam.status().message();
-  const double limit = corner_radius(model);
-  const double radius = monotonic_radius(model.distortion, limit);
-  ASSERT_GT(radius, 0.9 * limit) << "the lens folds over inside the image";
+  const double fold = fold_radius(model.distortion, 10.0);
+  const double corner_distorted = corner_distorted_radius(model);
+  ASSERT_GT(radial_map(model.distortion, fold), corner_distorted)
+      << "the lens folds over inside the image";
+  const double radius =
+      undistorted_radius(model.distortion, corner_distorted, fold);
+  EXPECT_NEAR(radius, expected_corner, 1e-3);
 
   std::vector<cv::Point3d> points;
   for (int i = 0; i <= 20; ++i) {
@@ -93,7 +116,7 @@ void expect_projects_as_recon(const camera::CameraModel& model) {
 
 TEST(CvCamera, HoldsTheModelInOpenCVsLayout) {
   // Every coefficient differs, so a misplaced one shows.
-  const camera::CameraModel model = testing::depth_like_lens();
+  const camera::CameraModel model = test::depth_like_lens();
   const core::Result<CvCamera> cam = cv_camera(model);
   ASSERT_TRUE(cam.ok()) << cam.status().message();
   EXPECT_EQ(cam->size, cv::Size(640, 576));
@@ -104,35 +127,38 @@ TEST(CvCamera, HoldsTheModelInOpenCVsLayout) {
 }
 
 TEST(CvCamera, ProjectsAsReconsColourLikeLens) {
-  expect_projects_as_recon(testing::color_like_lens());
+  expect_projects_as_recon(test::color_like_lens(), 0.979);
 }
 
+// The depth-like lens folds over at r = 1.83, past its corners at 1.244.
 TEST(CvCamera, ProjectsAsReconsDepthLikeLens) {
-  expect_projects_as_recon(testing::depth_like_lens());
+  expect_projects_as_recon(test::depth_like_lens(), 1.244);
 }
 
 TEST(CvCamera, RefusesAModelReconRefuses) {
-  camera::CameraModel no_focal = testing::color_like_lens();
+  camera::CameraModel no_focal = test::color_like_lens();
   no_focal.intrinsics.fx = std::numeric_limits<double>::quiet_NaN();
-  camera::CameraModel no_width = testing::color_like_lens();
+  camera::CameraModel no_width = test::color_like_lens();
   no_width.size.width = 0;
-  camera::CameraModel no_lens = testing::color_like_lens();
+  camera::CameraModel no_lens = test::color_like_lens();
   no_lens.distortion.k5 = std::numeric_limits<double>::infinity();
   for (const camera::CameraModel& model : {no_focal, no_width, no_lens}) {
     core::Result<CvCamera> cam = core::Status::invalid_argument("unset");
     EXPECT_NO_THROW(cam = cv_camera(model));
     EXPECT_EQ(cam.status().domain(), core::Status::Code::InvalidArgument);
+    EXPECT_EQ(cam.status().message().rfind("cv_camera: ", 0), 0u)
+        << cam.status().message();
   }
 }
 
 TEST(CvCamera, RefusesASideOpenCVCannotHold) {
-  camera::CameraModel wide = testing::color_like_lens();
+  camera::CameraModel wide = test::color_like_lens();
   wide.size.width =
       static_cast<std::uint32_t>(std::numeric_limits<int>::max()) + 1u;
   core::Result<CvCamera> cam = core::Status::invalid_argument("unset");
   EXPECT_NO_THROW(cam = cv_camera(wide));
   EXPECT_EQ(cam.status().domain(), core::Status::Code::InvalidArgument);
-  EXPECT_NE(cam.status().message().find("cv_camera"), std::string::npos)
+  EXPECT_EQ(cam.status().message().rfind("cv_camera: ", 0), 0u)
       << cam.status().message();
 
   wide.size.width = static_cast<std::uint32_t>(std::numeric_limits<int>::max());

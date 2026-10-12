@@ -9,7 +9,7 @@
 namespace volumetric_kit::calib::compute {
 
 core::Result<CvCamera> cv_camera(const recon::camera::CameraModel& model) {
-  VKC_TRY(recon::camera::check_camera_model(model));
+  VKC_TRY(recon::camera::check_camera_model(model).with_context("cv_camera"));
   constexpr std::uint32_t kMaxSide = std::numeric_limits<int>::max();
   if (model.size.width > kMaxSide || model.size.height > kMaxSide) {
     return core::Status::invalid_argument(

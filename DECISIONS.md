@@ -74,17 +74,17 @@ locked decision above.)
 
 ## 2026-10-12 — OpenCV, behind calib's types
 
-calib's CPU maths -- the lens model and poses now, detection and the solve as
-they land -- is OpenCV 5's, called from the `compute` tier on. Callers hold
-recon's `CameraModel` and `Mat4d` and calib's `Target`; `compute` converts them
+calib's CPU maths -- the lens model and poses now, detection as it lands -- is
+OpenCV 5's, called from the `compute` tier on. Callers hold recon's
+`CameraModel` and `Mat4d` and calib's `Target`; `compute` converts them
 (`cv_camera`, `cv_pose`, `Board`), so no second camera or board record exists.
 
 - **A prerequisite, and optional.** OpenCV is installed and found
   (`find_package(OpenCV 5.0 CONFIG)`), never fetched, like recon's SDKs.
   `VC_WITH_OPENCV` is OFF by default, so the core tier still builds anywhere.
-  5.0 is the floor: calib calls its geometry module. Ubuntu packages only
-  OpenCV 4, so CI builds the OpenCV tiers on macOS (Homebrew) until a cached
-  OpenCV 5 build exists.
+  5.0 is the floor: calib calls its geometry module. CI builds the OpenCV
+  tiers on macOS (Homebrew) only, until its Ubuntu legs have a cached OpenCV 5
+  build ([README](README.md#prerequisites)).
 - **No exception crosses.** A public function that calls OpenCV runs its body
   through `compute::guarded`, which maps a `cv::Exception`'s code to a
   `Status` domain (`guarded.hpp`) and anything else through the core's

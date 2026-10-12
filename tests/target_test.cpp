@@ -6,10 +6,10 @@
 #include "volumetric_kit/calib/core/target.hpp"
 
 #include <limits>
-#include <string>
 
 #include <gtest/gtest.h>
 
+#include "refused_naming.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib {
@@ -18,21 +18,7 @@ namespace {
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 constexpr double kInf = std::numeric_limits<double>::infinity();
 
-// The status is an InvalidArgument whose message is about `target.<field>`.
-::testing::AssertionResult RefusedNaming(const core::Status& status,
-                                         const std::string& field) {
-  if (status.ok()) return ::testing::AssertionFailure() << "accepted";
-  if (status.domain() != core::Status::Code::InvalidArgument) {
-    return ::testing::AssertionFailure()
-           << "refused as " << core::to_string(status.domain()) << ": "
-           << status.message();
-  }
-  if (status.message().rfind("target." + field + " ", 0) != 0) {
-    return ::testing::AssertionFailure()
-           << "message is not about " << field << ": " << status.message();
-  }
-  return ::testing::AssertionSuccess();
-}
+using test::RefusedNaming;
 
 Target checkerboard() {
   Target board;

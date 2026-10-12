@@ -22,10 +22,12 @@ namespace volumetric_kit::calib::compute {
 /// @brief A camera as OpenCV's functions take it.
 ///
 /// @code
-/// VKC_ASSIGN(const CvCamera cam, cv_camera(info.color));
-/// std::vector<cv::Point2d> pixels;
-/// cv::projectPoints(points, rvec, tvec, cam.camera_matrix, cam.distortion,
-///                   pixels);
+/// if (info.color) {  // a recon SensorInfo
+///   VKC_ASSIGN(const CvCamera cam, cv_camera(*info.color));
+///   std::vector<cv::Point2d> pixels;
+///   cv::projectPoints(points, rvec, tvec, cam.camera_matrix, cam.distortion,
+///                     pixels);
+/// }
 /// @endcode
 struct CvCamera {
   cv::Size size;  ///< The image the intrinsics describe (pixels).
@@ -37,9 +39,9 @@ struct CvCamera {
 
 /// @brief @p model in OpenCV's types.
 /// @param model  The camera.
-/// @return The camera; or `InvalidArgument` for a model recon's
-///         `check_camera_model` refuses, or a side longer than OpenCV's
-///         `int` holds.
+/// @return The camera; or `InvalidArgument`, its message starting
+///         `cv_camera: `, for a model recon's `check_camera_model` refuses or
+///         a side longer than OpenCV's `int` holds.
 VC_COMPUTE_API core::Result<CvCamera> cv_camera(
     const recon::camera::CameraModel& model);
 

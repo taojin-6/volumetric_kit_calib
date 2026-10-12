@@ -63,11 +63,10 @@ brew install cmake glm          # macOS
 ```
 
 `VC_WITH_OPENCV` (OFF by default) builds `compute` and the tiers on it, which
-need OpenCV 5.0 or newer, installed: `brew install opencv` on macOS. Ubuntu's
-packages are OpenCV 4, so there it needs an OpenCV 5 of your own build, which
-CI does not have yet. (Later tiers add Ceres for `solve` and
-`volumetric_kit_gfx` for `viz`/`app`.) To build against a local core or recon
-checkout instead of the pinned one, pass
+need an installed OpenCV 5 (5.0 or a later 5.x): `brew install opencv` on
+macOS; on Ubuntu, whose packages are OpenCV 4, one you build yourself. (Later
+tiers add Ceres for `solve` and `volumetric_kit_gfx` for `viz`/`app`.) To
+build against a local core or recon checkout instead of the pinned one, pass
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>` or
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>`.
 

@@ -18,10 +18,12 @@
 
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 
-namespace volumetric_kit::calib::testing {
+namespace volumetric_kit::calib::test {
 namespace {
 
 namespace camera = recon::camera;
+
+constexpr double kPi = 3.14159265358979323846;
 
 compute::Board femto_board() {
   return compute::Board::create(legacy_femto_board()).value();
@@ -100,37 +102,130 @@ TEST(SyntheticRig, RigSurroundsTheFloor) {
   EXPECT_EQ(ids.size(), rig.size());
 }
 
-TEST(SyntheticRig, PlanPlacesBoardsTheCamerasSee) {
+// Whether `cam` sees the board at `board_to_world` by `options`' rules, at
+// the outline points PlanOptions names.
+bool sees(const SyntheticCamera& cam, const camera::Mat4d& board_to_world,
+          const compute::Board& board, const PlanOptions& options) {
+  const camera::Mat4d board_to_camera = cam.world_to_camera * board_to_world;
+  const std::vector<cv::Point3d> outline = board_outline(board, 0.0, 16);
+  for (const cv::Point3d& p : outline) {
+    const camera::Vec3d q(board_to_camera * glm::dvec4(p.x, p.y, p.z, 1.0));
+    if (q.z < options.min_depth_m) return false;
+  }
+  const double w = cam.model.size.width - 1.0;
+  const double h = cam.model.size.height - 1.0;
+  const double m = options.margin_px;
+  for (const cv::Point2d& q : project(cam.model, board_to_camera, outline)) {
+    if (q.x < m || q.y < m || q.x > w - m || q.y > h - m) return false;
+  }
+  const cv::Point3f corner = board.charuco().getRightBottomCorner();
+  const camera::Vec3d centre(board_to_camera *
+                             glm::dvec4(0.5 * corner.x, 0.5 * corner.y, 0, 1));
+  const camera::Vec3d face = -camera::Vec3d(board_to_camera[2]);
+  const double tilt =
+      std::acos(std::min(1.0, glm::dot(face, glm::normalize(-centre)))) *
+      180.0 / kPi;
+  return tilt <= options.max_tilt_deg;
+}
+
+// Each placement lists exactly the cameras that see it, at least
+// `min_cameras` of them.
+void expect_plan_keeps_its_rules(const std::vector<SyntheticCamera>& rig,
+                                 const compute::Board& board,
+                                 const PlanOptions& options) {
+  const std::vector<Placement> plan = synthetic_plan(rig, board, options);
+  ASSERT_EQ(plan.size(), options.count);
+  for (std::size_t i = 0; i < plan.size(); ++i) {
+    EXPECT_TRUE(camera::check_rigid(plan[i].board_to_world).ok()) << i;
+    EXPECT_GE(plan[i].cameras.size(), options.min_cameras) << i;
+    std::vector<std::size_t> seeing;
+    for (std::size_t c = 0; c < rig.size(); ++c) {
+      if (sees(rig[c], plan[i].board_to_world, board, options)) {
+        seeing.push_back(c);
+      }
+    }
+    EXPECT_EQ(plan[i].cameras, seeing) << i;
+  }
+}
+
+TEST(SyntheticRig, PlanKeepsBoardsTheCamerasSee) {
+  const std::vector<SyntheticCamera> rig = synthetic_rig();
+  const compute::Board board = femto_board();
+  PlanOptions defaults;
+  defaults.count = 40;
+  expect_plan_keeps_its_rules(rig, board, defaults);
+  // Bounds tight enough that each turns boards away.
+  PlanOptions tight;
+  tight.count = 30;
+  tight.min_cameras = 1;
+  tight.max_tilt_deg = 45.0;
+  tight.margin_px = 300.0;
+  tight.min_depth_m = 1.5;
+  expect_plan_keeps_its_rules(rig, board, tight);
+}
+
+// Floor and stand placements at the plan's heights, half the stands' tilted
+// 5-15 degrees toward a camera.
+TEST(SyntheticRig, PlanPlacesBoardsAsAPersonDoes) {
   const std::vector<SyntheticCamera> rig = synthetic_rig();
   const compute::Board board = femto_board();
   PlanOptions options;
-  options.count = 40;
+  options.count = 60;
   const std::vector<Placement> plan = synthetic_plan(rig, board, options);
   ASSERT_EQ(plan.size(), options.count);
-  std::size_t floor = 0;
-  for (const Placement& placement : plan) {
-    EXPECT_TRUE(camera::check_rigid(placement.board_to_world).ok());
-    EXPECT_GE(placement.cameras.size(), options.min_cameras);
-    if (std::abs(placement.board_to_world[3].z) < 1e-12) ++floor;
-    for (const std::size_t c : placement.cameras) {
-      ASSERT_LT(c, rig.size());
-      const camera::Mat4d board_to_camera =
-          rig[c].world_to_camera * placement.board_to_world;
-      for (const cv::Point2d& q :
-           project(rig[c].model, board_to_camera, board.object_points())) {
-        EXPECT_GE(q.x, options.margin_px);
-        EXPECT_GE(q.y, options.margin_px);
-        EXPECT_LE(q.x, rig[c].model.size.width - 1.0 - options.margin_px);
-        EXPECT_LE(q.y, rig[c].model.size.height - 1.0 - options.margin_px);
-      }
-      // The printed face (-z) turns toward the camera.
-      const camera::Vec3d face = -camera::Vec3d(board_to_camera[2]);
-      const camera::Vec3d at(board_to_camera[3]);
-      EXPECT_LT(glm::dot(face, at), 0.0);
+  const cv::Point3f corner = board.charuco().getRightBottomCorner();
+  std::size_t floor = 0, level = 0, tilted = 0;
+  for (std::size_t i = 0; i < plan.size(); ++i) {
+    const camera::Mat4d& pose = plan[i].board_to_world;
+    const camera::Vec3d centre(
+        pose * glm::dvec4(0.5 * corner.x, 0.5 * corner.y, 0.0, 1.0));
+    const camera::Vec3d normal = -camera::Vec3d(pose[2]);
+    const double tilt = std::acos(std::min(1.0, normal.z)) * 180.0 / kPi;
+    if (std::abs(centre.z) < 1e-12) {
+      ++floor;
+      EXPECT_LT(tilt, 1e-6) << i;
+      continue;
     }
+    const double stand = std::round(2.0 * centre.z) / 2.0;
+    EXPECT_TRUE(stand == 0.5 || stand == 1.0 || stand == 1.5) << i;
+    EXPECT_LE(std::abs(centre.z - stand), 0.05 + 1e-12) << i;
+    if (tilt < 1e-6) {
+      ++level;
+      continue;
+    }
+    ++tilted;
+    EXPECT_GE(tilt, 5.0 - 1e-9) << i;
+    EXPECT_LE(tilt, 15.0 + 1e-9) << i;
+    // Its face leans toward a camera, seen from above.
+    const glm::dvec2 lean = glm::normalize(glm::dvec2(normal));
+    double best = -1.0;
+    for (const SyntheticCamera& cam : rig) {
+      const camera::Vec3d at(camera::rigid_inverse(cam.world_to_camera)[3]);
+      best = std::max(best, glm::dot(lean, glm::normalize(glm::dvec2(at) -
+                                                          glm::dvec2(centre))));
+    }
+    EXPECT_GT(best, 1.0 - 1e-12) << i;
   }
   EXPECT_GT(floor, 0u);
-  EXPECT_LT(floor, plan.size());
+  EXPECT_GT(level, 0u);
+  EXPECT_GT(tilted, 0u);
+}
+
+// With no cameras, nothing is tilted, and only a plan that needs none keeps
+// a board.
+TEST(SyntheticRig, PlanOfNoCameras) {
+  const compute::Board board = femto_board();
+  PlanOptions options;
+  options.count = 5;
+  options.min_cameras = 0;
+  const std::vector<Placement> plan = synthetic_plan({}, board, options);
+  ASSERT_EQ(plan.size(), options.count);
+  for (const Placement& placement : plan) {
+    EXPECT_TRUE(placement.cameras.empty());
+    EXPECT_EQ(placement.board_to_world[2], glm::dvec4(0.0, 0.0, -1.0, 0.0));
+  }
+  options.min_cameras = 1;
+  EXPECT_TRUE(synthetic_plan({}, board, options).empty());
 }
 
 TEST(SyntheticRig, PlanIsTheSameForTheSameSeed) {
@@ -186,5 +281,90 @@ TEST(SyntheticRig, RendersThePrintedFaceUnmirrored) {
   EXPECT_EQ(image.at<unsigned char>(30, 180), levels.white);
 }
 
+// Where the render puts a straight edge that projects from p0 to p1, with
+// the dark side toward `inside`, less where it projects (pixels), on each
+// image row across its middle 40 % (columns, for an edge nearer horizontal).
+// On a row, the dark coverage of a run of pixels from the light side to the
+// dark is how far into the run the edge crosses the row's centre line.
+std::vector<double> edge_errors(cv::Mat image, cv::Point2d p0, cv::Point2d p1,
+                                cv::Point2d inside,
+                                const RenderOptions& levels) {
+  if (std::abs(p1.y - p0.y) < std::abs(p1.x - p0.x)) {
+    cv::transpose(image, image);
+    for (cv::Point2d* p : {&p0, &p1, &inside}) *p = {p->y, p->x};
+  }
+  const auto edge_at = [&](double y) {
+    return p0.x + (y - p0.y) * (p1.x - p0.x) / (p1.y - p0.y);
+  };
+  const bool dark_right = inside.x > edge_at(inside.y);
+  const double low = std::min(p0.y, p1.y);
+  const double span = std::abs(p1.y - p0.y);
+  constexpr int kRun = 6;  // pixels each side, short of the next feature
+  std::vector<double> errors;
+  for (int y = static_cast<int>(std::ceil(low + 0.3 * span));
+       y <= static_cast<int>(std::floor(low + 0.7 * span)); ++y) {
+    const double x = edge_at(y);
+    const int first = static_cast<int>(std::lround(x)) - kRun;
+    const int last = first + 2 * kRun;
+    double dark = 0.0;
+    for (int i = first; i <= last; ++i) {
+      dark += (levels.white - image.at<unsigned char>(y, i)) /
+              (levels.white - levels.black);
+    }
+    errors.push_back((dark_right ? last + 0.5 - dark : first - 0.5 + dark) - x);
+  }
+  return errors;
+}
+
+// Through a pinhole, the board's edges stay straight lines between their
+// projected corners: the render puts each of square (0, 0)'s four there,
+// off the pixel grid, turned and tilted.
+TEST(SyntheticRig, PlacesSquaresWhereTheyProject) {
+  const compute::Board board = femto_board();
+  const camera::CameraModel pinhole{
+      {800, 500}, {1000.0, 1000.0, 399.5, 249.5}, {}};
+  const double s = board.target().square_size_m;
+  const std::vector<cv::Point3d> square = {
+      {0.0, 0.0, 0.0}, {s, 0.0, 0.0}, {s, s, 0.0}, {0.0, s, 0.0}};
+  const cv::Point3d middle(0.5 * s, 0.5 * s, 0.0);
+  struct View {
+    const char* name;
+    camera::Vec3d rvec;  // the board's rotation into the camera
+  };
+  const View views[] = {{"front-on", {0.0, 0.0, 0.0}},
+                        {"turned 30 deg", {0.0, 0.0, 30.0}},
+                        {"tilted 50 deg", {50.0, 0.0, 0.0}},
+                        {"tilted 40 deg and turned", {10.0, -40.0, 20.0}}};
+  const RenderOptions levels;
+  for (const View& view : views) {
+    camera::Mat4d board_to_camera(
+        camera::rotation_from_rodrigues(view.rvec * (kPi / 180.0)));
+    // The square's middle 1 m away, off the pixel grid by (0.31, 0.17) px.
+    const camera::Vec3d at(0.31e-3, 0.17e-3, 1.0);
+    board_to_camera[3] =
+        glm::dvec4(at - camera::Mat3d(board_to_camera) *
+                            camera::Vec3d(middle.x, middle.y, middle.z),
+                   1.0);
+    const cv::Mat image = render_board(pinhole, board_to_camera, board);
+    const std::vector<cv::Point2d> corners =
+        project(pinhole, board_to_camera, square);
+    const cv::Point2d inside =
+        project(pinhole, board_to_camera, {middle}).front();
+    for (std::size_t e = 0; e < 4; ++e) {
+      const std::vector<double> errors =
+          edge_errors(image, corners[e], corners[(e + 1) % 4], inside, levels);
+      ASSERT_GE(errors.size(), 20u) << view.name << ", edge " << e;
+      double mean = 0.0;
+      double worst = 0.0;
+      for (const double error : errors) {
+        mean += error / errors.size();
+        worst = std::max(worst, std::abs(error));
+      }
+      EXPECT_LT(std::abs(mean), 0.005) << view.name << ", edge " << e;
+      EXPECT_LT(worst, 0.02) << view.name << ", edge " << e;
+    }
+  }
+}
+
 }  // namespace
-}  // namespace volumetric_kit::calib::testing
+}  // namespace volumetric_kit::calib::test

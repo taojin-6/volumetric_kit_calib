@@ -59,8 +59,8 @@ VC_COMPUTE_API recon::camera::Mat4d matrix_from_cv_pose(
 /// a rotation below about 1e-5 rad: fine for an initial value, not for a
 /// solver's state.
 /// @param transform  The transform.
-/// @return The transform; or `InvalidArgument` for one recon's `check_rigid`
-///         refuses.
+/// @return The transform; or `InvalidArgument`, its message starting
+///         `cv_pose: `, for one recon's `check_rigid` refuses.
 ///
 /// @code
 /// VKC_ASSIGN(const CvPose pose, cv_pose(world_to_camera));

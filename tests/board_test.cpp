@@ -6,33 +6,20 @@
 
 #include "volumetric_kit/calib/compute/board.hpp"
 
+#include <cmath>
 #include <limits>
-#include <string>
 #include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include <opencv2/objdetect/aruco_dictionary.hpp>
 
+#include "refused_naming.hpp"
+
 namespace volumetric_kit::calib::compute {
 namespace {
 
-// The status is `code`, with a message naming `target.<field>`.
-::testing::AssertionResult RefusedNaming(const core::Status& status,
-                                         core::Status::Code code,
-                                         const std::string& field) {
-  if (status.ok()) return ::testing::AssertionFailure() << "accepted";
-  if (status.domain() != code) {
-    return ::testing::AssertionFailure()
-           << "refused as " << core::to_string(status.domain()) << ": "
-           << status.message();
-  }
-  if (status.message().rfind("target." + field + " ", 0) != 0) {
-    return ::testing::AssertionFailure()
-           << "message is not about " << field << ": " << status.message();
-  }
-  return ::testing::AssertionSuccess();
-}
+using test::RefusedNaming;
 
 core::Status create_status(const Target& target) {
   core::Result<Board> board = core::Status::invalid_argument("unset");
@@ -83,6 +70,39 @@ TEST(Board, TopLeftSquareIsBlack) {
   // Square (1, 0) is white around its marker, which is 28.5 px in.
   EXPECT_EQ(image.at<unsigned char>(5, 155), 255);
   EXPECT_EQ(image.at<unsigned char>(145, 295), 255);
+}
+
+// The legacy layout differs only with an even number of square rows: there
+// the top-left square is white and holds marker 0. Odd, as on the rig's
+// board, both layouts start black, marker 0 in the second square.
+TEST(Board, LaysOutTheLegacyPatternAsTargetSays) {
+  const double s = 0.15;
+  const double inset = 0.5 * (s - 0.112);
+  struct Layout {
+    int rows;  // inner corners: square rows - 1
+    bool legacy;
+    unsigned char top_left;
+    double marker_0_x;  // marker 0's first corner, x (metres)
+  };
+  for (const Layout& layout :
+       {Layout{3, true, 255, inset}, Layout{3, false, 0, s + inset},
+        Layout{2, true, 0, s + inset}, Layout{2, false, 0, s + inset}}) {
+    Target target = legacy_femto_board();
+    target.rows = layout.rows;
+    target.legacy_pattern = layout.legacy;
+    const core::Result<Board> board = Board::create(target);
+    ASSERT_TRUE(board.ok()) << board.status().message();
+    EXPECT_EQ(board->charuco().getLegacyPattern(), layout.legacy);
+    cv::Mat image;  // 150 px per square
+    board->charuco().generateImage(cv::Size(750, 150 * (layout.rows + 1)),
+                                   image, 0, 1);
+    EXPECT_EQ(image.at<unsigned char>(5, 5), layout.top_left)
+        << layout.rows << " " << layout.legacy;
+    const cv::Point3f first = board->charuco().getObjPoints()[0][0];
+    EXPECT_NEAR(first.x, layout.marker_0_x, 1e-6)
+        << layout.rows << " " << layout.legacy;
+    EXPECT_NEAR(first.y, inset, 1e-6) << layout.rows << " " << layout.legacy;
+  }
 }
 
 TEST(Board, NumbersTheMarkersFromTheFirstId) {
@@ -173,20 +193,39 @@ TEST(Board, BuildsOnlyAChArUcoBoard) {
                             core::Status::Code::Unsupported, "kind"));
 }
 
-// OpenCV keeps the lengths as float: one beyond float, and a marker that
-// rounds to the square's size, are refused before they reach it.
-TEST(Board, RefusesLengthsAFloatCannotHoldApart) {
-  Target huge = legacy_femto_board();
-  huge.square_size_m = 1e300;
-  EXPECT_TRUE(RefusedNaming(create_status(huge),
-                            core::Status::Code::InvalidArgument,
-                            "square_size_m"));
-  Target close = legacy_femto_board();
-  close.marker_size_m = close.square_size_m * (1.0 - 1e-12);
-  ASSERT_TRUE(check_target(close).ok());
-  EXPECT_TRUE(RefusedNaming(create_status(close),
+// OpenCV keeps the lengths and corners as float: a square or marker below
+// its normal range, a board whose far corner passes its largest value, and a
+// marker that rounds to the square's size are refused before they reach it.
+TEST(Board, RefusesLengthsAFloatCannotHold) {
+  const auto sized = [](double square, double marker) {
+    Target target = legacy_femto_board();  // 5 squares across
+    target.square_size_m = square;
+    target.marker_size_m = marker;
+    EXPECT_TRUE(check_target(target).ok()) << square << " " << marker;
+    return target;
+  };
+  constexpr double kFloatMax = std::numeric_limits<float>::max();
+  for (const double square : {1e300, 1e38, 1e-42, 1e-50}) {
+    EXPECT_TRUE(RefusedNaming(create_status(sized(square, 0.5 * square)),
+                              core::Status::Code::InvalidArgument,
+                              "square_size_m"))
+        << square;
+  }
+  EXPECT_TRUE(RefusedNaming(create_status(sized(1e-30, 1e-40)),
                             core::Status::Code::InvalidArgument,
                             "marker_size_m"));
+  EXPECT_TRUE(RefusedNaming(create_status(sized(0.15, 0.15 * (1.0 - 1e-12))),
+                            core::Status::Code::InvalidArgument,
+                            "marker_size_m"));
+
+  // A board that ends just inside float's range is built; just past, not.
+  const core::Result<Board> widest =
+      Board::create(sized(0.199 * kFloatMax, 0.1 * kFloatMax));
+  ASSERT_TRUE(widest.ok()) << widest.status().message();
+  EXPECT_TRUE(std::isfinite(widest->charuco().getRightBottomCorner().x));
+  EXPECT_TRUE(
+      RefusedNaming(create_status(sized(0.201 * kFloatMax, 0.1 * kFloatMax)),
+                    core::Status::Code::InvalidArgument, "square_size_m"));
 }
 
 }  // namespace

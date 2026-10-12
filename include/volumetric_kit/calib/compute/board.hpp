@@ -9,8 +9,11 @@
 ///
 /// The board frame is OpenCV's: the origin at the top-left outer corner of
 /// the chessboard, x right and y down across the printed face, and z into the
-/// board, so the printed face looks along -z. The corners come from OpenCV's
-/// `getChessboardCorners`; calib keeps no corner formula.
+/// board, so the printed face looks along -z. The top-left square is black,
+/// except in @ref volumetric_kit::calib::Target::legacy_pattern's layout with
+/// an even number of square rows, where it is white and holds the first
+/// marker. The corners come from OpenCV's `getChessboardCorners`; calib keeps
+/// no corner formula.
 
 #include <vector>
 
@@ -27,6 +30,9 @@ namespace volumetric_kit::calib::compute {
 ///        corner's position by its id.
 ///
 /// A value: copies share OpenCV's board, which this class only reads.
+/// OpenCV's board copies share state too: never call a setter on a copy of
+/// @ref charuco, which would change every copy's board under its
+/// @ref object_points and @ref target.
 ///
 /// @code
 /// VKC_ASSIGN(const Board board, Board::create(legacy_femto_board()));
@@ -42,9 +48,11 @@ class VC_COMPUTE_API Board {
   /// @ref Target::legacy_pattern's layout.
   /// @param target  A ChArUco board.
   /// @return The board; `InvalidArgument` for a target @ref check_target
-  ///         refuses or whose sizes a `float` cannot hold apart, as OpenCV's
-  ///         board stores them; `Unsupported` for another @ref TargetKind; or
-  ///         what OpenCV threw (@ref guarded).
+  ///         refuses, or whose lengths OpenCV's `float`s cannot hold (a
+  ///         square or marker below the normal range, a board beyond the
+  ///         range, or a marker that rounds to the square); `Unsupported`
+  ///         for another @ref TargetKind; or what OpenCV threw
+  ///         (@ref guarded).
   static core::Result<Board> create(const Target& target);
 
   /// @return The board's description.

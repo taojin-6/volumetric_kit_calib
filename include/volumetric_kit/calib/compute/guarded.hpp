@@ -29,14 +29,14 @@ namespace volumetric_kit::calib::compute {
 /// - any other code is a `Backend::Other` failure whose detail is the code,
 ///   or `StsError` for a code of 0, which a backend failure cannot carry.
 ///
-/// Anything else is the core's `exception_status(what, InvalidArgument)`: a
-/// `std::bad_alloc` is `OutOfMemory`.
+/// Anything else is the core's `exception_status(what, InvalidArgument)`.
 /// @param what  What was called; it prefixes the message.
 /// @pre Called inside a `catch` handler; with no exception being handled the
 ///      program terminates.
 /// @return A non-OK `Status` whose message is `"<what>: "` and the
 ///         exception's `what()`, or `unknown exception` for one that is not a
-///         `std::exception`.
+///         `std::exception`; `OutOfMemory` with `"<what>: out of memory"` for
+///         a `std::bad_alloc`, or when the message itself cannot be built.
 ///
 /// @code
 /// try {

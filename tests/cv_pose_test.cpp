@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <limits>
+#include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -108,6 +109,8 @@ TEST(CvPose, RefusesATransformThatIsNotRigid) {
     core::Result<CvPose> pose = CvPose{};
     EXPECT_NO_THROW(pose = cv_pose(m));
     EXPECT_EQ(pose.status().domain(), core::Status::Code::InvalidArgument);
+    EXPECT_EQ(pose.status().message().rfind("cv_pose: ", 0), 0u)
+        << pose.status().message();
   }
 }
 

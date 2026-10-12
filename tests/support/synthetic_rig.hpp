@@ -24,7 +24,7 @@
 #include "volumetric_kit/recon/camera/camera_model.hpp"
 #include "volumetric_kit/recon/camera/geometry.hpp"
 
-namespace volumetric_kit::calib::testing {
+namespace volumetric_kit::calib::test {
 
 /// @brief A 4K colour lens with a Femto Mega's magnitudes: Brown-Conrady with
 ///        small k4-k6, so the rational denominator is exercised.
@@ -32,7 +32,7 @@ namespace volumetric_kit::calib::testing {
 recon::camera::CameraModel color_like_lens();
 
 /// @brief A 640x576 depth lens like the Femto Mega's NFOV unbinned one:
-///        large, nearly cancelling k1 and k4 (k1 = 29.29, k6 = 3.77).
+///        large k1 and k4 that nearly cancel.
 /// @return The model, which recon's `check_camera_model` accepts.
 recon::camera::CameraModel depth_like_lens();
 
@@ -58,6 +58,14 @@ std::vector<cv::Point2d> project(const recon::camera::CameraModel& model,
                                  const recon::camera::Mat4d& to_camera,
                                  const std::vector<cv::Point3d>& points);
 
+/// @brief Points around the chessboard's outer edge, or a band outside it.
+/// @param board     The board.
+/// @param margin_m  How far outside the outer edge (metres); 0 for the edge.
+/// @param per_side  Points on each side, starting at its corner.
+/// @return The points in the board frame, on z = 0.
+std::vector<cv::Point3d> board_outline(const compute::Board& board,
+                                       double margin_m, int per_side);
+
 /// @brief One placement of the board, and who sees it.
 struct Placement {
   recon::camera::Mat4d board_to_world;  ///< T_wb.
@@ -65,20 +73,22 @@ struct Placement {
   std::vector<std::size_t> cameras;
 };
 
-/// @brief What @ref synthetic_plan places, and what counts as seeing a board.
+/// @brief What @ref synthetic_plan places, and what counts as seeing a board:
+///        every bound holds at 16 points a side of @ref board_outline.
 struct PlanOptions {
   std::size_t count = 60;       ///< Placements to make.
   std::uint32_t seed = 1;       ///< The random sequence's seed.
   std::size_t min_cameras = 2;  ///< Fewer cameras seeing a board drop it.
-  double max_tilt_deg = 70.0;   ///< Printed face to camera ray, at most.
-  double margin_px = 40.0;      ///< The board's outline inside the image.
-  double min_depth_m = 0.3;     ///< The board's outline in front, at least.
+  /// The printed face's normal to the ray to the board's centre, at most.
+  double max_tilt_deg = 70.0;
+  double margin_px = 40.0;   ///< The outline this far inside the image.
+  double min_depth_m = 0.3;  ///< The outline at least this far in front.
 };
 
 /// @brief Placements as a person makes them: 40 % on the floor, the rest on
 ///        stands at 0.5, 1.0 and 1.5 m, half of those tilted 5-15 degrees
-///        toward a camera; each at a random yaw, kept when at least
-///        `min_cameras` see it.
+///        toward a camera (none with no cameras); each at a random yaw, kept
+///        when at least `min_cameras` see it.
 /// @param rig      The cameras.
 /// @param board    The board placed.
 /// @param options  How many, and what counts as seeing one.
@@ -99,20 +109,28 @@ std::vector<cv::Point2d> undistort_pixels(
 
 /// @brief How @ref render_board draws.
 struct RenderOptions {
-  double texture_px_per_m = 6000.0;  ///< The board texture's resolution.
-  double margin_m = 0.02;            ///< White margin around the chessboard.
-  float black = 30.0f;               ///< A black square's level.
-  float white = 220.0f;              ///< A white square's level.
-  float background = 110.0f;         ///< Everything off the board.
-  int supersampling = 3;             ///< Samples per pixel on each axis.
+  /// The board texture's resolution; the board's edges should fall on its
+  /// texel edges, as the rig's board's do at 6000.
+  double texture_px_per_m = 6000.0;
+  double margin_m = 0.02;     ///< White margin around the chessboard.
+  float black = 30.0f;        ///< A black square's level.
+  float white = 220.0f;       ///< A white square's level.
+  float background = 110.0f;  ///< Everything off the board.
+  int supersampling = 3;      ///< Samples per pixel on each axis.
 };
 
 /// @brief The board as @p model images it at @p board_to_camera: a clean,
 ///        geometric render (no blur, noise or compression).
 ///
 /// Each sample is a pixel's ray (@ref undistort_pixels) meeting the board's
-/// plane, read from the board's texture, so the lens is inverted exactly
-/// rather than approximated by a forward warp.
+/// plane, so the lens is inverted exactly rather than approximated by a
+/// forward warp. A sample is the board's mean over the bounding box of its
+/// footprint there, from a summed-area table of the texture, so a pixel is
+/// close to the board's mean over it whatever the texture's resolution.
+/// Accuracy at the defaults (`SyntheticRig.PlacesSquaresWhereTheyProject`):
+/// an edge sits where it projects to within 0.005 px on average along it,
+/// front-on, turned or tilted, and within 0.02 px on any one pixel row; a
+/// slanted edge's spread on a row narrows with more supersampling.
 /// @param model            The lens.
 /// @param board_to_camera  T_cb.
 /// @param board            The board drawn.
@@ -123,4 +141,4 @@ cv::Mat render_board(const recon::camera::CameraModel& model,
                      const compute::Board& board,
                      const RenderOptions& options = {});
 
-}  // namespace volumetric_kit::calib::testing
+}  // namespace volumetric_kit::calib::test

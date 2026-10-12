@@ -3,47 +3,46 @@
 
 include(GoogleTest)
 
+# vc_<name>_test from <name>_test.cpp, linking the given targets.
+function(vc_add_test name)
+  add_executable(vc_${name}_test ${name}_test.cpp)
+  target_link_libraries(vc_${name}_test PRIVATE ${ARGN} GTest::gtest_main)
+  vc_target_warnings(vc_${name}_test)
+  gtest_discover_tests(vc_${name}_test)
+endfunction()
+
+# The tests' header-only helpers (support/).
+add_library(vc_test_support INTERFACE)
+target_include_directories(vc_test_support
+                           INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/support")
+target_link_libraries(vc_test_support INTERFACE volumetric_kit::calib_core
+                                                GTest::gtest)
+
 # version smoke test.
-add_executable(vc_version_test version_test.cpp)
-target_link_libraries(vc_version_test PRIVATE volumetric_kit::calib_core
-                                              GTest::gtest_main)
-vc_target_warnings(vc_version_test)
-gtest_discover_tests(vc_version_test)
-
+vc_add_test(version volumetric_kit::calib_core)
 # core: the board, its check, and the rig's board.
-add_executable(vc_target_test target_test.cpp)
-target_link_libraries(vc_target_test PRIVATE volumetric_kit::calib_core
-                                             GTest::gtest_main)
-vc_target_warnings(vc_target_test)
-gtest_discover_tests(vc_target_test)
-
+vc_add_test(target vc_test_support)
 # core: the plain records (Observation / ViewCheck / CaptureMeta / SensorProfile
 # / LensProfile).
-add_executable(vc_data_model_test data_model_test.cpp)
-target_link_libraries(vc_data_model_test PRIVATE volumetric_kit::calib_core
-                                                 GTest::gtest_main)
-vc_target_warnings(vc_data_model_test)
-gtest_discover_tests(vc_data_model_test)
+vc_add_test(data_model volumetric_kit::calib_core)
 
 if(VC_WITH_OPENCV)
   # The synthetic source every calib test draws on (support/): lenses, a rig, a
   # plan of placements and an exact-inverse renderer, over compute's bridge.
   add_library(vc_synthetic_rig STATIC EXCLUDE_FROM_ALL
               support/synthetic_rig.cpp)
-  target_include_directories(vc_synthetic_rig
-                             PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/support")
-  target_link_libraries(vc_synthetic_rig PUBLIC volumetric_kit::calib_compute
-                                                opencv_geometry opencv_imgproc)
+  target_link_libraries(
+    vc_synthetic_rig
+    PUBLIC vc_test_support volumetric_kit::calib_compute
+    PRIVATE opencv_geometry opencv_imgproc)
   vc_target_warnings(vc_synthetic_rig)
 
   # compute: the OpenCV bridge, and the synthetic source itself.
-  foreach(_vc_test cv_camera cv_pose board guarded synthetic_rig)
-    add_executable(vc_${_vc_test}_test ${_vc_test}_test.cpp)
-    target_link_libraries(vc_${_vc_test}_test PRIVATE vc_synthetic_rig
-                                                      GTest::gtest_main)
-    vc_target_warnings(vc_${_vc_test}_test)
-    gtest_discover_tests(vc_${_vc_test}_test)
-  endforeach()
+  vc_add_test(guarded volumetric_kit::calib_compute)
+  vc_add_test(cv_pose volumetric_kit::calib_compute opencv_geometry)
+  vc_add_test(board volumetric_kit::calib_compute vc_test_support)
+  vc_add_test(cv_camera vc_synthetic_rig opencv_geometry)
+  vc_add_test(synthetic_rig vc_synthetic_rig opencv_geometry)
 endif()
 
 # The core calib requires (third_party/CMakeLists.txt): calib's configure
@@ -85,6 +84,17 @@ vc_add_core_requirement_test(
   0_1_0 0.1.0 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.2\\.0 or newer")
 vc_add_core_requirement_test(0_2_0 0.2.0 -DEXPECT_CONFIG_VERSION=0.2)
 vc_add_core_requirement_test(0_3_2 0.3.2 -DEXPECT_CONFIG_VERSION=0.3)
+
+# VC_WITH_OPENCV without an OpenCV 5 to find stops the configure, naming the
+# fixes (opencv_requirement/).
+add_test(
+  NAME opencv_requirement.missing
+  COMMAND
+    ${CMAKE_COMMAND} -DCALIB_SOURCE=${PROJECT_SOURCE_DIR}
+    -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/opencv_requirement
+    -DGENERATOR=${CMAKE_GENERATOR} -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
+    -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} -P
+    ${CMAKE_CURRENT_SOURCE_DIR}/opencv_requirement/configure.cmake)
 
 # The brain needs no Vulkan (no_vulkan/): calib, with OpenCV as this build has
 # it, configures, builds and installs with find_package(Vulkan) disabled, and a

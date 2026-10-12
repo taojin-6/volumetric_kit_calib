@@ -42,7 +42,7 @@ recon::camera::Mat4d matrix_from_cv_pose(const CvPose& pose) noexcept {
 }
 
 core::Result<CvPose> cv_pose(const recon::camera::Mat4d& transform) {
-  VKC_TRY(recon::camera::check_rigid(transform));
+  VKC_TRY(recon::camera::check_rigid(transform).with_context("cv_pose"));
   return guarded("cv_pose", [&]() -> core::Result<CvPose> {
     const cv::Matx44d m = cv_matrix(transform);
     CvPose pose;

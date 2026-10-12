@@ -5,8 +5,8 @@ name: build
 # volumetric_kit_gfx (tests/no_vulkan checks it). Both an
 # unoptimized Debug and an optimized Release/NDEBUG configuration are exercised,
 # so an NDEBUG-only or optimizer-exposed break is caught. The macOS legs also
-# build the OpenCV tiers (VC_WITH_OPENCV) on Homebrew's OpenCV 5; Ubuntu has no
-# OpenCV 5 package, so its legs build without them.
+# build the OpenCV tiers (VC_WITH_OPENCV), on Homebrew's OpenCV (DECISIONS.md,
+# 2026-10-12).
 on:
   pull_request:
   push:
