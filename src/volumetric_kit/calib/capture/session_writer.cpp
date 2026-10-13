@@ -289,6 +289,8 @@ struct SessionWriter::State {
     const int index = next_index++;
     job.meta.index = index;
     const Streams& s = info.streams;
+    // TODO: encode and write each camera's files as a task of its own if the
+    // rig's write time per capture (hand check H4) asks for it.
     for (std::size_t i = 0; i < info.cameras.size(); ++i) {
       const std::string& serial = info.cameras[i].info.id;
       const CameraCapture& part = job.cameras[i];
