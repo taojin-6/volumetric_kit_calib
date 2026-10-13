@@ -259,8 +259,9 @@ struct SessionWriter::State {
     std::list<Outcome> outcome;
   };
 
+  // May throw: a deque may allocate as it is made (libstdc++'s does).
   State(SessionInfo session, ArrayCalibration factory_record,
-        std::size_t queue_capacity) noexcept
+        std::size_t queue_capacity)
       : info(std::move(session)),
         factory(std::move(factory_record)),
         capacity(queue_capacity) {}
