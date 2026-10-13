@@ -9,11 +9,11 @@
 # takes GLM from the system. OpenCV, with VC_WITH_OPENCV, is a prerequisite the
 # root CMakeLists finds.
 #
-# TODO (as tiers land, mirroring gfx's hybrid system/vendored strategy): Ceres
-# via find_package for the solve tier (intrinsics / stereo / BA); the rest of
-# volumetric_kit_recon for the capture tier (its sensor tier's drivers); and
-# volumetric_kit_gfx via FetchContent for the viz / app tiers. GPU work comes
-# from volumetric_kit_core's vulkan tier, not a Vulkan dependency of calib's.
+# TODO (as tiers land, mirroring gfx's hybrid system/vendored strategy): the
+# rest of volumetric_kit_recon for the capture tier (its sensor tier's drivers);
+# and volumetric_kit_gfx via FetchContent for the viz / app tiers. GPU work
+# comes from volumetric_kit_core's vulkan tier, not a Vulkan dependency of
+# calib's.
 
 include(FetchContent)
 

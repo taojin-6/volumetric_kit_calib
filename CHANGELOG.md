@@ -92,7 +92,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   eight coefficients; `cv_matrix`, `matrix_from_cv`, `cv_pose` and
   `matrix_from_cv_pose` convert rigid transforms; `Board` builds a ChArUco
   `Target` as OpenCV's board with its corners by id; `usable_for_pose` says
-  whether a view of it fixes a pose (`ViewUse`); `guarded` and
+  whether a view of it fixes a pose (`ViewUse`, phrased by `describe`), and
+  refuses one whose corners, or all but one, lie on a line; `guarded` and
   `current_exception_status` return what OpenCV throws as a `Status`. With it,
   the installed package re-finds OpenCV.
 - The `solve` tier, `volumetric_kit::calib_solve`, built with
@@ -102,7 +103,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   each pair of cameras shares and the tree of the links that share the most,
   its ties broken by camera id; `initialise` places every camera (`T_cw`, the
   reference's colour camera the world) and every capture's board (`T_wb`),
-  recording each view's fate (`ViewRecord`) and each weak link.
+  recording each view's fate (`ViewRecord`) and each link's inliers and
+  weakness (`PlacedLink`).
 - Build-system foundation: top-level CMake (C++17), tiered component layout, the
   `volumetric_kit::calib_core` library target + `volumetric_kit::calib` umbrella
   alias, and first-class install/export so the library is consumable via both

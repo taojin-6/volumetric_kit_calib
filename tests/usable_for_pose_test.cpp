@@ -7,6 +7,8 @@
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 
 #include <limits>
+#include <set>
+#include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -49,7 +51,23 @@ TEST(UsableForPose, NeedsFourCorners) {
 TEST(UsableForPose, RefusesCollinearCorners) {
   EXPECT_EQ(use_of(view_of({0, 1, 2, 3})), ViewUse::Collinear);
   EXPECT_EQ(use_of(view_of({4, 5, 6, 7})), ViewUse::Collinear);
-  EXPECT_EQ(use_of(view_of({0, 1, 2, 3, 7})), ViewUse::Usable);
+}
+
+// All corners but one on a line fix no homography, wherever the one is in the
+// view; two off the line do.
+TEST(UsableForPose, RefusesAllButOneCornerOnALine) {
+  for (const std::vector<int>& ids :
+       std::vector<std::vector<int>>{{0, 1, 2, 5},
+                                     {5, 0, 1, 2},
+                                     {0, 1, 2, 3, 7},
+                                     {4, 0, 1, 2, 3},
+                                     {4, 5, 6, 7, 1},
+                                     {0, 4, 5, 6, 7}}) {
+    EXPECT_EQ(use_of(view_of(ids)), ViewUse::Collinear) << ids.front();
+  }
+  EXPECT_EQ(use_of(view_of({0, 1, 2, 5, 6})), ViewUse::Usable);
+  EXPECT_EQ(use_of(view_of({0, 3, 4, 7})), ViewUse::Usable);
+  EXPECT_EQ(use_of(view_of({0, 1, 2, 3, 4, 7})), ViewUse::Usable);
 }
 
 TEST(UsableForPose, RefusesACornerTheBoardLacksOrRepeats) {
@@ -88,6 +106,23 @@ TEST(UsableForPose, AnswersTheFirstCheckThatFails) {
   EXPECT_EQ(use_of(view), ViewUse::UnknownCorner);
   view.points[3].id = 3;  // now collinear too
   EXPECT_EQ(use_of(view), ViewUse::OutsideImage);
+}
+
+// Each answer has its own phrase, and a value out of range one too.
+TEST(UsableForPose, DescribesEachAnswer) {
+  const std::vector<ViewUse> uses = {
+      ViewUse::Usable,       ViewUse::TooFewCorners, ViewUse::UnknownCorner,
+      ViewUse::OutsideImage, ViewUse::Collinear,     static_cast<ViewUse>(99)};
+  std::set<std::string> phrases;
+  for (const ViewUse use : uses) {
+    const char* phrase = describe(use);
+    ASSERT_NE(phrase, nullptr);
+    EXPECT_NE(phrase[0], '\0');
+    phrases.insert(phrase);
+  }
+  EXPECT_EQ(phrases.size(), uses.size());
+  EXPECT_STREQ(describe(ViewUse::TooFewCorners), "fewer than 4 corners");
+  EXPECT_STREQ(describe(static_cast<ViewUse>(99)), "an unknown use");
 }
 
 TEST(UsableForPose, RefusesAnImageOfNoArea) {

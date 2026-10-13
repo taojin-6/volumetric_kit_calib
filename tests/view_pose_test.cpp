@@ -97,6 +97,56 @@ TEST(ViewPose, PosesExactViewsThroughTheWholeLens) {
   }
 }
 
+// Every subset of 4 to 8 corners of each exact view that usable_for_pose
+// accepts gives IPPE's two poses, the best the board's: the check refuses
+// every view IPPE cannot pose, all but one corner on a line included.
+TEST(ViewPose, PosesEveryUsableSubsetOfAnExactView) {
+  const compute::Board board = femto_board();
+  const std::vector<test::SyntheticCamera> rig = test::synthetic_rig();
+  test::PlanOptions plan_options;
+  plan_options.count = 10;
+  const std::vector<test::Placement> plan =
+      test::synthetic_plan(rig, board, plan_options);
+  test::ObserveOptions exact;
+  exact.noise_px = 0.0;
+  const std::vector<Observation> views = test::observe(rig, board, plan, exact);
+  std::size_t usable = 0;
+  std::size_t refused = 0;
+  for (const Observation& view : views) {
+    ASSERT_EQ(view.points.size(), 8u);
+    std::size_t c = 0;
+    while (rig[c].id != view.camera_id) ++c;
+    const compute::CvCamera cam = compute::cv_camera(rig[c].model).value();
+    const camera::Mat4d truth =
+        rig[c].world_to_camera * plan[view.frame_id].board_to_world;
+    for (unsigned mask = 0; mask < 256u; ++mask) {
+      Observation subset;
+      for (std::size_t i = 0; i < 8; ++i) {
+        if (mask & (1u << i)) subset.points.push_back(view.points[i]);
+      }
+      if (subset.points.size() < 4) continue;
+      if (compute::usable_for_pose(board, subset, cam.size).value() !=
+          compute::ViewUse::Usable) {
+        ++refused;
+        continue;
+      }
+      ++usable;
+      const core::Result<ViewPose> pose = view_pose(cam, board, subset);
+      ASSERT_TRUE(pose.ok())
+          << "mask " << mask << ": " << pose.status().message();
+      EXPECT_TRUE(pose->alternative.has_value()) << mask;
+      EXPECT_LT(rotation_error(pose->best.board_to_camera, truth), 1e-7)
+          << mask;
+      EXPECT_LT(translation_error(pose->best.board_to_camera, truth), 1e-7)
+          << mask;
+    }
+  }
+  // On the 4 x 2 grid, 2 corners or more on each row: 121 of the 163
+  // subsets of 4 or more.
+  EXPECT_EQ(usable, 121u * views.size());
+  EXPECT_EQ(refused, 42u * views.size());
+}
+
 // With noise, the better fit comes first, and the ambiguity is the ratio of
 // the fits; the RMS is each corner's Euclidean error.
 TEST(ViewPose, PutsTheBetterFitFirst) {

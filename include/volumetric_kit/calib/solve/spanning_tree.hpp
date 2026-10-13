@@ -38,6 +38,12 @@ VC_SOLVE_API core::Result<Covisibility> covisibility(
 
 /// @brief One link of a @ref SpanningTree: the camera it places, and the
 ///        camera it is placed from.
+///
+/// @code
+/// for (const TreeLink& link : tree.links) {
+///   if (link.weak) warn(ids[link.camera], ids[link.parent], link.shared);
+/// }
+/// @endcode
 struct TreeLink {
   std::size_t camera = 0;  ///< The camera the link places.
   std::size_t parent = 0;  ///< The camera it is placed from.
@@ -52,10 +58,8 @@ struct TreeLink {
 ///
 /// @code
 /// VKC_ASSIGN(const SpanningTree tree,
-///            spanning_tree(shared, ids, reference));
-/// for (const TreeLink& link : tree.links) {
-///   if (link.weak) warn(ids[link.camera], link.shared);
-/// }
+///            spanning_tree(shared, ids, reference, /*weak_below=*/5));
+/// const TreeLink& first = tree.links.front();  // placed from the reference
 /// @endcode
 struct SpanningTree {
   std::size_t reference = 0;  ///< The root: the camera the world is.
@@ -83,6 +87,6 @@ struct SpanningTree {
 ///         @p weak_below); or what OpenCV threw (@ref compute::guarded).
 VC_SOLVE_API core::Result<SpanningTree> spanning_tree(
     const Covisibility& covisibility, const std::vector<std::string>& ids,
-    std::size_t reference, int weak_below = 5);
+    std::size_t reference, int weak_below);
 
 }  // namespace volumetric_kit::calib::solve

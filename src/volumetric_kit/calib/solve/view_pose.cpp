@@ -22,24 +22,6 @@ namespace {
 
 namespace camera = recon::camera;
 
-constexpr double kDegPerRad = 180.0 / 3.14159265358979323846;
-
-const char* why_not_usable(compute::ViewUse use) noexcept {
-  switch (use) {
-    case compute::ViewUse::Usable:
-      break;
-    case compute::ViewUse::TooFewCorners:
-      return "fewer than 4 corners";
-    case compute::ViewUse::UnknownCorner:
-      return "a corner the board does not have, or one repeated";
-    case compute::ViewUse::OutsideImage:
-      return "a corner not finite or not 2 px inside the image";
-    case compute::ViewUse::Collinear:
-      return "its corners lie on one line";
-  }
-  return "it is not usable";
-}
-
 // OpenCV's 3-vector, whatever its shape and depth, in double; false unless
 // it holds three values.
 bool read_vec3(const cv::Mat& m, cv::Vec3d& v) {
@@ -73,7 +55,7 @@ core::Result<ViewPose> view_pose(const compute::CvCamera& camera,
     if (use != compute::ViewUse::Usable) {
       return core::Status::invalid_argument(
           std::string("view_pose: the view fixes no pose: ") +
-          why_not_usable(use));
+          compute::describe(use));
     }
     std::vector<cv::Point3d> object;
     std::vector<cv::Point2d> image;
@@ -88,13 +70,15 @@ core::Result<ViewPose> view_pose(const compute::CvCamera& camera,
     std::vector<cv::Mat> tvecs;
     cv::solvePnPGeneric(object, image, camera.camera_matrix, camera.distortion,
                         rvecs, tvecs, false, cv::SOLVEPNP_IPPE);
-    // IPPE gives two solutions. solvePnPGeneric swallows whatever IPPE throws
-    // (running out of memory included) and returns the solutions it had kept
-    // by then: none, or the better one alone.
+    // IPPE gives two solutions of a usable view. solvePnPGeneric swallows
+    // whatever IPPE throws (running out of memory included) and returns the
+    // solutions it had kept by then: none, or half of them, which its own
+    // assertion then reports. Either is OpenCV failing, not the view.
     if (rvecs.size() != 2 || tvecs.size() != 2) {
-      return core::Status::numerical("view_pose: IPPE failed, giving " +
-                                     std::to_string(rvecs.size()) +
-                                     " solutions of 2");
+      return core::Status::backend_error(
+          core::Status::Backend::Other, cv::Error::StsError,
+          "view_pose: IPPE failed, solvePnPGeneric giving " +
+              std::to_string(rvecs.size()) + " solutions of 2");
     }
 
     std::vector<PoseCandidate> candidates;
@@ -144,9 +128,8 @@ double tilt_deg(const compute::Board& board,
   // The board's z points into it, away from the printed face.
   const camera::Vec3d face = -camera::Vec3d(board_to_camera[2]);
   const camera::Vec3d to_camera = -centre;
-  return std::atan2(glm::length(glm::cross(face, to_camera)),
-                    glm::dot(face, to_camera)) *
-         kDegPerRad;
+  return glm::degrees(std::atan2(glm::length(glm::cross(face, to_camera)),
+                                 glm::dot(face, to_camera)));
 }
 
 }  // namespace volumetric_kit::calib::solve

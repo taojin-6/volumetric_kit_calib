@@ -6,8 +6,8 @@
 // and checks the rig's board and an observation in recon's types, so it links
 // calib_core, recon_camera and the core's base tier. With compute
 // (VC_CONSUMER_COMPUTE) it includes compute's and solve's headers too, builds
-// the board and the camera in OpenCV's types and a rig's tree, so it links
-// calib_compute, calib_solve and OpenCV.
+// the board and the camera in OpenCV's types, a rig's tree and a view's
+// ambiguity, so it links calib_compute, calib_solve and OpenCV.
 
 #include "volumetric_kit/calib/core/capture_meta.hpp"
 #include "volumetric_kit/calib/core/lens_profile.hpp"
@@ -48,8 +48,9 @@ int main() {
       compute::guarded("consumer",
                        [] { return volumetric_kit::core::Status{}; })
           .ok() &&
-      vc::solve::spanning_tree({{2, 1}, {1, 2}}, {"A", "B"}, 0)->links.size() ==
-          1;
+      vc::solve::spanning_tree({{2, 1}, {1, 2}}, {"A", "B"}, 0, 5)
+              ->links.size() == 1 &&
+      vc::solve::ViewPose{}.ambiguity() > 1.0;
   return ok && bridged ? 0 : 1;
 #else
   return ok ? 0 : 1;

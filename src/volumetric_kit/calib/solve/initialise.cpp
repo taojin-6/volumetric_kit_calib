@@ -14,6 +14,8 @@
 #include <utility>
 #include <vector>
 
+#include <glm/trigonometric.hpp>
+
 #include "reprojection.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
@@ -23,8 +25,6 @@ namespace volumetric_kit::calib::solve {
 namespace {
 
 namespace camera = recon::camera;
-
-constexpr double kDegPerRad = 180.0 / 3.14159265358979323846;
 
 core::Status refuse_option(const char* name, const char* rule) {
   return core::Status::invalid_argument(std::string("initialise: options.") +
@@ -57,8 +57,8 @@ core::Status check_options(const InitialiseOptions& options) {
 
 // The angle between two rotations (degrees), accurate near 0 and 180.
 double angle_deg(const camera::Mat3d& a, const camera::Mat3d& b) noexcept {
-  return glm::length(camera::rodrigues_from_rotation(glm::transpose(a) * b)) *
-         kDegPerRad;
+  return glm::degrees(
+      glm::length(camera::rodrigues_from_rotation(glm::transpose(a) * b)));
 }
 
 double median(std::vector<double> values) {
@@ -138,6 +138,59 @@ const UsedView* find_view(const Capture& capture, std::size_t camera) noexcept {
   return nullptr;
 }
 
+const char* name_of(ViewFate fate) noexcept {
+  switch (fate) {
+    case ViewFate::Used:
+      return "Used";
+    case ViewFate::Ambiguous:
+      return "Ambiguous";
+    case ViewFate::NotUsable:
+      return "NotUsable";
+    case ViewFate::NoPose:
+      return "NoPose";
+    case ViewFate::PoorFit:
+      return "PoorFit";
+  }
+  return "?";
+}
+
+// Why each camera (in id order) with no view used has none: "; of SYN3's 45
+// views none is used: 45 PoorFit", or "; SYN3 has no view". Empty when every
+// camera has a view used.
+std::string unused_cameras(const std::vector<ViewRecord>& records,
+                           const std::vector<std::string>& ids,
+                           const std::vector<std::size_t>& by_rank) {
+  const std::size_t k = ids.size();
+  // PoorFit is ViewFate's last value.
+  constexpr std::size_t kFates =
+      static_cast<std::size_t>(ViewFate::PoorFit) + 1;
+  std::vector<std::vector<int>> counts(k, std::vector<int>(kFates, 0));
+  for (const ViewRecord& record : records) {
+    ++counts[record.camera][static_cast<std::size_t>(record.fate)];
+  }
+  std::string why;
+  for (const std::size_t c : by_rank) {
+    const std::vector<int>& count = counts[c];
+    if (count[static_cast<std::size_t>(ViewFate::Used)] > 0) continue;
+    int total = 0;
+    for (const int n : count) total += n;
+    if (total == 0) {
+      why += "; " + ids[c] + " has no view";
+      continue;
+    }
+    why += "; of " + ids[c] + "'s " + std::to_string(total) +
+           (total == 1 ? " view" : " views") + " none is used:";
+    const char* separator = " ";
+    for (std::size_t f = 0; f < kFates; ++f) {
+      if (count[f] == 0) continue;
+      why += separator + std::to_string(count[f]) + " " +
+             name_of(static_cast<ViewFate>(f));
+      separator = ", ";
+    }
+  }
+  return why;
+}
+
 }  // namespace
 
 core::Result<InitialRig> initialise(const std::vector<RigCamera>& cameras,
@@ -183,9 +236,11 @@ core::Result<InitialRig> initialise(const std::vector<RigCamera>& cameras,
       lenses.push_back(*lens);
     }
     std::vector<std::size_t> rank(k);
-    {
-      std::size_t r = 0;
-      for (const auto& entry : by_id) rank[entry.second] = r++;
+    std::vector<std::size_t> by_rank;
+    by_rank.reserve(k);
+    for (const auto& entry : by_id) {
+      rank[entry.second] = by_rank.size();
+      by_rank.push_back(entry.second);
     }
 
     // 1. Each view: whether it is usable, its own poses, and its fate.
@@ -221,7 +276,9 @@ core::Result<InitialRig> initialise(const std::vector<RigCamera>& cameras,
       core::Result<ViewPose> pose = view_pose(lenses[c], board, view);
       if (!pose.ok()) {
         if (pose.status().domain() != core::Status::Code::Numerical) {
-          return pose.status().with_context("initialise");
+          return pose.status().with_context(
+              "initialise: camera " + view.camera_id + "'s view of capture " +
+              std::to_string(view.frame_id));
         }
         record.fate = ViewFate::NoPose;
         continue;
@@ -261,14 +318,22 @@ core::Result<InitialRig> initialise(const std::vector<RigCamera>& cameras,
     VKC_ASSIGN(const Covisibility shared, covisibility(k, seen_by));
     core::Result<SpanningTree> tree =
         spanning_tree(shared, ids, reference, options.weak_below);
-    if (!tree.ok()) return tree.status().with_context("initialise");
-    rig.tree = *std::move(tree);
+    if (!tree.ok()) {
+      if (tree.status().domain() != core::Status::Code::InvalidArgument) {
+        return tree.status().with_context("initialise");
+      }
+      // A camera outside the tree: the tree counts used views alone, so say
+      // why a camera has none.
+      return core::Status::invalid_argument(
+          "initialise: " + tree.status().message() +
+          unused_cameras(rig.views, ids, by_rank));
+    }
 
     // 3. Each camera from its parent, from the reference outwards; a link
     // shares a capture at least, so each has a relative pose.
     rig.world_to_camera.assign(k, camera::Mat4d(1.0));
-    rig.inliers.reserve(rig.tree.links.size());
-    for (const TreeLink& link : rig.tree.links) {
+    rig.links.reserve(tree->links.size());
+    for (const TreeLink& link : tree->links) {
       std::vector<camera::Mat4d> relative;  // parent to camera, per capture
       for (const auto& entry : captures) {
         const UsedView* child = find_view(entry.second, link.camera);
@@ -281,10 +346,12 @@ core::Result<InitialRig> initialise(const std::vector<RigCamera>& cameras,
       const RobustMean mean = robust_mean(relative, options.inlier_deg);
       rig.world_to_camera[link.camera] =
           mean.transform * rig.world_to_camera[link.parent];
-      rig.inliers.push_back(mean.inliers);
+      rig.links.push_back({link, mean.inliers});
     }
 
     // 4. Each capture's board: the candidate that best fits its used views.
+    // TODO: CA5 decides how to seed, or drop, a capture whose views are all
+    // Ambiguous; it has no board pose here, so the adjustment cannot use them.
     const double cap = options.truncation_px * options.truncation_px;
     for (const auto& entry : captures) {
       const Capture& capture = entry.second;

@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   build:
-    name: ${{ matrix.os }} ${{ matrix.build_type }}
+    name: ${{ matrix.os }} ${{ matrix.build_type }}${{ matrix.shared == 'ON' && ' shared' || '' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -26,6 +26,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         build_type: [Debug, Release]
+        shared: ['OFF']
+        include:
+          # Shared libraries, with the OpenCV tiers: a test that calls a public
+          # symbol left unexported fails to link.
+          - os: macos-latest
+            build_type: Release
+            shared: 'ON'
     steps:
       - uses: actions/checkout@v4
 
@@ -56,14 +63,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: deps-${{ matrix.os }}-${{ matrix.build_type }}-${{ hashFiles('third_party/CMakeLists.txt') }}
+          key: deps-${{ matrix.os }}-${{ matrix.build_type }}-${{ matrix.shared }}-${{ hashFiles('third_party/CMakeLists.txt') }}
           restore-keys: |
-            deps-${{ matrix.os }}-${{ matrix.build_type }}-
+            deps-${{ matrix.os }}-${{ matrix.build_type }}-${{ matrix.shared }}-
 
       - name: Configure
         run: >-
           cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           -DVC_WITH_OPENCV=${{ runner.os == 'macOS' && 'ON' || 'OFF' }}
+          -DBUILD_SHARED_LIBS=${{ matrix.shared }}
 
       - name: Build
         run: cmake --build build --parallel

@@ -147,16 +147,16 @@ void expect_same_rig(const InitialRig& a, const std::vector<RigCamera>& a_cams,
     EXPECT_EQ(a.boards[i].board_to_world, b.boards[i].board_to_world)
         << "capture " << a.boards[i].capture;
   }
-  ASSERT_EQ(a.tree.links.size(), b.tree.links.size());
-  for (std::size_t i = 0; i < a.tree.links.size(); ++i) {
-    const TreeLink& x = a.tree.links[i];
-    const TreeLink& y = b.tree.links[i];
+  ASSERT_EQ(a.links.size(), b.links.size());
+  for (std::size_t i = 0; i < a.links.size(); ++i) {
+    const PlacedLink& x = a.links[i];
+    const PlacedLink& y = b.links[i];
     EXPECT_EQ(a_cams[x.camera].id, b_cams[y.camera].id);
     EXPECT_EQ(a_cams[x.parent].id, b_cams[y.parent].id);
     EXPECT_EQ(x.shared, y.shared);
     EXPECT_EQ(x.weak, y.weak);
+    EXPECT_EQ(x.inliers, y.inliers);
   }
-  EXPECT_EQ(a.inliers, b.inliers);
   if (!compare_views) return;
   ASSERT_EQ(a.views.size(), b.views.size());
   for (std::size_t i = 0; i < a.views.size(); ++i) {
@@ -178,14 +178,15 @@ const ViewRecord* record_of(const InitialRig& rig,
 }
 
 // Camera `c`'s view of `capture` replaced by its view of the board at
-// `board_to_world` instead.
+// `board_to_world` instead, without noise: the view fits its own pose better
+// than any other, so only the other views can outvote it.
 void replace_view(Scene& scene, std::size_t c, std::int64_t capture,
                   const camera::Mat4d& board_to_world) {
   test::Placement moved;
   moved.board_to_world = board_to_world;
   moved.cameras = {c};
   const std::vector<Observation> seen = test::observe(
-      scene.rig, scene.board, {moved}, test::ObserveOptions{0.3, 5});
+      scene.rig, scene.board, {moved}, test::ObserveOptions{0.0, 5});
   for (Observation& view : scene.views) {
     if (view.camera_id == scene.cameras[c].id && view.frame_id == capture) {
       view.points = seen.front().points;
@@ -236,11 +237,10 @@ TEST(Initialise, FirstRigIsWithinADegreeAndFiveCentimetres) {
     EXPECT_EQ(view.fate, ViewFate::Used) << view.capture;
   }
   EXPECT_EQ(rig->boards.size(), scene.plan.size());
-  ASSERT_EQ(rig->tree.links.size(), 3u);
-  ASSERT_EQ(rig->inliers.size(), 3u);
-  for (std::size_t i = 0; i < 3; ++i) {
-    EXPECT_FALSE(rig->tree.links[i].weak);
-    EXPECT_EQ(rig->inliers[i], rig->tree.links[i].shared);
+  ASSERT_EQ(rig->links.size(), 3u);
+  for (const PlacedLink& link : rig->links) {
+    EXPECT_FALSE(link.weak);
+    EXPECT_EQ(link.inliers, link.shared);
   }
 }
 
@@ -286,7 +286,6 @@ TEST(Initialise, AnyCameraCanBeTheReference) {
         run(scene.cameras, scene.board, scene.views, reference);
     ASSERT_TRUE(rig.ok()) << rig.status().message();
     EXPECT_EQ(rig->reference, reference);
-    EXPECT_EQ(rig->tree.reference, reference);
     EXPECT_EQ(rig->world_to_camera[reference], camera::Mat4d(1.0));
     expect_near_truth(scene, scene.cameras, *rig, scene.cameras[reference].id,
                       1.0, 0.05);
@@ -431,13 +430,15 @@ TEST(Initialise, LeavesOutAndListsAViewThatFitsPoorly) {
   expect_same_rig(*rig, scene.cameras, *without_it, scene.cameras,
                   /*compare_views=*/false);
 
-  // A looser limit uses it.
-  InitialiseOptions loose;
-  loose.max_pnp_rms_px = 2.0 * *record.pnp_rms_px;
-  const core::Result<InitialRig> used =
-      run(scene.cameras, scene.board, scene.views, 0, loose);
-  ASSERT_TRUE(used.ok());
-  EXPECT_NE(used->views[17].fate, ViewFate::PoorFit);
+  // A limit at its RMS, or looser, uses it.
+  for (const double limit : {*record.pnp_rms_px, 2.0 * *record.pnp_rms_px}) {
+    InitialiseOptions loose;
+    loose.max_pnp_rms_px = limit;
+    const core::Result<InitialRig> used =
+        run(scene.cameras, scene.board, scene.views, 0, loose);
+    ASSERT_TRUE(used.ok());
+    EXPECT_NE(used->views[17].fate, ViewFate::PoorFit) << limit;
+  }
 }
 
 // A view whose two poses fit too alike is kept, with its measures, but
@@ -475,6 +476,13 @@ TEST(Initialise, KeepsAnAmbiguousViewButDoesNotInitialiseFromIt) {
   ASSERT_TRUE(without_it.ok());
   expect_same_rig(*rig, scene.cameras, *without_it, scene.cameras,
                   /*compare_views=*/false);
+
+  // A limit at its ambiguity uses it.
+  options.min_ambiguity = ambiguity[0].first;
+  const core::Result<InitialRig> at =
+      run(scene.cameras, scene.board, scene.views, 0, options);
+  ASSERT_TRUE(at.ok());
+  EXPECT_EQ(at->views[i].fate, ViewFate::Used);
 }
 
 // A view tilted past oblique_deg is flagged and still used.
@@ -494,6 +502,15 @@ TEST(Initialise, FlagsObliqueViewsAndUsesThem) {
   }
   EXPECT_GT(oblique, 0u);
   EXPECT_LT(oblique, rig->views.size());
+
+  // A view tilted exactly oblique_deg is not oblique.
+  const double tilt = *rig->views[5].tilt_deg;
+  options.oblique_deg = tilt;
+  const core::Result<InitialRig> at =
+      run(scene.cameras, scene.board, scene.views, 0, options);
+  ASSERT_TRUE(at.ok());
+  EXPECT_EQ(*at->views[5].tilt_deg, tilt);
+  EXPECT_FALSE(at->views[5].oblique);
 }
 
 // One capture where a camera saw the board turned 10 degrees from where the
@@ -504,7 +521,7 @@ TEST(Initialise, AnOutlierCaptureDoesNotPlaceTheCamera) {
   const core::Result<InitialRig> clean =
       run(scene.cameras, scene.board, scene.views, 0);
   ASSERT_TRUE(clean.ok()) << clean.status().message();
-  const TreeLink link = clean->tree.links.back();
+  const PlacedLink link = clean->links.back();
   const std::string& child = scene.cameras[link.camera].id;
   const std::string& parent = scene.cameras[link.parent].id;
 
@@ -527,10 +544,9 @@ TEST(Initialise, AnOutlierCaptureDoesNotPlaceTheCamera) {
   const core::Result<InitialRig> rig =
       run(scene.cameras, scene.board, scene.views, 0);
   ASSERT_TRUE(rig.ok()) << rig.status().message();
-  ASSERT_EQ(rig->tree.links.size(), clean->tree.links.size());
-  const std::size_t last = rig->tree.links.size() - 1;
-  ASSERT_EQ(rig->tree.links[last].camera, link.camera);
-  EXPECT_EQ(rig->inliers[last], rig->tree.links[last].shared - 1);
+  ASSERT_EQ(rig->links.size(), clean->links.size());
+  ASSERT_EQ(rig->links.back().camera, link.camera);
+  EXPECT_EQ(rig->links.back().inliers, rig->links.back().shared - 1);
   EXPECT_EQ(record_of(*rig, scene.cameras, child, capture)->fate,
             ViewFate::Used);
   EXPECT_LT(angle_deg(rig->world_to_camera[link.camera],
@@ -538,6 +554,64 @@ TEST(Initialise, AnOutlierCaptureDoesNotPlaceTheCamera) {
             0.1)
       << child << " from " << parent;
   expect_near_truth(scene, scene.cameras, *rig, "SYN0", 1.0, 0.05);
+
+  // Within 15 degrees, the turned capture is an inlier.
+  InitialiseOptions wide;
+  wide.inlier_deg = 15.0;
+  const core::Result<InitialRig> loose =
+      run(scene.cameras, scene.board, scene.views, 0, wide);
+  ASSERT_TRUE(loose.ok()) << loose.status().message();
+  ASSERT_EQ(loose->links.back().camera, link.camera);
+  EXPECT_EQ(loose->links.back().inliers, loose->links.back().shared);
+}
+
+// A link whose shared captures' relative rotations are spread evenly about
+// the truth, a degree either way: their chordal mean is the truth, and the
+// median of their translations within a millimetre of it, while each one,
+// the medoid included, is a degree and centimetres off.
+TEST(Initialise, PlacesACameraByTheMeanOfItsInliers) {
+  Scene scene = make_scene(60, 0.0);
+  const core::Result<InitialRig> clean =
+      run(scene.cameras, scene.board, scene.views, 0);
+  ASSERT_TRUE(clean.ok()) << clean.status().message();
+  const PlacedLink link = clean->links.back();  // the last placed: a leaf
+  const camera::Mat4d world_to_child = scene.rig[link.camera].world_to_camera;
+  std::vector<std::size_t> shared;
+  for (std::size_t p = 0; p < scene.plan.size(); ++p) {
+    const std::vector<std::size_t>& seen = scene.plan[p].cameras;
+    if (std::count(seen.begin(), seen.end(), link.camera) &&
+        std::count(seen.begin(), seen.end(), link.parent)) {
+      shared.push_back(p);
+    }
+  }
+  ASSERT_EQ(shared.size(), static_cast<std::size_t>(link.shared));
+  ASSERT_GE(shared.size(), 4u);
+  // The child rolled a degree one way, then the other, in pairs; an odd one
+  // out is left as it was.
+  for (std::size_t i = 0; i + 1 < shared.size(); i += 2) {
+    for (const std::size_t j : {i, i + 1}) {
+      const double deg = j == i ? 1.0 : -1.0;
+      const camera::Mat4d roll(camera::rotation_from_rodrigues(
+          camera::Vec3d(0.0, 0.0, deg / kDegPerRad)));
+      replace_view(scene, link.camera, static_cast<std::int64_t>(shared[j]),
+                   camera::rigid_inverse(world_to_child) * roll *
+                       world_to_child * scene.plan[shared[j]].board_to_world);
+    }
+  }
+
+  const core::Result<InitialRig> rig =
+      run(scene.cameras, scene.board, scene.views, 0);
+  ASSERT_TRUE(rig.ok()) << rig.status().message();
+  for (const ViewRecord& view : rig->views) {
+    EXPECT_EQ(view.fate, ViewFate::Used) << view.capture;
+  }
+  ASSERT_EQ(rig->links.back().camera, link.camera);
+  EXPECT_EQ(rig->links.back().inliers, link.shared);
+  const camera::Mat4d expected =
+      world_to_child * camera::rigid_inverse(scene.rig[0].world_to_camera);
+  const camera::Mat4d& got = rig->world_to_camera[link.camera];
+  EXPECT_LT(angle_deg(got, expected), 1e-6);
+  EXPECT_LT(glm::length(centre_of(got) - centre_of(expected)), 1e-3);
 }
 
 // A capture whose first view, in id order, saw the board turned 10 degrees
@@ -637,6 +711,19 @@ TEST(Initialise, CapsEachCornersErrorWhenScoringABoard) {
   const auto [board, truth] = board_and_truth(scene, *rig, capture, "SYN0");
   EXPECT_LT(glm::length(camera::Vec3d(board[3] - truth[3])), 0.02)
       << scene.cameras[moved_in].id << ", ratio " << best;
+
+  // Uncapped, the one view places the board where it saw it.
+  InitialiseOptions uncapped;
+  uncapped.truncation_px = 1e6;
+  const core::Result<InitialRig> loose =
+      run(scene.cameras, scene.board, scene.views, 0, uncapped);
+  ASSERT_TRUE(loose.ok()) << loose.status().message();
+  const camera::Mat4d followed =
+      board_and_truth(scene, *loose, capture, "SYN0").first;
+  const camera::Mat4d moved_to =
+      scene.rig[0].world_to_camera * shift *
+      scene.plan[static_cast<std::size_t>(capture)].board_to_world;
+  EXPECT_LT(glm::length(camera::Vec3d(followed[3] - moved_to[3])), 0.01);
 }
 
 // A camera that shares no capture with the others' tree is named.
@@ -667,8 +754,29 @@ TEST(Initialise, NamesACameraOutsideTheTree) {
   }
   rig = run(scene.cameras, scene.board, none, 0);
   EXPECT_EQ(rig.status().domain(), Code::InvalidArgument);
-  EXPECT_NE(rig.status().message().find("SYN3"), std::string::npos)
-      << rig.status().message();
+  EXPECT_EQ(rig.status().message(),
+            "initialise: spanning_tree: SYN3 shares no capture with the tree "
+            "of the reference, SYN0; SYN3 has no view");
+
+  // With every view of it left out: the message says why.
+  std::vector<Observation> poor = scene.views;
+  std::size_t left_out = 0;
+  for (Observation& view : poor) {
+    if (view.camera_id != "SYN3") continue;
+    view.points[3].pixel += camera::Vec2d(40.0, -15.0);
+    ++left_out;
+  }
+  // Another camera's view left out too, which the message does not list.
+  std::find_if(poor.begin(), poor.end(), [](const Observation& view) {
+    return view.camera_id != "SYN3";
+  })->points.resize(3);
+  rig = run(scene.cameras, scene.board, poor, 0);
+  EXPECT_EQ(rig.status().domain(), Code::InvalidArgument);
+  EXPECT_EQ(rig.status().message(),
+            "initialise: spanning_tree: SYN3 shares no capture with the tree "
+            "of the reference, SYN0; of SYN3's " +
+                std::to_string(left_out) + " views none is used: " +
+                std::to_string(left_out) + " PoorFit");
 }
 
 // A camera sharing 3 captures with the others still links, weakly.
@@ -682,7 +790,7 @@ TEST(Initialise, AWeakLinkWarns) {
   }
   const core::Result<InitialRig> rig = run(scene.cameras, scene.board, few, 0);
   ASSERT_TRUE(rig.ok()) << rig.status().message();
-  for (const TreeLink& link : rig->tree.links) {
+  for (const PlacedLink& link : rig->links) {
     if (scene.cameras[link.camera].id == "SYN2") {
       EXPECT_TRUE(link.weak);
       EXPECT_LE(link.shared, 3);
@@ -691,6 +799,18 @@ TEST(Initialise, AWeakLinkWarns) {
     }
   }
   expect_near_truth(scene, scene.cameras, *rig, "SYN0", 1.0, 0.05);
+
+  // weak_below as given: 0 flags none, 100 every link.
+  for (const int weak_below : {0, 100}) {
+    InitialiseOptions options;
+    options.weak_below = weak_below;
+    const core::Result<InitialRig> other =
+        run(scene.cameras, scene.board, few, 0, options);
+    ASSERT_TRUE(other.ok()) << other.status().message();
+    for (const PlacedLink& link : other->links) {
+      EXPECT_EQ(link.weak, weak_below == 100) << weak_below;
+    }
+  }
 }
 
 TEST(Initialise, ARigOfOneCameraPlacesItsBoards) {
@@ -705,7 +825,7 @@ TEST(Initialise, ARigOfOneCameraPlacesItsBoards) {
   ASSERT_TRUE(rig.ok()) << rig.status().message();
   EXPECT_EQ(rig->world_to_camera,
             std::vector<camera::Mat4d>{camera::Mat4d(1.0)});
-  EXPECT_TRUE(rig->tree.links.empty());
+  EXPECT_TRUE(rig->links.empty());
   EXPECT_EQ(rig->boards.size(), views.size());
   expect_near_truth(scene, one, *rig, one[0].id, 1.0, 0.05);
 }

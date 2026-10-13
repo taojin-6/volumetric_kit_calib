@@ -47,7 +47,7 @@ struct PoseCandidate {
 /// if (pose.ambiguity() < 2.0) return;  // either pose could be the board's
 /// const recon::camera::Mat4d& board_to_camera = pose.best.board_to_camera;
 /// @endcode
-struct ViewPose {
+struct VC_SOLVE_API ViewPose {
   PoseCandidate best;                        ///< The better fit.
   std::optional<PoseCandidate> alternative;  ///< The other, if it is valid.
 
@@ -65,10 +65,12 @@ struct ViewPose {
 /// @param view    The corners seen; its weights are not used.
 /// @return The poses; `InvalidArgument` for a view
 ///         @ref compute::usable_for_pose does not find usable, its message
-///         saying why; `Numerical` when IPPE fails (OpenCV's
-///         `solvePnPGeneric` swallows what IPPE throws, running out of memory
-///         included) or no solution is finite with every corner in front of
-///         the camera; or what OpenCV threw (@ref compute::guarded).
+///         saying why (@ref compute::describe); `Numerical` when no solution
+///         is finite with every corner in front of the camera; a `Backend`
+///         error naming `solvePnPGeneric` when IPPE fails, which a usable view
+///         does only when IPPE throws (`solvePnPGeneric` swallows that,
+///         running out of memory included, and keeps none or half of the
+///         solutions); or what OpenCV threw (@ref compute::guarded).
 VC_SOLVE_API core::Result<ViewPose> view_pose(const compute::CvCamera& camera,
                                               const compute::Board& board,
                                               const Observation& view);

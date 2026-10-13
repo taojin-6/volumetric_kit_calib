@@ -72,8 +72,9 @@ struct InitialiseOptions {
 /// @brief What @ref initialise does with a view.
 enum class ViewFate {
   Used,  ///< It initialises the rig.
-  /// It is not initialised from, as its two poses fit almost alike, but the
-  /// adjustment keeps it.
+  /// It is not initialised from, as its two poses fit almost alike; it is left
+  /// for the adjustment, which needs its capture's board pose (@ref
+  /// InitialRig::boards).
   Ambiguous,
   /// Left out: @ref compute::usable_for_pose refused it
   /// (@ref ViewRecord::use says why).
@@ -99,7 +100,7 @@ struct ViewRecord {
   std::int64_t capture = 0;  ///< Its capture, as `Observation::frame_id`.
   ViewFate fate = ViewFate::NotUsable;  ///< What the solve does with it.
   /// @ref compute::usable_for_pose's answer.
-  compute::ViewUse use = compute::ViewUse::Usable;
+  compute::ViewUse use = compute::ViewUse::TooFewCorners;
   std::optional<double> pnp_rms_px;  ///< Its best pose's RMS (pixels).
   /// Its poses' @ref ViewPose::ambiguity.
   std::optional<double> ambiguity;
@@ -110,9 +111,30 @@ struct ViewRecord {
 };
 
 /// @brief Where a capture put the board.
+///
+/// @code
+/// for (const BoardPose& board : rig.boards) {
+///   const recon::camera::Mat4d board_to_camera =
+///       rig.world_to_camera[c] * board.board_to_world;  // T_cb in camera c
+/// }
+/// @endcode
 struct BoardPose {
   std::int64_t capture = 0;  ///< The capture, as `Observation::frame_id`.
   recon::camera::Mat4d board_to_world{1.0};  ///< T_wb.
+};
+
+/// @brief A link of the tree (@ref TreeLink) as @ref initialise placed its
+///        camera.
+///
+/// @code
+/// for (const PlacedLink& link : rig.links) {
+///   const int outliers = link.shared - link.inliers;
+///   if (outliers > 0) report(link.camera, outliers);  // captures to check
+/// }
+/// @endcode
+struct PlacedLink : TreeLink {
+  /// The shared captures whose relative pose agreed and placed the camera.
+  int inliers = 0;
 };
 
 /// @brief The first rig: every camera and board placed from the views.
@@ -130,10 +152,8 @@ struct InitialRig {
   /// The board in each capture with a view used, in the captures' order;
   /// a capture with none has no pose.
   std::vector<BoardPose> boards;
-  SpanningTree tree;  ///< How the cameras were placed.
-  /// For each of `tree.links`, the shared captures whose relative pose
-  /// agreed and placed the camera.
-  std::vector<int> inliers;
+  /// How the cameras were placed: @ref SpanningTree::links, in its order.
+  std::vector<PlacedLink> links;
   /// One record for each observation, in the observations' order.
   std::vector<ViewRecord> views;
 };
@@ -169,11 +189,13 @@ struct InitialRig {
 /// @param reference  The camera the world is, by index in @p cameras.
 /// @param options    The thresholds.
 /// @return The first rig; `InvalidArgument` for a camera outside the tree
-///         (naming it), an option out of range (naming it), no cameras, a
-///         repeated or empty id, a camera model @ref compute::cv_camera
-///         refuses, a view naming a camera the rig does not have, two views
-///         of one capture by one camera, or a reference outside the rig; or
-///         what OpenCV threw (@ref compute::guarded). Each message starts
+///         (naming it, and saying why when none of its views is used), an
+///         option out of range (naming it), no cameras, a repeated or empty
+///         id, a camera model @ref compute::cv_camera refuses, a view naming
+///         a camera the rig does not have, two views of one capture by one
+///         camera, or a reference outside the rig; @ref view_pose's `Backend`
+///         error when IPPE fails on a usable view (naming the view); or what
+///         OpenCV threw (@ref compute::guarded). Each message starts
 ///         `initialise: `.
 VC_SOLVE_API core::Result<InitialRig> initialise(
     const std::vector<RigCamera>& cameras, const compute::Board& board,

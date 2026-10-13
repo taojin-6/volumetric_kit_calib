@@ -51,12 +51,36 @@ core::Result<ViewUse> usable_for_pose(const Board& board,
     }
 
     // OpenCV indexes the board's corners by these ids unchecked: they are
-    // checked above.
-    if (board.charuco().checkCharucoCornersCollinear(ids)) {
-      return ViewUse::Collinear;
+    // checked above. Every corner on one line, or every corner but one.
+    const cv::aruco::CharucoBoard& charuco = board.charuco();
+    if (charuco.checkCharucoCornersCollinear(ids)) return ViewUse::Collinear;
+    std::vector<int> others(ids.size() - 1);
+    for (std::size_t skip = 0; skip < ids.size(); ++skip) {
+      for (std::size_t i = 0, j = 0; i < ids.size(); ++i) {
+        if (i != skip) others[j++] = ids[i];
+      }
+      if (charuco.checkCharucoCornersCollinear(others)) {
+        return ViewUse::Collinear;
+      }
     }
     return ViewUse::Usable;
   });
+}
+
+const char* describe(ViewUse use) noexcept {
+  switch (use) {
+    case ViewUse::Usable:
+      return "usable";
+    case ViewUse::TooFewCorners:
+      return "fewer than 4 corners";
+    case ViewUse::UnknownCorner:
+      return "a corner the board does not have, or one repeated";
+    case ViewUse::OutsideImage:
+      return "a corner not finite or not 2 px inside the image";
+    case ViewUse::Collinear:
+      return "its corners, or all but one, lie on one line";
+  }
+  return "an unknown use";
 }
 
 }  // namespace volumetric_kit::calib::compute

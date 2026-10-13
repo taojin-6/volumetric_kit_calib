@@ -74,11 +74,10 @@ locked decision above.)
 
 ## 2026-10-12 — OpenCV, behind calib's types
 
-calib's CPU maths -- the lens model, poses and the solve's first rig now,
-detection as it lands -- is OpenCV 5's, called from the `compute` tier on.
-Callers hold recon's `CameraModel` and `Mat4d` and calib's `Target`; `compute`
-converts them (`cv_camera`, `cv_pose`, `Board`), so no second camera or board
-record exists.
+calib's CPU maths -- the lens model, poses, detection and the solve -- is
+OpenCV 5's, called from the `compute` tier on. Callers hold recon's
+`CameraModel` and `Mat4d` and calib's `Target`; `compute` converts them
+(`cv_camera`, `cv_pose`, `Board`), so no second camera or board record exists.
 
 - **A prerequisite, and optional.** OpenCV is installed and found
   (`find_package(OpenCV 5.0 CONFIG)`), never fetched, like recon's SDKs.
