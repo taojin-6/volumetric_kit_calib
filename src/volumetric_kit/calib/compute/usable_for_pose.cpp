@@ -50,16 +50,15 @@ core::Result<ViewUse> usable_for_pose(const Board& board,
       }
     }
 
-    // OpenCV indexes the board's corners by these ids unchecked: they are
-    // checked above. Every corner on one line, or every corner but one.
-    const cv::aruco::CharucoBoard& charuco = board.charuco();
-    if (charuco.checkCharucoCornersCollinear(ids)) return ViewUse::Collinear;
+    // Every corner but one on a line, which every corner on it is too. OpenCV
+    // indexes the board's corners by these ids unchecked: they are checked
+    // above.
     std::vector<int> others(ids.size() - 1);
     for (std::size_t skip = 0; skip < ids.size(); ++skip) {
       for (std::size_t i = 0, j = 0; i < ids.size(); ++i) {
         if (i != skip) others[j++] = ids[i];
       }
-      if (charuco.checkCharucoCornersCollinear(others)) {
+      if (board.charuco().checkCharucoCornersCollinear(others)) {
         return ViewUse::Collinear;
       }
     }
