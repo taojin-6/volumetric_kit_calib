@@ -8,8 +8,9 @@
 ///
 /// OpenCV reports a failure by throwing `cv::Exception`, and calib's API
 /// throws nothing (AGENTS.md, "Error handling"). Each public entry point that
-/// calls OpenCV runs its body once through @ref guarded, which returns what
-/// the body threw as a `Status`.
+/// calls OpenCV runs its body once through @ref guarded, including input
+/// validation and error-message/context construction, which can also throw.
+/// The guard returns what the body threw as a `Status`.
 
 #include <string_view>
 #include <type_traits>

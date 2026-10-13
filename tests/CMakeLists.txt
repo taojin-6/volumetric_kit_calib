@@ -43,6 +43,9 @@ if(VC_WITH_OPENCV)
   vc_add_test(board volumetric_kit::calib_compute vc_test_support)
   vc_add_test(cv_camera vc_synthetic_rig opencv_geometry)
   vc_add_test(synthetic_rig vc_synthetic_rig opencv_geometry)
+  # Keep allocation replacement isolated from the other test executables.
+  vc_add_test(compute_oom volumetric_kit::calib_compute vc_test_support)
+  target_sources(vc_compute_oom_test PRIVATE support/allocation_failure.cpp)
 endif()
 
 # The core calib requires (third_party/CMakeLists.txt): calib's configure

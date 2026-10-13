@@ -82,39 +82,41 @@ Board::Board(const Target& target, const cv::aruco::CharucoBoard& charuco,
       object_points_(std::move(object_points)) {}
 
 core::Result<Board> Board::create(const Target& target) {
-  VKC_TRY(check_target(target));
-  if (target.kind != TargetKind::ChArUco) {
-    return core::Status::unsupported("target.kind must be ChArUco for a Board");
-  }
-  // OpenCV's board keeps its lengths and corners as float, its far corner at
-  // squares x square_size_m: each must be a normal float (a double beyond
-  // float's range does not even convert).
-  constexpr float kMin = std::numeric_limits<float>::min();
-  if (!(target.square_size_m >= kMin &&
-        target.square_size_m <= std::numeric_limits<float>::max())) {
-    return core::Status::invalid_argument(
-        "target.square_size_m must be a normal float");
-  }
-  const float square = static_cast<float>(target.square_size_m);
-  const float squares = static_cast<float>(std::max(target.rows, target.cols));
-  if (!std::isfinite(square * (squares + 1.0f))) {
-    return core::Status::invalid_argument(
-        "target.square_size_m must keep the board's extent a float");
-  }
-  const float marker = static_cast<float>(target.marker_size_m);
-  if (!(marker >= kMin && marker < square)) {
-    return core::Status::invalid_argument(
-        "target.marker_size_m must stay a normal float below square_size_m");
-  }
-  const std::optional<cv::aruco::PredefinedDictionaryType> dictionary =
-      opencv_dictionary(target.dictionary);
-  // check_target refuses a ChArUco board without a dictionary.
-  if (!dictionary) {
-    return core::Status::invalid_argument(
-        "target.dictionary must name the markers' dictionary");
-  }
-
   return guarded("Board::create", [&]() -> core::Result<Board> {
+    VKC_TRY(check_target(target));
+    if (target.kind != TargetKind::ChArUco) {
+      return core::Status::unsupported(
+          "target.kind must be ChArUco for a Board");
+    }
+    // OpenCV's board keeps its lengths and corners as float, its far corner at
+    // squares x square_size_m: each must be a normal float (a double beyond
+    // float's range does not even convert).
+    constexpr float kMin = std::numeric_limits<float>::min();
+    if (!(target.square_size_m >= kMin &&
+          target.square_size_m <= std::numeric_limits<float>::max())) {
+      return core::Status::invalid_argument(
+          "target.square_size_m must be a normal float");
+    }
+    const float square = static_cast<float>(target.square_size_m);
+    const float max_corners =
+        static_cast<float>(std::max(target.rows, target.cols));
+    if (!std::isfinite(square * (max_corners + 1.0f))) {
+      return core::Status::invalid_argument(
+          "target.square_size_m must keep the board's extent a float");
+    }
+    const float marker = static_cast<float>(target.marker_size_m);
+    if (!(marker >= kMin && marker < square)) {
+      return core::Status::invalid_argument(
+          "target.marker_size_m must stay a normal float below square_size_m");
+    }
+    const std::optional<cv::aruco::PredefinedDictionaryType> dictionary =
+        opencv_dictionary(target.dictionary);
+    // check_target refuses a ChArUco board without a dictionary.
+    if (!dictionary) {
+      return core::Status::invalid_argument(
+          "target.dictionary must name the markers' dictionary");
+    }
+
     const cv::Size squares(target.cols + 1, target.rows + 1);
     // One marker in every other square; check_target holds them inside the
     // dictionary.
