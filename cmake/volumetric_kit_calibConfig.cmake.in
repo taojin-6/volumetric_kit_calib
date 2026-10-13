@@ -3,22 +3,39 @@
 
 @PACKAGE_INIT@
 
-# Re-find the PUBLIC dependencies. Eigen is a PUBLIC dependency of calib_core
-# (its public headers — camera_model.hpp etc. — name Eigen types), so the
-# installed package re-finds it. CONFIG, as the build found it: a consumer's own
-# FindEigen3.cmake (common in older projects) sets only variables, not the
-# Eigen3::Eigen target our exported targets link.
+# Re-find the PUBLIC dependencies: volumetric_kit_recon, whose camera tier
+# calib's headers name, and through it volumetric_kit_core, whose Status and
+# Result are in every signature. calib installs both beside itself, which is the
+# hint; CMAKE_PREFIX_PATH still takes precedence.
+#
+# TODO: drop README's rule that a consumer finds the core only through calib
+# ("Use it in your project") once volumetric_kit_core#31 is fixed: until then,
+# the core's package recurses when one scope reads it twice.
 include(CMakeFindDependencyMacro)
-find_dependency(Eigen3 CONFIG)
-# volumetric_kit_core is PUBLIC too (Status / Result in every signature), at
-# the minor version this package was built against.
-find_dependency(volumetric_kit_core @VC_CORE_MAJOR_MINOR@ CONFIG)
+find_dependency(volumetric_kit_recon CONFIG HINTS "${PACKAGE_PREFIX_DIR}")
+# A recon found elsewhere may bring another core. calib takes the minor version
+# it was built with, which the core's version file would demand before 1.0; then
+# the package is not found, as a failed find_dependency leaves it.
+vkc_core_version(_vc_core_found MAJOR_MINOR)
+if(NOT _vc_core_found STREQUAL "@VC_CORE_MAJOR_MINOR@")
+  set(volumetric_kit_calib_FOUND FALSE)
+  string(
+    CONCAT volumetric_kit_calib_NOT_FOUND_MESSAGE
+           "volumetric_kit_calib was built against volumetric_kit_core "
+           "@VC_CORE_MAJOR_MINOR@, but the volumetric_kit_recon at "
+           "${volumetric_kit_recon_DIR} brings volumetric_kit_core "
+           "${_vc_core_found}: put calib's prefix, ${PACKAGE_PREFIX_DIR}, "
+           "first on CMAKE_PREFIX_PATH.")
+  unset(_vc_core_found)
+  return()
+endif()
+unset(_vc_core_found)
 # That minor may still be older than the core calib needs: then the package is
-# not found, as a failed find_dependency leaves it.
+# not found too.
 vkc_require_core(@VC_CORE_MIN_VERSION@ PACKAGE volumetric_kit_calib)
 
-# TODO: as the detect/solve tiers land, re-find their public deps here
-# (OpenCV for detect, Ceres for solve) — mirroring the Eigen line above.
+# TODO: as the detect/solve tiers land, re-find their public deps here (OpenCV
+# for detect, Ceres for solve).
 
 include("${CMAKE_CURRENT_LIST_DIR}/volumetric_kit_calibTargets.cmake")
 

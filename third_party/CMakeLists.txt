@@ -3,23 +3,22 @@
 
 # Third-party dependencies.
 #
-# System via find_package (resolved at the top level so imported targets are
-# visible across sibling subdirectories): Eigen3 (the calibration data model /
-# solver math). Vendored via pinned FetchContent: volumetric_kit_core (the
-# family's shared foundation), and googletest when the test suite is built.
+# Vendored via pinned FetchContent: volumetric_kit_core (the family's shared
+# foundation), volumetric_kit_recon's camera tier (the family's camera
+# vocabulary), and googletest when the test suite is built. recon's camera tier
+# takes GLM from the system.
 #
 # TODO (as tiers land, mirroring gfx's hybrid system/vendored strategy): OpenCV
 # via find_package for the detect tier (pattern detection + subpixel); Ceres via
-# find_package for the solve tier (intrinsics / stereo / BA);
-# volumetric_kit_recon via FetchContent for the capture tier (its sensor tier's
-# drivers); and volumetric_kit_gfx via FetchContent for the viz / app tiers. GPU
-# work comes from volumetric_kit_core's vulkan tier, not a Vulkan dependency of
-# calib's.
+# find_package for the solve tier (intrinsics / stereo / BA); the rest of
+# volumetric_kit_recon for the capture tier (its sensor tier's drivers); and
+# volumetric_kit_gfx via FetchContent for the viz / app tiers. GPU work comes
+# from volumetric_kit_core's vulkan tier, not a Vulkan dependency of calib's.
 
 include(FetchContent)
 
 # Only applications need the common JSON format. The calibration library keeps
-# its dependency on core_base and Eigen alone.
+# its dependency on core_base and recon_camera alone.
 if(VC_BUILD_EXAMPLES)
   set(VKC_WITH_CONFIG ON)
 endif()
@@ -52,6 +51,25 @@ if(VC_BUILD_EXAMPLES AND NOT TARGET volumetric_kit::core_config)
   message(
     FATAL_ERROR "calib examples require volumetric_kit_core with core_config")
 endif()
+
+# --- volumetric_kit_recon: the camera tier alone ----------------------------
+# calib's cameras are recon's CameraModel, with its rigid transforms
+# (DECISIONS.md, "The camera model is recon's"). VR_CAMERA_ONLY builds
+# recon_camera alone, over the core's base tier and GLM, so calib still builds
+# with no Vulkan SDK. Pinned by commit, never main, and declared after the core,
+# so recon's own core pin yields to calib's. recon's tests, examples and -Werror
+# stay off in a subproject; its install follows calib's, as calib's exported
+# targets link recon_camera. It leaves an application's VR_CAMERA_ONLY as set,
+# so an application that turns it off keeps the rest of recon.
+FetchContent_Declare(
+  volumetric_kit_recon
+  GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_recon.git
+  GIT_TAG 8b8b19856c474e0fc61e03c9534c529dbd71414c)
+if(NOT DEFINED VR_CAMERA_ONLY)
+  set(VR_CAMERA_ONLY ON)
+endif()
+set(VR_INSTALL ${VC_INSTALL})
+FetchContent_MakeAvailable(volumetric_kit_recon)
 
 if(VC_BUILD_TESTS)
   # googletest is only needed when building the test suite.

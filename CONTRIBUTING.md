@@ -21,7 +21,7 @@ lives in `.git/` and is **not** tracked, so each clone must run this once.
 
 ## Build and test
 
-Out-of-source CMake build (needs Eigen — see the README prerequisites):
+Out-of-source CMake build (needs GLM — see the README prerequisites):
 
 ```sh
 calib_root="$(git rev-parse --show-toplevel)"
