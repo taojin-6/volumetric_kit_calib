@@ -86,13 +86,24 @@ TEST(CvPose, RoundTripsThroughTheMatrix) {
   }
 }
 
-// cv_pose's documented limit: cv::Rodrigues takes a rotation below about
-// 1e-5 rad as none.
-TEST(CvPose, ATinyRotationReadsAsNone) {
-  const core::Result<CvPose> tiny =
-      cv_pose(matrix_from_cv_pose({cv::Vec3d(1e-6, 0.0, 0.0), {}}));
-  ASSERT_TRUE(tiny.ok()) << tiny.status().message();
-  EXPECT_EQ(tiny->rvec, cv::Vec3d(0.0, 0.0, 0.0));
+// Through recon's rodrigues_from_matrix, rotations round-trip where
+// cv::Rodrigues returns exactly zero (below about 1e-5 rad) and toward a half
+// turn.
+TEST(CvPose, RoundTripsTinyRotationsAndNearlyHalfTurns) {
+  const cv::Vec3d axis = cv::normalize(cv::Vec3d(0.3, -0.5, 0.8));
+  for (const double angle : {1e-9, 1e-6, 1e-5, kPi - 1e-6}) {
+    const CvPose pose{axis * angle, cv::Vec3d(0.1, 0.2, 0.3)};
+    const core::Result<CvPose> back = cv_pose(matrix_from_cv_pose(pose));
+    ASSERT_TRUE(back.ok()) << back.status().message();
+    // Relative to the angle: 1e-9 of it.
+    EXPECT_LE(cv::norm(back->rvec - pose.rvec), 1e-9 * angle)
+        << angle << " rad: " << back->rvec;
+  }
+  cv::Vec3d by_opencv;
+  cv::Rodrigues(cv::Matx33d(cv_matrix(matrix_from_cv_pose({axis * 1e-6, {}}))
+                                .get_minor<3, 3>(0, 0)),
+                by_opencv);
+  EXPECT_EQ(by_opencv, cv::Vec3d(0.0, 0.0, 0.0));  // what cv_pose avoids
 }
 
 TEST(CvPose, RefusesATransformThatIsNotRigid) {

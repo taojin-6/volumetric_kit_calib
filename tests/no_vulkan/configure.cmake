@@ -11,11 +11,11 @@
 #    it, calib's configure keeps it, and so reaches for Vulkan and fails.
 # 2. calib configures from CALIB_SOURCE, with VC_WITH_OPENCV as WITH_OPENCV says
 #    (OpenCV found at OPENCV_DIR), builds and installs to BINARY_DIR/prefix:
-#    compute's headers with it, none without.
+#    compute's and solve's headers with it, none without.
 # 3. The consumer (consumer/) finds that installed package, and with it the core
-#    and recon installed beside it, and OpenCV with compute, and builds and runs
-#    against calib_core and compute when built. It finds them by
-#    CMAKE_PREFIX_PATH, and again by volumetric_kit_calib_DIR alone.
+#    and recon installed beside it, and OpenCV with compute and solve, and builds
+#    and runs against calib_core, and compute and solve when built. It finds them
+#    by CMAKE_PREFIX_PATH, and again by volumetric_kit_calib_DIR alone.
 # 4. CMAKE_PREFIX_PATH, which takes precedence over calib's prefix, holds the
 #    same recon and core, relabelled to the core's next minor version: the
 #    consumer, given calib's directory, does not find calib, which names both
@@ -118,13 +118,15 @@ _vc_cmake(
   ${_opencv})
 _vc_cmake("Building calib" --build "${BINARY_DIR}/calib" --config Release)
 _vc_cmake("Installing calib" --install "${BINARY_DIR}/calib" --config Release)
-set(_compute_header "${_prefix}/include/volumetric_kit/calib/compute/board.hpp")
-if(WITH_OPENCV AND NOT EXISTS "${_compute_header}")
-  message(FATAL_ERROR "calib with OpenCV installed no ${_compute_header}")
-elseif(NOT WITH_OPENCV AND EXISTS
-                           "${_prefix}/include/volumetric_kit/calib/compute")
-  message(FATAL_ERROR "calib without OpenCV installed compute's headers")
-endif()
+set(_calib_include "${_prefix}/include/volumetric_kit/calib")
+foreach(_header compute/board.hpp solve/initialise.hpp)
+  get_filename_component(_tier "${_header}" DIRECTORY)
+  if(WITH_OPENCV AND NOT EXISTS "${_calib_include}/${_header}")
+    message(FATAL_ERROR "calib with OpenCV installed no ${_header}")
+  elseif(NOT WITH_OPENCV AND EXISTS "${_calib_include}/${_tier}")
+    message(FATAL_ERROR "calib without OpenCV installed ${_tier}'s headers")
+  endif()
+endforeach()
 
 _vc_cmake(
   "Configuring against the installed calib"

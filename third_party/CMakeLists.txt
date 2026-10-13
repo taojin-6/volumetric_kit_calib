@@ -64,7 +64,7 @@ endif()
 FetchContent_Declare(
   volumetric_kit_recon
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_recon.git
-  GIT_TAG 8b8b19856c474e0fc61e03c9534c529dbd71414c)
+  GIT_TAG 2f8d6eaf2d7cec17f3815240c27f7450095d4a12)
 if(NOT DEFINED VR_CAMERA_ONLY)
   set(VR_CAMERA_ONLY ON)
 endif()

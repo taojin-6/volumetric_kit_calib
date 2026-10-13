@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <random>
+#include <utility>
 
 #include <opencv2/geometry.hpp>
 #include <opencv2/imgproc.hpp>
@@ -270,6 +272,38 @@ std::vector<Placement> synthetic_plan(const std::vector<SyntheticCamera>& rig,
     }
   }
   return plan;
+}
+
+std::vector<Observation> observe(const std::vector<SyntheticCamera>& rig,
+                                 const compute::Board& board,
+                                 const std::vector<Placement>& plan,
+                                 const ObserveOptions& options) {
+  std::mt19937 rng(options.seed);
+  std::normal_distribution<double> noise(0.0, 1.0);
+  const std::vector<cv::Point3d>& corners = board.object_points();
+  const double weight = options.noise_px > 0.0
+                            ? 1.0 / (options.noise_px * options.noise_px)
+                            : 1.0;
+  std::vector<Observation> views;
+  for (std::size_t p = 0; p < plan.size(); ++p) {
+    for (const std::size_t c : plan[p].cameras) {
+      const SyntheticCamera& cam = rig[c];
+      const std::vector<cv::Point2d> pixels = project(
+          cam.model, cam.world_to_camera * plan[p].board_to_world, corners);
+      Observation view;
+      view.camera_id = cam.id;
+      view.frame_id = static_cast<std::int64_t>(p);
+      for (std::size_t i = 0; i < pixels.size(); ++i) {
+        const double dx = options.noise_px * noise(rng);
+        const double dy = options.noise_px * noise(rng);
+        view.points.push_back({static_cast<int>(i),
+                               {pixels[i].x + dx, pixels[i].y + dy},
+                               weight});
+      }
+      views.push_back(std::move(view));
+    }
+  }
+  return views;
 }
 
 std::vector<cv::Point2d> undistort_pixels(

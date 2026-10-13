@@ -2,13 +2,15 @@
 // Copyright (c) 2026 Tao Jin
 
 // The synthetic source every calib test draws on: its lenses and rig, its plan
-// of placements, and its renderer, whose inverse map and orientation the
-// detector's tests will rely on.
+// of placements, what the cameras detect of it, and its renderer, whose
+// inverse map and orientation the detector's tests will rely on.
 
 #include "synthetic_rig.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <set>
 #include <string>
 #include <vector>
@@ -244,6 +246,57 @@ TEST(SyntheticRig, PlanIsTheSameForTheSameSeed) {
     EXPECT_EQ(a[i].cameras, b[i].cameras) << i;
   }
   EXPECT_NE(a[0].board_to_world, c[0].board_to_world);
+}
+
+// Each placement in each camera that sees it, every corner where it
+// projects, plus the noise asked for.
+TEST(SyntheticRig, ObservesEachPlacementInEachCameraThatSeesIt) {
+  const std::vector<SyntheticCamera> rig = synthetic_rig();
+  const compute::Board board = femto_board();
+  PlanOptions plan_options;
+  plan_options.count = 30;
+  const std::vector<Placement> plan = synthetic_plan(rig, board, plan_options);
+  ObserveOptions exact;
+  exact.noise_px = 0.0;
+  const std::vector<Observation> views = observe(rig, board, plan, exact);
+  const std::vector<Observation> noisy = observe(rig, board, plan);
+  ASSERT_EQ(noisy.size(), views.size());
+  std::size_t v = 0;
+  double sum = 0.0;
+  std::size_t axes = 0;
+  for (std::size_t p = 0; p < plan.size(); ++p) {
+    for (const std::size_t c : plan[p].cameras) {
+      ASSERT_LT(v, views.size());
+      const Observation& view = views[v];
+      EXPECT_EQ(view.camera_id, rig[c].id);
+      EXPECT_EQ(view.frame_id, static_cast<std::int64_t>(p));
+      const std::vector<cv::Point2d> pixels =
+          project(rig[c].model, rig[c].world_to_camera * plan[p].board_to_world,
+                  board.object_points());
+      ASSERT_EQ(view.points.size(), 8u);
+      for (std::size_t i = 0; i < 8; ++i) {
+        EXPECT_EQ(view.points[i].id, static_cast<int>(i));
+        EXPECT_EQ(view.points[i].pixel,
+                  camera::Vec2d(pixels[i].x, pixels[i].y));
+        EXPECT_EQ(view.points[i].weight, 1.0);
+        const DetectedPoint& seen = noisy[v].points[i];
+        EXPECT_DOUBLE_EQ(seen.weight, 1.0 / (0.3 * 0.3));
+        const camera::Vec2d off = seen.pixel - view.points[i].pixel;
+        sum += off.x * off.x + off.y * off.y;
+        axes += 2;
+      }
+      ++v;
+    }
+  }
+  EXPECT_EQ(v, views.size());
+  EXPECT_NEAR(std::sqrt(sum / axes), 0.3, 0.03);
+
+  const std::vector<Observation> again = observe(rig, board, plan);
+  ObserveOptions other;
+  other.seed = 2;
+  const std::vector<Observation> reseeded = observe(rig, board, plan, other);
+  EXPECT_EQ(again[0].points[0].pixel, noisy[0].points[0].pixel);
+  EXPECT_NE(reseeded[0].points[0].pixel, noisy[0].points[0].pixel);
 }
 
 // A camera on the printed side, looking along the board's +z with its axes on

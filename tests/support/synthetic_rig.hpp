@@ -5,8 +5,8 @@
 
 /// @file synthetic_rig.hpp
 /// @brief The one synthetic source for calib's tests: lenses like the Femto
-///        Mega's, a four-camera rig, a plan of board placements, and an
-///        exact-inverse renderer of the board.
+///        Mega's, a four-camera rig, a plan of board placements, noisy
+///        detections of it, and an exact-inverse renderer of the board.
 ///
 /// World: z up, the floor at z = 0. Poses are recon's `Mat4d`s, named by what
 /// they map (`world_to_camera` is OpenCV's extrinsic). Projections are exact:
@@ -21,6 +21,7 @@
 #include <opencv2/core.hpp>
 
 #include "volumetric_kit/calib/compute/board.hpp"
+#include "volumetric_kit/calib/core/observation.hpp"
 #include "volumetric_kit/recon/camera/camera_model.hpp"
 #include "volumetric_kit/recon/camera/geometry.hpp"
 
@@ -96,6 +97,29 @@ struct PlanOptions {
 std::vector<Placement> synthetic_plan(const std::vector<SyntheticCamera>& rig,
                                       const compute::Board& board,
                                       const PlanOptions& options = {});
+
+/// @brief How @ref observe detects the board.
+struct ObserveOptions {
+  double noise_px = 0.3;   ///< Gaussian noise on each axis (pixels, sigma).
+  std::uint32_t seed = 1;  ///< The noise's seed.
+};
+
+/// @brief What the rig's cameras detect of a plan: every corner of each
+///        placement's board in each camera that sees it, where it projects
+///        (@ref project), plus noise.
+/// @param rig      The cameras.
+/// @param board    The board placed.
+/// @param plan     The placements.
+/// @param options  The noise.
+/// @return One observation for each placement and camera, in the plan's
+///         order and then the cameras': `camera_id` the camera's id,
+///         `frame_id` the placement's index, the corners in id order, each
+///         weighted `1 / noise_px^2` (1 without noise). The same for the same
+///         options.
+std::vector<Observation> observe(const std::vector<SyntheticCamera>& rig,
+                                 const compute::Board& board,
+                                 const std::vector<Placement>& plan,
+                                 const ObserveOptions& options = {});
 
 /// @brief The renderer's inverse map: pixels to normalized pinhole
 ///        coordinates (`x = X / Z`), through `cv::undistortPoints` iterated
