@@ -30,8 +30,8 @@ domain model and rationale remain in the intentionally gitignored local
   outside -- with no `vc::` re-exports (amended 2026-10-05; see the dated
   entry), so a calib error passes to `recon` or `gfx` unchanged. The core is
   fetched pinned by commit (`third_party/`), and the installed package
-  re-finds it, through recon's, holds it to the minor version calib was built
-  with, and requires calib's floor of it (`vkc_require_core`). Why:
+  re-finds it at the version calib was built with, requires calib's floor of
+  it (`vkc_require_core`), and refuses a recon that brings another. Why:
   `recon`'s and `gfx`'s copies of the same bottom layer had drifted (the core's
   DECISIONS.md has the evidence); one copy means a fix lands once.
 - **GPU work runs on the core's vulkan tier, on a `VkDevice` shared with
@@ -72,6 +72,37 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-13 — Sessions on disk
+
+The `capture` tier writes the rig application's calibration sessions
+(`capture/session_writer.hpp` has the layout and both schemas).
+
+- **What is kept.** Each camera's JPEG byte for byte, as the camera coded it
+  (recon's `RgbdFrame::color_bitstream`); raw 16-bit depth, through recon's
+  `encode_png_u16`; the factory models at the streamed mode, in recon's
+  calibration file, unposed; and the full-resolution detections, the solver's
+  input, in numbers that read back exactly.
+- **Never overwritten.** The session's directory is created at the first
+  capture, refusing one already there, and every file in it once, through the
+  core's `write_file(CreateNew)`, except `session.json`: it lists the captures
+  and is replaced atomically after each capture and each drop. A drop marks a
+  capture and keeps its files; no index is used twice.
+- **Written, never read.** calib reads no session back: no resume and no
+  replay. A crash loses no capture already listed; a new run starts a new
+  session.
+- **Off the caller's thread.** One writer thread behind a bounded queue, which
+  refuses a capture when full; the caller polls the outcomes.
+- **Records in `core`.** The detector fills `Detection` and the writer stores
+  it, so it is a plain `core` record, as `ViewCheck` is.
+- **How it builds.** `VC_WITH_RIG`, OFF by default, fetches all of recon and
+  turns on the core's vulkan tier, so it needs the Vulkan SDK. gfx comes with
+  the `viz` tier, its first user.
+- **Core 0.6.1.** Its package can be read twice in one configure
+  ([volumetric_kit_core#31](https://github.com/taojin-6/volumetric_kit_core/issues/31)),
+  so calib's package config finds the core directly, and an application may
+  find it too. calib requires it, since its installed package reads the core
+  again through recon's.
+
 ## 2026-10-12 — OpenCV, behind calib's types
 
 calib's CPU maths -- the lens model and poses now, detection as it lands -- is
@@ -111,10 +142,7 @@ eight-coefficient rational lens) and its rigid transforms.
   unprojection of its own.
 - **How recon arrives.** Fetched camera-only (`VR_CAMERA_ONLY`): recon_camera
   over the core's base tier and GLM, so the brain still builds with no Vulkan
-  SDK (the `no_vulkan.brain` test). calib installs recon beside itself, and its
-  package config finds the core through recon's, as a second read of the
-  core's package recurses
-  ([volumetric_kit_core#31](https://github.com/taojin-6/volumetric_kit_core/issues/31)).
+  SDK (the `no_vulkan.brain` test). calib installs recon beside itself.
 - **The board names its dictionary.** `Target` adds `dictionary`,
   `first_marker_id` and `legacy_pattern`, so a board is fully described without
   OpenCV; `check_target` validates one and `legacy_femto_board()` is the rig's

@@ -6,17 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The `capture` tier, `volumetric_kit::calib_capture`, built with
+  `VC_WITH_RIG` (OFF by default; fetches all of recon and needs the Vulkan
+  SDK): `SessionWriter` writes a calibration session -- each camera's JPEG,
+  raw 16-bit depth, the factory models in recon's calibration file, and each
+  capture's detections and checks -- on a thread of its own behind a bounded
+  queue, never overwriting a file (DECISIONS.md, 2026-10-13).
+  `session_stamp` names a session's directory.
+- `Detection` and `DetectedMarker`, a board's corners and markers in one
+  image, in `calib/core/detection.hpp`; `to_string` for `TargetKind`,
+  `MarkerDictionary` and `ViewVerdict`, the names calib's files write.
+
 ### Changed
 
-- calib requires `volumetric_kit_core` 0.2.0 or newer (was 0.1.0;
-  DECISIONS.md, 2026-10-12); the pinned core is unchanged.
+- calib requires `volumetric_kit_core` 0.6.1 or newer (was 0.1.0), with its
+  vulkan tier under `VC_WITH_RIG`, and pins core PR #32 (0.6.1) and recon
+  2f8d6ea. The installed package finds the core directly, at the version
+  calib was built with, and refuses a recon that brings another core; an
+  application may now find the core itself too (DECISIONS.md, 2026-10-13).
 - calib's camera model is recon's (DECISIONS.md, 2026-10-12). Migrating:
   `PinholeBrownConrady`, `ImageSize` and `calib/core/camera_model.hpp` are
   removed; use `volumetric_kit::recon::camera::CameraModel` and
   `check_camera_model` from `volumetric_kit/recon/camera/camera_model.hpp`.
   `DetectedPoint::pixel` is recon's `camera::Vec2d` (`glm::dvec2`), not an
   Eigen vector. calib fetches recon's camera tier alone (`VR_CAMERA_ONLY`) and
-  installs it beside itself; its package finds recon, and the core through it.
+  installs it beside itself, and its package finds recon.
   An application that uses recon beyond its camera tier makes recon available
   before calib. The build needs GLM instead of Eigen, and still no Vulkan SDK.
 - `Target` names its markers: `dictionary` (`MarkerDictionary`, OpenCV's

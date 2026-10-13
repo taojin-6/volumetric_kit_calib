@@ -142,6 +142,76 @@ core::Status check_target(const Target& target) {
   return {};
 }
 
+const char* to_string(TargetKind kind) noexcept {
+  switch (kind) {
+    case TargetKind::Checkerboard:
+      return "checkerboard";
+    case TargetKind::ChArUco:
+      return "charuco";
+    case TargetKind::SymmetricCircleGrid:
+      return "symmetric_circle_grid";
+    case TargetKind::AsymmetricCircleGrid:
+      return "asymmetric_circle_grid";
+    case TargetKind::AprilGrid:
+      return "april_grid";
+    case TargetKind::Screen:
+      return "screen";
+  }
+  return "unknown";
+}
+
+const char* to_string(MarkerDictionary dictionary) noexcept {
+  switch (dictionary) {
+    case MarkerDictionary::None:
+      return "none";
+    case MarkerDictionary::ArUco4x4_50:
+      return "DICT_4X4_50";
+    case MarkerDictionary::ArUco4x4_100:
+      return "DICT_4X4_100";
+    case MarkerDictionary::ArUco4x4_250:
+      return "DICT_4X4_250";
+    case MarkerDictionary::ArUco4x4_1000:
+      return "DICT_4X4_1000";
+    case MarkerDictionary::ArUco5x5_50:
+      return "DICT_5X5_50";
+    case MarkerDictionary::ArUco5x5_100:
+      return "DICT_5X5_100";
+    case MarkerDictionary::ArUco5x5_250:
+      return "DICT_5X5_250";
+    case MarkerDictionary::ArUco5x5_1000:
+      return "DICT_5X5_1000";
+    case MarkerDictionary::ArUco6x6_50:
+      return "DICT_6X6_50";
+    case MarkerDictionary::ArUco6x6_100:
+      return "DICT_6X6_100";
+    case MarkerDictionary::ArUco6x6_250:
+      return "DICT_6X6_250";
+    case MarkerDictionary::ArUco6x6_1000:
+      return "DICT_6X6_1000";
+    case MarkerDictionary::ArUco7x7_50:
+      return "DICT_7X7_50";
+    case MarkerDictionary::ArUco7x7_100:
+      return "DICT_7X7_100";
+    case MarkerDictionary::ArUco7x7_250:
+      return "DICT_7X7_250";
+    case MarkerDictionary::ArUco7x7_1000:
+      return "DICT_7X7_1000";
+    case MarkerDictionary::ArUcoOriginal:
+      return "DICT_ARUCO_ORIGINAL";
+    case MarkerDictionary::AprilTag16h5:
+      return "DICT_APRILTAG_16h5";
+    case MarkerDictionary::AprilTag25h9:
+      return "DICT_APRILTAG_25h9";
+    case MarkerDictionary::AprilTag36h10:
+      return "DICT_APRILTAG_36h10";
+    case MarkerDictionary::AprilTag36h11:
+      return "DICT_APRILTAG_36h11";
+    case MarkerDictionary::ArUcoMip36h12:
+      return "DICT_ARUCO_MIP_36h12";
+  }
+  return "unknown";
+}
+
 Target legacy_femto_board() noexcept {
   Target board;
   board.kind = TargetKind::ChArUco;

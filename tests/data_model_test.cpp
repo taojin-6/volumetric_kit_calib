@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include "volumetric_kit/calib/core/capture_meta.hpp"
+#include "volumetric_kit/calib/core/detection.hpp"
 #include "volumetric_kit/calib/core/lens_profile.hpp"
 #include "volumetric_kit/calib/core/observation.hpp"
 #include "volumetric_kit/calib/core/sensor_profile.hpp"
@@ -77,6 +78,32 @@ TEST(ViewCheck, StartsWithNoDetectionAndNoPose) {
   EXPECT_FALSE(check.pnp_rms_px);
   EXPECT_FALSE(check.cell);
   EXPECT_EQ(check.verdict, ViewVerdict::None);
+}
+
+// The names calib's files write for a verdict; "unknown" outside the enum.
+TEST(ViewCheck, NamesEachVerdict) {
+  EXPECT_STREQ(to_string(ViewVerdict::None), "none");
+  EXPECT_STREQ(to_string(ViewVerdict::Good), "good");
+  EXPECT_STREQ(to_string(ViewVerdict::Partial), "partial");
+  EXPECT_STREQ(to_string(ViewVerdict::Collinear), "collinear");
+  EXPECT_STREQ(to_string(ViewVerdict::Oblique), "oblique");
+  EXPECT_STREQ(to_string(ViewVerdict::Far), "far");
+  EXPECT_STREQ(to_string(static_cast<ViewVerdict>(42)), "unknown");
+}
+
+// Nothing found: no image, no corners and no markers; a marker has no id.
+TEST(Detection, StartsEmpty) {
+  const Detection detection;
+  EXPECT_EQ(detection.image_size.width, 0u);
+  EXPECT_EQ(detection.image_size.height, 0u);
+  EXPECT_TRUE(detection.observation.empty());
+  EXPECT_TRUE(detection.markers.empty());
+
+  const DetectedMarker marker;
+  EXPECT_EQ(marker.id, -1);
+  for (const recon::camera::Vec2d& corner : marker.corners) {
+    EXPECT_EQ(corner, recon::camera::Vec2d(0.0, 0.0));
+  }
 }
 
 TEST(CaptureMeta, StartsWithoutALiveVsFullComparison) {

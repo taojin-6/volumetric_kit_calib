@@ -48,12 +48,20 @@ if(VC_WITH_OPENCV)
   target_sources(vc_compute_oom_test PRIVATE support/allocation_failure.cpp)
 endif()
 
+if(VC_WITH_RIG)
+  # capture: sessions on disk, read back with recon's readers and nlohmann.
+  vc_add_test(session_writer volumetric_kit::calib_capture
+              volumetric_kit::recon_io Threads::Threads)
+  target_include_directories(vc_session_writer_test SYSTEM
+                             PRIVATE "${VC_JSON_INCLUDE_DIR}")
+endif()
+
 # The core calib requires (third_party/CMakeLists.txt): calib's configure
 # against a stand-in core of each version (core_requirement/) refuses one older
-# than VC_CORE_MIN_VERSION, 0.2.0 -- before 0.1.0 the core has no
-# vkc_require_core -- and accepts 0.2.0 or newer, its package config re-finding
-# recon, whose package config re-finds the core, and holding that core to its
-# MAJOR.MINOR and VC_CORE_MIN_VERSION.
+# than VC_CORE_MIN_VERSION, 0.6.1 -- before 0.1.0 the core has no
+# vkc_require_core -- and accepts 0.6.1 or newer, its package config finding
+# that core at its version and requiring VC_CORE_MIN_VERSION of it, then recon,
+# whose package config re-finds the core at its MAJOR.MINOR.
 #
 # Those configures, and the one below, take the fetched sources this build used
 # (FETCHCONTENT_SOURCE_DIR_<NAME>), so they need no network.
@@ -82,11 +90,49 @@ endfunction()
 vc_add_core_requirement_test(
   before_0_1_0 none "-DEXPECT_ERROR=Unknown CMake command \"vkc_require_core\"")
 vc_add_core_requirement_test(
-  0_0_9 0.0.9 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.2\\.0 or newer")
+  0_2_0 0.2.0 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.6\\.1 or newer")
 vc_add_core_requirement_test(
-  0_1_0 0.1.0 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.2\\.0 or newer")
-vc_add_core_requirement_test(0_2_0 0.2.0 -DEXPECT_CONFIG_VERSION=0.2)
-vc_add_core_requirement_test(0_3_2 0.3.2 -DEXPECT_CONFIG_VERSION=0.3)
+  0_6_0 0.6.0 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.6\\.1 or newer")
+vc_add_core_requirement_test(0_6_1 0.6.1 -DEXPECT_CONFIG_VERSION=0.6.1)
+vc_add_core_requirement_test(0_7_2 0.7.2 -DEXPECT_CONFIG_VERSION=0.7.2)
+
+if(VC_WITH_RIG)
+  # VC_WITH_RIG needs the core's vulkan tier and all of recon: an application
+  # that made either available without them first stops calib's configure, which
+  # names what is missing (rig_requirement/).
+  function(vc_add_rig_requirement_test name core_vulkan expect)
+    add_test(
+      NAME rig_requirement.${name}
+      COMMAND
+        ${CMAKE_COMMAND} -DCALIB_SOURCE=${PROJECT_SOURCE_DIR}
+        -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/rig_requirement/${name}
+        -DCORE_SOURCE=${volumetric_kit_core_SOURCE_DIR} ${_vc_fetched_sources}
+        -DCORE_VULKAN=${core_vulkan} "-DEXPECT_ERROR=${expect}" -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/rig_requirement/configure.cmake)
+  endfunction()
+  vc_add_rig_requirement_test(
+    core_without_vulkan OFF
+    "volumetric_kit_calib needs volumetric_kit_core's vulkan tier")
+  vc_add_rig_requirement_test(
+    camera_only_recon
+    ON
+    "VC_WITH_RIG needs all of volumetric_kit_recon, but it was made available camera-only"
+  )
+
+  # The capture tier from this build's install (rig_package/): a consumer finds
+  # calib, the core and all of recon at the prefix, and builds and runs against
+  # calib_capture, with this build's sanitizers, which its libraries need.
+  list(JOIN _vc_sanitize_flags " " _vc_consumer_flags)
+  add_test(
+    NAME rig_package.consumer
+    COMMAND
+      ${CMAKE_COMMAND} -DBUILD_DIR=${PROJECT_BINARY_DIR} -DCONFIG=$<CONFIG>
+      -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/rig_package
+      -DGENERATOR=${CMAKE_GENERATOR} -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
+      -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} -DGLM_DIR=${glm_DIR}
+      "-DFLAGS=${_vc_consumer_flags}" -P
+      ${CMAKE_CURRENT_SOURCE_DIR}/rig_package/configure.cmake)
+endif()
 
 # VC_WITH_OPENCV without an OpenCV 5 to find stops the configure, naming the
 # fixes (opencv_requirement/).

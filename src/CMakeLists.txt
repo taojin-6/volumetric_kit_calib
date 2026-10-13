@@ -11,9 +11,12 @@ add_subdirectory(volumetric_kit/calib/core)
 if(VC_WITH_OPENCV)
   add_subdirectory(volumetric_kit/calib/compute)
 endif()
-# TODO: add_subdirectory() for detect / solve / color / quality / capture / viz
-# / app as those tiers land (see DESIGN.md). detect/solve build on compute;
-# viz/app need volumetric_kit_gfx.
+if(VC_WITH_RIG)
+  add_subdirectory(volumetric_kit/calib/capture)
+endif()
+# TODO: add_subdirectory() for detect / solve / color / quality / viz / app as
+# those tiers land (see DESIGN.md). detect/solve build on compute; viz/app need
+# volumetric_kit_gfx.
 
 # --- calib: umbrella alias ---------------------------------------------------
 # Consumers link `volumetric_kit::calib` and get whatever tiers are built.
@@ -22,6 +25,9 @@ add_library(volumetric_kit::calib ALIAS calib)
 target_link_libraries(calib INTERFACE calib_core)
 if(VC_WITH_OPENCV)
   target_link_libraries(calib INTERFACE calib_compute)
+endif()
+if(VC_WITH_RIG)
+  target_link_libraries(calib INTERFACE calib_capture)
 endif()
 
 # --- Install / export --------------------------------------------------------
@@ -36,6 +42,9 @@ if(VC_INSTALL)
   if(NOT VC_WITH_OPENCV)
     list(APPEND _vc_unbuilt_headers PATTERN "compute" EXCLUDE)
   endif()
+  if(NOT VC_WITH_RIG)
+    list(APPEND _vc_unbuilt_headers PATTERN "capture" EXCLUDE)
+  endif()
   install(
     DIRECTORY "${PROJECT_SOURCE_DIR}/include/"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
@@ -47,9 +56,9 @@ if(VC_INSTALL)
     NAMESPACE volumetric_kit::
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/volumetric_kit_calib")
 
-  # The installed package holds the core to the MAJOR.MINOR this build fetched:
-  # the core's version file accepts only the same minor before 1.0.
-  vkc_core_version(VC_CORE_MAJOR_MINOR MAJOR_MINOR)
+  # The installed package finds the core this build fetched, at its version: the
+  # core's version file accepts only the same minor, no older, before 1.0.
+  vkc_core_version(VC_CORE_VERSION)
 
   include(CMakePackageConfigHelpers)
   configure_package_config_file(

@@ -13,6 +13,8 @@
 
 #include <optional>
 
+#include "volumetric_kit/calib/core/export.hpp"
+
 namespace volumetric_kit::calib {
 
 /// @brief What a view is good for.
@@ -24,6 +26,11 @@ enum class ViewVerdict {
   Oblique,    ///< The board is turned too far from the camera.
   Far,        ///< The board is too far from the camera.
 };
+
+/// @return A stable lowercase name for @p verdict (`"good"`, `"partial"`,
+///         ...), as calib's files write it; `"unknown"` for a value that is
+///         not a @ref ViewVerdict.
+VC_CORE_API const char* to_string(ViewVerdict verdict) noexcept;
 
 /// @brief One camera's view of the board in one set: what was detected, the
 ///        view's own pose, and the verdict.

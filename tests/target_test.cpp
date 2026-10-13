@@ -203,6 +203,57 @@ TEST(Target, RefusesAValueOutsideItsEnum) {
   EXPECT_TRUE(RefusedNaming(check_target(dictionary), "dictionary"));
 }
 
+// The names calib's files write: a stable lowercase one for a pattern,
+// OpenCV's for a dictionary, and "unknown" outside each enum.
+TEST(Target, NamesItsPatternAndDictionary) {
+  EXPECT_STREQ(to_string(TargetKind::Checkerboard), "checkerboard");
+  EXPECT_STREQ(to_string(TargetKind::ChArUco), "charuco");
+  EXPECT_STREQ(to_string(TargetKind::SymmetricCircleGrid),
+               "symmetric_circle_grid");
+  EXPECT_STREQ(to_string(TargetKind::AsymmetricCircleGrid),
+               "asymmetric_circle_grid");
+  EXPECT_STREQ(to_string(TargetKind::AprilGrid), "april_grid");
+  EXPECT_STREQ(to_string(TargetKind::Screen), "screen");
+  EXPECT_STREQ(to_string(static_cast<TargetKind>(42)), "unknown");
+
+  struct DictionaryName {
+    MarkerDictionary dictionary;
+    const char* name;
+  };
+  constexpr DictionaryName kNames[] = {
+      {MarkerDictionary::None, "none"},
+      {MarkerDictionary::ArUco4x4_50, "DICT_4X4_50"},
+      {MarkerDictionary::ArUco4x4_100, "DICT_4X4_100"},
+      {MarkerDictionary::ArUco4x4_250, "DICT_4X4_250"},
+      {MarkerDictionary::ArUco4x4_1000, "DICT_4X4_1000"},
+      {MarkerDictionary::ArUco5x5_50, "DICT_5X5_50"},
+      {MarkerDictionary::ArUco5x5_100, "DICT_5X5_100"},
+      {MarkerDictionary::ArUco5x5_250, "DICT_5X5_250"},
+      {MarkerDictionary::ArUco5x5_1000, "DICT_5X5_1000"},
+      {MarkerDictionary::ArUco6x6_50, "DICT_6X6_50"},
+      {MarkerDictionary::ArUco6x6_100, "DICT_6X6_100"},
+      {MarkerDictionary::ArUco6x6_250, "DICT_6X6_250"},
+      {MarkerDictionary::ArUco6x6_1000, "DICT_6X6_1000"},
+      {MarkerDictionary::ArUco7x7_50, "DICT_7X7_50"},
+      {MarkerDictionary::ArUco7x7_100, "DICT_7X7_100"},
+      {MarkerDictionary::ArUco7x7_250, "DICT_7X7_250"},
+      {MarkerDictionary::ArUco7x7_1000, "DICT_7X7_1000"},
+      {MarkerDictionary::ArUcoOriginal, "DICT_ARUCO_ORIGINAL"},
+      {MarkerDictionary::AprilTag16h5, "DICT_APRILTAG_16h5"},
+      {MarkerDictionary::AprilTag25h9, "DICT_APRILTAG_25h9"},
+      {MarkerDictionary::AprilTag36h10, "DICT_APRILTAG_36h10"},
+      {MarkerDictionary::AprilTag36h11, "DICT_APRILTAG_36h11"},
+      {MarkerDictionary::ArUcoMip36h12, "DICT_ARUCO_MIP_36h12"},
+  };
+  static_assert(sizeof(kNames) / sizeof(kNames[0]) ==
+                    static_cast<int>(MarkerDictionary::ArUcoMip36h12) + 1,
+                "a MarkerDictionary is missing from the table");
+  for (const DictionaryName& entry : kNames) {
+    EXPECT_STREQ(to_string(entry.dictionary), entry.name);
+  }
+  EXPECT_STREQ(to_string(static_cast<MarkerDictionary>(99)), "unknown");
+}
+
 TEST(Target, AprilGridCarriesOneTagPerFeature) {
   Target grid;
   grid.kind = TargetKind::AprilGrid;

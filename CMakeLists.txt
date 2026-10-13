@@ -42,6 +42,11 @@ option(
   VC_WITH_OPENCV
   "Build the OpenCV tiers, from compute on (requires an installed OpenCV 5)"
   OFF)
+# OFF by default too: the rig tiers, from capture on, take all of recon, which
+# needs the Vulkan SDK (DECISIONS.md, 2026-10-13).
+option(VC_WITH_RIG
+       "Build the rig tiers, from capture on (fetches all of recon; Vulkan SDK)"
+       OFF)
 
 # Semicolon list of sanitizers (e.g. "address;undefined"); empty = off. Applied
 # globally — see cmake/vc_sanitizers.cmake for why.
@@ -53,10 +58,10 @@ include(vc_warnings)
 include(vc_sanitizers)
 
 # --- Dependencies + library --------------------------------------------------
-# The oldest volumetric_kit_core calib builds with (DECISIONS.md, 2026-10-12):
+# The oldest volumetric_kit_core calib builds with (DECISIONS.md, 2026-10-13):
 # checked in the core that arrives (third_party/) and again by the installed
 # package config.
-set(VC_CORE_MIN_VERSION 0.2.0)
+set(VC_CORE_MIN_VERSION 0.6.1)
 # OpenCV 5, for the compute tier and those built on it (DECISIONS.md,
 # 2026-10-12): found here so its imported targets reach every tier.
 if(VC_WITH_OPENCV)
@@ -70,6 +75,11 @@ if(VC_WITH_OPENCV)
         "with -DOpenCV_DIR=<dir holding OpenCVConfig.cmake>; or configure "
         "with -DVC_WITH_OPENCV=OFF.")
   endif()
+endif()
+# The capture tier's writer thread; found here, as OpenCV is, so the imported
+# target reaches the tests that link the tier.
+if(VC_WITH_RIG)
+  find_package(Threads REQUIRED)
 endif()
 add_subdirectory(third_party)
 add_subdirectory(src)

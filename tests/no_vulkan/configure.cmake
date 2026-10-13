@@ -11,15 +11,16 @@
 #    it, calib's configure keeps it, and so reaches for Vulkan and fails.
 # 2. calib configures from CALIB_SOURCE, with VC_WITH_OPENCV as WITH_OPENCV says
 #    (OpenCV found at OPENCV_DIR), builds and installs to BINARY_DIR/prefix:
-#    compute's headers with it, none without.
+#    compute's headers with it, none without, and never capture's.
 # 3. The consumer (consumer/) finds that installed package, and with it the core
 #    and recon installed beside it, and OpenCV with compute, and builds and runs
 #    against calib_core and compute when built. It finds them by
-#    CMAKE_PREFIX_PATH, and again by volumetric_kit_calib_DIR alone.
+#    CMAKE_PREFIX_PATH; again finding the core itself too, before calib and after
+#    it; and again by volumetric_kit_calib_DIR alone.
 # 4. CMAKE_PREFIX_PATH, which takes precedence over calib's prefix, holds the
 #    same recon and core, relabelled to the core's next minor version: the
 #    consumer, given calib's directory, does not find calib, which names both
-#    minors.
+#    cores.
 #
 # CORE_SOURCE, RECON_SOURCE and JSON_SOURCE are the sources the calling build
 # fetched, so this needs no network; GENERATOR, CXX_COMPILER, MAKE_PROGRAM and
@@ -125,6 +126,9 @@ elseif(NOT WITH_OPENCV AND EXISTS
                            "${_prefix}/include/volumetric_kit/calib/compute")
   message(FATAL_ERROR "calib without OpenCV installed compute's headers")
 endif()
+if(EXISTS "${_prefix}/include/volumetric_kit/calib/capture")
+  message(FATAL_ERROR "calib without the rig installed capture's headers")
+endif()
 
 _vc_cmake(
   "Configuring against the installed calib"
@@ -151,6 +155,17 @@ execute_process(
 if(NOT _result EQUAL 0)
   message(FATAL_ERROR "the consumer failed (${_result}):\n${_output}")
 endif()
+
+_vc_cmake(
+  "Configuring against the installed calib, finding the core too"
+  -S
+  "${CMAKE_CURRENT_LIST_DIR}/consumer"
+  -B
+  "${BINARY_DIR}/consumer_and_core"
+  ${_common}
+  "-DCMAKE_PREFIX_PATH=${_prefix}"
+  -DFIND_CORE=ON
+  ${_consumer_opencv})
 
 set(_calib_dir "${_prefix}/lib/cmake/volumetric_kit_calib")
 _vc_cmake(
@@ -187,11 +202,9 @@ _vc_relabel(
   "${_other}/lib/cmake/volumetric_kit_recon/volumetric_kit_reconConfig.cmake"
   "find_dependency(volumetric_kit_core ${_minor} CONFIG"
   "find_dependency(volumetric_kit_core ${_next_minor} CONFIG")
-string(REPLACE "." "\\." _minor_re "${_minor}")
-string(REPLACE "." "\\." _next_minor_re "${_next_minor}")
 _vc_cmake_refuses(
   "Configuring against calib behind a recon with another core"
-  "built against volumetric_kit_core ${_minor_re}, but the volumetric_kit_recon at .* brings volumetric_kit_core ${_next_minor_re}"
+  "found volumetric_kit_core at .*/prefix/lib/cmake/volumetric_kit_core, but the volumetric_kit_recon at .*/other_core/lib/cmake/volumetric_kit_recon brings another, at .*/other_core/lib/cmake/volumetric_kit_core: put calib's prefix"
   -S
   "${CMAKE_CURRENT_LIST_DIR}/consumer"
   -B
