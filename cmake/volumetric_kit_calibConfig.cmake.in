@@ -34,8 +34,11 @@ unset(_vc_core_found)
 # not found too.
 vkc_require_core(@VC_CORE_MIN_VERSION@ PACKAGE volumetric_kit_calib)
 
-# TODO: as the detect/solve tiers land, re-find their public deps here (OpenCV
-# for detect, Ceres for solve).
+# OpenCV, when calib was built with it: calib_compute links its targets.
+if(@VC_WITH_OPENCV@)
+  find_dependency(OpenCV 5.0 CONFIG COMPONENTS core objdetect geometry)
+endif()
+# TODO: re-find each later tier's public dependencies here as it lands.
 
 include("${CMAKE_CURRENT_LIST_DIR}/volumetric_kit_calibTargets.cmake")
 

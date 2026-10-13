@@ -9,12 +9,13 @@
 #
 # 1. With VR_CAMERA_ONLY OFF, as an application that needs the rest of recon sets
 #    it, calib's configure keeps it, and so reaches for Vulkan and fails.
-# 2. calib configures from CALIB_SOURCE, builds and installs to
-#    BINARY_DIR/prefix.
+# 2. calib configures from CALIB_SOURCE, with VC_WITH_OPENCV as WITH_OPENCV says
+#    (OpenCV found at OPENCV_DIR), builds and installs to BINARY_DIR/prefix:
+#    compute's headers with it, none without.
 # 3. The consumer (consumer/) finds that installed package, and with it the core
-#    and recon installed beside it, and builds and runs against calib_core. It
-#    finds them by CMAKE_PREFIX_PATH, and again by volumetric_kit_calib_DIR
-#    alone.
+#    and recon installed beside it, and OpenCV with compute, and builds and runs
+#    against calib_core and compute when built. It finds them by
+#    CMAKE_PREFIX_PATH, and again by volumetric_kit_calib_DIR alone.
 # 4. CMAKE_PREFIX_PATH, which takes precedence over calib's prefix, holds the
 #    same recon and core, relabelled to the core's next minor version: the
 #    consumer, given calib's directory, does not find calib, which names both
@@ -77,6 +78,13 @@ set(_common
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_DISABLE_FIND_PACKAGE_Vulkan=ON)
 set(_prefix "${BINARY_DIR}/prefix")
+if(WITH_OPENCV)
+  set(_opencv -DVC_WITH_OPENCV=ON "-DOpenCV_DIR=${OPENCV_DIR}")
+  set(_consumer_opencv -DEXPECT_COMPUTE=ON "-DOpenCV_DIR=${OPENCV_DIR}")
+else()
+  set(_opencv -DVC_WITH_OPENCV=OFF)
+  set(_consumer_opencv -DEXPECT_COMPUTE=OFF)
+endif()
 
 file(REMOVE_RECURSE "${BINARY_DIR}")
 _vc_cmake_refuses(
@@ -106,9 +114,17 @@ _vc_cmake(
   "-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=${RECON_SOURCE}"
   "-DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=${JSON_SOURCE}"
   -DVC_BUILD_TESTS=OFF
-  -DVC_BUILD_EXAMPLES=OFF)
+  -DVC_BUILD_EXAMPLES=OFF
+  ${_opencv})
 _vc_cmake("Building calib" --build "${BINARY_DIR}/calib" --config Release)
 _vc_cmake("Installing calib" --install "${BINARY_DIR}/calib" --config Release)
+set(_compute_header "${_prefix}/include/volumetric_kit/calib/compute/board.hpp")
+if(WITH_OPENCV AND NOT EXISTS "${_compute_header}")
+  message(FATAL_ERROR "calib with OpenCV installed no ${_compute_header}")
+elseif(NOT WITH_OPENCV AND EXISTS
+                           "${_prefix}/include/volumetric_kit/calib/compute")
+  message(FATAL_ERROR "calib without OpenCV installed compute's headers")
+endif()
 
 _vc_cmake(
   "Configuring against the installed calib"
@@ -117,7 +133,8 @@ _vc_cmake(
   -B
   "${BINARY_DIR}/consumer"
   ${_common}
-  "-DCMAKE_PREFIX_PATH=${_prefix}")
+  "-DCMAKE_PREFIX_PATH=${_prefix}"
+  ${_consumer_opencv})
 _vc_cmake("Building against the installed calib" --build
           "${BINARY_DIR}/consumer" --config Release)
 
@@ -143,7 +160,8 @@ _vc_cmake(
   -B
   "${BINARY_DIR}/consumer_by_dir"
   ${_common}
-  "-Dvolumetric_kit_calib_DIR=${_calib_dir}")
+  "-Dvolumetric_kit_calib_DIR=${_calib_dir}"
+  ${_consumer_opencv})
 
 # The other prefix: calib's, less calib, with the core relabelled.
 set(_other "${BINARY_DIR}/other_core")

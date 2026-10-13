@@ -11,11 +11,9 @@
 namespace volumetric_kit::calib {
 namespace {
 
-// How many codes a dictionary holds, as OpenCV's predefined one does; -1 for a
-// value that is not a MarkerDictionary.
-//
-// TODO: once calib links OpenCV, test each count against
-// cv::aruco::getPredefinedDictionary(...).bytesList.rows.
+// How many codes a dictionary holds, as OpenCV's predefined one does
+// (board_test checks each against OpenCV); -1 for a value that is not a
+// MarkerDictionary.
 std::int64_t dictionary_size(MarkerDictionary dictionary) {
   switch (dictionary) {
     case MarkerDictionary::None:

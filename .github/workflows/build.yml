@@ -4,7 +4,9 @@ name: build
 # camera tier and GLM, so no GPU/Vulkan toolchain is needed — unlike
 # volumetric_kit_gfx (tests/no_vulkan checks it). Both an
 # unoptimized Debug and an optimized Release/NDEBUG configuration are exercised,
-# so an NDEBUG-only or optimizer-exposed break is caught.
+# so an NDEBUG-only or optimizer-exposed break is caught. The macOS legs also
+# build the OpenCV tiers (VC_WITH_OPENCV), on Homebrew's OpenCV (DECISIONS.md,
+# 2026-10-12).
 on:
   pull_request:
   push:
@@ -39,7 +41,14 @@ jobs:
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
           HOMEBREW_NO_INSTALL_CLEANUP: '1'
-        run: brew install cmake glm
+        # OpenCV brings many bottles; retry to ride out a transient fetch error.
+        run: |
+          for attempt in 1 2 3; do
+            brew install cmake glm opencv && exit 0
+            echo "::warning::brew install attempt ${attempt} failed; retrying"
+            sleep 15
+          done
+          exit 1
 
       # Cache the FetchContent dependency tree (googletest sources + build) so it
       # is not re-cloned and recompiled every run.
@@ -52,7 +61,9 @@ jobs:
             deps-${{ matrix.os }}-${{ matrix.build_type }}-
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        run: >-
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DVC_WITH_OPENCV=${{ runner.os == 'macOS' && 'ON' || 'OFF' }}
 
       - name: Build
         run: cmake --build build --parallel

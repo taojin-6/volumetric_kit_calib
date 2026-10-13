@@ -72,6 +72,24 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-12 — OpenCV, behind calib's types
+
+calib's CPU maths -- the lens model and poses now, detection as it lands -- is
+OpenCV 5's, called from the `compute` tier on. Callers hold recon's
+`CameraModel` and `Mat4d` and calib's `Target`; `compute` converts them
+(`cv_camera`, `cv_pose`, `Board`), so no second camera or board record exists.
+
+- **A prerequisite, and optional.** OpenCV is installed and found
+  (`find_package(OpenCV 5.0 CONFIG)`), never fetched, like recon's SDKs.
+  `VC_WITH_OPENCV` is OFF by default, so the core tier still builds anywhere.
+  5.0 is the floor: calib calls its geometry module. CI builds the OpenCV
+  tiers on macOS (Homebrew) only, until its Ubuntu legs have a cached OpenCV 5
+  build ([README](README.md#prerequisites)).
+- **No exception crosses.** A public function that calls OpenCV runs its body
+  through `compute::guarded`, which maps a `cv::Exception`'s code to a
+  `Status` domain (`guarded.hpp`) and anything else through the core's
+  `exception_status`. calib therefore needs core 0.2.0, which brought it.
+
 ## 2026-10-12 — The camera model is recon's
 
 calib's 2026-10-08 entry kept a camera model of its own, because recon's camera
