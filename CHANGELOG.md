@@ -107,9 +107,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PictureView` maps), at full resolution (`Mode::Full`) or by the live
   view's hybrid (`Mode::Hybrid`). The installed package re-finds OpenCV's
   imgproc too.
-- `Detection`, in the `core` tier: the plain record of what a detector found
-  in one image -- its size, the board's corners by id (an `Observation`) and
-  its markers (`DetectedMarker`).
 - The `compute` tier, `volumetric_kit::calib_compute`, built with
   `VC_WITH_OPENCV` (OFF by default; needs an installed OpenCV 5, 5.0 or a
   later 5.x): OpenCV behind recon's and calib's types (DECISIONS.md,
