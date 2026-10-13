@@ -123,6 +123,12 @@ OpenCV 5's, called from the `compute` tier on. Callers hold recon's
   through `compute::guarded`, which maps a `cv::Exception`'s code to a
   `Status` domain (`guarded.hpp`) and anything else through the core's
   `exception_status`. calib therefore needs core 0.2.0, which brought it.
+- **Detection.** OpenCV's `CharucoDetector`, default parameters, no camera
+  model. A capture's detections, which the solver takes, are found at full
+  resolution. The live view finds the markers in the image halved and refines
+  each corner at full resolution: under a third of the time (2.9 against
+  10.1 ms for a 4K image on an M5 Max) and, on synthetic views, as accurate.
+  Those detections are for display and live checks only.
 
 ## 2026-10-12 — The camera model is recon's
 

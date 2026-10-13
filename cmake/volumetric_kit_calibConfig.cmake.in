@@ -55,10 +55,10 @@ if(NOT volumetric_kit_core_DIR STREQUAL _vc_core_dir)
 endif()
 unset(_vc_core_dir)
 
-# OpenCV, when calib was built with it: calib_compute and calib_solve link its
-# targets.
+# OpenCV, when calib was built with it: calib_compute, calib_detect and
+# calib_solve link its targets.
 if(@VC_WITH_OPENCV@)
-  find_dependency(OpenCV 5.0 CONFIG COMPONENTS core objdetect geometry)
+  find_dependency(OpenCV 5.0 CONFIG COMPONENTS core imgproc objdetect geometry)
 endif()
 # The capture tier's writer thread, when calib was built with it.
 if(@VC_WITH_RIG@)

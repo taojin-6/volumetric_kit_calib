@@ -52,6 +52,13 @@ if(VC_WITH_OPENCV)
   vc_add_test(compute_oom volumetric_kit::calib_compute vc_test_support)
   target_sources(vc_compute_oom_test PRIVATE support/allocation_failure.cpp)
 
+  # detect: the board in rendered camera images, JPEG-compressed too.
+  find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS imgcodecs)
+  vc_add_test(detect_charuco volumetric_kit::calib_detect vc_synthetic_rig
+              opencv_imgcodecs opencv_imgproc)
+  vc_add_test(detect_oom volumetric_kit::calib_detect vc_test_support)
+  target_sources(vc_detect_oom_test PRIVATE support/allocation_failure.cpp)
+
   # solve: views, the spanning tree and the first rig, on the synthetic rig.
   vc_add_test(view_pose volumetric_kit::calib_solve vc_synthetic_rig)
   vc_add_test(spanning_tree volumetric_kit::calib_solve)

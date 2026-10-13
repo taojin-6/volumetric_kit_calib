@@ -11,12 +11,13 @@
 #    it, calib's configure keeps it, and so reaches for Vulkan and fails.
 # 2. calib configures from CALIB_SOURCE, with VC_WITH_OPENCV as WITH_OPENCV says
 #    (OpenCV found at OPENCV_DIR), builds and installs to BINARY_DIR/prefix:
-#    compute's and solve's headers with it, none without, and never capture's.
+#    compute's, detect's and solve's headers with it, none without, and never
+#    capture's.
 # 3. The consumer (consumer/) finds that installed package, and with it the core
-#    and recon installed beside it, and OpenCV with compute and solve, and builds
-#    and runs against calib_core, and compute and solve when built. It finds them
-#    by CMAKE_PREFIX_PATH; again finding the core itself too, before calib and
-#    after it; and again by volumetric_kit_calib_DIR alone.
+#    and recon installed beside it, and OpenCV with compute, detect and solve,
+#    and builds and runs against calib_core, and compute, detect and solve when
+#    built. It finds them by CMAKE_PREFIX_PATH; again finding the core itself
+#    too, before calib and after it; and again by volumetric_kit_calib_DIR alone.
 # 4. CMAKE_PREFIX_PATH, which takes precedence over calib's prefix, holds the
 #    same recon and core, relabelled to the core's next minor version: the
 #    consumer, given calib's directory, does not find calib, which names both
@@ -120,7 +121,7 @@ _vc_cmake(
 _vc_cmake("Building calib" --build "${BINARY_DIR}/calib" --config Release)
 _vc_cmake("Installing calib" --install "${BINARY_DIR}/calib" --config Release)
 set(_calib_include "${_prefix}/include/volumetric_kit/calib")
-foreach(_header compute/board.hpp solve/initialise.hpp)
+foreach(_header compute/board.hpp detect/charuco.hpp solve/initialise.hpp)
   get_filename_component(_tier "${_header}" DIRECTORY)
   if(WITH_OPENCV AND NOT EXISTS "${_calib_include}/${_header}")
     message(FATAL_ERROR "calib with OpenCV installed no ${_header}")
