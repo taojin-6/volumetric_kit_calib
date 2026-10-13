@@ -28,6 +28,7 @@
 #include <opencv2/objdetect/charuco_detector.hpp>
 
 #include "synthetic_rig.hpp"
+#include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 
 namespace volumetric_kit::calib::detect {
 namespace {
@@ -365,9 +366,7 @@ TEST(DetectCharuco, FindsPartOfABoardTheImageEdgeCuts) {
 
 // The bottom row of squares cropped away, and with it markers 5 and 6: only
 // the top row of corners keeps two markers beside it, and one row fixes no
-// pose.
-// TODO: assert that compute::usable_for_pose answers Collinear for this view
-// once it lands (PR #17).
+// pose, as compute::usable_for_pose answers.
 TEST(DetectCharuco, CollinearCropFindsOneRowOfCorners) {
   const compute::Board board = femto_board();
   const camera::Mat4d pose =
@@ -389,6 +388,10 @@ TEST(DetectCharuco, CollinearCropFindsOneRowOfCorners) {
     const Detection detection = detect(view.image, board, mode);
     EXPECT_EQ(corner_ids(detection), (std::vector<int>{0, 1, 2, 3}))
         << name(mode);
+    const core::Result<compute::ViewUse> use = compute::usable_for_pose(
+        board, detection.observation, view.image.size());
+    ASSERT_TRUE(use.ok()) << use.status().message();
+    EXPECT_EQ(*use, compute::ViewUse::Collinear) << name(mode);
     Errors errors;
     errors.add_corners(detection, view);
     EXPECT_LT(errors.max, mode == Mode::Full ? 0.3 : 0.8)
