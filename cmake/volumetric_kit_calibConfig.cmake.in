@@ -9,11 +9,29 @@
 # both beside itself, which is the hint; CMAKE_PREFIX_PATH still takes
 # precedence.
 include(CMakeFindDependencyMacro)
+# An application that found a core before calib keeps that core's targets,
+# wherever the find below finds calib's: then calib's must be that one.
+if(TARGET volumetric_kit::core_base)
+  set(_vc_first_core "${volumetric_kit_core_DIR}")
+endif()
 # The core this build used, at its version: the core's version file then accepts
 # only the same minor, no older -- so never a core whose package recursed when
 # read twice (before 0.6.1), as recon's package config reads it again.
 find_dependency(volumetric_kit_core @VC_CORE_VERSION@ CONFIG HINTS
                 "${PACKAGE_PREFIX_DIR}")
+if(DEFINED _vc_first_core AND NOT volumetric_kit_core_DIR STREQUAL
+                              _vc_first_core)
+  set(volumetric_kit_calib_FOUND FALSE)
+  string(
+    CONCAT volumetric_kit_calib_NOT_FOUND_MESSAGE
+           "volumetric_kit_calib needs the volumetric_kit_core at "
+           "${volumetric_kit_core_DIR}, but the application found another "
+           "first, at ${_vc_first_core}: find calib's, or put calib's prefix, "
+           "${PACKAGE_PREFIX_DIR}, first on CMAKE_PREFIX_PATH.")
+  unset(_vc_first_core)
+  return()
+endif()
+unset(_vc_first_core)
 if(@VC_WITH_RIG@)
   vkc_require_core(@VC_CORE_MIN_VERSION@ VULKAN PACKAGE volumetric_kit_calib)
 else()

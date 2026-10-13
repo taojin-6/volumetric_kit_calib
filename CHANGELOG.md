@@ -17,15 +17,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `session_stamp` names a session's directory.
 - `Detection` and `DetectedMarker`, a board's corners and markers in one
   image, in `calib/core/detection.hpp`; `to_string` for `TargetKind`,
-  `MarkerDictionary` and `ViewVerdict`, the names calib's files write.
+  `MarkerDictionary` and `ViewVerdict`, the names calib's files write; and
+  `is_usable(ViewVerdict)`, the verdicts that count as usable views.
 
 ### Changed
 
 - calib requires `volumetric_kit_core` 0.6.1 or newer (was 0.1.0), with its
   vulkan tier under `VC_WITH_RIG`, and pins core PR #32 (0.6.1) and recon
   2f8d6ea. The installed package finds the core directly, at the version
-  calib was built with, and refuses a recon that brings another core; an
-  application may now find the core itself too (DECISIONS.md, 2026-10-13).
+  calib was built with, and refuses another core, from recon or found by the
+  application first; an application may now find the core itself too
+  (DECISIONS.md, 2026-10-13).
 - calib's camera model is recon's (DECISIONS.md, 2026-10-12). Migrating:
   `PinholeBrownConrady`, `ImageSize` and `calib/core/camera_model.hpp` are
   removed; use `volumetric_kit::recon::camera::CameraModel` and

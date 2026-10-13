@@ -126,15 +126,19 @@ struct Target {
 /// @return OK; or `Status::Code::InvalidArgument` naming the field.
 VC_CORE_API core::Status check_target(const Target& target);
 
+/// @brief The name calib's files write for a board's pattern.
+/// @param kind  The pattern.
 /// @return A stable lowercase name for @p kind (`"charuco"`,
-///         `"checkerboard"`, ...), as calib's files write it; `"unknown"` for
-///         a value that is not a @ref TargetKind.
+///         `"checkerboard"`, ...); `"unknown"` for a value that is not a
+///         @ref TargetKind.
 VC_CORE_API const char* to_string(TargetKind kind) noexcept;
 
+/// @brief The name calib's files write for a marker dictionary: OpenCV's.
+/// @param dictionary  The dictionary.
 /// @return OpenCV's name for @p dictionary (`"DICT_4X4_100"`,
-///         `"DICT_APRILTAG_36h11"`, ...), as calib's files write it; `"none"`
-///         for @ref MarkerDictionary::None; `"unknown"` for a value that is not
-///         a @ref MarkerDictionary.
+///         `"DICT_APRILTAG_36h11"`, ...); `"none"` for
+///         @ref MarkerDictionary::None; `"unknown"` for a value that is not a
+///         @ref MarkerDictionary.
 VC_CORE_API const char* to_string(MarkerDictionary dictionary) noexcept;
 
 /// @brief The rig's board, as the legacy calibration scripts print it: ChArUco,

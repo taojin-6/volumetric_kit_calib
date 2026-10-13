@@ -173,19 +173,13 @@ SessionCamera make_camera(const std::string& serial, int seed,
   return c;
 }
 
-Streams small_streams() {
-  Streams s;
-  s.color_width = kColorW;
-  s.color_height = kColorH;
-  s.color_codec = "mjpeg";
-  s.depth_width = kDepthW;
-  s.depth_height = kDepthH;
-  s.depth_mode = "nfov_unbinned";
-  s.metres_per_unit = 0.001f;
-  s.min_depth_m = 0.5f;
-  s.max_depth_m = 3.86f;
-  s.fps = 25;
-  return s;
+DepthMode nfov_unbinned() {
+  DepthMode mode;
+  mode.name = "nfov_unbinned";
+  mode.metres_per_unit = 0.001f;
+  mode.min_m = 0.5f;
+  mode.max_m = 3.86f;
+  return mode;
 }
 
 // Two cameras, the second the reference, so neither order nor index 0 is
@@ -202,7 +196,7 @@ SessionInfo make_info(const ScratchDir& dir) {
   info.board.square_size_m = 0.1505;
   info.board.planarity_bow_m = 0.0005;
   info.square_measured = true;
-  info.streams = small_streams();
+  info.depth_mode = nfov_unbinned();
   info.cameras = {
       make_camera("CL2A14100A4", 1, recon::sensor::SyncRole::Secondary),
       make_camera("CL2A141000N", 2, recon::sensor::SyncRole::Primary)};
@@ -547,7 +541,14 @@ TEST(SessionWriter, CaptureJsonHoldsWhatWasGivenExactly) {
   job.cameras[0].check.pnp_rms_px = 0.21000000000000002;
   job.meta.live_vs_full_px = 0.12;
   submit(*writer, job);
+  // Flagged views are usable views.
+  CaptureJob flagged = make_job(4);
+  flagged.cameras[0].check.verdict = ViewVerdict::Oblique;
+  flagged.cameras[1].check.verdict = ViewVerdict::Far;
+  flagged.cameras[1].check.collinear = false;
+  submit(*writer, std::move(flagged));
   finish(*writer);
+  EXPECT_EQ(parse(info.directory + "/captures/001.json")["usable_views"], 2);
 
   const json doc = parse(info.directory + "/captures/000.json");
   EXPECT_EQ(doc["format"], "volumetric_kit_calib.capture");
@@ -679,31 +680,71 @@ TEST(SessionWriter, RefusesAnExistingSessionDirectory) {
       (std::map<std::string, std::string>{{"note.txt", "an earlier run's"}}));
 }
 
+// Each kind of file capture 1 writes, there before it.
 TEST(SessionWriter, RefusesAnExistingFileAndNeverReusesItsIndex) {
+  for (const char* name : {"images/CL2A141000N/calib_img_CL2A141000N_001.jpg",
+                           "depth/CL2A14100A4/calib_depth_CL2A14100A4_001.png",
+                           "captures/001.json"}) {
+    SCOPED_TRACE(name);
+    const ScratchDir dir;
+    const SessionInfo info = make_info(dir);
+    auto writer = make_writer(info);
+    ASSERT_TRUE(writer);
+    submit(*writer, make_job());
+    finish(*writer);
+    const std::string planted = info.directory + "/" + name;
+    write(planted, "planted");
+
+    submit(*writer, make_job());
+    submit(*writer, make_job());
+    const std::vector<WriteResult> results = finish(*writer);
+    ASSERT_EQ(results.size(), 2u);
+    EXPECT_EQ(results[0].status.domain(), Code::InvalidArgument)
+        << results[0].status.message();
+    EXPECT_NE(results[0].status.message().find(planted), std::string::npos)
+        << results[0].status.message();
+    expect_written(results[1], WriteResult::Kind::Capture, 2);
+    EXPECT_EQ(read(planted), "planted");
+    if (std::string(name) != "captures/001.json") {
+      EXPECT_FALSE(fs::exists(info.directory + "/captures/001.json"));
+    }
+    EXPECT_EQ(listed(info),
+              (std::vector<std::pair<int, bool>>{{0, false}, {2, false}}));
+  }
+}
+
+// The factory record, there before the session's first capture writes it:
+// that capture made the session's directory, and no more, so the next goes on
+// from there.
+TEST(SessionWriter, RefusesAnExistingFactoryCalibration) {
+  if (is_root()) GTEST_SKIP() << "root writes into read-only directories";
   const ScratchDir dir;
   const SessionInfo info = make_info(dir);
   auto writer = make_writer(info);
   ASSERT_TRUE(writer);
+  // The session's directory is made without its owner's write permission.
+  const ::mode_t saved_umask = ::umask(0222);
   submit(*writer, make_job());
-  finish(*writer);
-  // The second camera's colour image of capture 1, there before it.
-  const std::string planted =
-      info.directory + "/images/CL2A141000N/calib_img_CL2A141000N_001.jpg";
+  std::vector<WriteResult> results = finish(*writer);
+  ::umask(saved_umask);
+  ASSERT_EQ(results.size(), 1u);
+  EXPECT_EQ(results[0].status.domain(), Code::IoError)
+      << results[0].status.message();
+  EXPECT_EQ(files_under(info.directory), std::set<std::string>{});
+  fs::permissions(info.directory, fs::perms::owner_write,
+                  fs::perm_options::add);
+  const std::string planted = info.directory + "/factory_calibration.json";
   write(planted, "planted");
 
   submit(*writer, make_job());
-  submit(*writer, make_job());
-  const std::vector<WriteResult> results = finish(*writer);
-  ASSERT_EQ(results.size(), 2u);
+  results = finish(*writer);
+  ASSERT_EQ(results.size(), 1u);
   EXPECT_EQ(results[0].status.domain(), Code::InvalidArgument)
       << results[0].status.message();
   EXPECT_NE(results[0].status.message().find(planted), std::string::npos)
       << results[0].status.message();
-  expect_written(results[1], WriteResult::Kind::Capture, 2);
   EXPECT_EQ(read(planted), "planted");
-  EXPECT_FALSE(fs::exists(info.directory + "/captures/001.json"));
-  EXPECT_EQ(listed(info),
-            (std::vector<std::pair<int, bool>>{{0, false}, {2, false}}));
+  EXPECT_FALSE(fs::exists(info.directory + "/session.json"));
 }
 
 // --- Failures ---------------------------------------------------------------
@@ -841,6 +882,36 @@ TEST(SessionWriter, ADropRewritesOnlySessionJson) {
                               {0, true}, {1, true}, {2, false}}));
 }
 
+// The capture before a drop failed: the drop takes it, dropping nothing,
+// rather than the capture before that; a second drop takes that one.
+TEST(SessionWriter, ADropNeverReachesPastAFailedCapture) {
+  const ScratchDir dir;
+  const SessionInfo info = make_info(dir);
+  auto writer = make_writer(info);
+  ASSERT_TRUE(writer);
+  submit(*writer, make_job());
+  finish(*writer);
+  write(info.directory + "/captures/001.json", "planted");
+
+  submit(*writer, make_job());
+  ASSERT_TRUE(writer->drop_last().ok());
+  std::vector<WriteResult> results = finish(*writer);
+  ASSERT_EQ(results.size(), 2u);
+  EXPECT_EQ(results[0].status.domain(), Code::InvalidArgument);
+  EXPECT_EQ(results[1].kind, WriteResult::Kind::Drop);
+  EXPECT_EQ(results[1].status.domain(), Code::NotFound);
+  EXPECT_NE(results[1].status.message().find("not written"), std::string::npos)
+      << results[1].status.message();
+  EXPECT_EQ(results[1].index, -1);
+  EXPECT_EQ(listed(info), (std::vector<std::pair<int, bool>>{{0, false}}));
+
+  ASSERT_TRUE(writer->drop_last().ok());
+  results = finish(*writer);
+  ASSERT_EQ(results.size(), 1u);
+  expect_written(results[0], WriteResult::Kind::Drop, 0);
+  EXPECT_EQ(listed(info), (std::vector<std::pair<int, bool>>{{0, true}}));
+}
+
 TEST(SessionWriter, ADropBeforeAnyCaptureIsNotFound) {
   const ScratchDir dir;
   const SessionInfo info = make_info(dir);
@@ -884,9 +955,11 @@ TEST(SessionWriter, RefusesACaptureWhenTheQueueIsFull) {
   const ScratchDir dir;
   SessionInfo info = make_info(dir);
   info.sync_path = dir / "sync.fifo";
-  FifoGate gate(info.sync_path);
   auto writer = make_writer(info, /*capacity=*/2);
   ASSERT_TRUE(writer);
+  // After the writer, so that a failed assertion opens it before the writer
+  // waits on its thread; the thread reads it at the first capture.
+  FifoGate gate(info.sync_path);
 
   // The first capture holds the thread at the sync file.
   submit(*writer, make_job(0));
@@ -915,10 +988,10 @@ TEST(SessionWriter, DrainsTheQueueAtShutdown) {
   const ScratchDir dir;
   SessionInfo info = make_info(dir);
   info.sync_path = dir / "sync.fifo";
-  FifoGate gate(info.sync_path);
   {
     auto writer = make_writer(info);
     ASSERT_TRUE(writer);
+    FifoGate gate(info.sync_path);  // after the writer, as above
     for (int i = 0; i < 3; ++i) submit(*writer, make_job(i));
     ASSERT_TRUE(writer->drop_last().ok());
     // Let the thread go only once the destructor is waiting on it.
@@ -1008,43 +1081,39 @@ TEST(SessionWriter, RefusesASessionItCannotWrite) {
   }
   {
     SessionInfo info = good;
-    info.streams.depth_width = 0;
-    refused(info, Code::InvalidArgument, "sizes");
-  }
-  {
-    SessionInfo info = good;
-    info.streams.fps = 0;
-    refused(info, Code::InvalidArgument, "fps");
-  }
-  {
-    SessionInfo info = good;
-    info.streams.metres_per_unit = std::numeric_limits<float>::infinity();
+    info.depth_mode.metres_per_unit = std::numeric_limits<float>::infinity();
     refused(info, Code::InvalidArgument, "metres_per_unit");
   }
-  {
+  for (const float min_m : {4.0f, 0.0f, -0.5f}) {
     SessionInfo info = good;
-    info.streams.min_depth_m = 4.0f;
-    refused(info, Code::InvalidArgument, "min_depth_m");
+    info.depth_mode.min_m = min_m;
+    refused(info, Code::InvalidArgument, "min_m");
   }
   {
     SessionInfo info = good;
     info.cameras.clear();
-    refused(info, Code::InvalidArgument, "a camera");
+    refused(info, Code::InvalidArgument, "no sensors");
   }
-  {
+  for (const char* serial : {"../escape", "..", ".", ""}) {
     SessionInfo info = good;
-    info.cameras[0].info.id = "../escape";
-    refused(info, Code::InvalidArgument, "plain file name");
-  }
-  {
-    SessionInfo info = good;
-    info.cameras[0].info.id = "..";
+    info.cameras[0].info.id = serial;
     refused(info, Code::InvalidArgument, "plain file name");
   }
   {
     SessionInfo info = good;
     info.cameras[0].info.id = info.cameras[1].info.id;
-    refused(info, Code::InvalidArgument, "repeated");
+    refused(info, Code::InvalidArgument, "CL2A141000N is twice");
+  }
+  {
+    SessionInfo info = good;
+    info.cameras[0].info.id = "cl2a141000n";
+    refused(info, Code::InvalidArgument,
+            "cameras cl2a141000n and CL2A141000N differ only in case");
+  }
+  {
+    SessionInfo info = good;
+    info.cameras[1].info.color.reset();
+    refused(info, Code::InvalidArgument, "no colour model");
   }
   {
     SessionInfo info = good;
@@ -1054,7 +1123,25 @@ TEST(SessionWriter, RefusesASessionItCannotWrite) {
   {
     SessionInfo info = good;
     info.cameras[1].info.color->size.width += 1;
-    refused(info, Code::InvalidArgument, "colour model is 65x48");
+    refused(info, Code::InvalidArgument,
+            "camera CL2A141000N's colour model is 65x48, camera "
+            "CL2A14100A4's 64x48");
+  }
+  {
+    SessionInfo info = good;
+    info.cameras[1].info.depth->size.height += 1;
+    refused(info, Code::InvalidArgument, "depth model is 16x13");
+  }
+  {
+    SessionInfo info = good;
+    info.cameras[1].info.fps = 0;
+    refused(info, Code::InvalidArgument, "CL2A141000N's fps is unknown");
+  }
+  {
+    SessionInfo info = good;
+    info.cameras[1].info.fps = 15;
+    refused(info, Code::InvalidArgument,
+            "camera CL2A141000N streams at 15 fps, camera CL2A14100A4 at 25");
   }
   {
     SessionInfo info = good;
@@ -1100,7 +1187,12 @@ TEST(SessionWriter, RefusesACaptureThatDoesNotFitTheSession) {
   {
     CaptureJob job = make_job();
     job.cameras[1].jpeg.clear();
-    refused(std::move(job), "camera CL2A141000N: no JPEG");
+    refused(std::move(job), "camera CL2A141000N: the colour is not a JPEG");
+  }
+  {
+    CaptureJob job = make_job();
+    job.cameras[0].jpeg = {0x00, 0x00, 0x00, 0x01, 0x67};  // H.264's start
+    refused(std::move(job), "camera CL2A14100A4: the colour is not a JPEG");
   }
   {
     CaptureJob job = make_job();
@@ -1110,7 +1202,14 @@ TEST(SessionWriter, RefusesACaptureThatDoesNotFitTheSession) {
   {
     CaptureJob job = make_job();
     job.cameras[0].detection.image_size = {kColorW / 2, kColorH / 2};
-    refused(std::move(job), "a detection in a 32x24 image");
+    refused(std::move(job),
+            "a detection in a 32x24 image, not the colour "
+            "image's 64x48");
+  }
+  {
+    CaptureJob job = make_job();
+    job.cameras[0].detection.image_size = {kColorW, kColorH / 2};
+    refused(std::move(job), "a detection in a 64x24 image");
   }
   {
     CaptureJob job = make_job();
@@ -1134,6 +1233,16 @@ TEST(SessionWriter, RefusesACaptureThatDoesNotFitTheSession) {
   }
   {
     CaptureJob job = make_job();
+    job.cameras[0].check.distance_m = kNaN;
+    refused(std::move(job), "a check's measure is not finite");
+  }
+  {
+    CaptureJob job = make_job();
+    job.cameras[1].check.pnp_rms_px = kNaN;
+    refused(std::move(job), "a check's measure is not finite");
+  }
+  {
+    CaptureJob job = make_job();
     job.cameras[0].check.verdict = static_cast<ViewVerdict>(99);
     refused(std::move(job), "not a ViewVerdict");
   }
@@ -1145,6 +1254,11 @@ TEST(SessionWriter, RefusesACaptureThatDoesNotFitTheSession) {
   {
     CaptureJob job = make_job();
     job.meta.spread_ms = kNaN;
+    refused(std::move(job), "a set's measure is not finite");
+  }
+  {
+    CaptureJob job = make_job();
+    job.meta.stillness_px = kNaN;
     refused(std::move(job), "a set's measure is not finite");
   }
   EXPECT_EQ(writer->pending(), 0u);

@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <ctime>
 #include <deque>
+#include <iterator>
+#include <list>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -44,81 +46,51 @@ bool finite(const recon::camera::Vec2d& p) {
   return std::isfinite(p.x) && std::isfinite(p.y);
 }
 
-std::string size_text(std::uint32_t width, std::uint32_t height) {
-  return std::to_string(width) + "x" + std::to_string(height);
+std::string size_text(const recon::camera::ImageSize& size) {
+  return std::to_string(size.width) + "x" + std::to_string(size.height);
 }
 
-core::Status check_model(const SessionCamera& camera, const char* which,
-                         const std::optional<CameraModel>& model,
-                         std::uint32_t width, std::uint32_t height) {
-  const std::string& serial = camera.info.id;
-  if (!model)
-    return invalid("camera " + serial + " has no " + which + " model");
-  if (model->size.width != width || model->size.height != height) {
-    return invalid("camera " + serial + "'s " + which + " model is " +
-                   size_text(model->size.width, model->size.height) +
-                   ", the streams' " + size_text(width, height));
+// Serials name directories, and some file systems ignore case; plain serials
+// are ASCII.
+bool same_ignoring_case(const std::string& a, const std::string& b) noexcept {
+  if (a.size() != b.size()) return false;
+  const auto fold = [](char ch) {
+    return ch >= 'A' && ch <= 'Z' ? static_cast<char>(ch - 'A' + 'a') : ch;
+  };
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    if (fold(a[i]) != fold(b[i])) return false;
+  }
+  return true;
+}
+
+// Every camera streams the mode the first does.
+core::Status check_same_size(const SessionCamera& camera,
+                             const SessionCamera& first, const char* which,
+                             const CameraModel& model,
+                             const CameraModel& first_model) {
+  if (model.size.width == first_model.size.width &&
+      model.size.height == first_model.size.height) {
+    return {};
+  }
+  return invalid("camera " + camera.info.id + "'s " + which + " model is " +
+                 size_text(model.size) + ", camera " + first.info.id + "'s " +
+                 size_text(first_model.size));
+}
+
+core::Status check_depth_mode(const DepthMode& d) {
+  if (!(std::isfinite(d.metres_per_unit) && d.metres_per_unit > 0.0f)) {
+    return invalid("depth_mode.metres_per_unit must be finite and positive");
+  }
+  if (!(std::isfinite(d.min_m) && std::isfinite(d.max_m) && d.min_m > 0.0f &&
+        d.min_m < d.max_m)) {
+    return invalid("depth_mode needs finite 0 < min_m < max_m");
   }
   return {};
 }
 
-core::Status check_streams(const Streams& s) {
-  if (s.color_width == 0 || s.color_height == 0 || s.depth_width == 0 ||
-      s.depth_height == 0) {
-    return invalid("streams' image sizes must be positive");
-  }
-  if (s.fps == 0) return invalid("streams.fps must be positive");
-  if (!(std::isfinite(s.metres_per_unit) && s.metres_per_unit > 0.0f)) {
-    return invalid("streams.metres_per_unit must be finite and positive");
-  }
-  if (!(std::isfinite(s.min_depth_m) && std::isfinite(s.max_depth_m) &&
-        s.min_depth_m > 0.0f && s.min_depth_m < s.max_depth_m)) {
-    return invalid("streams need finite 0 < min_depth_m < max_depth_m");
-  }
-  return {};
-}
-
-// The session's own checks; the factory calibration's are recon's.
-core::Status check_info(const SessionInfo& info) {
-  VKC_TRY(core::check_path("SessionWriter: directory", info.directory));
-  VKC_TRY(core::check_path("SessionWriter: sync_path", info.sync_path));
-  if (core::Status board = check_target(info.board); !board.ok()) {
-    return std::move(board).with_context("SessionWriter: board");
-  }
-  if (info.board.kind != TargetKind::ChArUco) {
-    return core::Status::unsupported(
-        std::string("SessionWriter: a session's board is ChArUco, not ") +
-        to_string(info.board.kind));
-  }
-  VKC_TRY(check_streams(info.streams));
-  if (info.cameras.empty()) return invalid("a session needs a camera");
-  bool reference = false;
-  for (std::size_t i = 0; i < info.cameras.size(); ++i) {
-    const SessionCamera& camera = info.cameras[i];
-    const std::string& serial = camera.info.id;
-    if (!detail::is_plain_serial(serial)) {
-      return invalid("camera serial \"" + serial +
-                     "\" is not a plain file name");
-    }
-    for (std::size_t j = 0; j < i; ++j) {
-      if (info.cameras[j].info.id == serial) {
-        return invalid("camera " + serial + " is repeated");
-      }
-    }
-    const Streams& s = info.streams;
-    VKC_TRY(check_model(camera, "colour", camera.info.color, s.color_width,
-                        s.color_height));
-    VKC_TRY(check_model(camera, "depth", camera.info.depth, s.depth_width,
-                        s.depth_height));
-    reference = reference || serial == info.reference;
-  }
-  if (!reference) {
-    return invalid("reference \"" + info.reference + "\" is not a camera");
-  }
-  return {};
-}
-
-// The factory record: every camera's models and depth_to_color, unposed.
+// The factory record: every camera's models and depth_to_color, unposed,
+// which recon checks: a camera at least, no id twice, models it can hold.
+// @pre Every camera has both models.
 core::Result<ArrayCalibration> factory_calibration(const SessionInfo& info) {
   ArrayCalibration array;
   for (const SessionCamera& camera : info.cameras) {
@@ -138,24 +110,87 @@ core::Result<ArrayCalibration> factory_calibration(const SessionInfo& info) {
   return array;
 }
 
+// The session's checks, around recon's of its factory record, which it
+// returns.
+core::Result<ArrayCalibration> check_info(const SessionInfo& info) {
+  VKC_TRY(core::check_path("SessionWriter: directory", info.directory));
+  VKC_TRY(core::check_path("SessionWriter: sync_path", info.sync_path));
+  if (core::Status board = check_target(info.board); !board.ok()) {
+    return std::move(board).with_context("SessionWriter: board");
+  }
+  if (info.board.kind != TargetKind::ChArUco) {
+    return core::Status::unsupported(
+        std::string("SessionWriter: a session's board is ChArUco, not ") +
+        to_string(info.board.kind));
+  }
+  VKC_TRY(check_depth_mode(info.depth_mode));
+  for (const SessionCamera& camera : info.cameras) {
+    const std::string& serial = camera.info.id;
+    if (!detail::is_plain_serial(serial)) {
+      return invalid("camera serial \"" + serial +
+                     "\" is not a plain file name");
+    }
+    if (!camera.info.color) {
+      return invalid("camera " + serial + " has no colour model");
+    }
+    if (!camera.info.depth) {
+      return invalid("camera " + serial + " has no depth model");
+    }
+  }
+  VKC_ASSIGN(ArrayCalibration factory, factory_calibration(info));
+  // recon found a camera at least, and no serial twice.
+  const SessionCamera& first = info.cameras.front();
+  bool reference = false;
+  for (std::size_t i = 0; i < info.cameras.size(); ++i) {
+    const SessionCamera& camera = info.cameras[i];
+    const std::string& serial = camera.info.id;
+    for (std::size_t j = 0; j < i; ++j) {
+      if (same_ignoring_case(info.cameras[j].info.id, serial)) {
+        return invalid("cameras " + info.cameras[j].info.id + " and " + serial +
+                       " differ only in case");
+      }
+    }
+    VKC_TRY(check_same_size(camera, first, "colour", *camera.info.color,
+                            *first.info.color));
+    VKC_TRY(check_same_size(camera, first, "depth", *camera.info.depth,
+                            *first.info.depth));
+    if (camera.info.fps == 0) {
+      return invalid("camera " + serial + "'s fps is unknown");
+    }
+    if (camera.info.fps != first.info.fps) {
+      return invalid("camera " + serial + " streams at " +
+                     std::to_string(camera.info.fps) + " fps, camera " +
+                     first.info.id + " at " + std::to_string(first.info.fps));
+    }
+    reference = reference || serial == info.reference;
+  }
+  if (!reference) {
+    return invalid("reference \"" + info.reference + "\" is not a camera");
+  }
+  return factory;
+}
+
+// @pre `info` passed check_info.
 core::Status check_part(const SessionInfo& info, std::size_t i,
                         const CameraCapture& part) {
-  const std::string where = "capture: camera " + info.cameras[i].info.id + ": ";
-  const Streams& s = info.streams;
-  if (part.jpeg.empty()) return invalid(where + "no JPEG");
+  const recon::sensor::SensorInfo& camera = info.cameras[i].info;
+  const std::string where = "capture: camera " + camera.id + ": ";
+  // A JPEG starts with its SOI marker.
+  if (part.jpeg.size() < 2 || part.jpeg[0] != 0xFF || part.jpeg[1] != 0xD8) {
+    return invalid(where + "the colour is not a JPEG");
+  }
+  const recon::camera::ImageSize& depth = camera.depth->size;
   const std::size_t samples =
-      static_cast<std::size_t>(s.depth_width) * s.depth_height;
+      static_cast<std::size_t>(depth.width) * depth.height;
   if (part.depth.size() != samples) {
     return invalid(where + std::to_string(part.depth.size()) +
-                   " depth samples for a " +
-                   size_text(s.depth_width, s.depth_height) + " depth image");
+                   " depth samples for a " + size_text(depth) + " depth image");
   }
   const recon::camera::ImageSize& size = part.detection.image_size;
-  if (size.width != s.color_width || size.height != s.color_height) {
-    return invalid(where + "a detection in a " +
-                   size_text(size.width, size.height) +
-                   " image, not the colour stream's " +
-                   size_text(s.color_width, s.color_height));
+  const recon::camera::ImageSize& color = camera.color->size;
+  if (size.width != color.width || size.height != color.height) {
+    return invalid(where + "a detection in a " + size_text(size) +
+                   " image, not the colour image's " + size_text(color));
   }
   for (const DetectedPoint& point : part.detection.observation.points) {
     if (!finite(point.pixel) || !std::isfinite(point.weight)) {
@@ -212,29 +247,40 @@ std::int64_t now_ns() {
 }  // namespace
 
 struct SessionWriter::State {
+  // A capture as a drop finds it: its entry in `captures`, or none when it
+  // was not written.
+  using Outcome = std::optional<std::size_t>;
+
   struct Request {
     WriteResult::Kind kind = WriteResult::Kind::Capture;
-    CaptureJob job;  // for a capture
+    CaptureJob job;  // a capture's
+    // A capture's node for `takeable`, allocated when it is submitted, so
+    // the thread records what became of it without allocating.
+    std::list<Outcome> outcome;
   };
 
   State(SessionInfo session, ArrayCalibration factory_record,
-        std::size_t queue_capacity)
+        std::size_t queue_capacity) noexcept
       : info(std::move(session)),
         factory(std::move(factory_record)),
-        capacity(queue_capacity) {
-    const std::string& root = info.directory;
-    directories.push_back(root);
-    for (const char* tree : {detail::kImagesDir, detail::kDepthDir}) {
-      const std::string top = detail::join(root, tree);
-      directories.push_back(top);
-      for (const SessionCamera& camera : info.cameras) {
-        directories.push_back(detail::join(top, camera.info.id));
-      }
-    }
-    directories.push_back(detail::join(root, detail::kCapturesDir));
-  }
+        capacity(queue_capacity) {}
 
   // --- The writer's thread alone ----------------------------------------
+
+  // The session's directory, then its tree.
+  std::vector<std::string> tree() const {
+    const std::string& root = info.directory;
+    std::vector<std::string> paths = {root};
+    for (const char* name : {detail::kImagesDir, detail::kDepthDir}) {
+      const std::string top = detail::join(root, name);
+      paths.push_back(top);
+      for (const SessionCamera& camera : info.cameras) {
+        paths.push_back(detail::join(top, camera.info.id));
+      }
+    }
+    paths.push_back(detail::join(root, detail::kCapturesDir));
+    return paths;
+  }
 
   // The session's directory tree and factory record, at the first capture;
   // a failure leaves what was made, and the next capture goes on from there.
@@ -243,6 +289,7 @@ struct SessionWriter::State {
       VKC_ASSIGN(const std::string sync, core::read_file(info.sync_path));
       sync_sha256 = detail::sha256_hex(sync);
     }
+    if (directories.empty()) directories = tree();
     while (made < directories.size()) {
       if (made == 0) {
         std::string stamp = detail::iso_time(now_ns());
@@ -288,18 +335,18 @@ struct SessionWriter::State {
     // Used from here on, whatever happens: files of it may exist.
     const int index = next_index++;
     job.meta.index = index;
-    const Streams& s = info.streams;
     // TODO: encode and write each camera's files as a task of its own if the
     // rig's write time per capture (hand check H4) asks for it.
     for (std::size_t i = 0; i < info.cameras.size(); ++i) {
       const std::string& serial = info.cameras[i].info.id;
+      const recon::camera::ImageSize& depth = info.cameras[i].info.depth->size;
       const CameraCapture& part = job.cameras[i];
       VKC_TRY(core::write_file(
           detail::join(info.directory, detail::color_file(serial, index)),
           bytes_of(part.jpeg), core::WriteMode::CreateNew));
       VKC_ASSIGN(const std::vector<std::uint8_t> png,
                  recon::io::encode_png_u16(part.depth.data(), part.depth.size(),
-                                           s.depth_width, s.depth_height));
+                                           depth.width, depth.height));
       VKC_TRY(core::write_file(
           detail::join(info.directory, detail::depth_file(serial, index)),
           bytes_of(png), core::WriteMode::CreateNew));
@@ -311,24 +358,34 @@ struct SessionWriter::State {
     return index;
   }
 
+  // Takes the latest capture from `takeable`: drops it, or puts it back if
+  // session.json cannot say so.
   core::Result<int> drop_last() {
-    for (auto it = captures.rbegin(); it != captures.rend(); ++it) {
-      if (it->dropped) continue;
-      it->dropped = true;
-      core::Status written;
-      try {
-        written = write_session();
-      } catch (...) {
-        it->dropped = false;
-        throw;
-      }
-      if (!written.ok()) {
-        it->dropped = false;
-        return written;
-      }
-      return it->index;
+    if (takeable.empty()) {
+      return core::Status::not_found("SessionWriter: no capture to drop");
     }
-    return core::Status::not_found("SessionWriter: no capture to drop");
+    std::list<Outcome> taken;
+    taken.splice(taken.end(), takeable, std::prev(takeable.end()));
+    if (!taken.front()) {
+      return core::Status::not_found(
+          "SessionWriter: the capture to drop was not written");
+    }
+    detail::CaptureEntry& entry = captures[*taken.front()];
+    entry.dropped = true;
+    core::Status written;
+    try {
+      written = write_session();
+    } catch (...) {
+      entry.dropped = false;
+      takeable.splice(takeable.end(), taken);
+      throw;
+    }
+    if (!written.ok()) {
+      entry.dropped = false;
+      takeable.splice(takeable.end(), taken);
+      return written;
+    }
+    return entry.index;
   }
 
   WriteResult carry_out(Request& request) noexcept {
@@ -347,6 +404,13 @@ struct SessionWriter::State {
       result.status = core::exception_status(
           capture ? "SessionWriter: capture" : "SessionWriter: drop",
           Code::IoError);
+    }
+    if (capture && !request.outcome.empty()) {
+      // Written or not, it is now the latest capture a drop can take; a
+      // written one is the last listed.
+      request.outcome.front() =
+          result.status.ok() ? Outcome(captures.size() - 1) : std::nullopt;
+      takeable.splice(takeable.end(), request.outcome);
     }
     return result;
   }
@@ -381,15 +445,18 @@ struct SessionWriter::State {
   const SessionInfo info;
   const ArrayCalibration factory;
   const std::size_t capacity;
-  std::vector<std::string> directories;  // the session's, then its tree
 
   // The writer's thread's alone.
+  std::vector<std::string> directories;  // the session's, then its tree
   std::string sync_sha256;
   std::string created;
   std::size_t made = 0;  // directories made
   bool factory_written = false;
   int next_index = 0;
-  std::vector<detail::CaptureEntry> captures;
+  std::vector<detail::CaptureEntry> captures;  // what session.json lists
+  // Each capture carried out, written or not, until a drop takes it; the
+  // latest last.
+  std::list<Outcome> takeable;
 
   std::mutex mutex;
   std::condition_variable wake;  // the thread: a request, or stopping
@@ -410,8 +477,7 @@ core::Result<std::unique_ptr<SessionWriter>> SessionWriter::create(
     if (options.queue_capacity == 0) {
       return invalid("queue_capacity must be at least 1");
     }
-    VKC_TRY(check_info(info));
-    VKC_ASSIGN(ArrayCalibration factory, factory_calibration(info));
+    VKC_ASSIGN(ArrayCalibration factory, check_info(info));
     // The writer first, so that nothing after the thread starts can throw.
     std::unique_ptr<SessionWriter> writer(
         new SessionWriter(std::make_unique<State>(
@@ -444,31 +510,37 @@ SessionWriter::~SessionWriter() {
 }
 
 core::Result<bool> SessionWriter::submit(CaptureJob job) {
-  VKC_TRY(check_job(state_->info, job));
-  std::lock_guard<std::mutex> lock(state_->mutex);
-  if (state_->held >= state_->capacity) return false;
   try {
-    state_->queue.push_back({WriteResult::Kind::Capture, std::move(job)});
+    VKC_TRY(check_job(state_->info, job));
+    State::Request request;
+    request.job = std::move(job);
+    request.outcome.emplace_back();
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->held >= state_->capacity) return false;
+    state_->queue.push_back(std::move(request));
+    ++state_->held;
+    ++state_->in_flight;
+    state_->wake.notify_one();
+    return true;
   } catch (...) {
-    return core::exception_status("SessionWriter::submit", Code::OutOfMemory);
+    return core::exception_status("SessionWriter::submit",
+                                  Code::InvalidArgument);
   }
-  ++state_->held;
-  ++state_->in_flight;
-  state_->wake.notify_one();
-  return true;
 }
 
 core::Status SessionWriter::drop_last() {
-  std::lock_guard<std::mutex> lock(state_->mutex);
   try {
-    state_->queue.push_back({WriteResult::Kind::Drop, {}});
+    State::Request request;
+    request.kind = WriteResult::Kind::Drop;
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    state_->queue.push_back(std::move(request));
+    ++state_->in_flight;
+    state_->wake.notify_one();
+    return {};
   } catch (...) {
     return core::exception_status("SessionWriter::drop_last",
                                   Code::OutOfMemory);
   }
-  ++state_->in_flight;
-  state_->wake.notify_one();
-  return {};
 }
 
 std::vector<WriteResult> SessionWriter::take_results() {
@@ -490,18 +562,22 @@ void SessionWriter::flush() {
 
 core::Result<std::string> session_stamp(
     std::chrono::system_clock::time_point time) {
-  const std::time_t seconds = std::chrono::system_clock::to_time_t(time);
-  std::tm local{};
-  if (::localtime_r(&seconds, &local) == nullptr) {
-    return core::Status::invalid_argument(
-        "session_stamp: the time has no local calendar date");
+  try {
+    const std::time_t seconds = std::chrono::system_clock::to_time_t(time);
+    std::tm local{};
+    if (::localtime_r(&seconds, &local) == nullptr) {
+      return core::Status::invalid_argument(
+          "session_stamp: the time has no local calendar date");
+    }
+    char text[32];
+    if (std::strftime(text, sizeof text, "%Y-%m-%d_%H%M%S", &local) == 0) {
+      return core::Status::invalid_argument(
+          "session_stamp: the date does not fit the name");
+    }
+    return std::string(text);
+  } catch (...) {
+    return core::exception_status("session_stamp", Code::InvalidArgument);
   }
-  char text[32];
-  if (std::strftime(text, sizeof text, "%Y-%m-%d_%H%M%S", &local) == 0) {
-    return core::Status::invalid_argument(
-        "session_stamp: the date does not fit the name");
-  }
-  return std::string(text);
 }
 
 }  // namespace volumetric_kit::calib::capture

@@ -3,12 +3,16 @@
 
 include(GoogleTest)
 
-# vc_<name>_test from <name>_test.cpp, linking the given targets.
+# vc_<name>_test from <name>_test.cpp, linking the given targets. A case that
+# hangs fails after 5 minutes rather than holding a CI job to its limit.
 function(vc_add_test name)
   add_executable(vc_${name}_test ${name}_test.cpp)
   target_link_libraries(vc_${name}_test PRIVATE ${ARGN} GTest::gtest_main)
   vc_target_warnings(vc_${name}_test)
-  gtest_discover_tests(vc_${name}_test)
+  gtest_discover_tests(
+    vc_${name}_test
+    PROPERTIES
+    TIMEOUT 300)
 endfunction()
 
 # The tests' header-only helpers (support/).
@@ -22,8 +26,8 @@ target_link_libraries(vc_test_support INTERFACE volumetric_kit::calib_core
 vc_add_test(version volumetric_kit::calib_core)
 # core: the board, its check, and the rig's board.
 vc_add_test(target vc_test_support)
-# core: the plain records (Observation / ViewCheck / CaptureMeta / SensorProfile
-# / LensProfile).
+# core: the plain records (Observation / Detection / ViewCheck / CaptureMeta /
+# SensorProfile / LensProfile).
 vc_add_test(data_model volumetric_kit::calib_core)
 
 if(VC_WITH_OPENCV)
@@ -54,6 +58,9 @@ if(VC_WITH_RIG)
               volumetric_kit::recon_io Threads::Threads)
   target_include_directories(vc_session_writer_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
+  vc_add_test(capture_oom volumetric_kit::calib_capture vc_test_support
+              Threads::Threads)
+  target_sources(vc_capture_oom_test PRIVATE support/allocation_failure.cpp)
 endif()
 
 # The core calib requires (third_party/CMakeLists.txt): calib's configure

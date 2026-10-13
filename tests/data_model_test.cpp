@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
+#include <array>
 #include <type_traits>
 
 #include <gtest/gtest.h>
@@ -91,19 +92,15 @@ TEST(ViewCheck, NamesEachVerdict) {
   EXPECT_STREQ(to_string(static_cast<ViewVerdict>(42)), "unknown");
 }
 
-// Nothing found: no image, no corners and no markers; a marker has no id.
-TEST(Detection, StartsEmpty) {
-  const Detection detection;
-  EXPECT_EQ(detection.image_size.width, 0u);
-  EXPECT_EQ(detection.image_size.height, 0u);
-  EXPECT_TRUE(detection.observation.empty());
-  EXPECT_TRUE(detection.markers.empty());
-
-  const DetectedMarker marker;
-  EXPECT_EQ(marker.id, -1);
-  for (const recon::camera::Vec2d& corner : marker.corners) {
-    EXPECT_EQ(corner, recon::camera::Vec2d(0.0, 0.0));
-  }
+// The verdicts that fix a pose count as usable; flagged ones too.
+TEST(ViewCheck, CountsTheVerdictsThatFixAPose) {
+  EXPECT_FALSE(is_usable(ViewVerdict::None));
+  EXPECT_TRUE(is_usable(ViewVerdict::Good));
+  EXPECT_TRUE(is_usable(ViewVerdict::Partial));
+  EXPECT_FALSE(is_usable(ViewVerdict::Collinear));
+  EXPECT_TRUE(is_usable(ViewVerdict::Oblique));
+  EXPECT_TRUE(is_usable(ViewVerdict::Far));
+  EXPECT_FALSE(is_usable(static_cast<ViewVerdict>(42)));
 }
 
 TEST(CaptureMeta, StartsWithoutALiveVsFullComparison) {
@@ -115,6 +112,26 @@ TEST(CaptureMeta, StartsWithoutALiveVsFullComparison) {
   EXPECT_EQ(meta.spread_ms, 0.0);
   EXPECT_EQ(meta.stillness_px, 0.0);
   EXPECT_FALSE(meta.live_vs_full_px);
+}
+
+// A detection that found nothing: no corners and no markers. Its image size
+// and pixels are recon's, so a capture stores and a panel draws them
+// unconverted.
+TEST(Detection, StartsWithNothingFound) {
+  static_assert(std::is_same_v<decltype(Detection::image_size),
+                               recon::camera::ImageSize>);
+  static_assert(std::is_same_v<decltype(DetectedMarker::corners),
+                               std::array<recon::camera::Vec2d, 4>>);
+  const Detection detection;
+  EXPECT_EQ(detection.image_size.width, 0u);
+  EXPECT_EQ(detection.image_size.height, 0u);
+  EXPECT_TRUE(detection.observation.empty());
+  EXPECT_TRUE(detection.markers.empty());
+  const DetectedMarker marker;
+  EXPECT_EQ(marker.id, -1);
+  for (const recon::camera::Vec2d& corner : marker.corners) {
+    EXPECT_EQ(corner, recon::camera::Vec2d(0.0, 0.0));
+  }
 }
 
 }  // namespace

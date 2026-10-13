@@ -17,20 +17,30 @@
 
 namespace volumetric_kit::calib {
 
-/// @brief What a view is good for.
+/// @brief What a view is good for: @ref is_usable says which verdicts count
+///        among a camera's usable views.
 enum class ViewVerdict {
-  None,       ///< No usable view: no board, or too few corners.
+  None,       ///< Not usable: no board, or too few corners.
   Good,       ///< Usable, with the whole board in view.
   Partial,    ///< Usable, with part of the board in view.
-  Collinear,  ///< The corners seen lie on one line, so they fix no pose.
-  Oblique,    ///< The board is turned too far from the camera.
-  Far,        ///< The board is too far from the camera.
+  Collinear,  ///< Not usable: the corners seen lie on one line, fixing no pose.
+  Oblique,    ///< Usable, but flagged: the board is turned far from the camera.
+  Far,        ///< Usable, but flagged: the board is far from the camera.
 };
 
+/// @brief The name calib's files write for a verdict.
+/// @param verdict  The verdict.
 /// @return A stable lowercase name for @p verdict (`"good"`, `"partial"`,
-///         ...), as calib's files write it; `"unknown"` for a value that is
-///         not a @ref ViewVerdict.
+///         ...); `"unknown"` for a value that is not a @ref ViewVerdict.
 VC_CORE_API const char* to_string(ViewVerdict verdict) noexcept;
+
+/// @brief Whether a view fixes the board's pose, so that it counts among its
+///        camera's usable views (a capture's `usable_views`, and the session's
+///        views per camera).
+/// @param verdict  The view's verdict.
+/// @return `true` for `Good`, `Partial`, `Oblique` and `Far`; `false` for
+///         `None`, `Collinear` and a value that is not a @ref ViewVerdict.
+VC_CORE_API bool is_usable(ViewVerdict verdict) noexcept;
 
 /// @brief One camera's view of the board in one set: what was detected, the
 ///        view's own pose, and the verdict.

@@ -4,11 +4,8 @@
 // Invalid input can run out of memory while validation builds a message or
 // adds context. The public bridge must report that as OutOfMemory too.
 
-#include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <optional>
-#include <type_traits>
 
 #include <gtest/gtest.h>
 
@@ -21,33 +18,8 @@ namespace volumetric_kit::calib::compute {
 namespace {
 
 using Code = core::Status::Code;
+using test::expect_oom_when_reporting;
 namespace camera = recon::camera;
-
-// Sweep every allocation in a rejected call, including with_context and
-// Result construction, without depending on string allocation counts or
-// small-string buffer sizes. The first uninjected call also checks retry.
-template <class Fn>
-void expect_oom_when_reporting(const Fn& fn, Code expected) {
-  const auto original = fn();
-  ASSERT_EQ(original.status().domain(), expected);
-  for (std::size_t after = 0; after < 32; ++after) {
-    SCOPED_TRACE(after);
-    std::optional<std::invoke_result_t<const Fn&>> result;
-    EXPECT_NO_THROW({
-      const test::FailAllocation failure(after);
-      result.emplace(fn());
-    });
-    ASSERT_TRUE(result.has_value());
-    if (!test::allocation_failure.injected) {
-      EXPECT_GT(after, 0u) << "the refusal must exercise allocation failure";
-      EXPECT_EQ(result->status().domain(), expected);
-      EXPECT_EQ(result->status().message(), original.status().message());
-      return;
-    }
-    EXPECT_EQ(result->status().domain(), Code::OutOfMemory);
-  }
-  FAIL() << "did not reach a refusal without an injected allocation failure";
-}
 
 TEST(ComputeOom, BoardTargetValidation) {
   Target target = legacy_femto_board();

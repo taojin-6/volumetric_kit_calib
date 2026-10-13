@@ -4,12 +4,12 @@
 #pragma once
 
 /// @file detection.hpp
-/// @brief What a detector found of a marker board in one image: its corners by
-///        id, and its markers.
+/// @brief What a board detector found in one image: the record the live view
+///        draws, the live checks read and a capture stores.
 ///
-/// A plain record in the `core` tier, so the tier that detects and the one
-/// that stores a capture need not depend on each other. Pixels are OpenCV's
-/// and recon's: pixel centres sit at integer coordinates.
+/// A plain record in the `core` tier, so the tiers that fill, show and store
+/// it need not depend on each other. Pixels are OpenCV's and recon's: pixel
+/// centres sit at integer coordinates.
 
 #include <array>
 #include <vector>
@@ -23,10 +23,9 @@ namespace volumetric_kit::calib {
 /// @brief One marker found.
 ///
 /// @code
-/// DetectedMarker marker;
-/// marker.id = 3;
-/// marker.corners = {{{100.0, 50.0}, {140.0, 50.0}, {140.0, 90.0},
-///                    {100.0, 90.0}}};
+/// for (const DetectedMarker& marker : detection.markers) {
+///   draw_outline(marker.corners);  // a caller's own drawing
+/// }
 /// @endcode
 struct DetectedMarker {
   int id = -1;  ///< Its id in the board's dictionary.
@@ -39,16 +38,15 @@ struct DetectedMarker {
 /// @code
 /// Detection detection;
 /// detection.image_size = {3840, 2160};
+/// detection.observation.camera_id = serial;
+/// detection.observation.frame_id = capture_index;
 /// detection.observation.points.push_back({0, {812.4, 390.1}, 1.0});
-/// detection.markers.push_back(marker);
 /// @endcode
 struct Detection {
-  /// The image searched, whose pixels the corners are in.
-  recon::camera::ImageSize image_size;
-  /// The board's corners, by id, in ascending order.
+  recon::camera::ImageSize image_size;  ///< The image searched.
+  /// The board's corners found, by id.
   Observation observation;
-  /// The markers found, in ascending order of id.
-  std::vector<DetectedMarker> markers;
+  std::vector<DetectedMarker> markers;  ///< The board's markers found.
 };
 
 }  // namespace volumetric_kit::calib

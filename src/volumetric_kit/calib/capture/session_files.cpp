@@ -150,10 +150,6 @@ std::string iso_time(std::int64_t ns) {
   return text;
 }
 
-bool usable(ViewVerdict verdict) noexcept {
-  return verdict != ViewVerdict::None && verdict != ViewVerdict::Collinear;
-}
-
 std::string format_session(const SessionInfo& info, const std::string& created,
                            const std::string& sync_sha256,
                            const std::vector<CaptureEntry>& captures) {
@@ -189,20 +185,22 @@ std::string format_session(const SessionInfo& info, const std::string& created,
   b["square_tolerance_m"] = optional_number(board.square_size_tolerance_m);
   b["planarity_bow_m"] = optional_number(board.planarity_bow_m);
 
-  const Streams& s = info.streams;
+  // Every camera streams what the first does.
+  const recon::sensor::SensorInfo& first = info.cameras.front().info;
+  const DepthMode& mode = info.depth_mode;
   json& streams = doc["streams"];
   json& color = streams["color"];
-  color["width"] = s.color_width;
-  color["height"] = s.color_height;
-  color["codec"] = s.color_codec;
+  color["width"] = first.color->size.width;
+  color["height"] = first.color->size.height;
+  color["codec"] = "mjpeg";
   json& depth = streams["depth"];
-  depth["width"] = s.depth_width;
-  depth["height"] = s.depth_height;
-  depth["mode"] = s.depth_mode;
-  depth["metres_per_unit"] = shortest(s.metres_per_unit);
-  depth["min_m"] = shortest(s.min_depth_m);
-  depth["max_m"] = shortest(s.max_depth_m);
-  streams["fps"] = s.fps;
+  depth["width"] = first.depth->size.width;
+  depth["height"] = first.depth->size.height;
+  depth["mode"] = mode.name;
+  depth["metres_per_unit"] = shortest(mode.metres_per_unit);
+  depth["min_m"] = shortest(mode.min_m);
+  depth["max_m"] = shortest(mode.max_m);
+  streams["fps"] = first.fps;
 
   json cameras = json::array();
   for (const SessionCamera& camera : info.cameras) {
@@ -260,7 +258,7 @@ std::string format_capture(const SessionInfo& info, const CaptureJob& job) {
     c["detection"] = detection_json(part.detection);
     c["check"] = check_json(part.check);
     cameras[serial] = std::move(c);
-    if (usable(part.check.verdict)) ++usable_views;
+    if (is_usable(part.check.verdict)) ++usable_views;
   }
   doc["cameras"] = std::move(cameras);
   doc["usable_views"] = usable_views;

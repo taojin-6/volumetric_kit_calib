@@ -44,16 +44,13 @@ std::string capture_file(int index);
 // "2026-10-13T09:41:07.250Z".
 std::string iso_time(std::int64_t ns);
 
-// Whether a view with `verdict` fixes the board's pose, as `usable_views`
-// counts: every verdict but None and Collinear.
-bool usable(ViewVerdict verdict) noexcept;
-
-// session.json's text.
+// session.json's text, for an `info` SessionWriter::create accepted.
 std::string format_session(const SessionInfo& info, const std::string& created,
                            const std::string& sync_sha256,
                            const std::vector<CaptureEntry>& captures);
 
-// captures/<NNN>.json's text, for `job` with its index set.
+// captures/<NNN>.json's text, for `job` with its index set, which
+// SessionWriter::submit accepted.
 std::string format_capture(const SessionInfo& info, const CaptureJob& job);
 
 }  // namespace volumetric_kit::calib::capture::detail

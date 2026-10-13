@@ -20,7 +20,7 @@
 # 4. CMAKE_PREFIX_PATH, which takes precedence over calib's prefix, holds the
 #    same recon and core, relabelled to the core's next minor version: the
 #    consumer, given calib's directory, does not find calib, which names both
-#    cores.
+#    cores; nor when it finds that core itself first.
 #
 # CORE_SOURCE, RECON_SOURCE and JSON_SOURCE are the sources the calling build
 # fetched, so this needs no network; GENERATOR, CXX_COMPILER, MAKE_PROGRAM and
@@ -212,3 +212,14 @@ _vc_cmake_refuses(
   ${_common}
   "-DCMAKE_PREFIX_PATH=${_other}"
   "-Dvolumetric_kit_calib_DIR=${_calib_dir}")
+_vc_cmake_refuses(
+  "Configuring against calib after finding another core"
+  "needs the volumetric_kit_core at .*/prefix/lib/cmake/volumetric_kit_core, but the application found another first, at .*/other_core/lib/cmake/volumetric_kit_core: find calib's"
+  -S
+  "${CMAKE_CURRENT_LIST_DIR}/consumer"
+  -B
+  "${BINARY_DIR}/consumer_other_core_first"
+  ${_common}
+  "-DCMAKE_PREFIX_PATH=${_other}"
+  "-Dvolumetric_kit_calib_DIR=${_calib_dir}"
+  -DFIND_CORE=ON)

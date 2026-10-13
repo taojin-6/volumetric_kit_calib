@@ -91,7 +91,10 @@ The `capture` tier writes the rig application's calibration sessions
   replay. A crash loses no capture already listed; a new run starts a new
   session.
 - **Off the caller's thread.** One writer thread behind a bounded queue, which
-  refuses a capture when full; the caller polls the outcomes.
+  refuses a capture when full; the caller polls the outcomes. The writer
+  encodes and writes; the full-resolution detection is the caller's, done on
+  a worker of the application's before it submits, since `capture` cannot
+  link `detect`.
 - **Records in `core`.** The detector fills `Detection` and the writer stores
   it, so it is a plain `core` record, as `ViewCheck` is.
 - **How it builds.** `VC_WITH_RIG`, OFF by default, fetches all of recon and
@@ -100,8 +103,8 @@ The `capture` tier writes the rig application's calibration sessions
 - **Core 0.6.1.** Its package can be read twice in one configure
   ([volumetric_kit_core#31](https://github.com/taojin-6/volumetric_kit_core/issues/31)),
   so calib's package config finds the core directly, and an application may
-  find it too. calib requires it, since its installed package reads the core
-  again through recon's.
+  find it too, but not another. calib requires it, since its installed
+  package reads the core again through recon's.
 
 ## 2026-10-12 — OpenCV, behind calib's types
 

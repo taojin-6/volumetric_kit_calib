@@ -72,11 +72,10 @@ brew install cmake glm          # macOS
 need an installed OpenCV 5 (5.0 or a later 5.x): `brew install opencv` on
 macOS; on Ubuntu, whose packages are OpenCV 4, one you build yourself.
 `VC_WITH_RIG` (OFF by default) builds `capture`, over all of recon, which needs
-the Vulkan SDK and a shader compiler: `brew install molten-vk vulkan-loader
-vulkan-headers shaderc` on macOS, `apt-get install libvulkan-dev
-glslang-tools` on Ubuntu. (Later tiers add Ceres for `solve` and
-`volumetric_kit_gfx` for `viz`/`app`.) To
-build against a local core or recon checkout instead of the pinned one, pass
+the Vulkan SDK and a GLSL compiler: the core's vulkan tier
+[prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
+(Later tiers add Ceres for `solve` and `volumetric_kit_gfx` for `viz`/`app`.)
+To build against a local core or recon checkout instead of the pinned one, pass
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>` or
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>`.
 
@@ -126,7 +125,8 @@ e.g. `-DVC_SANITIZE="address;undefined"`. An installed calib carries the core
 and recon (its camera tier, or all of it with `VC_WITH_RIG`) beside it, and
 `find_package(volumetric_kit_calib)` finds all three, and the installed OpenCV
 when calib was built with it. An application may find the core itself too,
-before calib or after it.
+before calib or after it; if it finds another core first, calib is not found,
+and the message names both.
 
 calib needs `volumetric_kit_core` 0.6.1 or newer, with its vulkan tier for
 `VC_WITH_RIG`. An application that declares the core before calib, to share it

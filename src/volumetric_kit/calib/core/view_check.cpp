@@ -23,4 +23,18 @@ const char* to_string(ViewVerdict verdict) noexcept {
   return "unknown";
 }
 
+bool is_usable(ViewVerdict verdict) noexcept {
+  switch (verdict) {
+    case ViewVerdict::Good:
+    case ViewVerdict::Partial:
+    case ViewVerdict::Oblique:
+    case ViewVerdict::Far:
+      return true;
+    case ViewVerdict::None:
+    case ViewVerdict::Collinear:
+      return false;
+  }
+  return false;
+}
+
 }  // namespace volumetric_kit::calib

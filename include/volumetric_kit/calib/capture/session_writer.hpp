@@ -26,6 +26,8 @@
 ///   (`recon/camera/array_calibration.hpp`): each camera's factory colour and
 ///   depth models at the streamed mode, and its `depth_to_color`, with no pose.
 /// - Depth is as the sensor captured it: raw, not undistorted.
+/// - `streams` records the cameras' colour and depth sizes and rate, which
+///   every camera shares, and the @ref DepthMode.
 /// - **Never overwritten.** The directory is new, and every file in it but
 ///   `session.json` is created once, refusing one already there.
 ///   `session.json`, which lists the captures, is replaced atomically after
@@ -66,8 +68,7 @@
 /// @endcode
 ///
 /// `captures/<NNN>.json`, with `null` for a measure that is empty;
-/// `usable_views` counts the cameras whose verdict is neither `none` nor
-/// `collinear`:
+/// `usable_views` counts the cameras whose verdict @ref is_usable accepts:
 ///
 /// @code{.json}
 /// {"format": "volumetric_kit_calib.capture", "version": 1,
@@ -125,33 +126,23 @@ struct Software {
   std::string orbbec_sdk;  ///< The Orbbec SDK's version.
 };
 
-/// @brief What every camera of the rig streams.
+/// @brief The rig's depth mode: what each camera's `SensorInfo` does not say.
+///
+/// The image sizes and the rate are the cameras' own (their models and
+/// `fps`), and colour is the cameras' MJPEG.
 ///
 /// @code
-/// Streams streams;
-/// streams.color_width = 3840;
-/// streams.color_height = 2160;
-/// streams.color_codec = "mjpeg";
-/// streams.depth_width = 640;
-/// streams.depth_height = 576;
-/// streams.depth_mode = "nfov_unbinned";
-/// streams.min_depth_m = 0.5f;
-/// streams.max_depth_m = 3.86f;
-/// streams.fps = 25;
+/// DepthMode depth_mode;
+/// depth_mode.name = "nfov_unbinned";
+/// depth_mode.min_m = 0.5f;
+/// depth_mode.max_m = 3.86f;
 /// @endcode
-struct Streams {
-  std::uint32_t color_width = 0;   ///< Colour image width (pixels).
-  std::uint32_t color_height = 0;  ///< Colour image height (pixels).
-  /// How colour crossed the wire, which `images/` keeps: `"mjpeg"`.
-  std::string color_codec;
-  std::uint32_t depth_width = 0;   ///< Depth image width (pixels).
-  std::uint32_t depth_height = 0;  ///< Depth image height (pixels).
-  std::string depth_mode;          ///< The depth mode, e.g. `"nfov_unbinned"`.
+struct DepthMode {
+  std::string name;  ///< As the driver names it, e.g. `"nfov_unbinned"`.
   /// What one depth unit is (metres), as `RgbdFrame::metres_per_unit`.
   float metres_per_unit = 0.001f;
-  float min_depth_m = 0.0f;  ///< The nearest depth kept (metres).
-  float max_depth_m = 0.0f;  ///< The farthest depth kept (metres).
-  std::uint32_t fps = 0;     ///< Frames a second.
+  float min_m = 0.0f;  ///< The nearest depth kept (metres).
+  float max_m = 0.0f;  ///< The farthest depth kept (metres).
 };
 
 /// @brief One camera of the rig.
@@ -172,7 +163,7 @@ struct Streams {
 /// @endcode
 struct SessionCamera {
   /// What the sensor is: `id` (its serial), `model`, the factory `color` and
-  /// `depth` models at the streamed mode, `depth_to_color` and `role`.
+  /// `depth` models at the streamed mode, `depth_to_color`, `role` and `fps`.
   recon::sensor::SensorInfo info;
   std::string firmware;             ///< Its firmware version.
   std::string ip_address;           ///< Its IP address; empty for a USB camera.
@@ -190,7 +181,7 @@ struct SessionCamera {
 /// info.sync_path = "config/femto_mega_sync.json";
 /// info.reference = array.sensor(array.primary()).info().id;
 /// info.board = legacy_femto_board();
-/// info.streams = streams;
+/// info.depth_mode = depth_mode;
 /// info.cameras = cameras;
 /// @endcode
 struct SessionInfo {
@@ -208,12 +199,17 @@ struct SessionInfo {
   /// Whether `board.square_size_m` was measured, rather than the print's
   /// nominal size.
   bool square_measured = false;
-  Streams streams;  ///< What every camera streams.
-  /// The cameras, in the order every capture gives them.
+  DepthMode depth_mode;  ///< The rig's depth mode.
+  /// The cameras, in the order every capture gives them. Every camera
+  /// streams the same colour and depth sizes at the same rate.
   std::vector<SessionCamera> cameras;
 };
 
 /// @brief One camera's part of a capture.
+///
+/// The detection and the check are the caller's: this tier cannot link
+/// `detect`, so an application runs the full-resolution detection on a thread
+/// of its own before it submits the capture.
 ///
 /// @code
 /// CameraCapture part;
@@ -229,14 +225,15 @@ struct CameraCapture {
   /// The camera's JPEG (`RgbdFrame::color_bitstream`), copied out of the
   /// frame so the driver's buffers go back to it.
   std::vector<std::uint8_t> jpeg;
-  /// The depth, `Streams::depth_width * depth_height` samples, row-major, in
+  /// The depth, a sample for each of the depth model's pixels, row-major, in
   /// the sensor's units, as `RgbdFrame::depth`.
   std::vector<std::uint16_t> depth;
   std::uint64_t timestamp_ns = 0;  ///< `RgbdFrame::timestamp_ns`.
   std::uint64_t sequence = 0;      ///< `RgbdFrame::sequence`.
   /// The board found in the colour image at full resolution: what the solver
-  /// takes. Its `image_size` is the colour image's; the observation's camera
-  /// and frame are written as the camera's serial and the capture's index.
+  /// takes. Its `image_size` is the colour image's. The observation's own
+  /// camera and frame are not written: the capture's file holds the
+  /// detection under the camera's serial.
   Detection detection;
   ViewCheck check;  ///< What the view is worth.
 };
@@ -259,6 +256,16 @@ struct CaptureJob {
 };
 
 /// @brief What became of a request made of a @ref SessionWriter.
+///
+/// @code
+/// for (const WriteResult& done : writer->take_results()) {
+///   if (!done.status.ok()) {
+///     show(done.status.message());
+///   } else if (done.kind == WriteResult::Kind::Capture) {
+///     flash("capture " + std::to_string(done.index) + " saved");
+///   }
+/// }
+/// @endcode
 struct WriteResult {
   /// @brief What was asked.
   enum class Kind {
@@ -272,6 +279,13 @@ struct WriteResult {
 };
 
 /// @brief How a @ref SessionWriter queues.
+///
+/// @code
+/// SessionWriterOptions options;
+/// options.queue_capacity = 8;  // at most 8 captures' frames held
+/// VKC_ASSIGN(std::unique_ptr<SessionWriter> writer,
+///            SessionWriter::create(std::move(info), options));
+/// @endcode
 struct SessionWriterOptions {
   /// Captures held at once, queued or being written; at least 1.
   std::size_t queue_capacity = 4;
@@ -281,9 +295,10 @@ struct SessionWriterOptions {
 ///        queued, and its outcome is taken later, so no caller waits on the
 ///        disk.
 ///
-/// Requests are carried out in the order they are made. Every member may be
-/// called from any thread. Destroying the writer first carries out every
-/// request queued.
+/// It encodes and writes; it detects nothing (@ref CameraCapture). Requests
+/// are carried out in the order they are made. Every member may be called
+/// from any thread. Destroying the writer first carries out every request
+/// queued.
 ///
 /// @code
 /// VKC_ASSIGN(std::unique_ptr<SessionWriter> writer,
@@ -301,14 +316,16 @@ class VC_CAPTURE_API SessionWriter {
   ///        until the first capture.
   /// @param info     The session. Refused unless: the directory and sync path
   ///                 are non-empty; the board is a ChArUco board
-  ///                 @ref check_target accepts; the streams have positive
-  ///                 sizes and rate, a positive `metres_per_unit` and
-  ///                 `0 < min_depth_m < max_depth_m`, all finite; there is
-  ///                 at least one camera; each serial is a plain file name
-  ///                 (letters, digits, `-`, `_`, `.`; not `.` or `..`) and
-  ///                 unique; each camera has colour and depth models of the
-  ///                 streams' sizes that, with its `depth_to_color`, recon's
-  ///                 calibration file holds; and the reference is a camera.
+  ///                 @ref check_target accepts; the depth mode has a finite,
+  ///                 positive `metres_per_unit` and finite
+  ///                 `0 < min_m < max_m`; each serial is a plain file name
+  ///                 (letters, digits, `-`, `_`, `.`; not `.` or `..`), and
+  ///                 no two differ only in case; each camera has colour and
+  ///                 depth models that, with its `depth_to_color`, recon's
+  ///                 calibration file holds (which also needs a camera at
+  ///                 least, and no serial twice); every camera streams the
+  ///                 same sizes at the same, known `fps`; and the reference
+  ///                 is a camera.
   /// @param options  How it queues.
   /// @return The writer; `InvalidArgument` naming what @p info or @p options
   ///         gets wrong; `Unsupported` for a board that is not ChArUco;
@@ -335,24 +352,27 @@ class VC_CAPTURE_API SessionWriter {
   /// or the sync file is missing, `IoError` for a write that fails (a full
   /// disk), and `OutOfMemory`.
   /// @param job  The capture. Refused unless it has one part per camera,
-  ///             each with a JPEG, `depth_width * depth_height` depth
-  ///             samples, a detection in an image of the colour streams'
-  ///             size, and finite pixels, weights and measures; the same
-  ///             for the set's measures; and a @ref ViewVerdict for each
-  ///             check.
+  ///             each with a JPEG (starting with its SOI marker), a depth
+  ///             sample per depth pixel, a detection in an image of the
+  ///             colour model's size, and finite pixels, weights and
+  ///             measures; the same for the set's measures; and a
+  ///             @ref ViewVerdict for each check.
   /// @return `true` once queued; `false`, with nothing queued, when
   ///         `queue_capacity` captures are already queued or being written;
   ///         `InvalidArgument` naming the camera and what @p job gets wrong;
   ///         or `OutOfMemory`.
   core::Result<bool> submit(CaptureJob job);
 
-  /// @brief Queue a drop of the latest capture not dropped yet.
+  /// @brief Queue a drop of the latest capture requested before it that no
+  ///        earlier drop took.
   ///
   /// The capture stays on disk, marked `"dropped": true` in `session.json`,
-  /// the one file a drop rewrites; its index is not used again. Its
-  /// @ref WriteResult has its index; `NotFound` when no capture is left to
-  /// drop; or why `session.json` could not be written, the capture then
-  /// kept.
+  /// the one file a drop rewrites; its index is not used again. A drop never
+  /// reaches past the capture it takes: when that one failed, nothing is
+  /// dropped. Its @ref WriteResult has the capture's index; `NotFound` when
+  /// no capture is left to take, or the one it takes was not written; or
+  /// why `session.json` could not be written, the capture then left for the
+  /// next drop.
   /// @return OK once queued; or `OutOfMemory`.
   core::Status drop_last();
 
@@ -377,8 +397,8 @@ class VC_CAPTURE_API SessionWriter {
 /// @brief A session directory's name for @p time: `YYYY-MM-DD_HHMMSS`, in
 ///        local time.
 /// @param time  When the session starts.
-/// @return The name; or `InvalidArgument` for a time the C library cannot
-///         convert to a calendar date.
+/// @return The name; `InvalidArgument` for a time the C library cannot
+///         convert to a calendar date; or `OutOfMemory`.
 ///
 /// @code
 /// VKC_ASSIGN(const std::string name,
