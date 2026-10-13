@@ -27,10 +27,6 @@ namespace camera = recon::camera;
 
 constexpr double kPi = 3.14159265358979323846;
 
-compute::Board femto_board() {
-  return compute::Board::create(legacy_femto_board()).value();
-}
-
 TEST(SyntheticRig, LensesAreValid) {
   for (const camera::CameraModel& model :
        {color_like_lens(), depth_like_lens()}) {
@@ -391,6 +387,71 @@ TEST(SyntheticRig, PlacesSquaresWhereTheyProject) {
       EXPECT_LT(worst, 0.02) << view.name << ", edge " << e;
     }
   }
+}
+
+TEST(SyntheticRig, FemtoBoardIsTheRigsBoard) {
+  const compute::Board board = femto_board();
+  const Target rig = legacy_femto_board();
+  EXPECT_EQ(board.target().rows, rig.rows);
+  EXPECT_EQ(board.target().cols, rig.cols);
+  EXPECT_EQ(board.target().square_size_m, rig.square_size_m);
+  EXPECT_EQ(board.target().marker_size_m, rig.marker_size_m);
+  EXPECT_EQ(board.charuco().getIds(), (std::vector<int>{0, 1, 2, 3, 4, 5, 6}));
+}
+
+// The chessboard's centre lands where asked. Untilted and unrolled, the
+// board's axes are the camera's; the tilt turns its normal from the camera's
+// axis, and the roll then turns its x axis about that axis.
+TEST(SyntheticRig, FacesTheBoardToTheCamera) {
+  const compute::Board board = femto_board();
+  const cv::Point3f corner = board.charuco().getRightBottomCorner();
+  const glm::dvec4 middle(0.5 * corner.x, 0.5 * corner.y, 0.0, 1.0);
+  const camera::Vec3d centre(0.1, -0.2, 2.5);
+  const camera::Mat4d straight = board_facing_camera(board, centre, 0.0, 0.0);
+  EXPECT_LT(glm::length(camera::Vec3d(straight * middle) - centre), 1e-12);
+  EXPECT_EQ(camera::Mat3d(straight), camera::Mat3d(1.0));
+
+  const camera::Mat4d turned = board_facing_camera(board, centre, 60.0, 30.0);
+  EXPECT_LT(glm::length(camera::Vec3d(turned * middle) - centre), 1e-12);
+  EXPECT_NEAR(std::acos(turned[2].z) * 180.0 / kPi, 60.0, 1e-9);
+  EXPECT_NEAR(std::atan2(turned[0].y, turned[0].x) * 180.0 / kPi, 30.0, 1e-9);
+  EXPECT_NEAR(turned[0].z, 0.0, 1e-12);
+}
+
+// A flat render gains noise of the sigma asked for and nothing else; the
+// blur spreads an edge and leaves flat ground alone; the same seed gives the
+// same picture, another seed another.
+TEST(SyntheticRig, CameraImageBlursThenAddsNoise) {
+  const cv::Mat flat(256, 256, CV_8UC1, cv::Scalar(110));
+  const cv::Mat noisy = camera_image(flat);
+  ASSERT_EQ(noisy.type(), CV_8UC1);
+  ASSERT_EQ(noisy.size(), flat.size());
+  cv::Scalar mean;
+  cv::Scalar sigma;
+  cv::meanStdDev(noisy, mean, sigma);
+  EXPECT_NEAR(mean[0], 110.0, 0.05);
+  EXPECT_NEAR(sigma[0], 2.5, 0.05);
+  EXPECT_EQ(cv::norm(noisy, camera_image(flat), cv::NORM_INF), 0.0);
+  CameraOptions reseeded;
+  reseeded.seed = 2;
+  EXPECT_GT(cv::norm(noisy, camera_image(flat, reseeded), cv::NORM_INF), 0.0);
+
+  // A step from 30 to 220 between columns 127 and 128.
+  cv::Mat step(64, 256, CV_8UC1, cv::Scalar(30));
+  step.colRange(128, 256).setTo(220);
+  CameraOptions blur_only;
+  blur_only.noise_dn = 0.0;
+  const cv::Mat blurred = camera_image(step, blur_only);
+  EXPECT_GT(blurred.at<uchar>(32, 127), 70);
+  EXPECT_LT(blurred.at<uchar>(32, 128), 180);
+  EXPECT_NEAR(blurred.at<uchar>(32, 127) + blurred.at<uchar>(32, 128), 250, 1);
+  EXPECT_EQ(blurred.at<uchar>(32, 123), 30);
+  EXPECT_EQ(blurred.at<uchar>(32, 132), 220);
+  CameraOptions neither = blur_only;
+  neither.blur_px = 0.0;
+  const cv::Mat same = camera_image(step, neither);
+  EXPECT_EQ(cv::norm(step, same, cv::NORM_INF), 0.0);
+  EXPECT_NE(same.data, step.data);
 }
 
 }  // namespace

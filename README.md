@@ -56,8 +56,7 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
   on Apple; native Metal deferred).
 - **Detection:** the `detect` tier finds the ChArUco board in an 8-bit luma
   image with OpenCV's detector, as corners by id and markers, at full
-  resolution or by the live view's faster hybrid, and says whether a view
-  fixes the board's pose.
+  resolution or by the live view's faster hybrid.
 - **Solve:** the rig's extrinsics from views of the board. `initialise` places
   every camera and board from the views alone -- each view's own pose (IPPE),
   the spanning tree of the camera links that share the most captures, each

@@ -60,8 +60,7 @@ int main() {
   const auto found =
       detect::detect_charuco({64, 64, 64, blank}, *board, detect::Mode::Hybrid);
   const bool detected = found.ok() && found->observation.empty() &&
-                        detect::usable_for_pose(*found, *board).value() ==
-                            detect::Usability::TooFewCorners;
+                        found->markers.empty() && found->image_size.width == 64;
   return ok && detected ? 0 : 1;
 #else
   return ok ? 0 : 1;

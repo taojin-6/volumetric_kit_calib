@@ -2,10 +2,10 @@
 // Copyright (c) 2026 Tao Jin
 
 // The ChArUco board in a luma image: both modes against where the synthetic
-// renderer's board projects (front-on, turned 60 and 70 degrees, a JPEG), on
-// several threads, part of a board, a collinear crop, no board, the hybrid's
-// window and corner rejection, the images it refuses, what OpenCV throws, and
-// the usable-view check.
+// renderer's board projects (front-on, turned 60 and 70 degrees, a JPEG), an
+// odd-sized image, several threads, part of a board, a collinear crop, no
+// board, another board beside it, the hybrid's window and corner rejection,
+// the images it refuses, and what OpenCV throws.
 
 #include "volumetric_kit/calib/detect/charuco.hpp"
 
@@ -25,6 +25,7 @@
 #include <opencv2/core/parallel/parallel_backend.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/objdetect/charuco_detector.hpp>
 
 #include "synthetic_rig.hpp"
 
@@ -34,39 +35,8 @@ namespace {
 namespace camera = recon::camera;
 using Code = core::Status::Code;
 
-constexpr double kPi = 3.14159265358979323846;
-
-compute::Board femto_board() {
-  return compute::Board::create(legacy_femto_board()).value();
-}
-
-// The board's centre at `centre` in the camera, its printed face turned
-// `tilt_deg` about its x axis from facing the camera, then rolled `roll_deg`
-// about the camera's axis.
-camera::Mat4d facing(const compute::Board& board, const camera::Vec3d& centre,
-                     double tilt_deg, double roll_deg) {
-  const camera::Mat3d rotation =
-      camera::rotation_from_rodrigues({0.0, 0.0, roll_deg * kPi / 180.0}) *
-      camera::rotation_from_rodrigues({tilt_deg * kPi / 180.0, 0.0, 0.0});
-  const cv::Point3f corner = board.charuco().getRightBottomCorner();
-  const camera::Vec3d middle(0.5 * corner.x, 0.5 * corner.y, 0.0);
-  camera::Mat4d m(rotation);
-  m[3] = glm::dvec4(centre - rotation * middle, 1.0);
-  return m;
-}
-
-// A camera's picture of a render: 0.8 px of optical blur and 2.5 DN of noise.
-cv::Mat camera_image(const cv::Mat& render, std::uint64_t seed) {
-  cv::Mat blurred;
-  cv::GaussianBlur(render, blurred, cv::Size(), 0.8);
-  cv::Mat noise(render.size(), CV_32F);
-  cv::RNG(seed).fill(noise, cv::RNG::NORMAL, 0.0, 2.5);
-  cv::Mat level;
-  blurred.convertTo(level, CV_32F);
-  cv::Mat out;
-  cv::Mat(level + noise).convertTo(out, CV_8U);
-  return out;
-}
+using test::board_facing_camera;
+using test::femto_board;
 
 LumaView luma(const cv::Mat& image) {
   return {static_cast<std::uint32_t>(image.cols),
@@ -89,13 +59,11 @@ View render(std::string name, const compute::Board& board,
   const camera::CameraModel model = test::color_like_lens();
   View view;
   view.name = std::move(name);
-  const cv::Mat drawn =
-      test::render_board(model, board_to_camera, board, options);
-  if (seed != 0) {
-    view.image = camera_image(drawn, seed);
-  } else {
-    cv::GaussianBlur(drawn, view.image, cv::Size(), 0.8);
-  }
+  test::CameraOptions optics;
+  optics.seed = seed;
+  if (seed == 0) optics.noise_dn = 0.0;
+  view.image = test::camera_image(
+      test::render_board(model, board_to_camera, board, options), optics);
   view.corners = test::project(model, board_to_camera, board.object_points());
   for (const std::vector<cv::Point3f>& marker :
        board.charuco().getObjPoints()) {
@@ -185,13 +153,6 @@ std::ostream& operator<<(std::ostream& out, const Errors& e) {
              << " px, bias (" << e.bias.x << ", " << e.bias.y << ") px";
 }
 
-Usability usability(const Detection& detection, const compute::Board& board) {
-  core::Result<Usability> use = core::Status::invalid_argument("not run");
-  EXPECT_NO_THROW(use = usable_for_pose(detection, board));
-  EXPECT_TRUE(use.ok()) << use.status().message();
-  return use.ok() ? *use : Usability::TooFewCorners;
-}
-
 // Views in which both modes should find every corner: front-on, turned 60
 // and 70 degrees, and a JPEG at quality 85, each off the pixel grid and
 // rolled. Rendered once for the suite.
@@ -200,14 +161,18 @@ class FullViews : public ::testing::Test {
   static void SetUpTestSuite() {
     const compute::Board board = femto_board();
     views_ = std::make_unique<std::vector<View>>();
-    views_->push_back(render("front-on", board,
-                             facing(board, {0.031, -0.017, 2.5}, 0.0, 7.0), 1));
-    views_->push_back(render(
-        "60 deg", board, facing(board, {-0.12, 0.08, 2.0}, 60.0, -11.0), 2));
-    views_->push_back(render("70 deg", board,
-                             facing(board, {0.10, 0.05, 2.0}, -70.0, 23.0), 3));
-    View compressed = render("JPEG q85", board,
-                             facing(board, {0.21, 0.13, 2.7}, 25.0, -4.0), 4);
+    views_->push_back(
+        render("front-on", board,
+               board_facing_camera(board, {0.031, -0.017, 2.5}, 0.0, 7.0), 1));
+    views_->push_back(
+        render("60 deg", board,
+               board_facing_camera(board, {-0.12, 0.08, 2.0}, 60.0, -11.0), 2));
+    views_->push_back(
+        render("70 deg", board,
+               board_facing_camera(board, {0.10, 0.05, 2.0}, -70.0, 23.0), 3));
+    View compressed =
+        render("JPEG q85", board,
+               board_facing_camera(board, {0.21, 0.13, 2.7}, 25.0, -4.0), 4);
     std::vector<std::uint8_t> bytes;
     cv::imencode(".jpg", compressed.image, bytes,
                  {cv::IMWRITE_JPEG_QUALITY, 85});
@@ -282,6 +247,33 @@ TEST_F(FullViews, BothModesReportMarkersInTheImagesPixels) {
   }
 }
 
+// An odd width or height: the hybrid halves the image's even part, so its
+// markers stay on the image's pixels. (Halving the whole image put them
+// 0.4-0.6 px off.)
+TEST_F(FullViews, HybridHalvesAnOddSizedImage) {
+  const compute::Board board = femto_board();
+  for (const cv::Size size :
+       {cv::Size(3839, 2159), cv::Size(3839, 2160), cv::Size(3840, 2159)}) {
+    Errors corners;
+    Errors markers;
+    for (const View& view : views()) {
+      const Detection detection = detect(
+          view.image(cv::Rect(cv::Point(0, 0), size)), board, Mode::Hybrid);
+      EXPECT_EQ(detection.image_size.width,
+                static_cast<std::uint32_t>(size.width));
+      EXPECT_EQ(detection.image_size.height,
+                static_cast<std::uint32_t>(size.height));
+      corners.add_corners(detection, view);
+      markers.add_markers(detection, view);
+    }
+    EXPECT_EQ(corners.count, 8 * views().size()) << size;
+    EXPECT_LT(corners.max, 0.8) << size << ": " << corners;
+    EXPECT_EQ(markers.count, 4 * 7 * views().size()) << size;
+    EXPECT_LT(std::abs(markers.bias.x), 0.2) << size << ": " << markers;
+    EXPECT_LT(std::abs(markers.bias.y), 0.2) << size << ": " << markers;
+  }
+}
+
 TEST_F(FullViews, ReportsTheImageAndFeaturesInIdOrder) {
   const compute::Board board = femto_board();
   const View& view = views().front();
@@ -298,17 +290,6 @@ TEST_F(FullViews, ReportsTheImageAndFeaturesInIdOrder) {
     }
     const std::vector<int> markers = marker_ids(detection);
     EXPECT_TRUE(std::is_sorted(markers.begin(), markers.end())) << name(mode);
-  }
-}
-
-TEST_F(FullViews, EveryViewIsUsable) {
-  const compute::Board board = femto_board();
-  for (const Mode mode : {Mode::Full, Mode::Hybrid}) {
-    for (const View& view : views()) {
-      EXPECT_EQ(usability(detect(view.image, board, mode), board),
-                Usability::Usable)
-          << name(mode) << ", " << view.name;
-    }
   }
 }
 
@@ -360,11 +341,12 @@ TEST_F(FullViews, DetectsOnSeveralThreadsAtOnce) {
 
 // The image's left edge cuts the first column of squares, and with it
 // marker 2: the corners beside it go, though corner 0 is in the image, and
-// the rest are found and usable.
+// the rest are found.
 TEST(DetectCharuco, FindsPartOfABoardTheImageEdgeCuts) {
   const compute::Board board = femto_board();
-  const View view = render("edge-cut", board,
-                           facing(board, {-1.40, 0.02, 2.0}, 10.0, 0.0), 5);
+  const View view =
+      render("edge-cut", board,
+             board_facing_camera(board, {-1.40, 0.02, 2.0}, 10.0, 0.0), 5);
   ASSERT_LT(view.markers[2][0].x, 0.0);
   ASSERT_GT(view.corners[0].x, 40.0);
   for (const cv::Point2d& p : view.markers[0]) ASSERT_GT(p.x, 40.0);
@@ -378,16 +360,18 @@ TEST(DetectCharuco, FindsPartOfABoardTheImageEdgeCuts) {
     errors.add_corners(detection, view);
     EXPECT_LT(errors.max, mode == Mode::Full ? 0.3 : 0.8)
         << name(mode) << ": " << errors;
-    EXPECT_EQ(usability(detection, board), Usability::Usable) << name(mode);
   }
 }
 
 // The bottom row of squares cropped away, and with it markers 5 and 6: only
 // the top row of corners keeps two markers beside it, and one row fixes no
 // pose.
-TEST(DetectCharuco, CollinearCropIsNotUsable) {
+// TODO: assert that compute::usable_for_pose answers Collinear for this view
+// once it lands (PR #17).
+TEST(DetectCharuco, CollinearCropFindsOneRowOfCorners) {
   const compute::Board board = femto_board();
-  const camera::Mat4d pose = facing(board, {0.031, -0.017, 2.5}, 0.0, 0.0);
+  const camera::Mat4d pose =
+      board_facing_camera(board, {0.031, -0.017, 2.5}, 0.0, 0.0);
   View view = render("cropped", board, pose, 6);
   const double s = board.target().square_size_m;
   const std::vector<cv::Point3d> below = {{-0.1, 2.3 * s, 0.0},
@@ -409,19 +393,19 @@ TEST(DetectCharuco, CollinearCropIsNotUsable) {
     errors.add_corners(detection, view);
     EXPECT_LT(errors.max, mode == Mode::Full ? 0.3 : 0.8)
         << name(mode) << ": " << errors;
-    EXPECT_EQ(usability(detection, board), Usability::Collinear) << name(mode);
   }
 }
 
 TEST(DetectCharuco, FindsNothingInABlankImage) {
   const compute::Board board = femto_board();
-  const cv::Mat blank = camera_image(cv::Mat(2160, 3840, CV_8UC1, 110.0), 7);
+  test::CameraOptions optics;
+  optics.seed = 7;
+  const cv::Mat blank =
+      test::camera_image(cv::Mat(2160, 3840, CV_8UC1, 110.0), optics);
   for (const Mode mode : {Mode::Full, Mode::Hybrid}) {
     const Detection detection = detect(blank, board, mode);
     EXPECT_TRUE(detection.observation.empty()) << name(mode);
     EXPECT_TRUE(detection.markers.empty()) << name(mode);
-    EXPECT_EQ(usability(detection, board), Usability::TooFewCorners)
-        << name(mode);
   }
 }
 
@@ -431,14 +415,58 @@ TEST(DetectCharuco, FindsNothingWithTheWrongDictionary) {
   Target other = legacy_femto_board();
   other.dictionary = MarkerDictionary::ArUco5x5_100;
   const compute::Board wrong = compute::Board::create(other).value();
-  const View view = render("front-on", board,
-                           facing(board, {0.031, -0.017, 2.5}, 0.0, 7.0), 8);
+  const View view =
+      render("front-on", board,
+             board_facing_camera(board, {0.031, -0.017, 2.5}, 0.0, 7.0), 8);
   for (const Mode mode : {Mode::Full, Mode::Hybrid}) {
     EXPECT_EQ(detect(view.image, board, mode).observation.size(), 8u)
         << name(mode);
     const Detection detection = detect(view.image, wrong, mode);
     EXPECT_TRUE(detection.observation.empty()) << name(mode);
     EXPECT_TRUE(detection.markers.empty()) << name(mode);
+  }
+}
+
+// The rig's board on the image's left, and one of the same dictionary
+// numbered from marker 20 on its right: each detection holds its own
+// board's markers only.
+TEST(DetectCharuco, ReportsOnlyItsBoardsMarkers) {
+  const compute::Board board = femto_board();
+  Target next = legacy_femto_board();
+  next.first_marker_id = 20;
+  const compute::Board other = compute::Board::create(next).value();
+  const camera::CameraModel model = test::color_like_lens();
+  const camera::Mat4d left =
+      board_facing_camera(board, {-0.6, 0.0, 2.5}, 0.0, 5.0);
+  const camera::Mat4d right =
+      board_facing_camera(other, {0.6, 0.0, 2.5}, 0.0, -5.0);
+  const double middle = 0.5 * model.size.width;
+  for (const cv::Point2d& p :
+       test::project(model, left, test::board_outline(board, 0.02, 4))) {
+    ASSERT_LT(p.x, middle - 20.0);
+  }
+  for (const cv::Point2d& p :
+       test::project(model, right, test::board_outline(other, 0.02, 4))) {
+    ASSERT_GT(p.x, middle + 20.0);
+  }
+  cv::Mat both = test::render_board(model, right, other);
+  const cv::Rect half(0, 0, both.cols / 2, both.rows);
+  test::render_board(model, left, board)(half).copyTo(both(half));
+  test::CameraOptions optics;
+  optics.seed = 10;
+  const cv::Mat image = test::camera_image(both, optics);
+  for (const Mode mode : {Mode::Full, Mode::Hybrid}) {
+    const Detection mine = detect(image, board, mode);
+    EXPECT_EQ(corner_ids(mine), (std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}))
+        << name(mode);
+    EXPECT_EQ(marker_ids(mine), (std::vector<int>{0, 1, 2, 3, 4, 5, 6}))
+        << name(mode);
+    const Detection theirs = detect(image, other, mode);
+    EXPECT_EQ(corner_ids(theirs), (std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}))
+        << name(mode);
+    EXPECT_EQ(marker_ids(theirs),
+              (std::vector<int>{20, 21, 22, 23, 24, 25, 26}))
+        << name(mode);
   }
 }
 
@@ -449,8 +477,8 @@ TEST(DetectCharuco, FindsNothingWithTheWrongDictionary) {
 // 0.02-0.03 and 0.03-0.06).
 TEST(DetectCharuco, HybridKeepsNearbyMarkerCornersOutOfItsWindow) {
   const compute::Board board = femto_board();
-  const View view =
-      render("far", board, facing(board, {0.3, 0.2, 5.5}, 45.0, 31.0), 9);
+  const View view = render(
+      "far", board, board_facing_camera(board, {0.3, 0.2, 5.5}, 45.0, 31.0), 9);
   double nearest = std::numeric_limits<double>::infinity();
   for (const std::vector<cv::Point2d>& marker : view.markers) {
     for (const cv::Point2d& m : marker) {
@@ -468,6 +496,52 @@ TEST(DetectCharuco, HybridKeepsNearbyMarkerCornersOutOfItsWindow) {
   EXPECT_LT(errors.max, 0.09) << errors;
 }
 
+// The hybrid's seed for corner `id`, where the image halved puts it
+// (2u + 0.5), and its distance to the nearest marker corner found there:
+// twice the hybrid's half-window, before rounding and clamping.
+struct Seed {
+  cv::Point2f pixel;
+  double nearest_marker = std::numeric_limits<double>::infinity();
+};
+
+Seed hybrid_seed(const cv::Mat& image, const compute::Board& board, int id) {
+  cv::Mat half;
+  cv::resize(image, half, cv::Size(image.cols / 2, image.rows / 2), 0.0, 0.0,
+             cv::INTER_AREA);
+  std::vector<cv::Point2f> corners;
+  std::vector<int> ids;
+  std::vector<std::vector<cv::Point2f>> markers;
+  std::vector<int> marker_ids;
+  cv::aruco::CharucoDetector(board.charuco())
+      .detectBoard(half, corners, ids, markers, marker_ids);
+  const auto in_image = [](const cv::Point2f& p) {
+    return cv::Point2f(2.0f * p.x + 0.5f, 2.0f * p.y + 0.5f);
+  };
+  Seed seed;
+  const auto found = std::find(ids.begin(), ids.end(), id);
+  EXPECT_NE(found, ids.end()) << "corner " << id << " not in the image halved";
+  if (found == ids.end()) return seed;
+  seed.pixel = in_image(corners[static_cast<std::size_t>(found - ids.begin())]);
+  for (const std::vector<cv::Point2f>& marker : markers) {
+    for (const cv::Point2f& p : marker) {
+      seed.nearest_marker =
+          std::min(seed.nearest_marker, cv::norm(in_image(p) - seed.pixel));
+    }
+  }
+  return seed;
+}
+
+// Where cornerSubPix takes `seed` in `image` with half-window `half`, at the
+// hybrid's criteria.
+cv::Point2f refined(const cv::Mat& image, const cv::Point2f& seed, int half) {
+  std::vector<cv::Point2f> point = {seed};
+  cv::cornerSubPix(
+      image, point, cv::Size(half, half), cv::Size(-1, -1),
+      cv::TermCriteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 100,
+                       0.01));
+  return point[0];
+}
+
 // Adds d * (P(x - x0) + P(y - y0)), P = [+1, -1, -1, +1] repeating, to the
 // w x w pixels from (x0, y0), both even: a fine pattern every aligned 2 x 2
 // block of which sums to zero, so the image halved does not change.
@@ -482,44 +556,118 @@ void add_fine_pattern(cv::Mat& image, int x0, int y0, int w, int d) {
   }
 }
 
-// A pattern too fine for the image halved, beside corner 5 in its black
-// square, pulls that corner's refinement in the image more than 2 px: the
-// hybrid drops it and keeps the rest as they were. The board is printed low
-// in contrast (black at 100) so the pattern has room; no noise, so nothing
-// clips.
-TEST(DetectCharuco, HybridDropsACornerItsRefinementMovesMoreThanTwoPixels) {
+bool same_halved(const cv::Mat& a, const cv::Mat& b) {
+  cv::Mat half_a;
+  cv::Mat half_b;
+  cv::resize(a, half_a, cv::Size(), 0.5, 0.5, cv::INTER_AREA);
+  cv::resize(b, half_b, cv::Size(), 0.5, 0.5, cv::INTER_AREA);
+  return cv::norm(half_a, half_b, cv::NORM_INF) == 0.0;
+}
+
+// The board printed low in contrast (black at 100), so a fine pattern has
+// room; no noise, so nothing clips.
+test::RenderOptions faded() {
+  test::RenderOptions options;
+  options.black = 100.0f;
+  return options;
+}
+
+// A faded board front-on 2.5 m away, with a fine pattern of amplitude `d`
+// beside corner 5 in its black square, which the image halved does not see:
+// where the hybrid's own refinement takes the corner from its seed.
+struct Pulled {
+  View view;      // the board, without the pattern
+  cv::Mat image;  // with it
+  Seed seed;
+  cv::Point2f refined;
+};
+
+Pulled pulled_corner_5(int d) {
   const compute::Board board = femto_board();
-  test::RenderOptions faded;
-  faded.black = 100.0f;
-  const View view = render(
-      "faded", board, facing(board, {0.031, -0.017, 2.5}, 0.0, 7.0), 0, faded);
-  const cv::Point2d corner = view.corners[5];
-  cv::Mat pulled = view.image.clone();
-  const int x0 = 2 * static_cast<int>(std::floor((corner.x - 12.0) / 2.0));
-  const int y0 = 2 * static_cast<int>(std::floor((corner.y - 12.0) / 2.0));
-  add_fine_pattern(pulled, x0, y0, 8, 40);
+  Pulled pulled;
+  pulled.view = render(
+      "faded", board,
+      board_facing_camera(board, {0.031, -0.017, 2.5}, 0.0, 7.0), 0, faded());
+  const cv::Point2d corner = pulled.view.corners[5];
+  pulled.image = pulled.view.image.clone();
+  add_fine_pattern(
+      pulled.image, 2 * static_cast<int>(std::floor((corner.x - 12.0) / 2.0)),
+      2 * static_cast<int>(std::floor((corner.y - 12.0) / 2.0)), 8, d);
+  pulled.seed = hybrid_seed(pulled.view.image, board, 5);
+  // Marker corners 20 px away or more: the hybrid's half-window is 10.
+  EXPECT_GE(pulled.seed.nearest_marker, 20.0);
+  pulled.refined = refined(pulled.image, pulled.seed.pixel, 10);
+  return pulled;
+}
 
-  // The premise: the image halved is the same, and the pattern pulls the
-  // corner well inside the 2-10 px the hybrid drops (its window is 21 x 21
-  // here).
-  cv::Mat half, pulled_half;
-  cv::resize(view.image, half, cv::Size(), 0.5, 0.5, cv::INTER_AREA);
-  cv::resize(pulled, pulled_half, cv::Size(), 0.5, 0.5, cv::INTER_AREA);
-  ASSERT_EQ(cv::norm(half, pulled_half, cv::NORM_INF), 0.0);
-  std::vector<cv::Point2f> refined = {cv::Point2f(corner)};
-  cv::cornerSubPix(
-      pulled, refined, cv::Size(10, 10), cv::Size(-1, -1),
-      cv::TermCriteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 100,
-                       0.01));
-  const double pull = cv::norm(cv::Point2d(refined[0]) - corner);
-  ASSERT_GT(pull, 3.0);
-  ASSERT_LT(pull, 9.0);
+std::vector<DetectedPoint> without_corner(std::vector<DetectedPoint> points,
+                                          int id) {
+  points.erase(
+      std::remove_if(points.begin(), points.end(),
+                     [id](const DetectedPoint& p) { return p.id == id; }),
+      points.end());
+  return points;
+}
 
-  Detection clean = detect(view.image, board, Mode::Hybrid);
+// The pattern pulls corner 5's refinement 1.2-1.8 px from its seed: the
+// hybrid keeps the corner where its refinement took it, and the rest as they
+// were.
+TEST(DetectCharuco, HybridKeepsACornerItsRefinementMovesUnderTwoPixels) {
+  const compute::Board board = femto_board();
+  const Pulled pulled = pulled_corner_5(30);
+  ASSERT_TRUE(same_halved(pulled.view.image, pulled.image));
+  const double shift = cv::norm(pulled.refined - pulled.seed.pixel);
+  ASSERT_GT(shift, 1.2);
+  ASSERT_LT(shift, 1.8);
+
+  Detection clean = detect(pulled.view.image, board, Mode::Hybrid);
+  Detection found = detect(pulled.image, board, Mode::Hybrid);
+  ASSERT_EQ(corner_ids(found), (std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}));
+  EXPECT_NEAR(found.observation.points[5].pixel.x, pulled.refined.x, 1e-3);
+  EXPECT_NEAR(found.observation.points[5].pixel.y, pulled.refined.y, 1e-3);
+  clean.observation.points = without_corner(clean.observation.points, 5);
+  found.observation.points = without_corner(found.observation.points, 5);
+  EXPECT_TRUE(Same(found, clean));
+}
+
+// The pattern pulls corner 5's refinement 2.2-2.8 px from its seed: the
+// hybrid drops it and keeps the rest as they were.
+TEST(DetectCharuco, HybridDropsACornerItsRefinementMovesOverTwoPixels) {
+  const compute::Board board = femto_board();
+  const Pulled pulled = pulled_corner_5(32);
+  ASSERT_TRUE(same_halved(pulled.view.image, pulled.image));
+  const double shift = cv::norm(pulled.refined - pulled.seed.pixel);
+  ASSERT_GT(shift, 2.2);
+  ASSERT_LT(shift, 2.8);
+
+  Detection clean = detect(pulled.view.image, board, Mode::Hybrid);
   ASSERT_EQ(corner_ids(clean), (std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}));
-  std::vector<DetectedPoint>& points = clean.observation.points;
-  points.erase(points.begin() + 5);
-  EXPECT_TRUE(Same(detect(pulled, board, Mode::Hybrid), clean));
+  clean.observation.points = without_corner(clean.observation.points, 5);
+  EXPECT_TRUE(Same(detect(pulled.image, board, Mode::Hybrid), clean));
+}
+
+// 3.6 m away, half corner 5's distance to its nearest marker corner is
+// between 8 and 9 px, so its half-window is 8. A fine pattern 9 px below it
+// pulls a 9 px half-window's refinement more than 3 px, but an 8 px one's
+// less than 1 px: the hybrid keeps the corner.
+TEST(DetectCharuco, HybridRoundsItsHalfWindowDown) {
+  const compute::Board board = femto_board();
+  const View view = render(
+      "faded, 3.6 m", board,
+      board_facing_camera(board, {0.031, -0.017, 3.6}, 0.0, 7.0), 0, faded());
+  const Seed seed = hybrid_seed(view.image, board, 5);
+  ASSERT_GT(0.5 * seed.nearest_marker, 8.2);
+  ASSERT_LT(0.5 * seed.nearest_marker, 9.0);
+  cv::Mat pulled = view.image.clone();
+  add_fine_pattern(pulled, 2 * static_cast<int>(std::floor(seed.pixel.x / 2.0)),
+                   2 * static_cast<int>(std::floor((seed.pixel.y + 9.0) / 2.0)),
+                   8, 45);
+  ASSERT_TRUE(same_halved(view.image, pulled));
+  ASSERT_GT(cv::norm(refined(pulled, seed.pixel, 9) - seed.pixel), 3.0);
+  ASSERT_LT(cv::norm(refined(pulled, seed.pixel, 8) - seed.pixel), 1.0);
+
+  EXPECT_EQ(corner_ids(detect(pulled, board, Mode::Hybrid)),
+            (std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}));
 }
 
 core::Status refusal(const LumaView& image, Mode mode) {
@@ -581,6 +729,7 @@ TEST(DetectCharuco, RefusesAnImageItCannotRead) {
   // Full takes any pixel; Hybrid halves the image, so needs 2 x 2.
   EXPECT_TRUE(refusal({1, 1, 1, pixels.data()}, Mode::Full).ok());
   EXPECT_TRUE(refusal({2, 2, 2, pixels.data()}, Mode::Hybrid).ok());
+  EXPECT_TRUE(refusal({3, 3, 3, pixels.data()}, Mode::Hybrid).ok());
   for (const auto& [width, height] :
        {std::pair<std::uint32_t, std::uint32_t>{1, 8}, {8, 1}, {1, 1}}) {
     EXPECT_TRUE(
@@ -662,85 +811,6 @@ TEST(DetectCharuco, ReturnsWhatOpenCVThrowsAsAStatus) {
   for (const Mode mode : {Mode::Full, Mode::Hybrid}) {
     EXPECT_TRUE(detect_charuco(luma(image), board, mode).ok()) << name(mode);
   }
-}
-
-// A detection of `ids` on a 3840 x 2160 image, corner i at the pixel of a
-// 100 px grid from (1000, 800).
-Detection grid(const std::vector<int>& ids) {
-  Detection detection;
-  detection.image_size = {3840, 2160};
-  for (const int id : ids) {
-    detection.observation.points.push_back(
-        {id, {1000.0 + 100.0 * (id % 4), 800.0 + 100.0 * (id / 4)}, 1.0});
-  }
-  return detection;
-}
-
-TEST(UsableForPose, NeedsFourCorners) {
-  const compute::Board board = femto_board();
-  EXPECT_EQ(usability(grid({}), board), Usability::TooFewCorners);
-  EXPECT_EQ(usability(grid({0, 1, 5}), board), Usability::TooFewCorners);
-  EXPECT_EQ(usability(grid({0, 1, 5, 6}), board), Usability::Usable);
-  EXPECT_EQ(usability(grid({0, 1, 2, 3, 4, 5, 6, 7}), board),
-            Usability::Usable);
-}
-
-TEST(UsableForPose, RefusesCornersOnOneLine) {
-  const compute::Board board = femto_board();
-  EXPECT_EQ(usability(grid({0, 1, 2, 3}), board), Usability::Collinear);
-  EXPECT_EQ(usability(grid({4, 5, 6, 7}), board), Usability::Collinear);
-  EXPECT_EQ(usability(grid({0, 1, 2, 3, 7}), board), Usability::Usable);
-}
-
-// 2 <= x <= width - 3 and 2 <= y <= height - 3, and finite.
-TEST(UsableForPose, NeedsEveryCornerTwoPixelsInside) {
-  const compute::Board board = femto_board();
-  const auto moved = [&](double x, double y) {
-    Detection detection = grid({0, 1, 5, 6});
-    detection.observation.points[2].pixel = {x, y};
-    return usability(detection, board);
-  };
-  EXPECT_EQ(moved(2.0, 2.0), Usability::Usable);
-  EXPECT_EQ(moved(3837.0, 2157.0), Usability::Usable);
-  EXPECT_EQ(moved(1.999, 500.0), Usability::NearEdge);
-  EXPECT_EQ(moved(500.0, 1.999), Usability::NearEdge);
-  EXPECT_EQ(moved(3837.001, 500.0), Usability::NearEdge);
-  EXPECT_EQ(moved(500.0, 2157.001), Usability::NearEdge);
-  constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
-  constexpr double kInf = std::numeric_limits<double>::infinity();
-  EXPECT_EQ(moved(kNaN, 500.0), Usability::NearEdge);
-  EXPECT_EQ(moved(500.0, kNaN), Usability::NearEdge);
-  EXPECT_EQ(moved(kInf, 500.0), Usability::NearEdge);
-  EXPECT_EQ(moved(500.0, -kInf), Usability::NearEdge);
-}
-
-// Too few, then collinear, then near the edge.
-TEST(UsableForPose, AnswersTheFirstCheckThatFails) {
-  const compute::Board board = femto_board();
-  EXPECT_EQ(usability(grid({0, 1, 2}), board), Usability::TooFewCorners);
-  Detection few = grid({0, 1, 5});
-  few.observation.points[0].pixel.x = std::numeric_limits<double>::quiet_NaN();
-  EXPECT_EQ(usability(few, board), Usability::TooFewCorners);
-  Detection line = grid({0, 1, 2, 3});
-  line.observation.points[0].pixel.x = 0.0;
-  EXPECT_EQ(usability(line, board), Usability::Collinear);
-}
-
-TEST(UsableForPose, RefusesCornersNotOnTheBoard) {
-  const compute::Board board = femto_board();
-  const auto refused = [&](const Detection& detection) {
-    core::Result<Usability> use = Usability::Usable;
-    EXPECT_NO_THROW(use = usable_for_pose(detection, board));
-    return use.ok() ? core::Status{} : use.status();
-  };
-  EXPECT_TRUE(Refused(refused(grid({0, 1, 5, -1})),
-                      "usable_for_pose: corner id -1 is not the board's"));
-  EXPECT_TRUE(Refused(refused(grid({0, 1, 5, 8})),
-                      "usable_for_pose: corner id 8 is not the board's"));
-  EXPECT_TRUE(Refused(refused(grid({0, 1, 5, 1})),
-                      "usable_for_pose: corner id 1 appears twice"));
-  EXPECT_TRUE(Refused(refused(grid({0, 0, 0, 0})),
-                      "usable_for_pose: corner id 0 appears twice"));
 }
 
 }  // namespace

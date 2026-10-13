@@ -7,7 +7,6 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
-#include <string>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -27,10 +26,6 @@ constexpr double kMaxHalfWindow = 10.0;
 constexpr int kRefineIterations = 100;
 constexpr double kRefineEpsilon = 0.01;
 constexpr double kMaxRefineShift = 2.0;
-
-// usable_for_pose's bounds.
-constexpr std::size_t kMinCorners = 4;
-constexpr double kEdgeMargin = 2.0;
 
 core::Status check_image(const LumaView& image, Mode mode) {
   if (mode != Mode::Full && mode != Mode::Hybrid) {
@@ -58,6 +53,16 @@ core::Status check_image(const LumaView& image, Mode mode) {
   return {};
 }
 
+// The image's even part halved: INTER_AREA at exactly half the size averages
+// each 2 x 2 block, which it does not when a side is odd.
+cv::Mat halved(const cv::Mat& full) {
+  const cv::Mat even = full(cv::Rect(0, 0, full.cols & ~1, full.rows & ~1));
+  cv::Mat half;
+  cv::resize(even, half, cv::Size(even.cols / 2, even.rows / 2), 0.0, 0.0,
+             cv::INTER_AREA);
+  return half;
+}
+
 // A pixel of the image halved, in the image: the centre of the 2 x 2 pixels
 // INTER_AREA averaged into it.
 cv::Point2f full_resolution(const cv::Point2f& half) {
@@ -65,7 +70,8 @@ cv::Point2f full_resolution(const cv::Point2f& half) {
 }
 
 // Each corner refined in `image` from its seed, dropped (with its id) when it
-// moves more than kMaxRefineShift.
+// moves more than kMaxRefineShift. Every marker found bounds the window, the
+// board's or not: each is an edge that would pull the corner.
 void refine_corners(const cv::Mat& image,
                     const std::vector<std::vector<cv::Point2f>>& markers,
                     std::vector<cv::Point2f>& corners, std::vector<int>& ids) {
@@ -116,9 +122,7 @@ core::Result<Detection> detect_charuco(const LumaView& image,
     if (mode == Mode::Full) {
       detector.detectBoard(full, corners, ids, markers, marker_ids);
     } else {
-      cv::Mat half;
-      cv::resize(full, half, cv::Size(), 0.5, 0.5, cv::INTER_AREA);
-      detector.detectBoard(half, corners, ids, markers, marker_ids);
+      detector.detectBoard(halved(full), corners, ids, markers, marker_ids);
       for (std::vector<cv::Point2f>& marker : markers) {
         for (cv::Point2f& p : marker) p = full_resolution(p);
       }
@@ -137,8 +141,15 @@ core::Result<Detection> detect_charuco(const LumaView& image,
               [](const DetectedPoint& a, const DetectedPoint& b) {
                 return a.id < b.id;
               });
+    // The detector reports every marker of the board's dictionary it finds,
+    // another board's too.
+    const std::vector<int>& board_ids = board.charuco().getIds();
     detection.markers.reserve(markers.size());
     for (std::size_t i = 0; i < markers.size(); ++i) {
+      if (std::find(board_ids.begin(), board_ids.end(), marker_ids[i]) ==
+          board_ids.end()) {
+        continue;
+      }
       DetectedMarker marker;
       marker.id = marker_ids[i];
       for (std::size_t k = 0; k < marker.corners.size(); ++k) {
@@ -151,46 +162,6 @@ core::Result<Detection> detect_charuco(const LumaView& image,
                 return a.id < b.id;
               });
     return detection;
-  });
-}
-
-core::Result<Usability> usable_for_pose(const Detection& detection,
-                                        const compute::Board& board) {
-  return compute::guarded("usable_for_pose", [&]() -> core::Result<Usability> {
-    const std::size_t count = board.object_points().size();
-    std::vector<bool> seen(count, false);
-    std::vector<int> ids;
-    ids.reserve(detection.observation.points.size());
-    for (const DetectedPoint& point : detection.observation.points) {
-      if (point.id < 0 || static_cast<std::size_t>(point.id) >= count) {
-        return core::Status::invalid_argument("usable_for_pose: corner id " +
-                                              std::to_string(point.id) +
-                                              " is not the board's");
-      }
-      if (seen[static_cast<std::size_t>(point.id)]) {
-        return core::Status::invalid_argument("usable_for_pose: corner id " +
-                                              std::to_string(point.id) +
-                                              " appears twice");
-      }
-      seen[static_cast<std::size_t>(point.id)] = true;
-      ids.push_back(point.id);
-    }
-    if (ids.size() < kMinCorners) return Usability::TooFewCorners;
-    if (board.charuco().checkCharucoCornersCollinear(ids)) {
-      return Usability::Collinear;
-    }
-    const double right =
-        static_cast<double>(detection.image_size.width) - 1.0 - kEdgeMargin;
-    const double bottom =
-        static_cast<double>(detection.image_size.height) - 1.0 - kEdgeMargin;
-    for (const DetectedPoint& point : detection.observation.points) {
-      // A NaN fails every comparison, so it is near the edge too.
-      if (!(point.pixel.x >= kEdgeMargin && point.pixel.x <= right &&
-            point.pixel.y >= kEdgeMargin && point.pixel.y <= bottom)) {
-        return Usability::NearEdge;
-      }
-    }
-    return Usability::Usable;
   });
 }
 

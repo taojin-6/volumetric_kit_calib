@@ -28,16 +28,5 @@ TEST(DetectOom, ImageValidation) {
       Code::InvalidArgument);
 }
 
-TEST(DetectOom, CornerIdValidation) {
-  const compute::Board board =
-      compute::Board::create(legacy_femto_board()).value();
-  Detection detection;
-  detection.image_size = {3840, 2160};
-  detection.observation.points = {{0, {100.0, 100.0}, 1.0},
-                                  {123456789, {200.0, 100.0}, 1.0}};
-  expect_oom_when_reporting([&] { return usable_for_pose(detection, board); },
-                            Code::InvalidArgument);
-}
-
 }  // namespace
 }  // namespace volumetric_kit::calib::detect

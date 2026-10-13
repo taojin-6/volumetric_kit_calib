@@ -442,4 +442,38 @@ cv::Mat render_board(const camera::CameraModel& model,
   return out;
 }
 
+compute::Board femto_board() {
+  return compute::Board::create(legacy_femto_board()).value();
+}
+
+camera::Mat4d board_facing_camera(const compute::Board& board,
+                                  const camera::Vec3d& centre, double tilt_deg,
+                                  double roll_deg) {
+  const camera::Mat3d rotation =
+      camera::rotation_from_rodrigues({0.0, 0.0, roll_deg * kPi / 180.0}) *
+      camera::rotation_from_rodrigues({tilt_deg * kPi / 180.0, 0.0, 0.0});
+  const cv::Point3f corner = board.charuco().getRightBottomCorner();
+  const camera::Vec3d middle(0.5 * corner.x, 0.5 * corner.y, 0.0);
+  camera::Mat4d m(rotation);
+  m[3] = glm::dvec4(centre - rotation * middle, 1.0);
+  return m;
+}
+
+cv::Mat camera_image(const cv::Mat& render, const CameraOptions& options) {
+  cv::Mat blurred;
+  if (options.blur_px > 0.0) {
+    cv::GaussianBlur(render, blurred, cv::Size(), options.blur_px);
+  } else {
+    blurred = render.clone();
+  }
+  if (options.noise_dn <= 0.0) return blurred;
+  cv::Mat noise(render.size(), CV_32F);
+  cv::RNG(options.seed).fill(noise, cv::RNG::NORMAL, 0.0, options.noise_dn);
+  cv::Mat level;
+  blurred.convertTo(level, CV_32F);
+  cv::Mat out;
+  cv::Mat(level + noise).convertTo(out, CV_8U);
+  return out;
+}
+
 }  // namespace volumetric_kit::calib::test

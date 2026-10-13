@@ -2,8 +2,8 @@
 # Copyright (c) 2026 Tao Jin
 
 # --- calib_detect: Tier 2 ----------------------------------------------------
-# The ChArUco board in a luma image, through OpenCV's detector, and whether a
-# view of it fixes the board's pose. Built with VC_WITH_OPENCV.
+# The ChArUco board in a luma image, through OpenCV's detector. Built with
+# VC_WITH_OPENCV.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
