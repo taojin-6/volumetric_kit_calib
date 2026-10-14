@@ -78,19 +78,19 @@ locked decision above.)
 The solve refines the first rig with OpenCV's `cv::LevMarq`, not Ceres
 (`solve/bundle_adjust.hpp` has the method).
 
-- **Why OpenCV.** It is already calib's maths prerequisite, and the problem
-  is small: 6 parameters per camera and per capture, about 380 at 60 captures
-  and at most about 900 at the 150-capture cap, so a dense normal-equations
-  solve (Cholesky) suffices. A 60-capture solve takes about 25 ms on the
-  synthetic rig (Release, Apple M5 Max). Ceres would be a second solver
-  prerequisite on every platform.
+- **Why not Ceres.** The problem is small: 6 parameters per camera and per
+  capture, about 380 at 60 captures and at most about 900 at the 150-capture
+  cap, so a dense normal-equations solve (Cholesky) suffices. A 60-capture
+  solve takes about 25 ms on the synthetic rig (Release, Apple M5 Max). Ceres
+  would be a second solver prerequisite, beside OpenCV, on every platform.
 - **No matrix-to-vector Rodrigues inside it.** The derivatives chain
   `cv::projectPoints`' with `cv::Rodrigues`' vector-to-matrix one, never
   `composeRT` or a matrix-to-vector conversion, whose derivative is singular
   near a half turn; the 2026-09-29 session has boards at 167° and 174°.
-- **What it reports beside the poses.** Each camera's noise covariance and
-  the pose shift its intrinsics being off would cause, so a result's error
-  budget shows both; the intrinsics stay factory, as solved with.
+- **OpenCV's matrices where recon has no type.** The solve's results hold a
+  `cv::Matx` for a shape recon lacks (a camera's 6 x 6 covariance, a corner's
+  2 x 6 derivatives), amending the 2026-10-12 entry's "behind calib's
+  types"; cameras and poses stay recon's.
 - **Ambiguous views are adjusted.** A capture whose views are all ambiguous
   takes its board from them in `initialise`, so the adjustment can use them
   rather than drop the capture.

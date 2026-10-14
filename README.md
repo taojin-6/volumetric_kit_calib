@@ -82,10 +82,10 @@ brew install cmake glm          # macOS
 
 `VC_WITH_OPENCV` (OFF by default) builds `compute` and the tiers on it, which
 need an installed OpenCV 5 (5.0 or a later 5.x; the tests also use its
-imgcodecs and calib modules): `brew install opencv` on macOS; on Ubuntu, whose packages
-are OpenCV 4, one you build yourself. `VC_WITH_RIG` (OFF by default) builds
-`capture`, over all of recon, which needs the Vulkan SDK and a GLSL compiler:
-the core's vulkan tier
+imgcodecs and calib modules): `brew install opencv` on macOS; on Ubuntu,
+whose packages are OpenCV 4, one you build yourself. `VC_WITH_RIG` (OFF by
+default) builds `capture`, over all of recon, which needs the Vulkan SDK and
+a GLSL compiler: the core's vulkan tier
 [prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
 (Later tiers add `volumetric_kit_gfx` for `viz`/`app`.) To build against a
 local core or recon checkout instead of the pinned one, pass
