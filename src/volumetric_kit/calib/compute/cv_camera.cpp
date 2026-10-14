@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <limits>
 
+#include <opencv2/geometry.hpp>
+
 #include "volumetric_kit/calib/compute/guarded.hpp"
 
 namespace volumetric_kit::calib::compute {
@@ -29,6 +31,21 @@ core::Result<CvCamera> cv_camera(const recon::camera::CameraModel& model) {
         cv::Vec<double, 8>(d.k1, d.k2, d.p1, d.p2, d.k3, d.k4, d.k5, d.k6);
     return camera;
   });
+}
+
+core::Result<std::vector<cv::Point2d>> undistort_points(
+    const CvCamera& camera, const std::vector<cv::Point2d>& pixels) {
+  return guarded(
+      "undistort_points", [&]() -> core::Result<std::vector<cv::Point2d>> {
+        std::vector<cv::Point2d> rays;
+        if (pixels.empty()) return rays;
+        cv::undistortPoints(
+            pixels, rays, camera.camera_matrix, camera.distortion,
+            cv::noArray(), cv::noArray(),
+            cv::TermCriteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS,
+                             100, 1e-10));
+        return rays;
+      });
 }
 
 }  // namespace volumetric_kit::calib::compute

@@ -5,11 +5,14 @@
 
 /// @file cv_camera.hpp
 /// @brief recon's camera model in OpenCV's types: the image size, the camera
-///        matrix and the eight distortion coefficients.
+///        matrix and the eight distortion coefficients; and each pixel's ray
+///        back through that lens.
 ///
 /// recon's `RationalDistortion` is OpenCV's rational lens in OpenCV's order,
 /// so the conversion is exact: `cv::projectPoints` with these values computes
 /// recon's `distort_rational`.
+
+#include <vector>
 
 #include <opencv2/core.hpp>
 
@@ -44,5 +47,23 @@ struct CvCamera {
 ///         a side longer than OpenCV's `int` holds.
 VC_COMPUTE_API core::Result<CvCamera> cv_camera(
     const recon::camera::CameraModel& model);
+
+/// @brief Each pixel's ray as normalized coordinates `(X / Z, Y / Z)`:
+///        `cv::undistortPoints`, iterated until the lens takes each ray back
+///        to its pixel within 1e-10 px, or 100 times.
+///
+/// `cv::undistortPoints`' default criteria stop after 5 iterations, which can
+/// leave a pixel or more near the corners of a strongly distorted image.
+/// @param camera  The camera.
+/// @param pixels  Pixels in its image, OpenCV's convention (centres at
+///                integers).
+/// @return The rays, in order; or what OpenCV threw (@ref guarded).
+///
+/// @code
+/// VKC_ASSIGN(const std::vector<cv::Point2d> rays,
+///            undistort_points(cam, corners));
+/// @endcode
+VC_COMPUTE_API core::Result<std::vector<cv::Point2d>> undistort_points(
+    const CvCamera& camera, const std::vector<cv::Point2d>& pixels);
 
 }  // namespace volumetric_kit::calib::compute

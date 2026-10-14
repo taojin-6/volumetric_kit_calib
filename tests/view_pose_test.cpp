@@ -97,6 +97,39 @@ TEST(ViewPose, PosesExactViewsThroughTheWholeLens) {
   }
 }
 
+// Exact views near the edges of a lens where undistortPoints' default
+// criteria, solvePnPGeneric's own, leave the board's corners up to 0.9 px out:
+// the board parallel to the image 3 m away, its outline 30 px or more inside,
+// gives the board's pose.
+TEST(ViewPose, PosesExactViewsAtTheEdgesOfAStronglyDistortedLens) {
+  const compute::Board board = femto_board();
+  const camera::CameraModel lens = test::strongly_distorted_lens();
+  const compute::CvCamera cam = compute::cv_camera(lens).value();
+  // The board's centre at each pixel.
+  for (const cv::Point2d& centre :
+       {cv::Point2d(210.0, 118.0), cv::Point2d(1069.0, 118.0),
+        cv::Point2d(210.0, 601.0), cv::Point2d(1069.0, 601.0),
+        cv::Point2d(174.0, 359.5), cv::Point2d(639.5, 102.0)}) {
+    const cv::Point2d ray = test::undistort_pixels(lens, {centre})[0];
+    camera::Mat4d truth(1.0);
+    truth[3] = glm::dvec4(3.0 * ray.x - 0.375, 3.0 * ray.y - 0.225, 3.0, 1.0);
+    const std::vector<cv::Point2d> pixels =
+        test::project(lens, truth, board.object_points());
+    Observation view;
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+      view.points.push_back(
+          {static_cast<int>(i), {pixels[i].x, pixels[i].y}, 1.0});
+    }
+    const core::Result<ViewPose> pose = view_pose(cam, board, view);
+    ASSERT_TRUE(pose.ok()) << pose.status().message();
+    EXPECT_LT(rotation_error(pose->best.board_to_camera, truth), 1e-7)
+        << centre;
+    EXPECT_LT(translation_error(pose->best.board_to_camera, truth), 1e-7)
+        << centre;
+    EXPECT_LT(pose->best.rms_px, 1e-6) << centre;
+  }
+}
+
 // Every subset of 4 to 8 corners of each exact view that usable_for_pose
 // accepts gives IPPE's two poses, the best the board's: the check refuses
 // every view IPPE cannot pose, all but one corner on a line included.

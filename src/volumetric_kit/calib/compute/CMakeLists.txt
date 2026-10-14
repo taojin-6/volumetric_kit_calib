@@ -43,8 +43,11 @@ target_include_directories(
                        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
 # The public headers name OpenCV's core types and its ChArUco board.
-target_link_libraries(calib_compute PUBLIC calib_core opencv_core
-                                           opencv_objdetect)
+# opencv_geometry is private: only undistort_points uses it.
+target_link_libraries(
+  calib_compute
+  PUBLIC calib_core opencv_core opencv_objdetect
+  PRIVATE opencv_geometry)
 
 vc_target_warnings(calib_compute)
 

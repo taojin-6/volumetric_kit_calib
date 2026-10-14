@@ -164,6 +164,12 @@ camera::CameraModel depth_like_lens() {
           {29.29, 9.9, 1e-5, -2e-5, 0.3, 29.6, 15.0, 3.77}};
 }
 
+camera::CameraModel strongly_distorted_lens() {
+  return {{1280, 720},
+          {800.0, 800.0, 639.5, 359.5},
+          {0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}};
+}
+
 std::vector<SyntheticCamera> synthetic_rig() {
   // A camera on the ring at `azimuth_deg`, `radius_m` out and `height_m` up,
   // looking at `target`, with its own intrinsics and the colour-like lens's

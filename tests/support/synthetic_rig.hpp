@@ -37,6 +37,12 @@ recon::camera::CameraModel color_like_lens();
 /// @return The model, which recon's `check_camera_model` accepts.
 recon::camera::CameraModel depth_like_lens();
 
+/// @brief A 1280x720 lens with k1 = 0.4 alone: strong enough that
+///        `cv::undistortPoints`' default 5 iterations leave 1.5 px at the
+///        image's corners.
+/// @return The model, which recon's `check_camera_model` accepts.
+recon::camera::CameraModel strongly_distorted_lens();
+
 /// @brief One colour camera of the synthetic rig.
 struct SyntheticCamera {
   std::string id;                        ///< A stand-in serial.

@@ -57,9 +57,10 @@ struct VC_SOLVE_API ViewPose {
   double ambiguity() const noexcept;
 };
 
-/// @brief The poses of @p board that @p view allows, from OpenCV's
-///        `solvePnPGeneric` with `SOLVEPNP_IPPE` through the camera's whole
-///        lens.
+/// @brief The poses of @p board that @p view allows: OpenCV's
+///        `solvePnPGeneric` with `SOLVEPNP_IPPE` on the corners' rays
+///        (@ref compute::undistort_points), each fitted through the camera's
+///        whole lens.
 /// @param camera  The camera, its size the image the view was detected in.
 /// @param board   The board seen.
 /// @param view    The corners seen; its weights are not used.

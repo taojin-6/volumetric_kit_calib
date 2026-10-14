@@ -66,10 +66,15 @@ core::Result<ViewPose> view_pose(const compute::CvCamera& camera,
           board.object_points()[static_cast<std::size_t>(point.id)]);
       image.emplace_back(point.pixel.x, point.pixel.y);
     }
+    // Works around OpenCV 5.0.0's solvePnPGeneric (geometry/src/solvepnp.cpp),
+    // whose IPPE undistorts with undistortPoints' default 5 iterations: IPPE
+    // gets converged rays and no lens. The fits below use the pixels.
+    VKC_ASSIGN(const std::vector<cv::Point2d> rays,
+               compute::undistort_points(camera, image));
     std::vector<cv::Mat> rvecs;
     std::vector<cv::Mat> tvecs;
-    cv::solvePnPGeneric(object, image, camera.camera_matrix, camera.distortion,
-                        rvecs, tvecs, false, cv::SOLVEPNP_IPPE);
+    cv::solvePnPGeneric(object, rays, cv::Matx33d::eye(), cv::noArray(), rvecs,
+                        tvecs, false, cv::SOLVEPNP_IPPE);
     // IPPE gives two solutions of a usable view. solvePnPGeneric swallows
     // whatever IPPE throws (running out of memory included) and returns the
     // solutions it had kept by then: none, or half of them, which its own
