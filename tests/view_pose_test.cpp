@@ -98,9 +98,9 @@ TEST(ViewPose, PosesExactViewsThroughTheWholeLens) {
 }
 
 // Exact views near the edges of a lens where undistortPoints' default
-// criteria, solvePnPGeneric's own, leave the board's corners up to 0.9 px out:
-// the board parallel to the image 3 m away, its outline 30 px or more inside,
-// gives the board's pose.
+// criteria, solvePnPGeneric's own, leave these views' corners up to 0.18 px
+// out: the board parallel to the image 3 m away, its outline 30 px or more
+// inside, gives the board's pose.
 TEST(ViewPose, PosesExactViewsAtTheEdgesOfAStronglyDistortedLens) {
   const compute::Board board = femto_board();
   const camera::CameraModel lens = test::strongly_distorted_lens();
@@ -110,7 +110,7 @@ TEST(ViewPose, PosesExactViewsAtTheEdgesOfAStronglyDistortedLens) {
        {cv::Point2d(210.0, 118.0), cv::Point2d(1069.0, 118.0),
         cv::Point2d(210.0, 601.0), cv::Point2d(1069.0, 601.0),
         cv::Point2d(174.0, 359.5), cv::Point2d(639.5, 102.0)}) {
-    const cv::Point2d ray = test::undistort_pixels(lens, {centre})[0];
+    const cv::Point2d ray = compute::undistort_points(cam, {centre}).value()[0];
     camera::Mat4d truth(1.0);
     truth[3] = glm::dvec4(3.0 * ray.x - 0.375, 3.0 * ray.y - 0.225, 3.0, 1.0);
     const std::vector<cv::Point2d> pixels =
