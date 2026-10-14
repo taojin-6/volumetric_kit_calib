@@ -8,6 +8,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
+  `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds
+  and guards, and a `RigSolution` holding the poses, recon's
+  `ArrayCalibration` of them, the boards, every corner's residual, what was
+  left out, each camera's covariance and its sensitivity to the intrinsics
+  (DECISIONS.md, 2026-10-14). `solve::view_residuals` gives one view's
+  residuals and their derivatives.
 - The `capture` tier, `volumetric_kit::calib_capture`, built with
   `VC_WITH_RIG` (OFF by default; fetches all of recon and needs the Vulkan
   SDK): `SessionWriter` writes a calibration session -- each camera's JPEG,
@@ -22,6 +29,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `initialise` places the board of a capture whose views are all ambiguous,
+  from those views, so the adjustment takes them.
 - recon's camera tier is pinned at `2f8d6ea` (recon main, with its #228).
   `cv_pose` now converts through recon's `rodrigues_from_matrix`, accurate
   where `cv::Rodrigues` returns zero (below about 1e-5 rad).

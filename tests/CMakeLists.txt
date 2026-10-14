@@ -59,10 +59,15 @@ if(VC_WITH_OPENCV)
   vc_add_test(detect_oom volumetric_kit::calib_detect vc_test_support)
   target_sources(vc_detect_oom_test PRIVATE support/allocation_failure.cpp)
 
-  # solve: views, the spanning tree and the first rig, on the synthetic rig.
+  # solve: views, the spanning tree, the first rig and the bundle adjustment, on
+  # the synthetic rig; OpenCV's calibrateMultiview is the adjustment's oracle on
+  # full views.
+  find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS calib)
   vc_add_test(view_pose volumetric_kit::calib_solve vc_synthetic_rig)
   vc_add_test(spanning_tree volumetric_kit::calib_solve)
   vc_add_test(initialise volumetric_kit::calib_solve vc_synthetic_rig)
+  vc_add_test(bundle_adjust volumetric_kit::calib_solve vc_synthetic_rig
+              opencv_calib opencv_geometry)
   vc_add_test(solve_oom volumetric_kit::calib_solve vc_synthetic_rig)
   target_sources(vc_solve_oom_test PRIVATE support/allocation_failure.cpp)
 endif()

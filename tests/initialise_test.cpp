@@ -639,6 +639,41 @@ TEST(Initialise, EachBoardIsTheCandidateThatFitsItsCaptureBest) {
   expect_near_truth(scene, scene.cameras, *rig, "SYN0", 1.0, 0.05);
 }
 
+// A capture whose views are all ambiguous takes its board from them: of
+// their poses, the one that fits them all best.
+TEST(Initialise, PlacesTheBoardOfACaptureWhoseViewsAreAllAmbiguous) {
+  const Scene scene = make_scene();
+  const core::Result<InitialRig> plain =
+      run(scene.cameras, scene.board, scene.views, 0);
+  ASSERT_TRUE(plain.ok()) << plain.status().message();
+  // Each capture's least ambiguous view; the capture where it is least.
+  std::map<std::int64_t, double> clearest;
+  for (const ViewRecord& view : plain->views) {
+    double& a = clearest.try_emplace(view.capture, 0.0).first->second;
+    a = std::max(a, *view.ambiguity);
+  }
+  std::vector<std::pair<double, std::int64_t>> order;
+  for (const auto& [capture, a] : clearest) order.emplace_back(a, capture);
+  std::sort(order.begin(), order.end());
+  const std::int64_t capture = order[0].second;
+  InitialiseOptions options;
+  options.min_ambiguity = 0.5 * (order[0].first + order[1].first);
+  const core::Result<InitialRig> rig =
+      run(scene.cameras, scene.board, scene.views, 0, options);
+  ASSERT_TRUE(rig.ok()) << rig.status().message();
+  std::size_t ambiguous = 0;
+  for (const ViewRecord& view : rig->views) {
+    if (view.capture != capture) continue;
+    EXPECT_EQ(view.fate, ViewFate::Ambiguous);
+    ++ambiguous;
+  }
+  ASSERT_GE(ambiguous, 2u);
+  EXPECT_EQ(rig->boards.size(), scene.plan.size());
+  const auto [board, truth] = board_and_truth(scene, *rig, capture, "SYN0");
+  EXPECT_LT(angle_deg(board, truth), 1.0);
+  EXPECT_LT(glm::length(camera::Vec3d(board[3] - truth[3])), 0.05);
+}
+
 // RMS distance between two sets of pixels.
 double rms_px(const std::vector<cv::Point2d>& a,
               const std::vector<cv::Point2d>& b) {

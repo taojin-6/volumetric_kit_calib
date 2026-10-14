@@ -248,6 +248,7 @@ core::Result<InitialRig> initialise(const std::vector<RigCamera>& cameras,
     rig.reference = reference;
     rig.views.resize(views.size());
     std::map<std::int64_t, Capture> captures;
+    std::map<std::int64_t, Capture> ambiguous;
     std::map<std::pair<std::int64_t, std::size_t>, std::size_t> seen;
     for (std::size_t i = 0; i < views.size(); ++i) {
       const Observation& view = views[i];
@@ -289,21 +290,22 @@ core::Result<InitialRig> initialise(const std::vector<RigCamera>& cameras,
       record.oblique = *record.tilt_deg > options.oblique_deg;
       if (!(pose->best.rms_px <= options.max_pnp_rms_px)) {
         record.fate = ViewFate::PoorFit;
-      } else if (!(*record.ambiguity >= options.min_ambiguity)) {
-        record.fate = ViewFate::Ambiguous;
       } else {
-        record.fate = ViewFate::Used;
-        Capture& capture = captures[view.frame_id];
+        const bool used = *record.ambiguity >= options.min_ambiguity;
+        record.fate = used ? ViewFate::Used : ViewFate::Ambiguous;
+        Capture& capture = (used ? captures : ambiguous)[view.frame_id];
         capture.id = view.frame_id;
         capture.views.push_back({i, c, *std::move(pose)});
       }
     }
-    for (auto& entry : captures) {
-      std::vector<UsedView>& used = entry.second.views;
-      std::sort(used.begin(), used.end(),
-                [&](const UsedView& a, const UsedView& b) {
-                  return rank[a.camera] < rank[b.camera];
-                });
+    for (auto* by_capture : {&captures, &ambiguous}) {
+      for (auto& entry : *by_capture) {
+        std::vector<UsedView>& list = entry.second.views;
+        std::sort(list.begin(), list.end(),
+                  [&](const UsedView& a, const UsedView& b) {
+                    return rank[a.camera] < rank[b.camera];
+                  });
+      }
     }
 
     // 2. The tree of the links the used views share most.
@@ -349,9 +351,9 @@ core::Result<InitialRig> initialise(const std::vector<RigCamera>& cameras,
       rig.links.push_back({link, mean.inliers});
     }
 
-    // 4. Each capture's board: the candidate that best fits its used views.
-    // TODO: CA5 decides how to seed, or drop, a capture whose views are all
-    // Ambiguous; it has no board pose here, so the adjustment cannot use them.
+    // 4. Each capture's board: the candidate that best fits its used views,
+    // or, where it has none, its ambiguous views, which the adjustment takes.
+    for (auto& entry : ambiguous) captures.insert(std::move(entry));
     const double cap = options.truncation_px * options.truncation_px;
     for (const auto& entry : captures) {
       const Capture& capture = entry.second;

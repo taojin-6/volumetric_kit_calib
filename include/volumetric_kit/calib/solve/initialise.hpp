@@ -73,8 +73,7 @@ struct InitialiseOptions {
 enum class ViewFate {
   Used,  ///< It initialises the rig.
   /// It is not initialised from, as its two poses fit almost alike; it is left
-  /// for the adjustment, which needs its capture's board pose (@ref
-  /// InitialRig::boards).
+  /// for the adjustment (@ref bundle_adjust), on its capture's board.
   Ambiguous,
   /// Left out: @ref compute::usable_for_pose refused it
   /// (@ref ViewRecord::use says why).
@@ -149,8 +148,8 @@ struct InitialRig {
   /// T_cw for each camera, in the rig's order; the reference's is exactly
   /// the identity.
   std::vector<recon::camera::Mat4d> world_to_camera;
-  /// The board in each capture with a view used, in the captures' order;
-  /// a capture with none has no pose.
+  /// The board in each capture with a view used or ambiguous, in the
+  /// captures' order; a capture with neither has no pose.
   std::vector<BoardPose> boards;
   /// How the cameras were placed: @ref SpanningTree::links, in its order.
   std::vector<PlacedLink> links;
@@ -178,7 +177,9 @@ struct InitialRig {
 /// 4. **Boards.** For each capture, each used view's poses, both of IPPE's,
 ///    through its camera's placement, are candidates; the one whose summed
 ///    squared reprojection error over the capture's used views, each corner
-///    capped at `truncation_px`, is least is the board's.
+///    capped at `truncation_px`, is least is the board's. A capture whose
+///    views are all ambiguous takes its board from them alike, so the
+///    adjustment can take them.
 ///
 /// The result depends on the cameras' ids, not on the order of the cameras
 /// or of the observations, and is the same on every run.
