@@ -10,8 +10,7 @@
 # and with VC_WITH_RIG the Vulkan SDK, from the system. OpenCV, with
 # VC_WITH_OPENCV, is a prerequisite the root CMakeLists finds.
 #
-# TODO (as tiers land, mirroring gfx's hybrid system/vendored strategy): Ceres
-# via find_package for the solve tier (intrinsics / stereo / BA); and
+# TODO (as tiers land, mirroring gfx's hybrid system/vendored strategy):
 # volumetric_kit_gfx via FetchContent for the viz / app tiers. GPU work comes
 # from volumetric_kit_core's vulkan tier, not a Vulkan dependency of calib's.
 

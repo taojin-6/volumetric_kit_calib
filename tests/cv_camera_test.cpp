@@ -2,12 +2,14 @@
 // Copyright (c) 2026 Tao Jin
 
 // recon's camera model in OpenCV's types: its layout, cv::projectPoints equal
-// to recon's distort_rational, and the models it refuses.
+// to recon's distort_rational, pixels undistorted to convergence, and the
+// models it refuses.
 
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -133,6 +135,62 @@ TEST(CvCamera, ProjectsAsReconsColourLikeLens) {
 // The depth-like lens folds over at r = 1.83, past its corners at 1.244.
 TEST(CvCamera, ProjectsAsReconsDepthLikeLens) {
   expect_projects_as_recon(test::depth_like_lens(), 1.244);
+}
+
+// Pixels across the whole image, its corners included.
+std::vector<cv::Point2d> pixel_grid(const cv::Size& size) {
+  std::vector<cv::Point2d> pixels;
+  for (int i = 0; i <= 16; ++i) {
+    for (int j = 0; j <= 9; ++j) {
+      pixels.emplace_back(-0.5 + i * size.width / 16.0,
+                          -0.5 + j * size.height / 9.0);
+    }
+  }
+  return pixels;
+}
+
+// How far the lens takes `rays` from `pixels`, at most (pixels).
+double round_trip_px(const CvCamera& cam, const std::vector<cv::Point2d>& rays,
+                     const std::vector<cv::Point2d>& pixels) {
+  std::vector<cv::Point3d> points;
+  for (const cv::Point2d& ray : rays) points.emplace_back(ray.x, ray.y, 1.0);
+  std::vector<cv::Point2d> back;
+  cv::projectPoints(points, cv::Vec3d(0.0, 0.0, 0.0), cv::Vec3d(0.0, 0.0, 0.0),
+                    cam.camera_matrix, cam.distortion, back);
+  double worst = 0.0;
+  for (std::size_t i = 0; i < back.size(); ++i) {
+    worst = std::max(
+        worst, std::hypot(back[i].x - pixels[i].x, back[i].y - pixels[i].y));
+  }
+  return worst;
+}
+
+// Every ray goes back through the lens to its pixel, out to the image's
+// corners, where undistortPoints' default criteria fall short on the strong
+// lens.
+TEST(CvCamera, UndistortsPixelsToConvergence) {
+  for (const camera::CameraModel& model :
+       {test::color_like_lens(), test::depth_like_lens(),
+        test::strongly_distorted_lens()}) {
+    const CvCamera cam = cv_camera(model).value();
+    const std::vector<cv::Point2d> pixels = pixel_grid(cam.size);
+    const core::Result<std::vector<cv::Point2d>> rays =
+        undistort_points(cam, pixels);
+    ASSERT_TRUE(rays.ok()) << rays.status().message();
+    ASSERT_EQ(rays->size(), pixels.size());
+    EXPECT_LT(round_trip_px(cam, *rays, pixels), 1e-9) << cam.size;
+  }
+
+  const CvCamera strong = cv_camera(test::strongly_distorted_lens()).value();
+  const std::vector<cv::Point2d> pixels = pixel_grid(strong.size);
+  std::vector<cv::Point2d> rays;
+  cv::undistortPoints(pixels, rays, strong.camera_matrix, strong.distortion);
+  EXPECT_GT(round_trip_px(strong, rays, pixels), 0.5);
+
+  const core::Result<std::vector<cv::Point2d>> none =
+      undistort_points(strong, {});
+  ASSERT_TRUE(none.ok()) << none.status().message();
+  EXPECT_TRUE(none->empty());
 }
 
 TEST(CvCamera, RefusesAModelReconRefuses) {

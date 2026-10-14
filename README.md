@@ -14,11 +14,12 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > and its check, observations, detections, view and capture records, lens and
 > sensor profiles) over recon's camera model and the core's exception-free
 > `Status`/`Result` — builds and is tested (GoogleTest); so, with
-> `VC_WITH_OPENCV`, does the `compute` tier's OpenCV bridge, and, with
-> `VC_WITH_RIG`, the `capture` tier's session writer. The detection, solve,
-> quality, color, viz, and app tiers are not yet implemented;
-> the legacy `camera_calibration` Python scripts (a separate checkout beside
-> the `volumetric_kit/` folder) remain the reference oracle.
+> `VC_WITH_OPENCV`, do the `compute` tier's OpenCV bridge and the `solve`
+> tier's first rig, and, with `VC_WITH_RIG`, the `capture` tier's session
+> writer. The solve's bundle adjustment and the detection, quality, color, viz,
+> and app tiers are not yet implemented; the legacy `camera_calibration` Python
+> scripts (a separate checkout beside the `volumetric_kit/` folder) remain the
+> reference oracle.
 
 [AGENTS.md](AGENTS.md) is the shared working guide for Codex and Claude Code;
 `CLAUDE.md` imports it. [DECISIONS.md](DECISIONS.md) records the locked
@@ -47,11 +48,16 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
   recon's sensor and io tiers, so `VC_WITH_RIG` fetches all of recon.
 - **Compute:** a CPU backend is the correctness oracle: OpenCV, behind
   recon's and calib's types. The `compute` tier holds the bridge -- the camera
-  model and rigid transforms in OpenCV's types, the ChArUco board, and
-  `guarded()`, which returns what OpenCV throws as a `Status`. GPU work runs on
-  the core's vulkan tier, on a `VkDevice` shared with `recon` and `gfx`, so
-  frames pass between them without copies (MoltenVK on Apple; native Metal
-  deferred).
+  model and rigid transforms in OpenCV's types, the ChArUco board and whether a
+  view of it fixes a pose, and `guarded()`, which returns what OpenCV throws as
+  a `Status`. GPU work runs on the core's vulkan tier, on a `VkDevice` shared
+  with `recon` and `gfx`, so frames pass between them without copies (MoltenVK
+  on Apple; native Metal deferred).
+- **Solve:** the rig's extrinsics from views of the board. `initialise` places
+  every camera and board from the views alone -- each view's own pose (IPPE),
+  the spanning tree of the camera links that share the most captures, each
+  link's robust relative pose -- in the world of the reference camera's colour
+  frame: the first rig, which the bundle adjustment refines.
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
 
@@ -74,8 +80,8 @@ macOS; on Ubuntu, whose packages are OpenCV 4, one you build yourself.
 `VC_WITH_RIG` (OFF by default) builds `capture`, over all of recon, which needs
 the Vulkan SDK and a GLSL compiler: the core's vulkan tier
 [prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
-(Later tiers add Ceres for `solve` and `volumetric_kit_gfx` for `viz`/`app`.)
-To build against a local core or recon checkout instead of the pinned one, pass
+(Later tiers add `volumetric_kit_gfx` for `viz`/`app`.) To build against a
+local core or recon checkout instead of the pinned one, pass
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>` or
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>`.
 
@@ -118,8 +124,8 @@ target_link_libraries(your_app PRIVATE volumetric_kit::calib_core)
 default ON only when `volumetric_kit_calib` is the top-level project, so a
 FetchContent build of it never fails on a warning your compiler adds. Set
 `VC_WITH_OPENCV` ON before calib is made available to link
-`volumetric_kit::calib_compute`, and `VC_WITH_RIG` ON to link
-`volumetric_kit::calib_capture`.
+`volumetric_kit::calib_compute` and `volumetric_kit::calib_solve`, and
+`VC_WITH_RIG` ON to link `volumetric_kit::calib_capture`.
 `VC_SANITIZE` is a semicolon list, empty (off) by default —
 e.g. `-DVC_SANITIZE="address;undefined"`. An installed calib carries the core
 and recon (its camera tier, or all of it with `VC_WITH_RIG`) beside it, and

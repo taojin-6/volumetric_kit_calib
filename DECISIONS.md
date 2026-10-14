@@ -108,7 +108,7 @@ The `capture` tier writes the rig application's calibration sessions
 
 ## 2026-10-12 — OpenCV, behind calib's types
 
-calib's CPU maths -- the lens model and poses now, detection as it lands -- is
+calib's CPU maths -- the lens model, poses, detection and the solve -- is
 OpenCV 5's, called from the `compute` tier on. Callers hold recon's
 `CameraModel` and `Mat4d` and calib's `Target`; `compute` converts them
 (`cv_camera`, `cv_pose`, `Board`), so no second camera or board record exists.

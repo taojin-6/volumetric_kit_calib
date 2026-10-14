@@ -53,11 +53,11 @@ VC_COMPUTE_API recon::camera::Mat4d matrix_from_cv(
 VC_COMPUTE_API recon::camera::Mat4d matrix_from_cv_pose(
     const CvPose& pose) noexcept;
 
-/// @brief A rigid transform in OpenCV's form.
+/// @brief A rigid transform in OpenCV's form, through recon's
+///        `rodrigues_from_matrix`.
 ///
-/// The rotation goes through `cv::Rodrigues`, which returns exactly zero for
-/// a rotation below about 1e-5 rad: fine for an initial value, not for a
-/// solver's state.
+/// Accurate to round-off at every angle, where `cv::Rodrigues` returns
+/// exactly zero below about 1e-5 rad.
 /// @param transform  The transform.
 /// @return The transform; or `InvalidArgument`, its message starting
 ///         `cv_pose: `, for one recon's `check_rigid` refuses.

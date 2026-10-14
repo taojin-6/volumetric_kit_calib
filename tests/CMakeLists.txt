@@ -45,11 +45,19 @@ if(VC_WITH_OPENCV)
   vc_add_test(guarded volumetric_kit::calib_compute)
   vc_add_test(cv_pose volumetric_kit::calib_compute opencv_geometry)
   vc_add_test(board volumetric_kit::calib_compute vc_test_support)
+  vc_add_test(usable_for_pose volumetric_kit::calib_compute)
   vc_add_test(cv_camera vc_synthetic_rig opencv_geometry)
   vc_add_test(synthetic_rig vc_synthetic_rig opencv_geometry)
   # Keep allocation replacement isolated from the other test executables.
   vc_add_test(compute_oom volumetric_kit::calib_compute vc_test_support)
   target_sources(vc_compute_oom_test PRIVATE support/allocation_failure.cpp)
+
+  # solve: views, the spanning tree and the first rig, on the synthetic rig.
+  vc_add_test(view_pose volumetric_kit::calib_solve vc_synthetic_rig)
+  vc_add_test(spanning_tree volumetric_kit::calib_solve)
+  vc_add_test(initialise volumetric_kit::calib_solve vc_synthetic_rig)
+  vc_add_test(solve_oom volumetric_kit::calib_solve vc_synthetic_rig)
+  target_sources(vc_solve_oom_test PRIVATE support/allocation_failure.cpp)
 endif()
 
 if(VC_WITH_RIG)
