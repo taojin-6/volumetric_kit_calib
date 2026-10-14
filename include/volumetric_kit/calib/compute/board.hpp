@@ -65,6 +65,9 @@ class VC_COMPUTE_API Board {
   const std::vector<cv::Point3d>& object_points() const noexcept {
     return object_points_;
   }
+  /// @return The chessboard's middle in the board frame (metres), on z = 0:
+  ///         also the middle of its corners.
+  cv::Point3d centre() const noexcept;
 
  private:
   Board(const Target& target, const cv::aruco::CharucoBoard& charuco,

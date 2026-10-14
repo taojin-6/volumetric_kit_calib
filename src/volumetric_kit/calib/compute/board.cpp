@@ -81,6 +81,12 @@ Board::Board(const Target& target, const cv::aruco::CharucoBoard& charuco,
       charuco_(charuco),
       object_points_(std::move(object_points)) {}
 
+cv::Point3d Board::centre() const noexcept {
+  // OpenCV's board has one square more than corners on each axis.
+  const double s = target_.square_size_m;
+  return {0.5 * s * (target_.cols + 1), 0.5 * s * (target_.rows + 1), 0.0};
+}
+
 core::Result<Board> Board::create(const Target& target) {
   return guarded("Board::create", [&]() -> core::Result<Board> {
     VKC_TRY(check_target(target));

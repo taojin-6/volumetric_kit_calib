@@ -452,8 +452,8 @@ camera::Mat4d board_facing_camera(const compute::Board& board,
   const camera::Mat3d rotation =
       camera::rotation_from_rodrigues({0.0, 0.0, roll_deg * kPi / 180.0}) *
       camera::rotation_from_rodrigues({tilt_deg * kPi / 180.0, 0.0, 0.0});
-  const cv::Point3f corner = board.charuco().getRightBottomCorner();
-  const camera::Vec3d middle(0.5 * corner.x, 0.5 * corner.y, 0.0);
+  const cv::Point3d c = board.centre();
+  const camera::Vec3d middle(c.x, c.y, c.z);
   camera::Mat4d m(rotation);
   m[3] = glm::dvec4(centre - rotation * middle, 1.0);
   return m;

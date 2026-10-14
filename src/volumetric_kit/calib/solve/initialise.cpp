@@ -14,12 +14,11 @@
 #include <utility>
 #include <vector>
 
-#include <glm/trigonometric.hpp>
-
 #include "common.hpp"
 #include "reprojection.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
+#include "volumetric_kit/calib/compute/measures.hpp"
 #include "volumetric_kit/calib/solve/view_pose.hpp"
 
 namespace volumetric_kit::calib::solve {
@@ -55,12 +54,6 @@ core::Status check_options(const InitialiseOptions& options) {
   return {};
 }
 
-// The angle between two rotations (degrees), accurate near 0 and 180.
-double angle_deg(const camera::Mat3d& a, const camera::Mat3d& b) noexcept {
-  return glm::degrees(
-      glm::length(camera::rodrigues_from_rotation(glm::transpose(a) * b)));
-}
-
 // A robust mean of transforms that each estimate one: the rotation with the
 // least median angle to the others (the first, on a tie) is the medoid; those
 // within `inlier_deg` of it give the chordal mean of their rotations and the
@@ -82,9 +75,9 @@ RobustMean robust_mean(const std::vector<camera::Mat4d>& candidates,
   for (std::size_t i = 0; i < n; ++i) {
     std::vector<double> angles(n);
     for (std::size_t j = 0; j < n; ++j) {
-      angles[j] = angle_deg(rotations[i], rotations[j]);
+      angles[j] = compute::rotation_angle_deg(rotations[i], rotations[j]);
     }
-    const double m = detail::median(std::move(angles));
+    const double m = compute::median(std::move(angles));
     if (m < least) {
       least = m;
       medoid = i;
@@ -94,7 +87,10 @@ RobustMean robust_mean(const std::vector<camera::Mat4d>& candidates,
   camera::Mat3d sum(0.0);
   std::vector<double> x, y, z;
   for (std::size_t i = 0; i < n; ++i) {
-    if (!(angle_deg(rotations[i], rotations[medoid]) <= inlier_deg)) continue;
+    if (!(compute::rotation_angle_deg(rotations[i], rotations[medoid]) <=
+          inlier_deg)) {
+      continue;
+    }
     sum += rotations[i];
     x.push_back(candidates[i][3][0]);
     y.push_back(candidates[i][3][1]);
@@ -108,8 +104,8 @@ RobustMean robust_mean(const std::vector<camera::Mat4d>& candidates,
   // nearest_rotation needs.
   mean.transform = camera::Mat4d(camera::nearest_rotation(sum));
   mean.transform[3] =
-      glm::dvec4(detail::median(std::move(x)), detail::median(std::move(y)),
-                 detail::median(std::move(z)), 1.0);
+      glm::dvec4(compute::median(std::move(x)), compute::median(std::move(y)),
+                 compute::median(std::move(z)), 1.0);
   return mean;
 }
 

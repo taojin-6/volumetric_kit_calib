@@ -46,6 +46,7 @@ if(VC_WITH_OPENCV)
   vc_add_test(cv_pose volumetric_kit::calib_compute opencv_geometry)
   vc_add_test(board volumetric_kit::calib_compute vc_test_support)
   vc_add_test(usable_for_pose volumetric_kit::calib_compute)
+  vc_add_test(measures volumetric_kit::calib_compute)
   vc_add_test(cv_camera vc_synthetic_rig opencv_geometry)
   vc_add_test(synthetic_rig vc_synthetic_rig opencv_geometry)
   # Keep allocation replacement isolated from the other test executables.
@@ -70,6 +71,15 @@ if(VC_WITH_OPENCV)
               opencv_calib opencv_geometry)
   vc_add_test(solve_oom volumetric_kit::calib_solve vc_synthetic_rig)
   target_sources(vc_solve_oom_test PRIVATE support/allocation_failure.cpp)
+
+  # quality: the live checks against known poses and rendered views, the capture
+  # rule's states, and the session's checks on the synthetic rig.
+  vc_add_test(live_checks volumetric_kit::calib_quality
+              volumetric_kit::calib_detect vc_synthetic_rig)
+  vc_add_test(capture_rule volumetric_kit::calib_quality)
+  vc_add_test(session_checks volumetric_kit::calib_quality vc_synthetic_rig)
+  vc_add_test(quality_oom volumetric_kit::calib_quality vc_synthetic_rig)
+  target_sources(vc_quality_oom_test PRIVATE support/allocation_failure.cpp)
 endif()
 
 if(VC_WITH_RIG)

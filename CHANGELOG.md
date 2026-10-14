@@ -21,6 +21,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   left out, each camera's covariance and its sensitivity to the intrinsics
   (DECISIONS.md, 2026-10-14). `solve::view_residuals` gives one view's
   residuals and their derivatives.
+- The `quality` tier, `volumetric_kit::calib_quality`, built with
+  `VC_WITH_OPENCV`: the live checks and the capture rule (DECISIONS.md,
+  2026-10-14). `check_view` fills a view's `ViewCheck` (verdict, distance,
+  tilt, fit, 3 x 3 cell) from its own pose and says whether it is frontal;
+  `corner_shift` measures how far corners moved between two sets of
+  detections, and `live_vs_full_flagged` judges a capture's live corners by
+  it; `CaptureRule` takes the first complete, still set after a press, or
+  fails naming why; `SessionChecks` sums up the captures kept: views and
+  8 x 6 coverage per camera, the shared captures, a graded tree preview, when
+  Calibrate may run, and the duplicate, floor-only and mostly-frontal
+  warnings.
+- `compute::median`, `angle_deg`, `rotation_angle_deg` and
+  `Board::centre`, which the solve and the checks share.
 - The `capture` tier, `volumetric_kit::calib_capture`, built with
   `VC_WITH_RIG` (OFF by default; fetches all of recon and needs the Vulkan
   SDK): `SessionWriter` writes a calibration session -- each camera's JPEG,

@@ -404,8 +404,8 @@ TEST(SyntheticRig, FemtoBoardIsTheRigsBoard) {
 // axis, and the roll then turns its x axis about that axis.
 TEST(SyntheticRig, FacesTheBoardToTheCamera) {
   const compute::Board board = femto_board();
-  const cv::Point3f corner = board.charuco().getRightBottomCorner();
-  const glm::dvec4 middle(0.5 * corner.x, 0.5 * corner.y, 0.0, 1.0);
+  const cv::Point3d c = board.centre();
+  const glm::dvec4 middle(c.x, c.y, c.z, 1.0);
   const camera::Vec3d centre(0.1, -0.2, 2.5);
   const camera::Mat4d straight = board_facing_camera(board, centre, 0.0, 0.0);
   EXPECT_LT(glm::length(camera::Vec3d(straight * middle) - centre), 1e-12);

@@ -4,8 +4,8 @@
 # --- calib_compute: Tier 1 ---------------------------------------------------
 # The OpenCV bridge, calib's CPU maths backend: recon's camera model and rigid
 # transforms in OpenCV's types, the ChArUco board and whether a view of it fixes
-# a pose, and guarded(), which returns what OpenCV throws as a Status. Built
-# with VC_WITH_OPENCV.
+# a pose, the measures the solve and the checks share, and guarded(), which
+# returns what OpenCV throws as a Status. Built with VC_WITH_OPENCV.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
@@ -14,8 +14,9 @@ set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 add_library(calib_compute)
 add_library(volumetric_kit::calib_compute ALIAS calib_compute)
 
-target_sources(calib_compute PRIVATE board.cpp cv_camera.cpp cv_pose.cpp
-                                     guarded.cpp usable_for_pose.cpp)
+target_sources(
+  calib_compute PRIVATE board.cpp cv_camera.cpp cv_pose.cpp guarded.cpp
+                        measures.cpp usable_for_pose.cpp)
 
 # The tier's own export macro and guard (see calib_core).
 generate_export_header(

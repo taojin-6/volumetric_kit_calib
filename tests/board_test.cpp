@@ -57,6 +57,27 @@ TEST(Board, CornersSitOnTheGridFromTheTopLeft) {
   }
 }
 
+// The centre is the chessboard's middle, and its corners' middle, whatever
+// the board's shape.
+TEST(Board, CentreIsTheChessboardsMiddle) {
+  for (const auto& [rows, cols] : {std::pair{2, 4}, std::pair{5, 3}}) {
+    Target target = legacy_femto_board();
+    target.rows = rows;
+    target.cols = cols;
+    const core::Result<Board> board = Board::create(target);
+    ASSERT_TRUE(board.ok()) << board.status().message();
+    const cv::Point3f far = board->charuco().getRightBottomCorner();
+    const cv::Point3d centre = board->centre();
+    EXPECT_NEAR(centre.x, 0.5 * far.x, 1e-7);
+    EXPECT_NEAR(centre.y, 0.5 * far.y, 1e-7);
+    EXPECT_EQ(centre.z, 0.0);
+    cv::Point3d mean(0.0, 0.0, 0.0);
+    for (const cv::Point3d& corner : board->object_points()) mean += corner;
+    mean *= 1.0 / static_cast<double>(board->object_points().size());
+    EXPECT_NEAR(cv::norm(mean - centre), 0.0, 1e-7);
+  }
+}
+
 // The top-left square is black, and the markers fill the white squares,
 // from the second.
 TEST(Board, TopLeftSquareIsBlack) {
