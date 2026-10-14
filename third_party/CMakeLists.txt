@@ -9,11 +9,11 @@
 # takes GLM from the system. OpenCV, with VC_WITH_OPENCV, is a prerequisite the
 # root CMakeLists finds.
 #
-# TODO (as tiers land, mirroring gfx's hybrid system/vendored strategy): Ceres
-# via find_package for the solve tier (intrinsics / stereo / BA); the rest of
-# volumetric_kit_recon for the capture tier (its sensor tier's drivers); and
-# volumetric_kit_gfx via FetchContent for the viz / app tiers. GPU work comes
-# from volumetric_kit_core's vulkan tier, not a Vulkan dependency of calib's.
+# TODO (as tiers land, mirroring gfx's hybrid system/vendored strategy): the
+# rest of volumetric_kit_recon for the capture tier (its sensor tier's drivers);
+# and volumetric_kit_gfx via FetchContent for the viz / app tiers. GPU work
+# comes from volumetric_kit_core's vulkan tier, not a Vulkan dependency of
+# calib's.
 
 include(FetchContent)
 
@@ -64,7 +64,7 @@ endif()
 FetchContent_Declare(
   volumetric_kit_recon
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_recon.git
-  GIT_TAG 8b8b19856c474e0fc61e03c9534c529dbd71414c)
+  GIT_TAG 2f8d6eaf2d7cec17f3815240c27f7450095d4a12)
 if(NOT DEFINED VR_CAMERA_ONLY)
   set(VR_CAMERA_ONLY ON)
 endif()

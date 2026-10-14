@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <random>
+#include <utility>
 
 #include <opencv2/geometry.hpp>
 #include <opencv2/imgproc.hpp>
@@ -162,6 +164,12 @@ camera::CameraModel depth_like_lens() {
           {29.29, 9.9, 1e-5, -2e-5, 0.3, 29.6, 15.0, 3.77}};
 }
 
+camera::CameraModel strongly_distorted_lens() {
+  return {{1280, 720},
+          {800.0, 800.0, 639.5, 359.5},
+          {0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}};
+}
+
 std::vector<SyntheticCamera> synthetic_rig() {
   // A camera on the ring at `azimuth_deg`, `radius_m` out and `height_m` up,
   // looking at `target`, with its own intrinsics and the colour-like lens's
@@ -272,17 +280,36 @@ std::vector<Placement> synthetic_plan(const std::vector<SyntheticCamera>& rig,
   return plan;
 }
 
-std::vector<cv::Point2d> undistort_pixels(
-    const camera::CameraModel& model, const std::vector<cv::Point2d>& pixels) {
-  std::vector<cv::Point2d> normalized;
-  if (pixels.empty()) return normalized;
-  const compute::CvCamera cam = cv_lens(model);
-  cv::undistortPoints(
-      pixels, normalized, cam.camera_matrix, cam.distortion, cv::noArray(),
-      cv::noArray(),
-      cv::TermCriteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 100,
-                       1e-12));
-  return normalized;
+std::vector<Observation> observe(const std::vector<SyntheticCamera>& rig,
+                                 const compute::Board& board,
+                                 const std::vector<Placement>& plan,
+                                 const ObserveOptions& options) {
+  std::mt19937 rng(options.seed);
+  std::normal_distribution<double> noise(0.0, 1.0);
+  const std::vector<cv::Point3d>& corners = board.object_points();
+  const double weight = options.noise_px > 0.0
+                            ? 1.0 / (options.noise_px * options.noise_px)
+                            : 1.0;
+  std::vector<Observation> views;
+  for (std::size_t p = 0; p < plan.size(); ++p) {
+    for (const std::size_t c : plan[p].cameras) {
+      const SyntheticCamera& cam = rig[c];
+      const std::vector<cv::Point2d> pixels = project(
+          cam.model, cam.world_to_camera * plan[p].board_to_world, corners);
+      Observation view;
+      view.camera_id = cam.id;
+      view.frame_id = static_cast<std::int64_t>(p);
+      for (std::size_t i = 0; i < pixels.size(); ++i) {
+        const double dx = options.noise_px * noise(rng);
+        const double dy = options.noise_px * noise(rng);
+        view.points.push_back({static_cast<int>(i),
+                               {pixels[i].x + dx, pixels[i].y + dy},
+                               weight});
+      }
+      views.push_back(std::move(view));
+    }
+  }
+  return views;
 }
 
 cv::Mat render_board(const camera::CameraModel& model,
@@ -345,7 +372,8 @@ cv::Mat render_board(const camera::CameraModel& model,
       samples[at(i, j)] = {x0 + (i + 0.5) / S - 0.5, y0 + (j + 0.5) / S - 0.5};
     }
   }
-  const std::vector<cv::Point2d> rays = undistort_pixels(model, samples);
+  const std::vector<cv::Point2d> rays =
+      compute::undistort_points(cam, samples).value();
   const camera::Mat3d rotation(board_to_camera);
   const camera::Vec3d normal = rotation[2];
   const camera::Vec3d origin(board_to_camera[3]);

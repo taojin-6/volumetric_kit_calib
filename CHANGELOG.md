@@ -8,6 +8,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- recon's camera tier is pinned at `2f8d6ea` (recon main, with its #228).
+  `cv_pose` now converts through recon's `rodrigues_from_matrix`, accurate
+  where `cv::Rodrigues` returns zero (below about 1e-5 rad).
 - calib requires `volumetric_kit_core` 0.2.0 or newer (was 0.1.0;
   DECISIONS.md, 2026-10-12); the pinned core is unchanged.
 - calib's camera model is recon's (DECISIONS.md, 2026-10-12). Migrating:
@@ -85,11 +88,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `VC_WITH_OPENCV` (OFF by default; needs an installed OpenCV 5, 5.0 or a
   later 5.x): OpenCV behind recon's and calib's types (DECISIONS.md,
   2026-10-12). `cv_camera` gives a `CameraModel` as OpenCV's camera matrix and
-  eight coefficients; `cv_matrix`, `matrix_from_cv`, `cv_pose` and
+  eight coefficients, and `undistort_points` its pixels' rays, undistorted to
+  convergence; `cv_matrix`, `matrix_from_cv`, `cv_pose` and
   `matrix_from_cv_pose` convert rigid transforms; `Board` builds a ChArUco
-  `Target` as OpenCV's board with its corners by id; `guarded` and
+  `Target` as OpenCV's board with its corners by id; `usable_for_pose` says
+  whether a view of it fixes a pose (`ViewUse`, phrased by `describe`), and
+  refuses one whose corners, or all but one, lie on a line; `guarded` and
   `current_exception_status` return what OpenCV throws as a `Status`. With it,
   the installed package re-finds OpenCV.
+- The `solve` tier, `volumetric_kit::calib_solve`, built with
+  `VC_WITH_OPENCV`: the first rig. `view_pose` gives a view's IPPE poses, the
+  better first, with their RMS and `ambiguity()`, and `tilt_deg` the board's
+  turn from the camera; `covisibility` and `spanning_tree` give the captures
+  each pair of cameras shares and the tree of the links that share the most,
+  its ties broken by camera id; `initialise` places every camera (`T_cw`, the
+  reference's colour camera the world) and every capture's board (`T_wb`),
+  recording each view's fate (`ViewRecord`) and each link's inliers and
+  weakness (`PlacedLink`).
 - Build-system foundation: top-level CMake (C++17), tiered component layout, the
   `volumetric_kit::calib_core` library target + `volumetric_kit::calib` umbrella
   alias, and first-class install/export so the library is consumable via both
