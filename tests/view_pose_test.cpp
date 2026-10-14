@@ -130,6 +130,41 @@ TEST(ViewPose, PosesExactViewsAtTheEdgesOfAStronglyDistortedLens) {
   }
 }
 
+// A board turned a half turn, or within 1e-6 rad of one, about axes that
+// keep its face toward the camera, where IPPE's rotation vectors lose the
+// angle: the pose is exact, and its mirror image a far worse fit.
+TEST(ViewPose, PosesABoardTurnedHalfATurn) {
+  const compute::Board board = femto_board();
+  const camera::Vec3d middle(0.375, 0.225, 0.0);  // the 5 x 3 squares' middle
+  const double tilt = 15.0 * kPi / 180.0;
+  for (const camera::Vec3d& axis :
+       {camera::Vec3d(0.0, 0.0, 1.0),
+        camera::Vec3d(0.0, std::sin(tilt), std::cos(tilt)),
+        glm::normalize(camera::Vec3d(0.27, 0.42, 0.87))}) {
+    for (const camera::Vec3d& centre :
+         {camera::Vec3d(0.6, 0.3, 2.5), camera::Vec3d(-0.4, 0.2, 1.5)}) {
+      for (const double short_of_half : {0.0, 1e-9, 1e-7, 1e-6}) {
+        const camera::Mat3d rotation =
+            camera::rotation_from_rodrigues(axis * (kPi - short_of_half));
+        camera::Mat4d truth(rotation);
+        truth[3] = glm::dvec4(centre - rotation * middle, 1.0);
+        SCOPED_TRACE(testing::Message()
+                     << "axis (" << axis.x << ", " << axis.y << ", " << axis.z
+                     << "), centre (" << centre.x << ", " << centre.y << ", "
+                     << centre.z << "), " << short_of_half << " rad short");
+        const Observation view =
+            pinhole_view(board, truth, {0, 1, 2, 3, 4, 5, 6, 7});
+        const core::Result<ViewPose> pose = view_pose(pinhole(), board, view);
+        ASSERT_TRUE(pose.ok()) << pose.status().message();
+        EXPECT_LT(rotation_error(pose->best.board_to_camera, truth), 1e-9);
+        EXPECT_LT(translation_error(pose->best.board_to_camera, truth), 1e-9);
+        EXPECT_LT(pose->best.rms_px, 1e-6);
+        EXPECT_GT(pose->ambiguity(), 2.0);
+      }
+    }
+  }
+}
+
 // Every subset of 4 to 8 corners of each exact view that usable_for_pose
 // accepts gives IPPE's two poses, the best the board's: the check refuses
 // every view IPPE cannot pose, all but one corner on a line included.
