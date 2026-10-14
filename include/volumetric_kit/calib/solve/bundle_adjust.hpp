@@ -69,15 +69,16 @@ struct ViewResiduals {
 /// Accurate at every rotation: `cv::Rodrigues` is taken only from vector to
 /// matrix, whose derivative has no singularity below 2 pi, and never from
 /// matrix to vector. A corner behind the camera projects as OpenCV projects
-/// it; its depth says so.
+/// it; its depth says so. A pixel not a number gives a residual not a
+/// number.
 /// @param camera           The view's camera.
 /// @param board            The board seen.
 /// @param view             The corners seen; their weights are not used.
 /// @param world_to_camera  T_cw.
 /// @param board_to_world   T_wb.
 /// @return The residuals and derivatives; `InvalidArgument` for a corner id
-///         the board does not have; or what OpenCV threw
-///         (@ref compute::guarded).
+///         the board does not have or a transform not finite; or what OpenCV
+///         threw (@ref compute::guarded).
 VC_SOLVE_API core::Result<ViewResiduals> view_residuals(
     const compute::CvCamera& camera, const compute::Board& board,
     const Observation& view,
@@ -95,7 +96,8 @@ struct BundleAdjustOptions {
   /// fitting worse counts linearly, not squared.
   double huber_px = 1.0;
   /// A corner nearer its camera than this (metres), or behind it, as a solve
-  /// begins is dropped; a step that would bring a kept one nearer is refused.
+  /// begins is dropped; a step that would bring a kept one nearer is refused
+  /// (@ref bundle_adjust, step 2).
   double min_depth_m = 0.05;
   /// `cv::LevMarq`'s iterations in one solve, at most; at least 1.
   int max_iterations = 100;
@@ -120,8 +122,7 @@ struct BundleAdjustOptions {
   /// Each camera's 6 x 6 block of the normal matrix, with the boards
   /// eliminated, must have a condition number below this; above 1.
   double max_condition = 1e12;
-  /// Captures adjusted, at most, which keeps the dense solve below about a
-  /// thousand parameters; at least 1.
+  /// Captures adjusted, at most; at least 1.
   std::size_t max_captures = 150;
   /// The focal lengths' error, as a fraction of them, whose effect
   /// @ref IntrinsicsSensitivity predicts.
@@ -223,9 +224,14 @@ struct PoseCovariance {
 };
 
 /// @brief How far a camera's solved pose moves, to first order.
+///
+/// @code
+/// const PoseShift& moved = solution.sensitivity[j].focal[c];
+/// log(cameras[c].id, moved.rotation_deg, glm::length(moved.centre_mm));
+/// @endcode
 struct PoseShift {
-  double rotation_deg = 0.0;           ///< The rotation's turn (degrees).
-  recon::camera::Vec3d centre_m{0.0};  ///< The centre's move (metres).
+  double rotation_deg = 0.0;            ///< The rotation's turn (degrees).
+  recon::camera::Vec3d centre_mm{0.0};  ///< The centre's move (millimetres).
 };
 
 /// @brief What one camera's intrinsics being off does to every camera's
@@ -279,7 +285,7 @@ struct RigSolution {
   std::vector<PoseCovariance> covariance;
   /// The residuals' variance: `sum w |e|^2 / (m - n)` over the kept
   /// corners, `w` each one's weight times its Huber weight, `m` the
-  /// residuals and `n` the parameters.
+  /// residuals of those whose weight is positive and `n` the parameters.
   double variance = 0.0;
   /// What each camera's intrinsics being off does, in the rig's order.
   std::vector<IntrinsicsSensitivity> sensitivity;
@@ -304,7 +310,9 @@ struct RigSolution {
 ///    It stops after `max_iterations`, or when the energy's relative change
 ///    or the step's squared norm falls below 1e-12. As each solve begins,
 ///    corners nearer their cameras than `min_depth_m` are dropped and every
-///    rotation's angle is brought within pi.
+///    rotation's angle is brought within pi. A step that would bring a kept
+///    corner nearer than `min_depth_m`, or make a value not finite, has
+///    infinite energy, so `cv::LevMarq` tries a shorter one.
 /// 3. **Outlier rounds.** After each solve, up to `outlier_rounds` times:
 ///    the views whose RMS is above both `outlier_view_ratio` times the median
 ///    view's and `outlier_view_px`, and in the others the corners whose
@@ -338,8 +346,9 @@ struct RigSolution {
 ///         captures than `max_captures`, or a link left short of
 ///         `min_shared` captures (naming its cameras); `Numerical` when a
 ///         solve does not converge or meets a value that is not finite, for
-///         fewer residuals than parameters, or for a camera poorly
-///         constrained (naming it); or what OpenCV threw
+///         fewer weighted residuals than parameters, for a board or a camera
+///         poorly constrained (naming its capture or its id), or for the
+///         cameras poorly constrained together; or what OpenCV threw
 ///         (@ref compute::guarded). Each message starts `bundle_adjust: `.
 VC_SOLVE_API core::Result<RigSolution> bundle_adjust(
     const std::vector<RigCamera>& cameras, const compute::Board& board,

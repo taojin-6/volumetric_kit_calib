@@ -54,8 +54,8 @@ struct RigCamera {
 struct InitialiseOptions {
   /// A view whose own pose fits worse than this (RMS, pixels) is left out.
   double max_pnp_rms_px = 5.0;
-  /// A view whose poses' @ref ViewPose::ambiguity is below this is not
-  /// initialised from; at least 1.
+  /// A view whose poses' @ref ViewPose::ambiguity is below this places no
+  /// camera; at least 1.
   double min_ambiguity = 2.0;
   /// A view tilted more than this (degrees, @ref tilt_deg) is flagged.
   double oblique_deg = 70.0;
@@ -72,8 +72,9 @@ struct InitialiseOptions {
 /// @brief What @ref initialise does with a view.
 enum class ViewFate {
   Used,  ///< It initialises the rig.
-  /// It is not initialised from, as its two poses fit almost alike; it is left
-  /// for the adjustment (@ref bundle_adjust), on its capture's board.
+  /// Its two poses fit almost alike, so it places no camera. Its capture's
+  /// board comes from it only when the capture has no view used; the
+  /// adjustment (@ref bundle_adjust) takes it.
   Ambiguous,
   /// Left out: @ref compute::usable_for_pose refused it
   /// (@ref ViewRecord::use says why).

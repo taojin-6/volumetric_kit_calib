@@ -14,8 +14,11 @@
 #include <utility>
 #include <vector>
 
+#include <glm/gtc/constants.hpp>
+#include <glm/trigonometric.hpp>
 #include <opencv2/geometry.hpp>
 
+#include "common.hpp"
 #include "reprojection.hpp"
 #include "volumetric_kit/calib/compute/cv_pose.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
@@ -29,8 +32,7 @@ using detail::Derivatives;
 using detail::Pose;
 using detail::Projection;
 
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kDegPerRad = 180.0 / kPi;
+constexpr const char* kWhat = "bundle_adjust: ";
 constexpr double kInfinity = std::numeric_limits<double>::infinity();
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 // cv::LevMarq stops when the energy's relative change, or the step's squared
@@ -55,10 +57,11 @@ camera::RodriguesTransform transform_of(const Pose& p) noexcept {
 // The same rotation with its angle in [0, pi]: a vector longer than pi turns
 // the other way about its axis, by what it lacks of a whole turn.
 Pose within_pi(Pose p) noexcept {
+  const double pi = glm::pi<double>();
   const double angle = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
-  if (!(angle > kPi)) return p;
+  if (!(angle > pi)) return p;
   const double scale =
-      (angle - 2.0 * kPi * std::round(angle / (2.0 * kPi))) / angle;
+      (angle - 2.0 * pi * std::round(angle / (2.0 * pi))) / angle;
   for (int i = 0; i < 3; ++i) p[i] *= scale;
   return p;
 }
@@ -72,21 +75,10 @@ double huber_weight(double s, double delta) noexcept {
   return s <= delta ? 1.0 : delta / s;
 }
 
-double median(std::vector<double> values) {
-  const std::size_t n = values.size();
-  std::sort(values.begin(), values.end());
-  return n % 2 == 1 ? values[n / 2] : 0.5 * (values[n / 2 - 1] + values[n / 2]);
-}
-
 std::string number(double v) {
   char text[32];
   std::snprintf(text, sizeof text, "%.6g", v);
   return text;
-}
-
-core::Status refuse_option(const char* name, const char* rule) {
-  return core::Status::invalid_argument(std::string("bundle_adjust: options.") +
-                                        name + " must be " + rule);
 }
 
 bool positive(double v) noexcept { return v > 0.0 && std::isfinite(v); }
@@ -105,18 +97,20 @@ core::Status check_options(const BundleAdjustOptions& o) {
                    {"principal_px", o.principal_px}};
   for (const auto& option : positives) {
     if (!positive(option.value)) {
-      return refuse_option(option.name, "positive and finite");
+      return detail::refuse_option(kWhat, option.name, "positive and finite");
     }
   }
   if (o.max_iterations < 1)
-    return refuse_option("max_iterations", "at least 1");
+    return detail::refuse_option(kWhat, "max_iterations", "at least 1");
   if (o.outlier_rounds < 0)
-    return refuse_option("outlier_rounds", "at least 0");
-  if (o.min_shared < 1) return refuse_option("min_shared", "at least 1");
+    return detail::refuse_option(kWhat, "outlier_rounds", "at least 0");
+  if (o.min_shared < 1)
+    return detail::refuse_option(kWhat, "min_shared", "at least 1");
   if (!(o.max_condition > 1.0)) {
-    return refuse_option("max_condition", "above 1");
+    return detail::refuse_option(kWhat, "max_condition", "above 1");
   }
-  if (o.max_captures < 1) return refuse_option("max_captures", "at least 1");
+  if (o.max_captures < 1)
+    return detail::refuse_option(kWhat, "max_captures", "at least 1");
   return {};
 }
 
@@ -231,8 +225,8 @@ Outcome evaluate(const Problem& p, const std::vector<Active>& active,
     const View& view = *a.view;
     detail::project(
         p.lenses[view.camera], cameras[view.camera], boards[view.board],
-        a.object, jtj != nullptr ? Derivatives::Extrinsics : Derivatives::None,
-        at);
+        a.object, &a.pixels,
+        jtj != nullptr ? Derivatives::Extrinsics : Derivatives::None, at);
     cv::Matx66d hcc = cv::Matx66d::zeros();
     cv::Matx66d hcb = cv::Matx66d::zeros();
     cv::Matx66d hbb = cv::Matx66d::zeros();
@@ -242,8 +236,7 @@ Outcome evaluate(const Problem& p, const std::vector<Active>& active,
       if (!(at.depths[i] >= options.min_depth_m)) {
         return std::isnan(at.depths[i]) ? Outcome::NotFinite : Outcome::TooNear;
       }
-      const cv::Vec2d e(at.pixels[i].x - a.pixels[i].x,
-                        at.pixels[i].y - a.pixels[i].y);
+      const cv::Vec2d& e = at.residuals[i];
       const double s = std::sqrt(e.dot(e));
       if (!std::isfinite(s)) return Outcome::NotFinite;
       energy += a.weights[i] * huber(s, options.huber_px);
@@ -420,7 +413,8 @@ core::Status drop_too_near(Problem& p, const compute::Board& board,
     View& view = p.views[v];
     if (!counts(view)) continue;
     detail::project(p.lenses[view.camera], p.cameras[view.camera],
-                    p.boards[view.board], view.object, Derivatives::None, at);
+                    p.boards[view.board], view.object, nullptr,
+                    Derivatives::None, at);
     for (std::size_t i = 0; i < view.object.size(); ++i) {
       if (!view.kept[i] || at.depths[i] >= options.min_depth_m) continue;
       view.kept[i] = false;
@@ -452,25 +446,25 @@ core::Result<bool> drop_outliers(Problem& p, const compute::Board& board,
     const View& view = p.views[v];
     if (!counts(view)) continue;
     detail::project(p.lenses[view.camera], p.cameras[view.camera],
-                    p.boards[view.board], view.object, Derivatives::None, at);
+                    p.boards[view.board], view.object, &view.pixels,
+                    Derivatives::None, at);
     Fit& fit = fits.emplace_back();
     fit.view = v;
     fit.norms.assign(view.object.size(), kNaN);
     for (std::size_t i = 0; i < view.object.size(); ++i) {
       if (!view.kept[i]) continue;
-      const double du = at.pixels[i].x - view.pixels[i].x;
-      const double dv = at.pixels[i].y - view.pixels[i].y;
-      components.push_back(du);
-      components.push_back(dv);
-      fit.norms[i] = std::sqrt(du * du + dv * dv);
+      const cv::Vec2d& e = at.residuals[i];
+      components.push_back(e[0]);
+      components.push_back(e[1]);
+      fit.norms[i] = std::sqrt(e.dot(e));
     }
   }
   if (fits.empty()) return false;
-  const double centre = median(components);
+  const double centre = detail::median(components);
   for (double& c : components) c = std::abs(c - centre);
   const double corner_bound =
       std::max(options.outlier_px,
-               options.outlier_mads * kMadToSigma * median(components));
+               options.outlier_mads * kMadToSigma * detail::median(components));
   std::vector<double> rms;
   for (Fit& fit : fits) {
     double within = 0.0;
@@ -489,8 +483,9 @@ core::Result<bool> drop_outliers(Problem& p, const compute::Board& board,
         n_within > 0 ? std::sqrt(within / n_within) : std::sqrt(all / n_all);
     rms.push_back(fit.rms);
   }
-  const double view_bound = std::max(options.outlier_view_ratio * median(rms),
-                                     options.outlier_view_px);
+  const double view_bound =
+      std::max(options.outlier_view_ratio * detail::median(rms),
+               options.outlier_view_px);
 
   std::vector<bool> touched(p.views.size(), false);
   bool any = false;
@@ -524,33 +519,14 @@ core::Result<Problem> read_problem(const std::vector<RigCamera>& cameras,
                                    const std::vector<Observation>& views,
                                    const InitialRig& start,
                                    const BundleAdjustOptions& options) {
+  VKC_ASSIGN(detail::RigCameras rig, detail::read_rig_cameras(cameras, kWhat));
   const std::size_t k = cameras.size();
-  if (k == 0) {
-    return core::Status::invalid_argument(
-        "bundle_adjust: the rig has no cameras");
-  }
   Problem p;
-  std::map<std::string, std::size_t> by_id;
-  for (std::size_t c = 0; c < k; ++c) {
-    const std::string& id = cameras[c].id;
-    if (id.empty()) {
-      return core::Status::invalid_argument("bundle_adjust: camera " +
-                                            std::to_string(c) + " has no id");
-    }
-    if (!by_id.emplace(id, c).second) {
-      return core::Status::invalid_argument("bundle_adjust: camera id \"" + id +
-                                            "\" appears twice");
-    }
-    core::Result<compute::CvCamera> lens = compute::cv_camera(cameras[c].model);
-    if (!lens.ok()) {
-      return lens.status().with_context("bundle_adjust: camera " + id);
-    }
-    p.ids.push_back(id);
-    p.lenses.push_back(*lens);
-  }
-  for (const auto& entry : by_id) p.by_rank.push_back(entry.second);
-  std::vector<std::size_t> rank(k);
-  for (std::size_t r = 0; r < k; ++r) rank[p.by_rank[r]] = r;
+  p.ids = std::move(rig.ids);
+  p.lenses = std::move(rig.lenses);
+  p.by_rank = std::move(rig.by_rank);
+  const std::vector<std::size_t>& rank = rig.rank;
+  VKC_TRY(detail::check_one_view_each(views, kWhat));
 
   // The start's reference and cameras.
   if (start.reference >= k) {
@@ -603,7 +579,6 @@ core::Result<Problem> read_problem(const std::vector<RigCamera>& cameras,
 
   // The views adjusted, and the captures they see.
   std::map<std::int64_t, std::size_t> board_of;
-  std::map<std::pair<std::int64_t, std::size_t>, std::size_t> seen;
   const std::vector<cv::Point3d>& corners = board.object_points();
   for (std::size_t i = 0; i < views.size(); ++i) {
     const Observation& view = views[i];
@@ -614,11 +589,6 @@ core::Result<Problem> read_problem(const std::vector<RigCamera>& cameras,
       return core::Status::invalid_argument(
           "bundle_adjust: start's record of " + what +
           " is not of its camera and capture");
-    }
-    if (!seen.emplace(std::make_pair(view.frame_id, record.camera), i).second) {
-      return core::Status::invalid_argument(
-          "bundle_adjust: camera " + view.camera_id +
-          " has two views of capture " + std::to_string(view.frame_id));
     }
     if (record.fate != ViewFate::Used && record.fate != ViewFate::Ambiguous) {
       continue;
@@ -684,23 +654,32 @@ core::Result<Problem> read_problem(const std::vector<RigCamera>& cameras,
 // keep a view of.
 core::Status check_links(const Problem& p, const InitialRig& start,
                          const BundleAdjustOptions& options) {
-  std::vector<std::vector<bool>> kept(
-      p.cameras.size(), std::vector<bool>(p.captures.size(), false));
+  const std::size_t k = p.cameras.size();
+  const std::size_t n = p.captures.size();
+  std::vector<std::vector<bool>> adjusted(k, std::vector<bool>(n, false));
+  std::vector<std::vector<bool>> kept(k, std::vector<bool>(n, false));
   for (const View& view : p.views) {
+    adjusted[view.camera][view.board] = true;
     if (counts(view)) kept[view.camera][view.board] = true;
   }
   for (const PlacedLink& link : start.links) {
     int shared = 0;
-    for (std::size_t b = 0; b < p.captures.size(); ++b) {
+    int before = 0;  // as the adjustment began
+    for (std::size_t b = 0; b < n; ++b) {
       shared += kept[link.camera][b] && kept[link.parent][b] ? 1 : 0;
+      before += adjusted[link.camera][b] && adjusted[link.parent][b] ? 1 : 0;
     }
-    if (shared < options.min_shared) {
-      return core::Status::invalid_argument(
-          "bundle_adjust: " + p.ids[link.camera] + " and " +
-          p.ids[link.parent] + " share " + std::to_string(shared) +
-          " captures once the outliers are dropped, fewer than min_shared (" +
-          std::to_string(options.min_shared) + ")");
+    if (shared >= options.min_shared) continue;
+    std::string why = "bundle_adjust: " + p.ids[link.camera] + " and " +
+                      p.ids[link.parent] + " share " + std::to_string(shared) +
+                      (shared == 1 ? " capture" : " captures") +
+                      " in which both keep a view";
+    if (shared < before) {
+      why += " (" + std::to_string(before) + " before views were dropped)";
     }
+    return core::Status::invalid_argument(why + ", fewer than min_shared (" +
+                                          std::to_string(options.min_shared) +
+                                          ")");
   }
   return {};
 }
@@ -740,8 +719,8 @@ PoseDerivatives pose_derivatives(const Pose& world_to_camera) {
 PoseShift shift_of(const PoseDerivatives& d, const cv::Vec6d& step) {
   const cv::Vec3d turn = d.rotation * cv::Vec3d(step[0], step[1], step[2]);
   const cv::Vec3d moved = d.centre * step;
-  return {std::sqrt(turn.dot(turn)) * kDegPerRad,
-          {moved[0], moved[1], moved[2]}};
+  return {glm::degrees(std::sqrt(turn.dot(turn))),
+          1000.0 * camera::Vec3d(moved[0], moved[1], moved[2])};
 }
 
 // The guard on each camera's conditioning, the covariance and the
@@ -761,26 +740,27 @@ core::Status uncertainty(const Problem& p, const BundleAdjustOptions& options,
   };
   std::vector<Line> lines;
   double weighted = 0.0;
-  int residuals = 0;
+  int residuals = 0;  // those weighted: a corner of weight 0 adds nothing
   for (const Active& a : active_of(p)) {
     Line& line = lines.emplace_back();
     line.view = a.view;
     detail::project(p.lenses[a.view->camera], p.cameras[a.view->camera],
-                    p.boards[a.view->board], a.object, Derivatives::All,
-                    line.at);
+                    p.boards[a.view->board], a.object, &a.pixels,
+                    Derivatives::All, line.at);
     for (std::size_t i = 0; i < a.object.size(); ++i) {
-      const double s = std::hypot(line.at.pixels[i].x - a.pixels[i].x,
-                                  line.at.pixels[i].y - a.pixels[i].y);
+      const cv::Vec2d& e = line.at.residuals[i];
+      const double s = std::sqrt(e.dot(e));
       const double w = a.weights[i] * huber_weight(s, options.huber_px);
       line.w.push_back(w);
       weighted += w * s * s;
-      residuals += 2;
+      residuals += a.weights[i] > 0.0 ? 2 : 0;
     }
   }
   if (residuals <= layout.size) {
     return core::Status::numerical(
-        "bundle_adjust: " + std::to_string(residuals) + " residuals for " +
-        std::to_string(layout.size) + " parameters");
+        "bundle_adjust: " + std::to_string(residuals) +
+        " weighted residuals for " + std::to_string(layout.size) +
+        " parameters");
   }
   cv::Mat_<double> h(layout.size, layout.size, 0.0);
   for (const Line& line : lines) {
@@ -816,6 +796,11 @@ core::Status uncertainty(const Problem& p, const BundleAdjustOptions& options,
     for (const std::size_t c : p.by_rank) {
       const int oc = layout.camera[c];
       if (oc < 0) continue;
+      // TODO: the plan's max_condition, 1e12, stops only a block all but
+      // singular: on the synthetic rig the blocks' condition numbers are 3e2
+      // to 4e3, a camera tied to the rig by 3 shared captures included, and
+      // they mix radians and metres. Revisit it with H3's and H5's data, or
+      // scale the translations by the boards' depth to make it unitless.
       const cv::Mat_<double> block = s(cv::Rect(oc, oc, 6, 6));
       cv::Mat values;  // descending
       cv::eigen(0.5 * (block + block.t()), values);
@@ -855,7 +840,7 @@ core::Status uncertainty(const Problem& p, const BundleAdjustOptions& options,
         d.rotation * cov.covariance.get_minor<3, 3>(0, 0) * d.rotation.t();
     const cv::Matx33d centre = d.centre * cov.covariance * d.centre.t();
     cov.rotation_deg =
-        std::sqrt(std::max(0.0, cv::trace(rotation))) * kDegPerRad;
+        glm::degrees(std::sqrt(std::max(0.0, cv::trace(rotation))));
     cov.centre_mm = std::sqrt(std::max(0.0, cv::trace(centre))) * 1000.0;
   }
 
@@ -944,7 +929,8 @@ void write_solution(const Problem& p, const std::vector<RigCamera>& cameras,
   for (const View* view : by_observation) {
     if (view == nullptr) continue;
     detail::project(p.lenses[view->camera], p.cameras[view->camera],
-                    p.boards[view->board], view->object, Derivatives::None, at);
+                    p.boards[view->board], view->object, &view->pixels,
+                    Derivatives::None, at);
     for (std::size_t i = 0; i < view->object.size(); ++i) {
       CornerResidual& r = out.residuals.emplace_back();
       r.camera = view->camera;
@@ -952,8 +938,7 @@ void write_solution(const Problem& p, const std::vector<RigCamera>& cameras,
       r.corner = view->ids[i];
       r.pixel = {view->pixels[i].x, view->pixels[i].y};
       r.residual = at.depths[i] > 0.0
-                       ? camera::Vec2d(at.pixels[i].x - view->pixels[i].x,
-                                       at.pixels[i].y - view->pixels[i].y)
+                       ? camera::Vec2d(at.residuals[i][0], at.residuals[i][1])
                        : camera::Vec2d(kNaN);
       r.weight = view->weights[i];
       r.huber_weight = huber_weight(glm::length(r.residual), options.huber_px);
@@ -973,7 +958,9 @@ core::Result<ViewResiduals> view_residuals(
       "view_residuals", [&]() -> core::Result<ViewResiduals> {
         const std::vector<cv::Point3d>& corners = board.object_points();
         std::vector<cv::Point3d> object;
+        std::vector<cv::Point2d> detected;
         object.reserve(view.points.size());
+        detected.reserve(view.points.size());
         for (const DetectedPoint& point : view.points) {
           if (point.id < 0 ||
               static_cast<std::size_t>(point.id) >= corners.size()) {
@@ -982,16 +969,23 @@ core::Result<ViewResiduals> view_residuals(
                                                   " is not one of the board's");
           }
           object.push_back(corners[static_cast<std::size_t>(point.id)]);
+          detected.emplace_back(point.pixel.x, point.pixel.y);
+        }
+        const Pose camera_pose = pose_of(world_to_camera);
+        const Pose board_pose = pose_of(board_to_world);
+        for (int k = 0; k < 6; ++k) {
+          if (!std::isfinite(camera_pose[k]) || !std::isfinite(board_pose[k])) {
+            return core::Status::invalid_argument(
+                "view_residuals: a transform is not finite");
+          }
         }
         Projection at;
-        detail::project(camera, pose_of(world_to_camera),
-                        pose_of(board_to_world), object,
+        detail::project(camera, camera_pose, board_pose, object, &detected,
                         Derivatives::Extrinsics, at);
         ViewResiduals out;
         out.residuals.reserve(object.size());
-        for (std::size_t i = 0; i < object.size(); ++i) {
-          out.residuals.emplace_back(at.pixels[i].x - view.points[i].pixel.x,
-                                     at.pixels[i].y - view.points[i].pixel.y);
+        for (const cv::Vec2d& e : at.residuals) {
+          out.residuals.emplace_back(e[0], e[1]);
         }
         out.depths = std::move(at.depths);
         out.camera_jacobian = std::move(at.by_camera);

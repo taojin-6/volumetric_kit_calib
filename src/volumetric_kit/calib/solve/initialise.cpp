@@ -16,6 +16,7 @@
 
 #include <glm/trigonometric.hpp>
 
+#include "common.hpp"
 #include "reprojection.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
@@ -26,31 +27,30 @@ namespace {
 
 namespace camera = recon::camera;
 
-core::Status refuse_option(const char* name, const char* rule) {
-  return core::Status::invalid_argument(std::string("initialise: options.") +
-                                        name + " must be " + rule);
-}
+constexpr const char* kWhat = "initialise: ";
 
 core::Status check_options(const InitialiseOptions& options) {
   if (!(options.max_pnp_rms_px > 0.0) ||
       !std::isfinite(options.max_pnp_rms_px)) {
-    return refuse_option("max_pnp_rms_px", "positive and finite");
+    return detail::refuse_option(kWhat, "max_pnp_rms_px",
+                                 "positive and finite");
   }
   if (!(options.min_ambiguity >= 1.0) ||
       !std::isfinite(options.min_ambiguity)) {
-    return refuse_option("min_ambiguity", "at least 1 and finite");
+    return detail::refuse_option(kWhat, "min_ambiguity",
+                                 "at least 1 and finite");
   }
   if (!(options.oblique_deg > 0.0 && options.oblique_deg <= 180.0)) {
-    return refuse_option("oblique_deg", "in (0, 180]");
+    return detail::refuse_option(kWhat, "oblique_deg", "in (0, 180]");
   }
   if (options.weak_below < 0) {
-    return refuse_option("weak_below", "at least 0");
+    return detail::refuse_option(kWhat, "weak_below", "at least 0");
   }
   if (!(options.inlier_deg > 0.0 && options.inlier_deg < 90.0)) {
-    return refuse_option("inlier_deg", "in (0, 90)");
+    return detail::refuse_option(kWhat, "inlier_deg", "in (0, 90)");
   }
   if (!(options.truncation_px > 0.0) || !std::isfinite(options.truncation_px)) {
-    return refuse_option("truncation_px", "positive and finite");
+    return detail::refuse_option(kWhat, "truncation_px", "positive and finite");
   }
   return {};
 }
@@ -59,12 +59,6 @@ core::Status check_options(const InitialiseOptions& options) {
 double angle_deg(const camera::Mat3d& a, const camera::Mat3d& b) noexcept {
   return glm::degrees(
       glm::length(camera::rodrigues_from_rotation(glm::transpose(a) * b)));
-}
-
-double median(std::vector<double> values) {
-  const std::size_t n = values.size();
-  std::sort(values.begin(), values.end());
-  return n % 2 == 1 ? values[n / 2] : 0.5 * (values[n / 2 - 1] + values[n / 2]);
 }
 
 // A robust mean of transforms that each estimate one: the rotation with the
@@ -90,7 +84,7 @@ RobustMean robust_mean(const std::vector<camera::Mat4d>& candidates,
     for (std::size_t j = 0; j < n; ++j) {
       angles[j] = angle_deg(rotations[i], rotations[j]);
     }
-    const double m = median(std::move(angles));
+    const double m = detail::median(std::move(angles));
     if (m < least) {
       least = m;
       medoid = i;
@@ -113,8 +107,9 @@ RobustMean robust_mean(const std::vector<camera::Mat4d>& candidates,
   // sum's: the sum is invertible with a positive determinant, as
   // nearest_rotation needs.
   mean.transform = camera::Mat4d(camera::nearest_rotation(sum));
-  mean.transform[3] = glm::dvec4(median(std::move(x)), median(std::move(y)),
-                                 median(std::move(z)), 1.0);
+  mean.transform[3] =
+      glm::dvec4(detail::median(std::move(x)), detail::median(std::move(y)),
+                 detail::median(std::move(z)), 1.0);
   return mean;
 }
 
@@ -200,48 +195,21 @@ core::Result<InitialRig> initialise(const std::vector<RigCamera>& cameras,
                                     const InitialiseOptions& options) {
   return compute::guarded("initialise", [&]() -> core::Result<InitialRig> {
     VKC_TRY(check_options(options));
+    // The cameras by id, in OpenCV's types, and each one's rank in id order.
+    VKC_ASSIGN(const detail::RigCameras rig_cameras,
+               detail::read_rig_cameras(cameras, kWhat));
     const std::size_t k = cameras.size();
-    if (k == 0) {
-      return core::Status::invalid_argument(
-          "initialise: the rig has no cameras");
-    }
     if (reference >= k) {
       return core::Status::invalid_argument(
           "initialise: reference " + std::to_string(reference) +
           " is not one of the rig's " + std::to_string(k) + " cameras");
     }
-
-    // The cameras by id, in OpenCV's types, and each one's rank in id order.
-    std::map<std::string, std::size_t> by_id;
-    std::vector<std::string> ids;
-    std::vector<compute::CvCamera> lenses;
-    ids.reserve(k);
-    lenses.reserve(k);
-    for (std::size_t c = 0; c < k; ++c) {
-      const std::string& id = cameras[c].id;
-      if (id.empty()) {
-        return core::Status::invalid_argument("initialise: camera " +
-                                              std::to_string(c) + " has no id");
-      }
-      if (!by_id.emplace(id, c).second) {
-        return core::Status::invalid_argument("initialise: camera id \"" + id +
-                                              "\" appears twice");
-      }
-      core::Result<compute::CvCamera> lens =
-          compute::cv_camera(cameras[c].model);
-      if (!lens.ok()) {
-        return lens.status().with_context("initialise: camera " + id);
-      }
-      ids.push_back(id);
-      lenses.push_back(*lens);
-    }
-    std::vector<std::size_t> rank(k);
-    std::vector<std::size_t> by_rank;
-    by_rank.reserve(k);
-    for (const auto& entry : by_id) {
-      rank[entry.second] = by_rank.size();
-      by_rank.push_back(entry.second);
-    }
+    VKC_TRY(detail::check_one_view_each(views, kWhat));
+    const std::map<std::string, std::size_t>& by_id = rig_cameras.by_id;
+    const std::vector<std::string>& ids = rig_cameras.ids;
+    const std::vector<compute::CvCamera>& lenses = rig_cameras.lenses;
+    const std::vector<std::size_t>& rank = rig_cameras.rank;
+    const std::vector<std::size_t>& by_rank = rig_cameras.by_rank;
 
     // 1. Each view: whether it is usable, its own poses, and its fate.
     InitialRig rig;
@@ -249,7 +217,6 @@ core::Result<InitialRig> initialise(const std::vector<RigCamera>& cameras,
     rig.views.resize(views.size());
     std::map<std::int64_t, Capture> captures;
     std::map<std::int64_t, Capture> ambiguous;
-    std::map<std::pair<std::int64_t, std::size_t>, std::size_t> seen;
     for (std::size_t i = 0; i < views.size(); ++i) {
       const Observation& view = views[i];
       const auto found = by_id.find(view.camera_id);
@@ -259,11 +226,6 @@ core::Result<InitialRig> initialise(const std::vector<RigCamera>& cameras,
             " names camera \"" + view.camera_id + "\", which the rig lacks");
       }
       const std::size_t c = found->second;
-      if (!seen.emplace(std::make_pair(view.frame_id, c), i).second) {
-        return core::Status::invalid_argument(
-            "initialise: camera " + view.camera_id +
-            " has two views of capture " + std::to_string(view.frame_id));
-      }
       ViewRecord& record = rig.views[i];
       record.camera = c;
       record.capture = view.frame_id;

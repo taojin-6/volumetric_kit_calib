@@ -14,8 +14,8 @@ add_library(calib_solve)
 add_library(volumetric_kit::calib_solve ALIAS calib_solve)
 
 target_sources(
-  calib_solve PRIVATE bundle_adjust.cpp initialise.cpp reprojection.cpp
-                      spanning_tree.cpp view_pose.cpp)
+  calib_solve PRIVATE bundle_adjust.cpp common.cpp initialise.cpp
+                      reprojection.cpp spanning_tree.cpp view_pose.cpp)
 
 # The tier's own export macro and guard (see calib_core).
 generate_export_header(
