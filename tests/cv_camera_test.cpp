@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-// recon's camera model in OpenCV's types: its layout, cv::projectPoints equal
-// to recon's distort_rational, pixels undistorted to convergence, and the
-// models it refuses.
+// recon's camera model in OpenCV's types: its layout, cv::projectPoints and
+// compute::project equal to recon's distort_rational, pixels undistorted to
+// convergence, and the models it refuses.
 
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 
@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -106,14 +107,21 @@ void expect_projects_as_recon(const camera::CameraModel& model,
   const double lens[8] = {d.k1, d.k2, d.p1, d.p2, d.k3, d.k4, d.k5, d.k6};
   const camera::PinholeIntrinsics& k = model.intrinsics;
   double worst = 0.0;
+  double worst_project = 0.0;  // compute::project's
   for (std::size_t i = 0; i < points.size(); ++i) {
     double xd = 0.0, yd = 0.0;
     camera::distort_rational(lens, points[i].x / points[i].z,
                              points[i].y / points[i].z, &xd, &yd);
     worst = std::max(worst, std::hypot(k.fx * xd + k.cx - pixels[i].x,
                                        k.fy * yd + k.cy - pixels[i].y));
+    const std::optional<camera::Vec2d> pixel =
+        project(*cam, {points[i].x, points[i].y, points[i].z});
+    ASSERT_TRUE(pixel.has_value()) << i;
+    worst_project = std::max(worst_project, std::hypot(pixel->x - pixels[i].x,
+                                                       pixel->y - pixels[i].y));
   }
   EXPECT_LE(worst, 1e-9);
+  EXPECT_LE(worst_project, 1e-9);
 }
 
 TEST(CvCamera, HoldsTheModelInOpenCVsLayout) {
@@ -135,6 +143,22 @@ TEST(CvCamera, ProjectsAsReconsColourLikeLens) {
 // The depth-like lens folds over at r = 1.83, past its corners at 1.244.
 TEST(CvCamera, ProjectsAsReconsDepthLikeLens) {
   expect_projects_as_recon(test::depth_like_lens(), 1.244);
+}
+
+// A point not in front of the camera, or one so far off-axis that the lens
+// overflows, has no pixel.
+TEST(CvCamera, ProjectsNothingBehindTheCameraOrPastTheLens) {
+  const CvCamera cam = cv_camera(test::color_like_lens()).value();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double inf = std::numeric_limits<double>::infinity();
+  EXPECT_TRUE(project(cam, {0.1, 0.2, 2.0}).has_value());
+  for (const camera::Vec3d& point :
+       {camera::Vec3d(0.1, 0.2, 0.0), camera::Vec3d(0.1, 0.2, -2.0),
+        camera::Vec3d(0.1, 0.2, nan), camera::Vec3d(nan, 0.2, 2.0),
+        camera::Vec3d(1e300, 0.0, 1.0), camera::Vec3d(inf, 0.0, 1.0)}) {
+    EXPECT_FALSE(project(cam, point).has_value())
+        << point.x << ", " << point.y << ", " << point.z;
+  }
 }
 
 // Pixels across the whole image, its corners included.

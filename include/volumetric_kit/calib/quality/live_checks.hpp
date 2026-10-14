@@ -10,8 +10,8 @@
 ///        stillness and flags one whose live corners disagree with its full
 ///        ones (@ref live_vs_full_flagged).
 ///
-/// Pure and geometric: no sensor or lens profile is taken (DECISIONS.md,
-/// 2026-10-14). Every function may run on several threads at once.
+/// Pure and geometric (DECISIONS.md, 2026-10-14); every function may run on
+/// several threads at once.
 
 #include <optional>
 #include <vector>
@@ -21,8 +21,8 @@
 #include "volumetric_kit/calib/core/detection.hpp"
 #include "volumetric_kit/calib/core/view_check.hpp"
 #include "volumetric_kit/calib/quality/export.hpp"
+#include "volumetric_kit/calib/solve/view_pose.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::quality {
 
@@ -35,19 +35,18 @@ namespace volumetric_kit::calib::quality {
 /// @endcode
 struct ViewCheckOptions {
   /// A view tilted more than this (degrees) is `Oblique` (amber); one tilted
-  /// more than the solve's `InitialiseOptions::oblique_deg`, 70, is flagged
-  /// by the solve too (red).
+  /// more than the solve's `InitialiseOptions::oblique_deg` is flagged by the
+  /// solve too (red).
   double oblique_deg = 60.0;
   double far_m = 4.5;  ///< A board farther than this (metres) is `Far`.
-  /// A view tilted less than this (degrees) is frontal: the rig's board then
-  /// fixes its own rotation less than half as well as at 45 degrees
-  /// (DECISIONS.md, 2026-10-14).
+  /// A view tilted less than this (degrees) is frontal (DECISIONS.md,
+  /// 2026-10-14).
   double frontal_deg = 20.0;
 };
 
 /// @brief One camera's view of the board, checked: the record a capture
-///        stores, and the view's own pose, which the session's checks
-///        compare.
+///        stores, and the view's own poses, which the session's checks
+///        compare and judge as the solve does.
 ///
 /// @code
 /// VKC_ASSIGN(const CheckedView view, check_view(cam, board, detection));
@@ -55,8 +54,9 @@ struct ViewCheckOptions {
 /// @endcode
 struct CheckedView {
   ViewCheck check;  ///< What the view is worth.
-  /// Its own pose, T_cb (IPPE's better fit): empty when the view has none.
-  std::optional<recon::camera::Mat4d> board_to_camera;
+  /// Its own poses (@ref solve::view_pose; `pose->best.board_to_camera` is
+  /// T_cb): empty when the view has none.
+  std::optional<solve::ViewPose> pose;
   /// Posed, and tilted less than `ViewCheckOptions::frontal_deg`.
   bool frontal = false;
 };

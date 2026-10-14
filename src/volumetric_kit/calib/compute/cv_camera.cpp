@@ -3,12 +3,14 @@
 
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 
 #include <opencv2/geometry.hpp>
 
 #include "volumetric_kit/calib/compute/guarded.hpp"
+#include "volumetric_kit/recon/camera/projection.hpp"
 
 namespace volumetric_kit::calib::compute {
 
@@ -31,6 +33,20 @@ core::Result<CvCamera> cv_camera(const recon::camera::CameraModel& model) {
         cv::Vec<double, 8>(d.k1, d.k2, d.p1, d.p2, d.k3, d.k4, d.k5, d.k6);
     return camera;
   });
+}
+
+std::optional<recon::camera::Vec2d> project(
+    const CvCamera& camera, const recon::camera::Vec3d& point) noexcept {
+  if (!(point.z > 0.0)) return std::nullopt;
+  double xd = 0.0;
+  double yd = 0.0;
+  recon::camera::distort_rational(camera.distortion.val, point.x / point.z,
+                                  point.y / point.z, &xd, &yd);
+  const cv::Matx33d& k = camera.camera_matrix;
+  const recon::camera::Vec2d pixel(k(0, 0) * xd + k(0, 2),
+                                   k(1, 1) * yd + k(1, 2));
+  if (!std::isfinite(pixel.x) || !std::isfinite(pixel.y)) return std::nullopt;
+  return pixel;
 }
 
 core::Result<std::vector<cv::Point2d>> undistort_points(

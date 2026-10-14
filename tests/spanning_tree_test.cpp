@@ -167,6 +167,51 @@ TEST(SpanningTree, NamesEveryCameraOutsideTheReferencesTree) {
             "reference, SN-A");
 }
 
+// The cameras a chain of shared captures links to the reference: those the
+// tree places.
+TEST(ReachedFrom, FollowsSharedCapturesFromTheReference) {
+  // 0-1-2 chained, 3-4 apart, 5 alone.
+  Covisibility shared(6, std::vector<int>(6, 0));
+  for (const auto& [a, b] :
+       {std::pair{0, 1}, std::pair{1, 2}, std::pair{3, 4}}) {
+    shared[a][b] = shared[b][a] = 2;
+  }
+  for (std::size_t c = 0; c < 6; ++c) shared[c][c] = 3;
+  const auto reached = [&](std::size_t reference) {
+    core::Result<std::vector<bool>> result =
+        core::Status::invalid_argument("unset");
+    EXPECT_NO_THROW(result = reached_from(shared, reference));
+    EXPECT_TRUE(result.ok()) << result.status().message();
+    return result.ok() ? *result : std::vector<bool>{};
+  };
+  EXPECT_EQ(reached(2),
+            (std::vector<bool>{true, true, true, false, false, false}));
+  EXPECT_EQ(reached(4),
+            (std::vector<bool>{false, false, false, true, true, false}));
+  EXPECT_EQ(reached(5),
+            (std::vector<bool>{false, false, false, false, false, true}));
+
+  const struct {
+    const char* name;
+    Covisibility shared;
+    std::size_t reference;
+  } cases[] = {
+      {"no cameras", {}, 0},
+      {"a short row", {{2, 1}, {1}}, 0},
+      {"not symmetric", {{2, 1}, {0, 2}}, 0},
+      {"a negative count", {{2, -1}, {-1, 2}}, 0},
+      {"a reference outside", {{2, 1}, {1, 2}}, 2},
+  };
+  for (const auto& c : cases) {
+    core::Result<std::vector<bool>> result =
+        core::Status::invalid_argument("unset");
+    EXPECT_NO_THROW(result = reached_from(c.shared, c.reference));
+    EXPECT_EQ(result.status().domain(), Code::InvalidArgument) << c.name;
+    EXPECT_EQ(result.status().message().rfind("reached_from: ", 0), 0u)
+        << c.name << ": " << result.status().message();
+  }
+}
+
 TEST(SpanningTree, ARigOfOneIsItsReference) {
   const core::Result<SpanningTree> tree = tree_of({{3}}, {"only"}, 0);
   ASSERT_TRUE(tree.ok()) << tree.status().message();

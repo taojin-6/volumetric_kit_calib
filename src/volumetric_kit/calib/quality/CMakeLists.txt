@@ -4,8 +4,8 @@
 # --- calib_quality: Tier 3 ---------------------------------------------------
 # What the views and the captures are worth, before and after the solve: the
 # live checks of each view and set, the capture rule, and the session's checks.
-# Pure and geometric, on detect's records and solve's poses and tree. Built with
-# VC_WITH_OPENCV.
+# Pure and geometric, on core's detection records and solve's poses, view rule
+# and tree. Built with VC_WITH_OPENCV.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
@@ -42,8 +42,8 @@ target_include_directories(
   calib_quality PUBLIC "$<BUILD_INTERFACE:${_vc_generated_inc}>"
                        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
-# The public headers name compute's board and camera and solve's rig cameras and
-# covisibility; nothing calls OpenCV directly.
+# The public headers name compute's board and camera and solve's rig cameras,
+# poses, options and covisibility; nothing calls OpenCV directly.
 target_link_libraries(calib_quality PUBLIC calib_solve)
 
 vc_target_warnings(calib_quality)

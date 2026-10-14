@@ -14,8 +14,6 @@
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
-#include "volumetric_kit/calib/solve/view_pose.hpp"
-#include "volumetric_kit/recon/camera/projection.hpp"
 
 namespace volumetric_kit::calib::quality {
 namespace {
@@ -23,19 +21,6 @@ namespace {
 namespace camera = recon::camera;
 
 constexpr int kCellsPerSide = 3;
-
-// Where `camera` images `point`, in its frame; empty behind the camera.
-std::optional<camera::Vec2d> project(const compute::CvCamera& cam,
-                                     const camera::Vec3d& point) noexcept {
-  if (!(point.z > 0.0)) return std::nullopt;
-  double xd = 0.0;
-  double yd = 0.0;
-  camera::distort_rational(cam.distortion.val, point.x / point.z,
-                           point.y / point.z, &xd, &yd);
-  const cv::Matx33d& k = cam.camera_matrix;
-  return camera::Vec2d(k(0, 0) * xd + k(0, 1) * yd + k(0, 2),
-                       k(1, 1) * yd + k(1, 2));
-}
 
 // A detection's corners by id, sorted; InvalidArgument for an id repeated or
 // a pixel not finite.
@@ -105,14 +90,13 @@ core::Result<CheckedView> check_view(const compute::CvCamera& camera,
     }
 
     const camera::Mat4d& board_to_camera = pose->best.board_to_camera;
-    const cv::Point3d middle = board.centre();
-    const camera::Vec3d centre(board_to_camera *
-                               glm::dvec4(middle.x, middle.y, middle.z, 1.0));
-    view.board_to_camera = board_to_camera;
+    const camera::Vec3d centre = compute::centre_in(board, board_to_camera);
     check.distance_m = glm::length(centre);
     check.tilt_deg = solve::tilt_deg(board, board_to_camera);
     check.pnp_rms_px = pose->best.rms_px;
-    if (const std::optional<camera::Vec2d> pixel = project(camera, centre)) {
+    view.pose = *pose;
+    if (const std::optional<camera::Vec2d> pixel =
+            compute::project(camera, centre)) {
       check.cell = detail::grid_cell(pixel->x, pixel->y, camera.size,
                                      kCellsPerSide, kCellsPerSide);
     }

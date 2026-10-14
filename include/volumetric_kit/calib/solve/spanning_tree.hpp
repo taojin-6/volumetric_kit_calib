@@ -69,6 +69,22 @@ struct SpanningTree {
   std::vector<TreeLink> links;
 };
 
+/// @brief Which cameras the reference reaches through shared captures: those
+///        @ref spanning_tree places.
+/// @param covisibility  The captures each pair shares (@ref covisibility).
+/// @param reference     The root's index.
+/// @return For each camera, whether a chain of shared captures links it to
+///         @p reference (which reaches itself); `InvalidArgument` for a matrix
+///         that is not square, symmetric and non-negative, or a reference
+///         outside it; or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const std::vector<bool> reached, reached_from(shared, primary));
+/// if (!reached[c]) warn(ids[c] + " shares no capture with the tree");
+/// @endcode
+VC_SOLVE_API core::Result<std::vector<bool>> reached_from(
+    const Covisibility& covisibility, std::size_t reference);
+
 /// @brief The maximum spanning tree of @p covisibility, rooted at
 ///        @p reference: OpenCV's `buildMST` (Prim) on weights of minus the
 ///        shared captures.
@@ -81,7 +97,8 @@ struct SpanningTree {
 /// @param reference     The root's index.
 /// @param weak_below    A link sharing fewer captures than this is weak.
 /// @return The tree; `InvalidArgument` naming every camera that shares no
-///         capture with the reference's tree, or for inputs that do not
+///         capture with the reference's tree (@ref reached_from), or for
+///         inputs that do not
 ///         agree (sizes, a matrix that is not symmetric or has a negative
 ///         count, repeated ids, a reference outside the rig, a negative
 ///         @p weak_below); or what OpenCV threw (@ref compute::guarded).

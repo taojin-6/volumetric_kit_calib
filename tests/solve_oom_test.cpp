@@ -131,6 +131,25 @@ TEST(SolveOom, TreeAndCovisibility) {
   const std::vector<std::vector<std::size_t>> fine = {{0, 1}, {1, 2}};
   expect_oom_anywhere([&] { return covisibility(3, twice); });
   expect_oom_anywhere([&] { return covisibility(3, fine); });
+  expect_oom_anywhere([&] { return reached_from(apart, 0); });
+  expect_oom_anywhere([&] { return reached_from(apart, 3); });
+}
+
+// Checking a rig keeps cv_camera's OutOfMemory, never recoding it.
+TEST(SolveOom, RigChecks) {
+  Small scene;
+  expect_oom_anywhere([&] { return check_rig(scene.cameras, 0); });
+  expect_oom_anywhere([&] { return check_rig(scene.cameras, 4); });
+  // Refusals, as Results (a Status has no status()).
+  const std::vector<std::string> twice = {"A", "B", "A"};
+  expect_oom_anywhere(
+      [&] { return core::Result<bool>(check_camera_ids(twice)); });
+  scene.cameras[3].model.intrinsics.fx = 0.0;
+  expect_oom_anywhere([&] { return check_rig(scene.cameras, 0); });
+  InitialiseOptions options;
+  options.min_ambiguity = 0.5;
+  expect_oom_anywhere(
+      [&] { return core::Result<bool>(check_initialise_options(options)); });
 }
 
 }  // namespace

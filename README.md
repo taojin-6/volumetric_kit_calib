@@ -50,10 +50,11 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
 - **Compute:** a CPU backend is the correctness oracle: OpenCV, behind
   recon's and calib's types. The `compute` tier holds the bridge -- the camera
   model and rigid transforms in OpenCV's types, the ChArUco board and whether a
-  view of it fixes a pose, and `guarded()`, which returns what OpenCV throws as
-  a `Status`. GPU work runs on the core's vulkan tier, on a `VkDevice` shared
-  with `recon` and `gfx`, so frames pass between them without copies (MoltenVK
-  on Apple; native Metal deferred).
+  view of it fixes a pose, the measures the solve and the checks share, and
+  `guarded()`, which returns what OpenCV throws as a `Status`. GPU work runs
+  on the core's vulkan tier, on a `VkDevice` shared with `recon` and `gfx`, so
+  frames pass between them without copies (MoltenVK on Apple; native Metal
+  deferred).
 - **Detection:** the `detect` tier finds the ChArUco board in an 8-bit luma
   image with OpenCV's detector, as corners by id and markers, at full
   resolution or by the live view's faster hybrid.
@@ -70,9 +71,9 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
   from its own pose; a capture takes the first complete set whose board is
   still, warning of a wide frame spread or too few views; and the captures
   kept add up to views and image coverage per camera, the captures each pair
-  of cameras shares, the tree the solve would place them by, when Calibrate
-  may run, and warnings of repeated, floor-only and mostly frontal views. All
-  geometric: no sensor or lens profile is taken
+  of cameras shares through views the solve uses, the tree it would place
+  them by, when Calibrate may run, and warnings of repeated, floor-only and
+  mostly frontal views. All geometric
   ([DECISIONS.md](DECISIONS.md#2026-10-14--live-checks-and-the-capture-rule)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.

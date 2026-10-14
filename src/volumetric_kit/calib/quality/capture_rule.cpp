@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "volumetric_kit/calib/compute/guarded.hpp"
+#include "volumetric_kit/calib/solve/initialise.hpp"
 
 namespace volumetric_kit::calib::quality {
 namespace {
@@ -38,21 +39,7 @@ core::Result<CaptureRule> CaptureRule::create(
     const std::vector<std::string>& camera_ids,
     const CaptureRuleOptions& options) {
   return compute::guarded("CaptureRule", [&]() -> core::Result<CaptureRule> {
-    if (camera_ids.empty()) {
-      return core::Status::invalid_argument("CaptureRule: no cameras");
-    }
-    for (std::size_t i = 0; i < camera_ids.size(); ++i) {
-      if (camera_ids[i].empty()) {
-        return core::Status::invalid_argument("CaptureRule: camera " +
-                                              std::to_string(i) + " has no id");
-      }
-      for (std::size_t j = 0; j < i; ++j) {
-        if (camera_ids[j] == camera_ids[i]) {
-          return core::Status::invalid_argument(
-              "CaptureRule: camera id \"" + camera_ids[i] + "\" appears twice");
-        }
-      }
-    }
+    VKC_TRY(solve::check_camera_ids(camera_ids).with_context("CaptureRule"));
     if (!(options.still_px > 0.0) || !std::isfinite(options.still_px)) {
       return refuse_option("still_px", "positive and finite");
     }

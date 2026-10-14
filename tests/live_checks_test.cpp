@@ -85,14 +85,17 @@ TEST(CheckView, MeasuresDistanceAndTiltOfAKnownPose) {
         test::board_facing_camera(board, centre, 35.0, 10.0);
     const CheckedView view =
         check(detection_of(model, board, truth, {0, 1, 2, 3, 4, 5, 6, 7}));
-    ASSERT_TRUE(view.board_to_camera.has_value());
+    ASSERT_TRUE(view.pose.has_value());
     EXPECT_NEAR(compute::rotation_angle_deg(
-                    camera::Mat3d(*view.board_to_camera), camera::Mat3d(truth)),
+                    camera::Mat3d(view.pose->best.board_to_camera),
+                    camera::Mat3d(truth)),
                 0.0, 1e-6);
     ASSERT_TRUE(view.check.distance_m && view.check.tilt_deg &&
                 view.check.pnp_rms_px);
+    EXPECT_EQ(*view.check.pnp_rms_px, view.pose->best.rms_px);
     EXPECT_NEAR(*view.check.distance_m, glm::length(centre), 1e-7);
-    // The printed face's normal against the line back to the camera.
+    // Written out as the oracle: the printed face's normal (minus the
+    // board's z) against the line back to the camera.
     EXPECT_NEAR(*view.check.tilt_deg,
                 compute::angle_deg(-camera::Vec3d(truth[2]), -centre), 1e-6);
     EXPECT_LT(*view.check.pnp_rms_px, 1e-6);
@@ -159,12 +162,12 @@ TEST(CheckView, GivesEachVerdictByItsRule) {
   const CheckedView row = check_at(near, 35.0, {0, 1, 2, 3});
   EXPECT_EQ(row.check.verdict, ViewVerdict::Collinear);
   EXPECT_TRUE(row.check.collinear);
-  EXPECT_FALSE(row.board_to_camera || row.check.distance_m ||
-               row.check.tilt_deg || row.check.pnp_rms_px || row.check.cell);
+  EXPECT_FALSE(row.pose || row.check.distance_m || row.check.tilt_deg ||
+               row.check.pnp_rms_px || row.check.cell);
   // Too few corners, or none.
   const CheckedView few = check_at(near, 35.0, {0, 1, 5});
   EXPECT_EQ(few.check.verdict, ViewVerdict::None);
-  EXPECT_FALSE(few.check.collinear || few.board_to_camera);
+  EXPECT_FALSE(few.check.collinear || few.pose);
   EXPECT_EQ(check_at(near, 35.0, {}).check.verdict, ViewVerdict::None);
   EXPECT_EQ(check_at(near, 35.0, {}).check.corners, 0);
   // Oblique above 60 degrees, far beyond 4.5 m; oblique first.
@@ -218,7 +221,7 @@ TEST(CheckView, AViewWithNoPoseIsOfNoUse) {
   ASSERT_TRUE(view.ok()) << view.status().message();
   EXPECT_EQ(view->check.verdict, ViewVerdict::None);
   EXPECT_EQ(view->check.corners, 4);
-  EXPECT_FALSE(view->board_to_camera || view->check.distance_m);
+  EXPECT_FALSE(view->pose || view->check.distance_m);
 }
 
 TEST(CheckView, RefusesWhatItCannotCheck) {

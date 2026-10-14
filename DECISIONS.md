@@ -103,20 +103,19 @@ worth and which set a capture takes, and sums up the captures kept
 (`quality/live_checks.hpp`, `capture_rule.hpp` and `session_checks.hpp` hold
 the thresholds).
 
-- **Geometric, so profiles are optional.** Every check reads the detection,
-  the view's own pose (IPPE), coverage and shared captures; none takes a
-  `SensorProfile` or `LensProfile`. The locked "spine" entry is amended rather
-  than given a use invented for v1: the profiles stay in `core`, unchanged,
-  until intrinsics work needs them (noise-weighted corners, blur and
-  rolling-shutter gates).
+- **Why the profiles became optional.** Every check reads the detection, the
+  view's own pose (IPPE), coverage and shared captures, so the locked "spine"
+  entry is amended rather than given a use invented for v1; intrinsics work
+  is what will need them (noise-weighted corners, blur and rolling-shutter
+  gates).
 - **Stillness gates; spread and views only warn.** A press arms the rule,
-  which takes the first set with every camera's frame whose corners moved
-  less than 0.3 px since the set before, or fails after 3 s naming what held
-  the last set. The whole set is saved however many cameras see the board.
-  The frames' spread mostly reflects the SDK's clock skew under the hardware
-  trigger, so it is recorded and warned of, never a gate; a set with fewer
-  than two usable views adds nothing to the extrinsics and is warned of too.
-  A full writer refuses the capture at once.
+  which takes the first set with every camera's frame whose board is still
+  since the set before, or fails after a timeout naming what held the last
+  set. The whole set is saved however many cameras see the board. The
+  frames' spread mostly reflects the SDK's clock skew under the hardware
+  trigger, so it is recorded and warned of, never a gate; a set with too few
+  usable views adds nothing to the extrinsics and is warned of too. The set
+  the rule would take is refused at once when the writer is full.
 - **Live corners are flagged, not refused.** The live view's hybrid corners
   are for display; the solver takes the capture's full-resolution ones. A
   capture whose two disagree is flagged.
@@ -126,6 +125,11 @@ the thresholds).
   20-degree tilt and 0.11 at 45. A view tilted under 20 degrees is frontal,
   and a camera whose views are mostly frontal is warned, beside the duplicate
   and floor-only warnings. Coverage counts every usable view.
+- **The session counts what the solve uses.** Shared captures, the tree
+  preview and when Calibrate may run count only the views `initialise` places
+  cameras by (`solve::view_fate`), so Calibrate is never offered on links the
+  solve then lacks. An ambiguous view, mostly a board facing the camera,
+  still counts toward coverage.
 
 ## 2026-10-13 — Sessions on disk
 

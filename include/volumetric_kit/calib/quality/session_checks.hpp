@@ -5,9 +5,9 @@
 
 /// @file session_checks.hpp
 /// @brief What the captures kept so far add up to, before any solve: views
-///        and image coverage per camera, which cameras share captures, the
-///        tree the solve would place them by, whether Calibrate may run, and
-///        the warnings that call for other placements.
+///        and image coverage per camera, which cameras share captures the
+///        solve uses, the tree it would place them by, whether Calibrate may
+///        run, and the warnings that call for other placements.
 
 #include <array>
 #include <cstddef>
@@ -40,27 +40,35 @@ inline constexpr int kCoverageRows = 6;
 /// @endcode
 struct SessionOptions {
   ViewCheckOptions view;  ///< How each captured view is checked.
+  /// The solve's thresholds, the ones to pass @ref solve::initialise: which
+  /// views it places cameras by (@ref solve::view_fate), and which tree links
+  /// are weak (`weak_below`).
+  solve::InitialiseOptions solve;
   /// A capture repeats an earlier one when every camera that sees its board
   /// saw the earlier one's within this (metres, the board's centre) ...
   double duplicate_m = 0.02;
   double duplicate_deg = 2.0;  ///< ... and this (degrees).
-  /// A camera is warned floor-only when this share of its views' board
-  /// normals or more lie within `floor_deg` of one of them ...
+  /// A camera is warned floor-only when this share of its usable views'
+  /// board normals or more lie within `floor_deg` of one of them ...
   double floor_share = 0.8;
   double floor_deg = 10.0;  ///< ... (degrees).
   /// A camera is warned mostly frontal when more than this share of its
-  /// views are frontal (@ref CheckedView::frontal).
+  /// usable views are frontal (@ref CheckedView::frontal).
   double frontal_share = 0.5;
-  int fair_from = 5;     ///< A tree link sharing fewer captures is weak.
-  int strong_from = 10;  ///< A tree link sharing this many is strong.
+  /// Neither warning is given before a camera has this many usable views.
+  int warn_from = 5;
+  /// A tree link sharing this many captures or more is strong.
+  int strong_from = 10;
+  // TODO: default to solve::BundleAdjustOptions::min_shared once #21 merges,
+  // the adjustment's guard on the same rule.
   /// Calibrate may run once every tree link shares this many captures.
   int ready_from = 3;
 };
 
 /// @brief How strong a link of the tree preview is.
 enum class LinkStrength {
-  Weak,    ///< Fewer than `fair_from` shared captures (red).
-  Fair,    ///< From `fair_from` to below `strong_from` (amber).
+  Weak,    ///< Fewer shared captures than the solve's `weak_below` (red).
+  Fair,    ///< From `weak_below` to below `strong_from` (amber).
   Strong,  ///< `strong_from` or more (green).
 };
 
@@ -85,8 +93,14 @@ struct PreviewLink {
 /// if (cam.mostly_frontal) warn("tilt the board more for " + ids[i]);
 /// @endcode
 struct CameraSummary {
-  int usable_views = 0;   ///< Kept captures with a usable view in it.
-  int frontal_views = 0;  ///< Of those, the frontal ones.
+  int usable_views = 0;  ///< Kept captures with a usable view in it.
+  /// Of those, the views the solve places cameras by (@ref solve::view_fate
+  /// gives `Used`): the ones the shared captures and the tree count.
+  int used_views = 0;
+  /// Of those, the ambiguous ones (`Ambiguous`): mostly boards nearly facing
+  /// the camera, or small in its image.
+  int ambiguous_views = 0;
+  int frontal_views = 0;  ///< Of the usable views, the frontal ones.
   /// Corners of its usable views in each cell of a `kCoverageCols` x
   /// `kCoverageRows` grid over its image, row-major from the top left.
   std::array<int, kCoverageCols * kCoverageRows> coverage{};
@@ -101,6 +115,13 @@ struct CameraSummary {
 
 /// @brief A capture that repeats an earlier one (@ref
 ///        SessionOptions::duplicate_m).
+///
+/// @code
+/// for (const Duplicate& d : summary.duplicates) {
+///   warn("capture " + std::to_string(d.capture) + " repeats " +
+///        std::to_string(d.earlier));
+/// }
+/// @endcode
 struct Duplicate {
   int capture = 0;  ///< The capture's index.
   int earlier = 0;  ///< The first earlier capture it repeats.
@@ -117,8 +138,9 @@ struct SessionSummary {
   int dropped = 0;  ///< Captures dropped.
   /// One per camera, in the rig's order.
   std::vector<CameraSummary> cameras;
-  /// The kept captures each pair of cameras shares with a usable view in
-  /// both (@ref solve::covisibility).
+  /// The kept captures each pair of cameras shares with a view the solve
+  /// uses in both (@ref solve::covisibility); its diagonal is each camera's
+  /// `used_views`.
   solve::Covisibility covisibility;
   std::vector<Duplicate> duplicates;  ///< In the order of the captures.
   /// Calibrate may run: the rig has two cameras or more, each linked to the
@@ -129,9 +151,10 @@ struct SessionSummary {
 /// @brief The session's checks: the captures kept and dropped, each
 ///        camera's views checked with @ref check_view.
 ///
-/// The tree preview is @ref solve::spanning_tree over the cameras the
-/// reference reaches through shared captures; the others are unlinked. A
-/// value; not thread-safe.
+/// Shared captures count only the views the solve uses, as it does. The tree
+/// preview is @ref solve::spanning_tree over the cameras the reference
+/// reaches through them (@ref solve::reached_from); the others are unlinked.
+/// A value; not thread-safe.
 ///
 /// @code
 /// VKC_ASSIGN(SessionChecks checks,
@@ -144,13 +167,13 @@ class VC_QUALITY_API SessionChecks {
  public:
   /// @brief The checks of an empty session.
   /// @param cameras    The rig's colour cameras, in the order every capture
-  ///                   gives them: at least one, ids unique and not empty.
+  ///                   gives them.
   /// @param board      The board.
   /// @param reference  The camera the world is, by index in @p cameras.
   /// @param options    The thresholds.
   /// @return The checks; `InvalidArgument` naming what the arguments get
-  ///         wrong, a camera model @ref compute::cv_camera refuses included;
-  ///         or `OutOfMemory`.
+  ///         wrong (@ref solve::check_rig, then the options); or
+  ///         `OutOfMemory`.
   static core::Result<SessionChecks> create(
       const std::vector<solve::RigCamera>& cameras, const compute::Board& board,
       std::size_t reference, const SessionOptions& options = {});
@@ -180,6 +203,8 @@ class VC_QUALITY_API SessionChecks {
   struct View {
     bool usable = false;
     bool frontal = false;
+    // A usable view's fate, as solve::view_fate gives it.
+    solve::ViewFate fate = solve::ViewFate::NotUsable;
     recon::camera::Mat4d board_to_camera{1.0};
     std::vector<recon::camera::Vec2d> corners;  // usable views only
   };

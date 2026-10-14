@@ -184,11 +184,8 @@ core::Result<ViewPose> view_pose(const compute::CvCamera& camera,
 
 double tilt_deg(const compute::Board& board,
                 const camera::Mat4d& board_to_camera) noexcept {
-  const cv::Point3d middle = board.centre();
-  const camera::Vec3d centre(board_to_camera *
-                             glm::dvec4(middle.x, middle.y, middle.z, 1.0));
-  // The board's z points into it, away from the printed face.
-  return compute::angle_deg(-camera::Vec3d(board_to_camera[2]), -centre);
+  return compute::angle_deg(compute::face_normal(board_to_camera),
+                            -compute::centre_in(board, board_to_camera));
 }
 
 }  // namespace volumetric_kit::calib::solve

@@ -75,7 +75,8 @@ TEST(SyntheticRig, RigSurroundsTheFloor) {
 }
 
 // Whether `cam` sees the board at `board_to_world` by `options`' rules, at
-// the outline points PlanOptions names.
+// the outline points PlanOptions names. Written out as the plan's oracle: the
+// centre from OpenCV's board, the tilt by acos.
 bool sees(const SyntheticCamera& cam, const camera::Mat4d& board_to_world,
           const compute::Board& board, const PlanOptions& options) {
   const camera::Mat4d board_to_camera = cam.world_to_camera * board_to_world;
@@ -145,6 +146,7 @@ TEST(SyntheticRig, PlanPlacesBoardsAsAPersonDoes) {
   options.count = 60;
   const std::vector<Placement> plan = synthetic_plan(rig, board, options);
   ASSERT_EQ(plan.size(), options.count);
+  // The centre and the normal's tilt written out, as the plan's oracle.
   const cv::Point3f corner = board.charuco().getRightBottomCorner();
   std::size_t floor = 0, level = 0, tilted = 0;
   for (std::size_t i = 0; i < plan.size(); ++i) {

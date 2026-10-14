@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-// The ChArUco board: OpenCV's board for a Target, its frame and corners, each
-// dictionary's codes, and the targets it refuses.
+// The ChArUco board: OpenCV's board for a Target, its frame, corners and
+// centre, where a pose puts them, each dictionary's codes, and the targets it
+// refuses.
 
 #include "volumetric_kit/calib/compute/board.hpp"
 
@@ -76,6 +77,30 @@ TEST(Board, CentreIsTheChessboardsMiddle) {
     mean *= 1.0 / static_cast<double>(board->object_points().size());
     EXPECT_NEAR(cv::norm(mean - centre), 0.0, 1e-7);
   }
+}
+
+// A pose moves the board's centre with it and turns its printed face, which
+// looks along the board's -z.
+TEST(Board, APosePutsItsCentreAndTurnsItsFace) {
+  const core::Result<Board> board = Board::create(legacy_femto_board());
+  ASSERT_TRUE(board.ok()) << board.status().message();
+  const recon::camera::Mat3d turn =
+      recon::camera::rotation_from_rodrigues({0.3, -0.2, 0.5});
+  recon::camera::Mat4d pose(turn);
+  pose[3] = glm::dvec4(0.1, -0.2, 2.0, 1.0);
+  const cv::Point3d c = board->centre();
+  const recon::camera::Vec3d centre = centre_in(*board, pose);
+  const recon::camera::Vec3d expected =
+      turn * recon::camera::Vec3d(c.x, c.y, c.z) +
+      recon::camera::Vec3d(0.1, -0.2, 2.0);
+  EXPECT_NEAR(glm::length(centre - expected), 0.0, 1e-15);
+  const recon::camera::Vec3d normal = face_normal(pose);
+  EXPECT_NEAR(glm::length(normal - turn * recon::camera::Vec3d(0.0, 0.0, -1.0)),
+              0.0, 1e-15);
+  EXPECT_EQ(face_normal(recon::camera::Mat4d(1.0)),
+            recon::camera::Vec3d(0.0, 0.0, -1.0));
+  EXPECT_EQ(centre_in(*board, recon::camera::Mat4d(1.0)),
+            recon::camera::Vec3d(c.x, c.y, c.z));
 }
 
 // The top-left square is black, and the markers fill the white squares,

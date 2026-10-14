@@ -256,7 +256,7 @@ TEST(CaptureRule, RefusesARigOrOptionsItCannotUse) {
     EXPECT_EQ(rule.status().domain(), Code::InvalidArgument);
     return rule.status().message();
   };
-  EXPECT_EQ(refused({}, {}), "CaptureRule: no cameras");
+  EXPECT_EQ(refused({}, {}), "CaptureRule: the rig has no cameras");
   EXPECT_EQ(refused({"A", ""}, {}), "CaptureRule: camera 1 has no id");
   EXPECT_EQ(refused({"A", "B", "A"}, {}),
             "CaptureRule: camera id \"A\" appears twice");

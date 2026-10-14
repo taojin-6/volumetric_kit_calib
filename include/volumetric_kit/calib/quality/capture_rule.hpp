@@ -57,7 +57,9 @@ struct LiveSet {
   /// How far the board's corners moved since the set before
   /// (@ref CornerShift::median_px); empty when no corner is in both.
   std::optional<double> motion_px;
-  double spread_ms = 0.0;   ///< The latest frame's time less the earliest's.
+  double spread_ms = 0.0;  ///< The latest frame's time less the earliest's.
+  // TODO: the example's `pending() >= capacity` becomes the writer's own
+  // full() once the capture tier gives SessionWriter one.
   bool saver_full = false;  ///< The writer holds as many captures as it may.
 };
 
@@ -76,7 +78,9 @@ enum class Hold {
   Incomplete,  ///< A camera's frame is missing.
   NoBoard,     ///< No corner of the board is in both this set and the last.
   Moving,      ///< The board moved `still_px` or more since the last set.
-  SaverFull,   ///< The writer is full: the capture is refused at once.
+  /// The writer is full when the set to take comes: the capture is refused
+  /// at once.
+  SaverFull,
 };
 
 /// @brief The rule's answer to a set or a tick.
@@ -133,8 +137,9 @@ class VC_QUALITY_API CaptureRule {
   ///                    of every @ref LiveSet; at least one, unique, none
   ///                    empty.
   /// @param options     The thresholds.
-  /// @return The rule, idle; `InvalidArgument` naming what @p camera_ids or
-  ///         @p options gets wrong; or `OutOfMemory`.
+  /// @return The rule, idle; `InvalidArgument` naming what @p camera_ids
+  ///         (@ref solve::check_camera_ids) or @p options gets wrong; or
+  ///         `OutOfMemory`.
   static core::Result<CaptureRule> create(
       const std::vector<std::string>& camera_ids,
       const CaptureRuleOptions& options = {});

@@ -15,6 +15,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
+#include "volumetric_kit/calib/compute/measures.hpp"
 
 namespace volumetric_kit::calib::test {
 namespace {
@@ -59,14 +60,15 @@ camera::Mat4d look_at(const camera::Vec3d& centre, const camera::Vec3d& target,
 // Board to world: the printed face's normal `normal`, the board's x along
 // `yaw` as far as the normal allows, centred at `centre`. The board's z is
 // -normal (OpenCV's board frame).
-camera::Mat4d board_pose(const camera::Vec3d& centre,
-                         const camera::Vec3d& normal, double yaw,
-                         const cv::Point2d& extent) {
+camera::Mat4d board_pose(const compute::Board& board,
+                         const camera::Vec3d& centre,
+                         const camera::Vec3d& normal, double yaw) {
   const camera::Vec3d z = -normal;
   const camera::Vec3d d(std::cos(yaw), std::sin(yaw), 0.0);
   const camera::Vec3d x = glm::normalize(d - glm::dot(d, normal) * normal);
   const camera::Vec3d y = glm::cross(z, x);
-  return frame(x, y, z, centre - 0.5 * extent.x * x - 0.5 * extent.y * y);
+  const cv::Point3d middle = board.centre();
+  return frame(x, y, z, centre - middle.x * x - middle.y * y);
 }
 
 // The chessboard's outer size (metres), from OpenCV's board.
@@ -121,17 +123,15 @@ class SummedTexture {
   cv::Mat sums_;  // CV_64F, (height + 1) x (width + 1)
 };
 
-// Whether `cam` sees the whole board, whose outer edge is `edge`, at
+// Whether `cam` sees the whole `board`, whose outer edge is `edge`, at
 // `board_to_world`.
-bool sees(const SyntheticCamera& cam, const camera::Mat4d& board_to_world,
-          const cv::Point2d& extent, const std::vector<cv::Point3d>& edge,
-          const PlanOptions& options) {
+bool sees(const SyntheticCamera& cam, const compute::Board& board,
+          const camera::Mat4d& board_to_world,
+          const std::vector<cv::Point3d>& edge, const PlanOptions& options) {
   const camera::Mat4d board_to_camera = cam.world_to_camera * board_to_world;
-  const camera::Vec3d face = -camera::Vec3d(board_to_camera[2]);
-  const camera::Vec3d centre =
-      apply(board_to_camera, {0.5 * extent.x, 0.5 * extent.y, 0.0});
-  if (glm::dot(face, glm::normalize(-centre)) <
-      std::cos(options.max_tilt_deg * kDeg)) {
+  if (compute::angle_deg(compute::face_normal(board_to_camera),
+                         -compute::centre_in(board, board_to_camera)) >
+      options.max_tilt_deg) {
     return false;
   }
   for (const cv::Point3d& p : edge) {
@@ -238,7 +238,6 @@ std::vector<Placement> synthetic_plan(const std::vector<SyntheticCamera>& rig,
                                       const PlanOptions& options) {
   std::mt19937 rng(options.seed);
   std::uniform_real_distribution<double> uniform(0.0, 1.0);
-  const cv::Point2d extent = board_extent(board);
   const std::vector<cv::Point3d> edge = board_outline(board, 0.0, 16);
   std::vector<Placement> plan;
   for (std::size_t attempt = 0;
@@ -267,9 +266,9 @@ std::vector<Placement> synthetic_plan(const std::vector<SyntheticCamera>& rig,
       normal = std::cos(tilt) * normal + std::sin(tilt) * glm::normalize(to);
     }
     Placement placement;
-    placement.board_to_world = board_pose(centre, normal, yaw, extent);
+    placement.board_to_world = board_pose(board, centre, normal, yaw);
     for (std::size_t c = 0; c < rig.size(); ++c) {
-      if (sees(rig[c], placement.board_to_world, extent, edge, options)) {
+      if (sees(rig[c], board, placement.board_to_world, edge, options)) {
         placement.cameras.push_back(c);
       }
     }
@@ -452,10 +451,8 @@ camera::Mat4d board_facing_camera(const compute::Board& board,
   const camera::Mat3d rotation =
       camera::rotation_from_rodrigues({0.0, 0.0, roll_deg * kPi / 180.0}) *
       camera::rotation_from_rodrigues({tilt_deg * kPi / 180.0, 0.0, 0.0});
-  const cv::Point3d c = board.centre();
-  const camera::Vec3d middle(c.x, c.y, c.z);
   camera::Mat4d m(rotation);
-  m[3] = glm::dvec4(centre - rotation * middle, 1.0);
+  m[3] = glm::dvec4(centre - compute::centre_in(board, m), 1.0);
   return m;
 }
 

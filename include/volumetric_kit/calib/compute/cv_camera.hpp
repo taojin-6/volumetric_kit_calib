@@ -5,13 +5,14 @@
 
 /// @file cv_camera.hpp
 /// @brief recon's camera model in OpenCV's types: the image size, the camera
-///        matrix and the eight distortion coefficients; and each pixel's ray
-///        back through that lens.
+///        matrix and the eight distortion coefficients; where that lens images
+///        a point; and each pixel's ray back through it.
 ///
 /// recon's `RationalDistortion` is OpenCV's rational lens in OpenCV's order,
 /// so the conversion is exact: `cv::projectPoints` with these values computes
 /// recon's `distort_rational`.
 
+#include <optional>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -19,6 +20,7 @@
 #include "volumetric_kit/calib/compute/export.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/recon/camera/camera_model.hpp"
+#include "volumetric_kit/recon/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::compute {
 
@@ -47,6 +49,23 @@ struct CvCamera {
 ///         a side longer than OpenCV's `int` holds.
 VC_COMPUTE_API core::Result<CvCamera> cv_camera(
     const recon::camera::CameraModel& model);
+
+/// @brief Where @p camera images @p point: recon's `distort_rational`, then
+///        the camera matrix's focal lengths and centre, as `cv::projectPoints`
+///        computes for a point in the camera's frame.
+/// @param camera  The camera.
+/// @param point   A point in the camera's frame (+z forward).
+/// @return Its pixel, OpenCV's convention (centres at integers); empty when
+///         the point is not in front of the camera (z not above 0) or its
+///         pixel is not finite (far enough off-axis, the lens overflows).
+///
+/// @code
+/// if (const auto pixel = project(cam, centre_in(board, board_to_camera))) {
+///   mark(*pixel);  // a caller's own drawing
+/// }
+/// @endcode
+VC_COMPUTE_API std::optional<recon::camera::Vec2d> project(
+    const CvCamera& camera, const recon::camera::Vec3d& point) noexcept;
 
 /// @brief Each pixel's ray as normalized coordinates `(X / Z, Y / Z)`:
 ///        `cv::undistortPoints`, iterated until the lens takes each ray back

@@ -4,8 +4,9 @@
 #pragma once
 
 /// @file board.hpp
-/// @brief A ChArUco @ref volumetric_kit::calib::Target as OpenCV's board, and
-///        its corners in the board's frame.
+/// @brief A ChArUco @ref volumetric_kit::calib::Target as OpenCV's board, its
+///        corners in the board's frame, and where a pose puts its centre and
+///        its printed face.
 ///
 /// The board frame is OpenCV's: the origin at the top-left outer corner of
 /// the chessboard, x right and y down across the printed face, and z into the
@@ -23,6 +24,7 @@
 #include "volumetric_kit/calib/compute/export.hpp"
 #include "volumetric_kit/calib/core/target.hpp"
 #include "volumetric_kit/core/base/result.hpp"
+#include "volumetric_kit/recon/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::compute {
 
@@ -77,5 +79,28 @@ class VC_COMPUTE_API Board {
   cv::aruco::CharucoBoard charuco_;
   std::vector<cv::Point3d> object_points_;
 };
+
+/// @brief Where a pose of the board puts its centre (@ref Board::centre).
+/// @param board           The board.
+/// @param board_to_frame  Its pose in a frame, e.g. T_cb.
+/// @return The centre in that frame (metres).
+///
+/// @code
+/// const double distance_m = glm::length(centre_in(board, board_to_camera));
+/// @endcode
+VC_COMPUTE_API recon::camera::Vec3d centre_in(
+    const Board& board, const recon::camera::Mat4d& board_to_frame) noexcept;
+
+/// @brief Which way a pose of the board turns its printed face: minus the
+///        board's z, which points into the board.
+/// @param board_to_frame  Its pose in a frame, e.g. T_cb.
+/// @return The face's normal in that frame; unit length for a rigid pose.
+///
+/// @code
+/// const double deg = angle_deg(face_normal(a.board_to_camera),
+///                              face_normal(b.board_to_camera));
+/// @endcode
+VC_COMPUTE_API recon::camera::Vec3d face_normal(
+    const recon::camera::Mat4d& board_to_frame) noexcept;
 
 }  // namespace volumetric_kit::calib::compute

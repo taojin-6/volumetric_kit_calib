@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include "synthetic_rig.hpp"
+#include "volumetric_kit/calib/compute/measures.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 
 namespace volumetric_kit::calib::solve {
@@ -39,8 +40,8 @@ compute::CvCamera pinhole() {
 
 // The rotation angle between two transforms (radians).
 double rotation_error(const camera::Mat4d& a, const camera::Mat4d& b) {
-  return glm::length(camera::rodrigues_from_rotation(
-      glm::transpose(camera::Mat3d(a)) * camera::Mat3d(b)));
+  return compute::rotation_angle_deg(camera::Mat3d(a), camera::Mat3d(b)) * kPi /
+         180.0;
 }
 
 double translation_error(const camera::Mat4d& a, const camera::Mat4d& b) {
