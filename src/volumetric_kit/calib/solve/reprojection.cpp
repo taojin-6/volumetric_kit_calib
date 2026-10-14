@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <utility>
 
 #include <opencv2/geometry.hpp>
 
@@ -74,9 +75,13 @@ void project(const compute::CvCamera& camera, const Pose& world_to_camera,
     world[i] = cv::Point3d(x[0], x[1], x[2]);
     out.depths[i] = (rotation_cw * x + t_cw)[2];
   }
+  // OpenCV sizes the pixels in its own, uninstrumented, code: a fresh vector
+  // each time, as AddressSanitizer's container checks need.
+  std::vector<cv::Point2d> pixels;
   if (derivatives == Derivatives::None) {
     cv::projectPoints(world, r_cw, t_cw, camera.camera_matrix,
-                      camera.distortion, out.pixels);
+                      camera.distortion, pixels);
+    out.pixels = std::move(pixels);
     return;
   }
   cv::Mat dpdr;
@@ -85,11 +90,12 @@ void project(const compute::CvCamera& camera, const Pose& world_to_camera,
   cv::Mat dpdc;
   if (derivatives == Derivatives::All) {
     cv::projectPoints(world, r_cw, t_cw, camera.camera_matrix,
-                      camera.distortion, out.pixels, dpdr, dpdt, dpdf, dpdc);
+                      camera.distortion, pixels, dpdr, dpdt, dpdf, dpdc);
   } else {
     cv::projectPoints(world, r_cw, t_cw, camera.camera_matrix,
-                      camera.distortion, out.pixels, dpdr, dpdt);
+                      camera.distortion, pixels, dpdr, dpdt);
   }
+  out.pixels = std::move(pixels);
   out.by_camera.resize(n);
   out.by_board.resize(n);
   for (std::size_t i = 0; i < n; ++i) {
