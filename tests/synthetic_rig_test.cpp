@@ -3,7 +3,7 @@
 
 // The synthetic source every calib test draws on: its lenses and rig, its plan
 // of placements, what the cameras detect of it, and its renderer, whose
-// inverse map and orientation the detector's tests will rely on.
+// orientation and edges the detector's tests will rely on.
 
 #include "synthetic_rig.hpp"
 
@@ -36,32 +36,6 @@ TEST(SyntheticRig, LensesAreValid) {
        {color_like_lens(), depth_like_lens()}) {
     const core::Status status = camera::check_camera_model(model);
     EXPECT_TRUE(status.ok()) << status.message();
-  }
-}
-
-// Pixels through the renderer's inverse map and back through the lens land
-// where they started, across the whole image.
-TEST(SyntheticRig, InverseMapRoundTripsBelowANanopixel) {
-  for (const camera::CameraModel& model :
-       {color_like_lens(), depth_like_lens()}) {
-    const double w = model.size.width;
-    const double h = model.size.height;
-    const double step = w / 128.0;
-    std::vector<cv::Point2d> pixels;
-    for (double v = -0.5; v <= h - 0.5; v += step) {
-      for (double u = -0.5; u <= w - 0.5; u += step) pixels.emplace_back(u, v);
-      pixels.emplace_back(w - 0.5, v);
-    }
-    const std::vector<cv::Point2d> rays = undistort_pixels(model, pixels);
-    std::vector<cv::Point3d> points;
-    for (const cv::Point2d& r : rays) points.emplace_back(r.x, r.y, 1.0);
-    const std::vector<cv::Point2d> back =
-        project(model, camera::Mat4d(1.0), points);
-    double worst = 0.0;
-    for (std::size_t i = 0; i < pixels.size(); ++i) {
-      worst = std::max(worst, cv::norm(back[i] - pixels[i]));
-    }
-    EXPECT_LE(worst, 1e-9) << model.size.width << "x" << model.size.height;
   }
 }
 

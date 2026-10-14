@@ -127,16 +127,6 @@ std::vector<Observation> observe(const std::vector<SyntheticCamera>& rig,
                                  const std::vector<Placement>& plan,
                                  const ObserveOptions& options = {});
 
-/// @brief The renderer's inverse map: pixels to normalized pinhole
-///        coordinates (`x = X / Z`), through `cv::undistortPoints` iterated
-///        until the round trip through the lens is below 1e-9 px.
-/// @param model   The lens.
-/// @param pixels  Pixels, OpenCV's convention.
-/// @return Each pixel's normalized coordinates.
-std::vector<cv::Point2d> undistort_pixels(
-    const recon::camera::CameraModel& model,
-    const std::vector<cv::Point2d>& pixels);
-
 /// @brief How @ref render_board draws.
 struct RenderOptions {
   /// The board texture's resolution; the board's edges should fall on its
@@ -152,8 +142,8 @@ struct RenderOptions {
 /// @brief The board as @p model images it at @p board_to_camera: a clean,
 ///        geometric render (no blur, noise or compression).
 ///
-/// Each sample is a pixel's ray (@ref undistort_pixels) meeting the board's
-/// plane, so the lens is inverted exactly rather than approximated by a
+/// Each sample is a pixel's ray (@ref compute::undistort_points) meeting the
+/// board's plane, so the lens is inverted exactly rather than approximated by a
 /// forward warp. A sample is the board's mean over the bounding box of its
 /// footprint there, from a summed-area table of the texture, so a pixel is
 /// close to the board's mean over it whatever the texture's resolution.

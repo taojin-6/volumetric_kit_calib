@@ -312,19 +312,6 @@ std::vector<Observation> observe(const std::vector<SyntheticCamera>& rig,
   return views;
 }
 
-std::vector<cv::Point2d> undistort_pixels(
-    const camera::CameraModel& model, const std::vector<cv::Point2d>& pixels) {
-  std::vector<cv::Point2d> normalized;
-  if (pixels.empty()) return normalized;
-  const compute::CvCamera cam = cv_lens(model);
-  cv::undistortPoints(
-      pixels, normalized, cam.camera_matrix, cam.distortion, cv::noArray(),
-      cv::noArray(),
-      cv::TermCriteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 100,
-                       1e-12));
-  return normalized;
-}
-
 cv::Mat render_board(const camera::CameraModel& model,
                      const camera::Mat4d& board_to_camera,
                      const compute::Board& board,
@@ -385,7 +372,8 @@ cv::Mat render_board(const camera::CameraModel& model,
       samples[at(i, j)] = {x0 + (i + 0.5) / S - 0.5, y0 + (j + 0.5) / S - 0.5};
     }
   }
-  const std::vector<cv::Point2d> rays = undistort_pixels(model, samples);
+  const std::vector<cv::Point2d> rays =
+      compute::undistort_points(cam, samples).value();
   const camera::Mat3d rotation(board_to_camera);
   const camera::Vec3d normal = rotation[2];
   const camera::Vec3d origin(board_to_camera[3]);
