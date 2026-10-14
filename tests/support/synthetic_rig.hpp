@@ -11,7 +11,8 @@
 /// World: z up, the floor at z = 0. Poses are recon's `Mat4d`s, named by what
 /// they map (`world_to_camera` is OpenCV's extrinsic). Projections are exact:
 /// a point is moved into the camera in double, then through the lens with
-/// `cv::projectPoints`, with no Rodrigues round trip.
+/// `cv::projectPoints`, with no Rodrigues round trip. @ref camera_image adds
+/// a camera's blur and noise to a render.
 
 #include <cstddef>
 #include <cstdint>
@@ -160,5 +161,36 @@ cv::Mat render_board(const recon::camera::CameraModel& model,
                      const recon::camera::Mat4d& board_to_camera,
                      const compute::Board& board,
                      const RenderOptions& options = {});
+
+/// @brief The rig's board, @ref legacy_femto_board, as compute builds it.
+/// @return The board.
+compute::Board femto_board();
+
+/// @brief @p board in front of a camera: its centre at @p centre, its printed
+///        face turned @p tilt_deg about its x axis from facing the camera,
+///        then rolled @p roll_deg about the camera's z axis.
+/// @param board     The board.
+/// @param centre    Where the chessboard's centre is in the camera (metres).
+/// @param tilt_deg  The turn about the board's x axis (degrees).
+/// @param roll_deg  The roll about the camera's z axis (degrees).
+/// @return T_cb.
+recon::camera::Mat4d board_facing_camera(const compute::Board& board,
+                                         const recon::camera::Vec3d& centre,
+                                         double tilt_deg, double roll_deg);
+
+/// @brief What @ref camera_image adds to a render.
+struct CameraOptions {
+  double blur_px = 0.8;  ///< The optics' Gaussian blur (sigma, px); 0 for none.
+  /// Gaussian noise on each pixel (sigma, 8-bit levels); 0 for none.
+  double noise_dn = 2.5;
+  std::uint64_t seed = 1;  ///< The noise's seed.
+};
+
+/// @brief A camera's picture of @p render: blurred by its optics, then
+///        noisy, rounded to 8 bits.
+/// @param render   An 8-bit luma image, as @ref render_board draws.
+/// @param options  The blur and noise.
+/// @return A new image of the render's size, the same for the same options.
+cv::Mat camera_image(const cv::Mat& render, const CameraOptions& options = {});
 
 }  // namespace volumetric_kit::calib::test

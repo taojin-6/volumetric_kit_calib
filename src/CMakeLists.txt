@@ -10,14 +10,14 @@ include(GNUInstallDirs)
 add_subdirectory(volumetric_kit/calib/core)
 if(VC_WITH_OPENCV)
   add_subdirectory(volumetric_kit/calib/compute)
+  add_subdirectory(volumetric_kit/calib/detect)
   add_subdirectory(volumetric_kit/calib/solve)
 endif()
 if(VC_WITH_RIG)
   add_subdirectory(volumetric_kit/calib/capture)
 endif()
-# TODO: add_subdirectory() for detect / color / quality / viz / app as those
-# tiers land (see DESIGN.md). detect builds on compute; viz/app need
-# volumetric_kit_gfx.
+# TODO: add_subdirectory() for color / quality / viz / app as those tiers land
+# (see DESIGN.md). viz/app need volumetric_kit_gfx.
 
 # --- calib: umbrella alias ---------------------------------------------------
 # Consumers link `volumetric_kit::calib` and get whatever tiers are built.
@@ -25,7 +25,7 @@ add_library(calib INTERFACE)
 add_library(volumetric_kit::calib ALIAS calib)
 target_link_libraries(calib INTERFACE calib_core)
 if(VC_WITH_OPENCV)
-  target_link_libraries(calib INTERFACE calib_compute calib_solve)
+  target_link_libraries(calib INTERFACE calib_compute calib_detect calib_solve)
 endif()
 if(VC_WITH_RIG)
   target_link_libraries(calib INTERFACE calib_capture)
@@ -41,15 +41,9 @@ if(VC_INSTALL)
   # A tier's headers ship only when the tier is built.
   set(_vc_unbuilt_headers)
   if(NOT VC_WITH_OPENCV)
-    list(
-      APPEND
-      _vc_unbuilt_headers
-      PATTERN
-      "compute"
-      EXCLUDE
-      PATTERN
-      "solve"
-      EXCLUDE)
+    foreach(_vc_tier compute detect solve)
+      list(APPEND _vc_unbuilt_headers PATTERN "${_vc_tier}" EXCLUDE)
+    endforeach()
   endif()
   if(NOT VC_WITH_RIG)
     list(APPEND _vc_unbuilt_headers PATTERN "capture" EXCLUDE)

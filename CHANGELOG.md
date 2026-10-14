@@ -101,6 +101,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The `detect` tier, `volumetric_kit::calib_detect`, built with
+  `VC_WITH_OPENCV` (DECISIONS.md, 2026-10-12): `detect_charuco` finds a
+  ChArUco `Board` in an 8-bit luma image (`LumaView`, onto which recon's
+  `PictureView` maps), at full resolution (`Mode::Full`) or by the live
+  view's hybrid (`Mode::Hybrid`). The installed package re-finds OpenCV's
+  imgproc too.
 - The `compute` tier, `volumetric_kit::calib_compute`, built with
   `VC_WITH_OPENCV` (OFF by default; needs an installed OpenCV 5, 5.0 or a
   later 5.x): OpenCV behind recon's and calib's types (DECISIONS.md,
