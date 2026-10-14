@@ -5,12 +5,13 @@
 # (fake_core/) at CORE_VERSION, with the real core's modules from CORE_MODULES,
 # and checks the outcome. With EXPECT_ERROR, the configure must fail with output
 # matching that regex, blanks and line breaks counting as one space. With
-# EXPECT_CONFIG_VERSION, it must succeed: recon's package config must re-find
-# the core at that MAJOR.MINOR, and calib's must re-find recon, hinted at its
-# own prefix, refuse a core of another MAJOR.MINOR, and then require
-# MIN_VERSION, calib's floor, of it. RECON_SOURCE and JSON_SOURCE are the
-# sources the calling build fetched; GENERATOR, CXX_COMPILER, MAKE_PROGRAM and
-# GLM_DIR repeat its settings (tests/CMakeLists.txt).
+# EXPECT_CONFIG_VERSION, it must succeed: calib's package config must find the
+# core at that version, hinted at its own prefix, and require MIN_VERSION,
+# calib's floor, of it; then recon, refusing one that brings another core; and
+# recon's must re-find the core at that MAJOR.MINOR. RECON_SOURCE and
+# JSON_SOURCE are the sources the calling build fetched; GENERATOR,
+# CXX_COMPILER, MAKE_PROGRAM and GLM_DIR repeat its settings
+# (tests/CMakeLists.txt).
 foreach(
   _var
   CALIB_SOURCE
@@ -71,8 +72,8 @@ set(_recon_config
     "${BINARY_DIR}/_deps/volumetric_kit_recon-build/src/volumetric_kit_reconConfig.cmake"
 )
 file(READ "${_recon_config}" _recon_config_text)
-set(_find_core
-    "find_dependency(volumetric_kit_core ${EXPECT_CONFIG_VERSION} CONFIG")
+string(REGEX MATCH "^[0-9]+\\.[0-9]+" _major_minor "${EXPECT_CONFIG_VERSION}")
+set(_find_core "find_dependency(volumetric_kit_core ${_major_minor} CONFIG")
 string(FIND "${_recon_config_text}" "${_find_core}" _core_at)
 if(_core_at EQUAL -1)
   message(
@@ -82,15 +83,16 @@ endif()
 
 set(_config "${BINARY_DIR}/src/volumetric_kit_calibConfig.cmake")
 file(READ "${_config}" _config_text)
-# Each must follow the one before it: the version check reads the core recon
-# found, and the floor is checked once the minor is.
+# Each must follow the one before it: the floor is checked in the core found,
+# and recon's package config may only take that core.
 set(_after -1)
 foreach(
   _expected
+  "find_dependency(volumetric_kit_core ${EXPECT_CONFIG_VERSION} CONFIG HINTS"
+  "vkc_require_core(${MIN_VERSION} PACKAGE volumetric_kit_calib)"
+  [[set(_vc_core_dir "${volumetric_kit_core_DIR}")]]
   [[find_dependency(volumetric_kit_recon CONFIG HINTS "${PACKAGE_PREFIX_DIR}")]]
-  "vkc_core_version(_vc_core_found MAJOR_MINOR)"
-  "if(NOT _vc_core_found STREQUAL \"${EXPECT_CONFIG_VERSION}\")"
-  "vkc_require_core(${MIN_VERSION} PACKAGE volumetric_kit_calib)")
+  "if(NOT volumetric_kit_core_DIR STREQUAL _vc_core_dir)")
   string(FIND "${_config_text}" "${_expected}" _at)
   if(_at LESS_EQUAL _after)
     message(

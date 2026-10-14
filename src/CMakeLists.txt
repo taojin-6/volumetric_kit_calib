@@ -12,8 +12,11 @@ if(VC_WITH_OPENCV)
   add_subdirectory(volumetric_kit/calib/compute)
   add_subdirectory(volumetric_kit/calib/solve)
 endif()
-# TODO: add_subdirectory() for detect / color / quality / capture / viz / app as
-# those tiers land (see DESIGN.md). detect builds on compute; viz/app need
+if(VC_WITH_RIG)
+  add_subdirectory(volumetric_kit/calib/capture)
+endif()
+# TODO: add_subdirectory() for detect / color / quality / viz / app as those
+# tiers land (see DESIGN.md). detect builds on compute; viz/app need
 # volumetric_kit_gfx.
 
 # --- calib: umbrella alias ---------------------------------------------------
@@ -23,6 +26,9 @@ add_library(volumetric_kit::calib ALIAS calib)
 target_link_libraries(calib INTERFACE calib_core)
 if(VC_WITH_OPENCV)
   target_link_libraries(calib INTERFACE calib_compute calib_solve)
+endif()
+if(VC_WITH_RIG)
+  target_link_libraries(calib INTERFACE calib_capture)
 endif()
 
 # --- Install / export --------------------------------------------------------
@@ -45,6 +51,9 @@ if(VC_INSTALL)
       "solve"
       EXCLUDE)
   endif()
+  if(NOT VC_WITH_RIG)
+    list(APPEND _vc_unbuilt_headers PATTERN "capture" EXCLUDE)
+  endif()
   install(
     DIRECTORY "${PROJECT_SOURCE_DIR}/include/"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
@@ -56,9 +65,9 @@ if(VC_INSTALL)
     NAMESPACE volumetric_kit::
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/volumetric_kit_calib")
 
-  # The installed package holds the core to the MAJOR.MINOR this build fetched:
-  # the core's version file accepts only the same minor before 1.0.
-  vkc_core_version(VC_CORE_MAJOR_MINOR MAJOR_MINOR)
+  # The installed package finds the core this build fetched, at its version: the
+  # core's version file accepts only the same minor, no older, before 1.0.
+  vkc_core_version(VC_CORE_VERSION)
 
   include(CMakePackageConfigHelpers)
   configure_package_config_file(

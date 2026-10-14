@@ -6,7 +6,7 @@ name: build
 # unoptimized Debug and an optimized Release/NDEBUG configuration are exercised,
 # so an NDEBUG-only or optimizer-exposed break is caught. The macOS legs also
 # build the OpenCV tiers (VC_WITH_OPENCV), on Homebrew's OpenCV (DECISIONS.md,
-# 2026-10-12).
+# 2026-10-12), and the rig job the rig tiers (VC_WITH_RIG, 2026-10-13).
 on:
   pull_request:
   push:
@@ -72,6 +72,53 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           -DVC_WITH_OPENCV=${{ runner.os == 'macOS' && 'ON' || 'OFF' }}
           -DBUILD_SHARED_LIBS=${{ matrix.shared }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  # The rig tiers, which take all of recon and so the Vulkan SDK: calib builds
+  # recon's sensor, video and Orbbec tiers against calib's core pin, the core
+  # every sibling compiles against in the rig application. No test needs a
+  # GPU. The Orbbec SDK comes from recon's own action, at calib's recon pin.
+  rig:
+    name: macos-latest Release rig
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: |
+          for attempt in 1 2 3; do
+            brew install cmake glm opencv molten-vk vulkan-headers \
+              vulkan-loader shaderc ffmpeg pkgconf && exit 0
+            echo "::warning::brew install attempt ${attempt} failed; retrying"
+            sleep 15
+          done
+          exit 1
+
+      # Keep the ref at calib's recon pin (third_party/CMakeLists.txt).
+      - name: Install the Orbbec SDK
+        uses: taojin-6/volumetric_kit_recon/.github/actions/install-orbbec-sdk@2f8d6eaf2d7cec17f3815240c27f7450095d4a12
+
+      - name: Cache third-party deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-rig-macos-${{ hashFiles('third_party/CMakeLists.txt') }}
+          restore-keys: |
+            deps-rig-macos-
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DVC_WITH_OPENCV=ON
+          -DVC_WITH_RIG=ON -DVR_WITH_ORBBEC=ON -DVR_WITH_FFMPEG=ON
 
       - name: Build
         run: cmake --build build --parallel

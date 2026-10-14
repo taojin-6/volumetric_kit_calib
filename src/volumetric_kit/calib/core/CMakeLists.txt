@@ -3,11 +3,11 @@
 
 # --- calib_core: Tier 0 ------------------------------------------------------
 # Foundation tier: the version API and the data model (board target,
-# observation, view and capture records, lens and sensor profiles), with error
-# handling from volumetric_kit_core's base tier. Every other tier depends on
-# this; it depends only on the core's base tier and recon's camera tier, which
-# its public headers name. Pure CPU, no GPU and no OpenCV/Ceres, so it stays
-# usable from a tool or a device-less test.
+# observation, detection, view and capture records, lens and sensor profiles),
+# with error handling from volumetric_kit_core's base tier. Every other tier
+# depends on this; it depends only on the core's base tier and recon's camera
+# tier, which its public headers name. Pure CPU, no GPU and no OpenCV/Ceres, so
+# it stays usable from a tool or a device-less test.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
@@ -16,7 +16,7 @@ set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 add_library(calib_core)
 add_library(volumetric_kit::calib_core ALIAS calib_core)
 
-target_sources(calib_core PRIVATE target.cpp version.cpp)
+target_sources(calib_core PRIVATE target.cpp version.cpp view_check.cpp)
 
 # Generated headers: the VC_CORE_API export macro + the configured version
 # header. The export header is per-tier (core/export.hpp + VC_CORE_API +
@@ -57,8 +57,8 @@ target_include_directories(
 
 # Both are PUBLIC: the public headers name the core's Status / Result and
 # recon's camera types in their signatures, so consumers compile against them
-# too. The installed package re-finds recon, and the core through recon's
-# package config.
+# too. The installed package re-finds the core, then recon
+# (cmake/volumetric_kit_calibConfig.cmake.in).
 target_link_libraries(calib_core PUBLIC volumetric_kit::core_base
                                         volumetric_kit::recon_camera)
 

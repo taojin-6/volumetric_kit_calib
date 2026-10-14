@@ -11,14 +11,15 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 `volumetric_kit_gfx`, so it is not in a clone.
 
 > **Status:** Early scaffolding. The `core` tier — the data model (the board
-> and its check, observations, view and capture records, lens and sensor
-> profiles) over recon's camera model and the core's exception-free
-> `Status`/`Result` — builds and is tested (GoogleTest), and so, with
+> and its check, observations, detections, view and capture records, lens and
+> sensor profiles) over recon's camera model and the core's exception-free
+> `Status`/`Result` — builds and is tested (GoogleTest); so, with
 > `VC_WITH_OPENCV`, do the `compute` tier's OpenCV bridge and the `solve`
-> tier's first rig. The solve's bundle adjustment and the detection, quality,
-> color, capture, viz, and app tiers are not yet implemented; the legacy
-> `camera_calibration` Python scripts (a separate checkout beside the
-> `volumetric_kit/` folder) remain the reference oracle.
+> tier's first rig, and, with `VC_WITH_RIG`, the `capture` tier's session
+> writer. The solve's bundle adjustment and the detection, quality, color, viz,
+> and app tiers are not yet implemented; the legacy `camera_calibration` Python
+> scripts (a separate checkout beside the `volumetric_kit/` folder) remain the
+> reference oracle.
 
 [AGENTS.md](AGENTS.md) is the shared working guide for Codex and Claude Code;
 `CLAUDE.md` imports it. [DECISIONS.md](DECISIONS.md) records the locked
@@ -38,8 +39,13 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
   until calib writes GPU code, so it needs no Vulkan SDK.
 - **Cameras and sensors:** cameras are `volumetric_kit_recon`'s
   `CameraModel`, from its camera tier, which calib fetches alone so the brain
-  still needs no Vulkan SDK; the `capture` tier will take frames from recon's
-  sensor tier and its drivers ([DECISIONS.md](DECISIONS.md#locked-decisions)).
+  still needs no Vulkan SDK ([DECISIONS.md](DECISIONS.md#locked-decisions)).
+- **Capture:** the `capture` tier writes a calibration session to disk on a
+  thread of its own and never overwrites: each camera's JPEG as the camera
+  coded it, raw 16-bit depth, the factory models in recon's calibration file,
+  and the detections and checks
+  ([DECISIONS.md](DECISIONS.md#2026-10-13--sessions-on-disk)). It takes
+  recon's sensor and io tiers, so `VC_WITH_RIG` fetches all of recon.
 - **Compute:** a CPU backend is the correctness oracle: OpenCV, behind
   recon's and calib's types. The `compute` tier holds the bridge -- the camera
   model and rigid transforms in OpenCV's types, the ChArUco board and whether a
@@ -70,9 +76,12 @@ brew install cmake glm          # macOS
 
 `VC_WITH_OPENCV` (OFF by default) builds `compute` and the tiers on it, which
 need an installed OpenCV 5 (5.0 or a later 5.x): `brew install opencv` on
-macOS; on Ubuntu, whose packages are OpenCV 4, one you build yourself. (Later
-tiers add `volumetric_kit_gfx` for `viz`/`app`.) To build against a local core
-or recon checkout instead of the pinned one, pass
+macOS; on Ubuntu, whose packages are OpenCV 4, one you build yourself.
+`VC_WITH_RIG` (OFF by default) builds `capture`, over all of recon, which needs
+the Vulkan SDK and a GLSL compiler: the core's vulkan tier
+[prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
+(Later tiers add `volumetric_kit_gfx` for `viz`/`app`.) To build against a
+local core or recon checkout instead of the pinned one, pass
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>` or
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>`.
 
@@ -81,7 +90,7 @@ or recon checkout instead of the pinned one, pass
 ```bash
 calib_root="$(git rev-parse --show-toplevel)"
 cmake -S "$calib_root" -B "$calib_root/build" -DCMAKE_BUILD_TYPE=Release \
-  -DVC_WITH_OPENCV=ON   # without OpenCV 5, leave this out
+  -DVC_WITH_OPENCV=ON -DVC_WITH_RIG=ON  # leave out what you lack
 cmake --build "$calib_root/build" --parallel
 ctest --test-dir "$calib_root/build" --output-on-failure
 ```
@@ -115,23 +124,24 @@ target_link_libraries(your_app PRIVATE volumetric_kit::calib_core)
 default ON only when `volumetric_kit_calib` is the top-level project, so a
 FetchContent build of it never fails on a warning your compiler adds. Set
 `VC_WITH_OPENCV` ON before calib is made available to link
-`volumetric_kit::calib_compute` and `volumetric_kit::calib_solve`.
+`volumetric_kit::calib_compute` and `volumetric_kit::calib_solve`, and
+`VC_WITH_RIG` ON to link `volumetric_kit::calib_capture`.
 `VC_SANITIZE` is a semicolon list, empty (off) by default —
 e.g. `-DVC_SANITIZE="address;undefined"`. An installed calib carries the core
-and recon's camera tier beside it, and `find_package(volumetric_kit_calib)`
-finds all three, and the installed OpenCV when calib was built with it.
+and recon (its camera tier, or all of it with `VC_WITH_RIG`) beside it, and
+`find_package(volumetric_kit_calib)` finds all three, and the installed OpenCV
+when calib was built with it. An application may find the core itself too,
+before calib or after it; if it finds another core first, calib is not found,
+and the message names both.
 
-calib needs `volumetric_kit_core` 0.2.0 or newer. An application that declares
-the core before calib, to share it with `recon` or `gfx`, pins at least that:
-on an older core, calib's configure fails at `vkc_require_core`, and an
-installed calib is not found. calib makes recon available camera-only, so an
-application that uses recon beyond its camera tier makes recon available, with
-its options, before calib.
-
-Until [volumetric_kit_core#31](https://github.com/taojin-6/volumetric_kit_core/issues/31)
-is fixed, a second read of the core's package in one scope recurses in
-`vkc_require_core`. So a consumer of an installed calib finds the core only
-through it, and finds calib and recon both `REQUIRED`.
+calib needs `volumetric_kit_core` 0.6.1 or newer, with its vulkan tier for
+`VC_WITH_RIG`. An application that declares the core before calib, to share it
+with `recon` or `gfx`, pins at least that: on an older core, calib's configure
+fails at `vkc_require_core`, and an installed calib is not found. Without
+`VC_WITH_RIG`, calib makes recon available camera-only, so an application that
+uses recon beyond its camera tier makes recon available, with its options,
+before calib; with it, an application that makes recon available first makes
+all of it.
 
 ## Development
 

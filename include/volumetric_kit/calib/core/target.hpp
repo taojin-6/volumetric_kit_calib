@@ -126,6 +126,21 @@ struct Target {
 /// @return OK; or `Status::Code::InvalidArgument` naming the field.
 VC_CORE_API core::Status check_target(const Target& target);
 
+/// @brief The name calib's files write for a board's pattern.
+/// @param kind  The pattern.
+/// @return A stable lowercase name for @p kind (`"charuco"`,
+///         `"checkerboard"`, ...); `"unknown"` for a value that is not a
+///         @ref TargetKind.
+VC_CORE_API const char* to_string(TargetKind kind) noexcept;
+
+/// @brief The name calib's files write for a marker dictionary: OpenCV's.
+/// @param dictionary  The dictionary.
+/// @return OpenCV's name for @p dictionary (`"DICT_4X4_100"`,
+///         `"DICT_APRILTAG_36h11"`, ...); `"none"` for
+///         @ref MarkerDictionary::None; `"unknown"` for a value that is not a
+///         @ref MarkerDictionary.
+VC_CORE_API const char* to_string(MarkerDictionary dictionary) noexcept;
+
 /// @brief The rig's board, as the legacy calibration scripts print it: ChArUco,
 ///        5 x 3 squares (4 x 2 inner corners) of 0.15 m, with 0.112 m markers
 ///        from `DICT_4X4_100` numbered from 0, in the legacy layout.

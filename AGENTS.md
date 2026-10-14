@@ -22,7 +22,8 @@ The implemented core and planned tiers are distinguished in
   it is `../volumetric_kit_core/`.
 - Cameras are `volumetric_kit_recon`'s camera tier (`CameraModel`, rigid
   transforms), fetched alone (`VR_CAMERA_ONLY`) so the brain needs no Vulkan;
-  calib keeps no camera model of its own.
+  calib keeps no camera model of its own. `VC_WITH_RIG` fetches all of recon
+  for the `capture` tier.
 - GPU work runs on the core's vulkan tier, on a `VkDevice` shared with `recon`
   and `gfx` ([DECISIONS.md](DECISIONS.md#locked-decisions)); calib keeps no
   GPU backend of its own. A CPU backend is the correctness oracle.
@@ -119,13 +120,13 @@ MSVC flags.
 
 Run from the task's worktree. The build requires CMake ≥ 3.21, a C++17
 compiler, GLM, and network access on the first configure (the core, recon and
-googletest are fetched); `VC_WITH_OPENCV` needs an installed OpenCV 5. See
-README and CI for platform dependencies.
+googletest are fetched); `VC_WITH_OPENCV` needs an installed OpenCV 5, and
+`VC_WITH_RIG` the Vulkan SDK. See README and CI for platform dependencies.
 
 ```sh
 calib_root="$(git rev-parse --show-toplevel)"
-cmake -S "$calib_root" -B "$calib_root/build" \
-  -DCMAKE_BUILD_TYPE=Release -DVC_BUILD_TESTS=ON -DVC_WITH_OPENCV=ON
+cmake -S "$calib_root" -B "$calib_root/build" -DCMAKE_BUILD_TYPE=Release \
+  -DVC_BUILD_TESTS=ON -DVC_WITH_OPENCV=ON -DVC_WITH_RIG=ON
 cmake --build "$calib_root/build" --parallel
 ctest --test-dir "$calib_root/build" --output-on-failure
 pre-commit run --all-files --show-diff-on-failure

@@ -10,6 +10,7 @@
 // ambiguity, so it links calib_compute, calib_solve and OpenCV.
 
 #include "volumetric_kit/calib/core/capture_meta.hpp"
+#include "volumetric_kit/calib/core/detection.hpp"
 #include "volumetric_kit/calib/core/lens_profile.hpp"
 #include "volumetric_kit/calib/core/observation.hpp"
 #include "volumetric_kit/calib/core/sensor_profile.hpp"

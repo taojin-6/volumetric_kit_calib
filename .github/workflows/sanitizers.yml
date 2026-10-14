@@ -3,7 +3,9 @@ name: sanitizers
 # AddressSanitizer + UndefinedBehaviorSanitizer + LeakSanitizer, Linux-only
 # (LeakSanitizer isn't available on macOS). A green normal build is necessary but
 # not sufficient — this is what turns the move-only / lifetime tests into actual
-# leak / use-after-free / double-free detectors.
+# leak / use-after-free / double-free detectors. It builds the rig tiers too
+# (VC_WITH_RIG), whose session writer runs a thread of its own; they take all
+# of recon, so the Vulkan SDK's headers, loader and shader compiler.
 on:
   pull_request:
   push:
@@ -16,7 +18,7 @@ concurrency:
 jobs:
   asan-ubsan-lsan:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45 # recon builds too, sanitized
     env:
       ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
@@ -27,14 +29,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake clang libglm-dev
+            cmake clang libglm-dev libvulkan-dev glslang-tools spirv-tools
 
       - name: Configure
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-            -DVC_SANITIZE="address;undefined"
+            -DVC_SANITIZE="address;undefined" -DVC_WITH_RIG=ON
 
       - name: Build
         run: cmake --build build --parallel
