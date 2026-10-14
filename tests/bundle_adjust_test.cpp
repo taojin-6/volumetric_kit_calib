@@ -17,6 +17,7 @@
 #include <map>
 #include <random>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -60,12 +61,14 @@ Scene make_scene(std::size_t count = 60, double noise_px = 0.3,
   return scene;
 }
 
+// The first rig, or the test fails here: GoogleTest reports the exception
+// and goes on to the next test.
 InitialRig first_rig(const Scene& scene, std::size_t reference = 0,
                      const InitialiseOptions& options = {}) {
   core::Result<InitialRig> rig =
       initialise(scene.cameras, scene.board, scene.views, reference, options);
-  EXPECT_TRUE(rig.ok()) << rig.status().message();
-  return rig.ok() ? *std::move(rig) : InitialRig{};
+  if (!rig.ok()) throw std::runtime_error(rig.status().message());
+  return *std::move(rig);
 }
 
 core::Result<RigSolution> adjust(const Scene& scene, const InitialRig& start,
@@ -76,11 +79,12 @@ core::Result<RigSolution> adjust(const Scene& scene, const InitialRig& start,
   return solution;
 }
 
+// The solution, or the test fails here, as first_rig does.
 RigSolution solved(const Scene& scene, const InitialRig& start,
                    const BundleAdjustOptions& options = {}) {
   core::Result<RigSolution> solution = adjust(scene, start, options);
-  EXPECT_TRUE(solution.ok()) << solution.status().message();
-  return solution.ok() ? *std::move(solution) : RigSolution{};
+  if (!solution.ok()) throw std::runtime_error(solution.status().message());
+  return *std::move(solution);
 }
 
 double angle_deg(const camera::Mat4d& a, const camera::Mat4d& b) {
@@ -462,7 +466,8 @@ TEST(BundleAdjust, BringsEachRotationWithinPi) {
 }
 
 // The noise's covariance against the spread of 40 solves of the same plan
-// under fresh noise.
+// under fresh noise, each corner weighted 1, as the detector weights them:
+// the residuals' variance gives the scale.
 TEST(BundleAdjust, CovarianceIsWithinThirtyPercentOfMonteCarlo) {
   constexpr int kRuns = 40;
   std::vector<double> rotation(4, 0.0);
@@ -470,8 +475,12 @@ TEST(BundleAdjust, CovarianceIsWithinThirtyPercentOfMonteCarlo) {
   std::vector<double> predicted_rotation(4, 0.0);
   std::vector<double> predicted_centre(4, 0.0);
   for (int run = 0; run < kRuns; ++run) {
-    const Scene scene = make_scene(60, 0.3, 1, 100 + run);
+    Scene scene = make_scene(60, 0.3, 1, 100 + run);
+    for (Observation& view : scene.views) {
+      for (DetectedPoint& point : view.points) point.weight = 1.0;
+    }
     const RigSolution solution = solved(scene, first_rig(scene));
+    EXPECT_NEAR(solution.variance, 0.09, 0.01);  // 0.3 px on each axis
     ASSERT_EQ(solution.covariance.size(), 4u);
     const std::vector<camera::Mat4d> truth = truth_of(scene, 0);
     for (std::size_t c = 0; c < 4; ++c) {
