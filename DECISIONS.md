@@ -11,8 +11,9 @@ domain model and rationale remain in the intentionally gitignored local
 - **Consume `volumetric_kit_gfx` for all rendering + UI; do not re-implement.**
   The 3D copilot + ImGui dashboards ride `vg::` pipelines.
 - **Mobile (Android + iOS) is first-class and fully on-device, solve included.**
-  Target-based BA is small (a known board fixes structure → hundreds of sparse
-  params → Ceres on an ARM CPU in tens of ms), so the solve runs on CPU
+  Target-based BA is small (a known board fixes structure → hundreds of
+  params → OpenCV's `cv::LevMarq`, which ships for iOS and Android, on an ARM
+  CPU in tens of ms; see the 2026-10-14 entry), so the solve runs on CPU
   everywhere; the GPU (Vulkan) is for dense per-pixel work.
 - **The physically-parameterized sensor/lens model is the spine** — the quality
   tier is physical, not heuristic, so `SensorProfile`/`LensProfile` are required
@@ -71,6 +72,28 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
+
+## 2026-10-14 — The bundle adjustment on `cv::LevMarq`
+
+The solve refines the first rig with OpenCV's `cv::LevMarq`, not Ceres
+(`solve/bundle_adjust.hpp` has the method).
+
+- **Why not Ceres.** The problem is small: 6 parameters per camera and per
+  capture, about 380 at 60 captures and at most about 900 at the 150-capture
+  cap, so a dense normal-equations solve (Cholesky) suffices. A 60-capture
+  solve takes about 25 ms on the synthetic rig (Release, Apple M5 Max). Ceres
+  would be a second solver prerequisite, beside OpenCV, on every platform.
+- **No matrix-to-vector Rodrigues inside it.** The derivatives chain
+  `cv::projectPoints`' with `cv::Rodrigues`' vector-to-matrix one, never
+  `composeRT` or a matrix-to-vector conversion, whose derivative is singular
+  near a half turn; the 2026-09-29 session has boards at 167° and 174°.
+- **OpenCV's matrices where recon has no type.** The solve's results hold a
+  `cv::Matx` for a shape recon lacks (a camera's 6 x 6 covariance, a corner's
+  2 x 6 derivatives), amending the 2026-10-12 entry's "behind calib's
+  types"; cameras and poses stay recon's.
+- **Ambiguous views are adjusted.** A capture whose views are all ambiguous
+  takes its board from them in `initialise`, so the adjustment can use them
+  rather than drop the capture.
 
 ## 2026-10-13 — Sessions on disk
 

@@ -3,7 +3,8 @@
 
 # --- calib_solve: Tier 2 -----------------------------------------------------
 # The rig solve on OpenCV: each view's own pose (IPPE), the cameras' spanning
-# tree, and the first rig the adjustment starts from. Built with VC_WITH_OPENCV.
+# tree, the first rig, and the bundle adjustment that refines it (LevMarq).
+# Built with VC_WITH_OPENCV.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
@@ -12,8 +13,9 @@ set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 add_library(calib_solve)
 add_library(volumetric_kit::calib_solve ALIAS calib_solve)
 
-target_sources(calib_solve PRIVATE initialise.cpp reprojection.cpp
-                                   spanning_tree.cpp view_pose.cpp)
+target_sources(
+  calib_solve PRIVATE bundle_adjust.cpp common.cpp initialise.cpp
+                      reprojection.cpp spanning_tree.cpp view_pose.cpp)
 
 # The tier's own export macro and guard (see calib_core).
 generate_export_header(
@@ -41,7 +43,7 @@ target_include_directories(
                      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
 # The public headers name compute's board and camera; OpenCV's geometry module
-# (PnP, projection, buildMST) stays private.
+# (PnP, projection, buildMST, LevMarq) stays private.
 target_link_libraries(
   calib_solve
   PUBLIC calib_compute

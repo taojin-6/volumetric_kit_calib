@@ -6,8 +6,8 @@
 # observation, detection, view and capture records, lens and sensor profiles),
 # with error handling from volumetric_kit_core's base tier. Every other tier
 # depends on this; it depends only on the core's base tier and recon's camera
-# tier, which its public headers name. Pure CPU, no GPU and no OpenCV/Ceres, so
-# it stays usable from a tool or a device-less test.
+# tier, which its public headers name. Pure CPU, no GPU and no OpenCV, so it
+# stays usable from a tool or a device-less test.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 

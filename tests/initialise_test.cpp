@@ -21,7 +21,7 @@
 
 #include <gtest/gtest.h>
 
-#include "synthetic_rig.hpp"
+#include "synthetic_scene.hpp"
 
 namespace volumetric_kit::calib::solve {
 namespace {
@@ -29,35 +29,11 @@ namespace {
 namespace camera = recon::camera;
 using Code = core::Status::Code;
 
-constexpr double kDegPerRad = 180.0 / 3.14159265358979323846;
-
-// The synthetic rig, a plan of its placements and what its cameras see.
-struct Scene {
-  std::vector<test::SyntheticCamera> rig;
-  compute::Board board;
-  std::vector<test::Placement> plan;
-  std::vector<Observation> views;
-  std::vector<RigCamera> cameras;
-};
-
-Scene make_scene(std::size_t count = 60, double noise_px = 0.3) {
-  std::vector<test::SyntheticCamera> rig = test::synthetic_rig();
-  compute::Board board = compute::Board::create(legacy_femto_board()).value();
-  test::PlanOptions plan_options;
-  plan_options.count = count;
-  std::vector<test::Placement> plan =
-      test::synthetic_plan(rig, board, plan_options);
-  test::ObserveOptions observe_options;
-  observe_options.noise_px = noise_px;
-  std::vector<Observation> views =
-      test::observe(rig, board, plan, observe_options);
-  std::vector<RigCamera> cameras;
-  for (const test::SyntheticCamera& cam : rig) {
-    cameras.push_back({cam.id, cam.model});
-  }
-  return {std::move(rig), std::move(board), std::move(plan), std::move(views),
-          std::move(cameras)};
-}
+using test::angle_deg;
+using test::centre_of;
+using test::index_of;
+using test::make_scene;
+using test::Scene;
 
 core::Result<InitialRig> run(const std::vector<RigCamera>& cameras,
                              const compute::Board& board,
@@ -67,25 +43,6 @@ core::Result<InitialRig> run(const std::vector<RigCamera>& cameras,
   core::Result<InitialRig> rig = core::Status::invalid_argument("unset");
   EXPECT_NO_THROW(rig = initialise(cameras, board, views, reference, options));
   return rig;
-}
-
-std::size_t index_of(const std::vector<RigCamera>& cameras,
-                     const std::string& id) {
-  for (std::size_t c = 0; c < cameras.size(); ++c) {
-    if (cameras[c].id == id) return c;
-  }
-  ADD_FAILURE() << "no camera " << id;
-  return 0;
-}
-
-double angle_deg(const camera::Mat4d& a, const camera::Mat4d& b) {
-  return glm::length(camera::rodrigues_from_rotation(
-             glm::transpose(camera::Mat3d(a)) * camera::Mat3d(b))) *
-         kDegPerRad;
-}
-
-camera::Vec3d centre_of(const camera::Mat4d& world_to_camera) {
-  return camera::Vec3d(camera::rigid_inverse(world_to_camera)[3]);
 }
 
 bool finite(const camera::Mat4d& m) {
@@ -103,16 +60,12 @@ bool finite(const camera::Mat4d& m) {
 void expect_near_truth(const Scene& scene, const std::vector<RigCamera>& order,
                        const InitialRig& rig, const std::string& reference,
                        double max_deg, double max_m) {
-  std::map<std::string, camera::Mat4d> truth;
-  for (const test::SyntheticCamera& cam : scene.rig) {
-    truth[cam.id] = cam.world_to_camera;
-  }
-  const camera::Mat4d world_to_reference = truth[reference];
-  const camera::Mat4d reference_to_world =
-      camera::rigid_inverse(world_to_reference);
+  const std::size_t r = index_of(scene.cameras, reference);
+  const std::vector<camera::Mat4d> truth = test::truths_in_world_of(scene, r);
+  const camera::Mat4d& world_to_reference = scene.rig[r].world_to_camera;
   ASSERT_EQ(rig.world_to_camera.size(), order.size());
   for (std::size_t c = 0; c < order.size(); ++c) {
-    const camera::Mat4d expected = truth[order[c].id] * reference_to_world;
+    const camera::Mat4d& expected = truth[index_of(scene.cameras, order[c].id)];
     const camera::Mat4d& got = rig.world_to_camera[c];
     EXPECT_LT(angle_deg(got, expected), max_deg) << order[c].id;
     EXPECT_LT(glm::length(centre_of(got) - centre_of(expected)), max_m)
@@ -198,7 +151,7 @@ void replace_view(Scene& scene, std::size_t c, std::int64_t capture,
 camera::Mat4d turned(const camera::Mat4d& board_to_world, double deg) {
   const camera::Vec3d middle(0.375, 0.225, 0.0);
   camera::Mat4d turn(camera::rotation_from_rodrigues(
-      camera::Vec3d(0.0, 0.0, deg / kDegPerRad)));
+      camera::Vec3d(0.0, 0.0, glm::radians(deg))));
   turn[3] = glm::dvec4(middle - camera::Mat3d(turn) * middle, 1.0);
   return board_to_world * turn;
 }
@@ -592,7 +545,7 @@ TEST(Initialise, PlacesACameraByTheMeanOfItsInliers) {
     for (const std::size_t j : {i, i + 1}) {
       const double deg = j == i ? 1.0 : -1.0;
       const camera::Mat4d roll(camera::rotation_from_rodrigues(
-          camera::Vec3d(0.0, 0.0, deg / kDegPerRad)));
+          camera::Vec3d(0.0, 0.0, glm::radians(deg))));
       replace_view(scene, link.camera, static_cast<std::int64_t>(shared[j]),
                    camera::rigid_inverse(world_to_child) * roll *
                        world_to_child * scene.plan[shared[j]].board_to_world);
@@ -637,6 +590,41 @@ TEST(Initialise, EachBoardIsTheCandidateThatFitsItsCaptureBest) {
   const auto [board, truth] = board_and_truth(scene, *rig, capture, "SYN0");
   EXPECT_LT(angle_deg(board, truth), 1.0);
   expect_near_truth(scene, scene.cameras, *rig, "SYN0", 1.0, 0.05);
+}
+
+// A capture whose views are all ambiguous takes its board from them: of
+// their poses, the one that fits them all best.
+TEST(Initialise, PlacesTheBoardOfACaptureWhoseViewsAreAllAmbiguous) {
+  const Scene scene = make_scene();
+  const core::Result<InitialRig> plain =
+      run(scene.cameras, scene.board, scene.views, 0);
+  ASSERT_TRUE(plain.ok()) << plain.status().message();
+  // Each capture's least ambiguous view; the capture where it is least.
+  std::map<std::int64_t, double> clearest;
+  for (const ViewRecord& view : plain->views) {
+    double& a = clearest.try_emplace(view.capture, 0.0).first->second;
+    a = std::max(a, *view.ambiguity);
+  }
+  std::vector<std::pair<double, std::int64_t>> order;
+  for (const auto& [capture, a] : clearest) order.emplace_back(a, capture);
+  std::sort(order.begin(), order.end());
+  const std::int64_t capture = order[0].second;
+  InitialiseOptions options;
+  options.min_ambiguity = 0.5 * (order[0].first + order[1].first);
+  const core::Result<InitialRig> rig =
+      run(scene.cameras, scene.board, scene.views, 0, options);
+  ASSERT_TRUE(rig.ok()) << rig.status().message();
+  std::size_t ambiguous = 0;
+  for (const ViewRecord& view : rig->views) {
+    if (view.capture != capture) continue;
+    EXPECT_EQ(view.fate, ViewFate::Ambiguous);
+    ++ambiguous;
+  }
+  ASSERT_GE(ambiguous, 2u);
+  EXPECT_EQ(rig->boards.size(), scene.plan.size());
+  const auto [board, truth] = board_and_truth(scene, *rig, capture, "SYN0");
+  EXPECT_LT(angle_deg(board, truth), 1.0);
+  EXPECT_LT(glm::length(camera::Vec3d(board[3] - truth[3])), 0.05);
 }
 
 // RMS distance between two sets of pixels.

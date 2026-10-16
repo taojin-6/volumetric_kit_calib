@@ -2,8 +2,8 @@
 // Copyright (c) 2026 Tao Jin
 
 // The solve runs out of memory anywhere -- building a message, adding
-// context, inside OpenCV -- and returns OutOfMemory, never throwing, and
-// never a rig short of a view. The one exception is OpenCV's own:
+// context, inside OpenCV and cv::LevMarq -- and returns OutOfMemory, never
+// throwing, and never a rig short of a view. The one exception is OpenCV's own:
 // solvePnPGeneric swallows whatever IPPE throws, leaving the view with no
 // pose or half of one, and view_pose reports either as a Backend error naming
 // solvePnPGeneric.
@@ -18,6 +18,7 @@
 
 #include "allocation_failure.hpp"
 #include "synthetic_rig.hpp"
+#include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
 #include "volumetric_kit/calib/solve/view_pose.hpp"
@@ -107,6 +108,38 @@ TEST(SolveOom, InitialiseRefusingAView) {
       [&](const core::Result<InitialRig>& rig) {
         return rig.status().message() == refusal || ippe_failed(rig.status());
       });
+}
+
+TEST(SolveOom, BundleAdjust) {
+  const Small scene;
+  const InitialRig rig =
+      initialise(scene.cameras, scene.board, scene.views, 0).value();
+  expect_oom_anywhere([&] {
+    return bundle_adjust(scene.cameras, scene.board, scene.views, rig);
+  });
+  // Refusing an option, and a start that does not fit.
+  BundleAdjustOptions refused;
+  refused.huber_px = 0.0;
+  expect_oom_anywhere([&] {
+    return bundle_adjust(scene.cameras, scene.board, scene.views, rig, refused);
+  });
+  InitialRig short_of = rig;
+  short_of.views.pop_back();
+  expect_oom_anywhere([&] {
+    return bundle_adjust(scene.cameras, scene.board, scene.views, short_of);
+  });
+}
+
+TEST(SolveOom, ViewResiduals) {
+  const Small scene;
+  const compute::CvCamera cam =
+      compute::cv_camera(scene.cameras[0].model).value();
+  expect_oom_anywhere(
+      [&] { return view_residuals(cam, scene.board, scene.views[0], {}, {}); });
+  Observation unknown = scene.views[0];
+  unknown.points[0].id = 99;
+  expect_oom_anywhere(
+      [&] { return view_residuals(cam, scene.board, unknown, {}, {}); });
 }
 
 TEST(SolveOom, ViewPose) {

@@ -7,8 +7,9 @@
 // calib_core, recon_camera and the core's base tier. With compute
 // (VC_CONSUMER_COMPUTE) it includes compute's, detect's and solve's headers
 // too, builds the board and the camera in OpenCV's types, seeks the board in a
-// blank image, and builds a rig's tree and a view's ambiguity, so it links
-// calib_compute, calib_detect, calib_solve and OpenCV.
+// blank image, builds a rig's tree and a view's ambiguity, and refuses to
+// adjust a rig of no cameras, so it links calib_compute, calib_detect,
+// calib_solve and OpenCV.
 
 #include "volumetric_kit/calib/core/capture_meta.hpp"
 #include "volumetric_kit/calib/core/detection.hpp"
@@ -27,6 +28,7 @@
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 #include "volumetric_kit/calib/detect/charuco.hpp"
+#include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
 #include "volumetric_kit/calib/solve/view_pose.hpp"
@@ -56,6 +58,10 @@ int main() {
               ->links.size() == 1 &&
       vc::solve::ViewPose{}.ambiguity() > 1.0;
   if (!bridged) return 1;
+  const bool refused =
+      vc::solve::bundle_adjust({}, *board, {}, {}).status().domain() ==
+      volumetric_kit::core::Status::Code::InvalidArgument;
+  if (!refused) return 1;
   const unsigned char blank[64 * 64] = {};
   const auto found =
       detect::detect_charuco({64, 64, 64, blank}, *board, detect::Mode::Hybrid);

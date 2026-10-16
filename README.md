@@ -15,10 +15,9 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > sensor profiles) over recon's camera model and the core's exception-free
 > `Status`/`Result` — builds and is tested (GoogleTest); so, with
 > `VC_WITH_OPENCV`, do the `compute` tier's OpenCV bridge, the `detect` tier's
-> board detection and the `solve` tier's first rig, and, with `VC_WITH_RIG`,
-> the `capture` tier's session writer. The solve's bundle adjustment and the
-> quality, color, viz, and app tiers are not yet implemented; the legacy
-> `camera_calibration` Python
+> board detection and the `solve` tier's rig solve, and, with `VC_WITH_RIG`,
+> the `capture` tier's session writer. The quality, color, viz, and app tiers
+> are not yet implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain the
 > reference oracle.
 
@@ -61,7 +60,10 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
   every camera and board from the views alone -- each view's own pose (IPPE),
   the spanning tree of the camera links that share the most captures, each
   link's robust relative pose -- in the world of the reference camera's colour
-  frame: the first rig, which the bundle adjustment refines.
+  frame: the first rig. `bundle_adjust` refines it on OpenCV's `cv::LevMarq`,
+  with a Huber loss and outlier rounds, and reports each camera's covariance
+  and its sensitivity to the intrinsics, and the poses as recon's
+  calibration.
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
 
@@ -80,10 +82,10 @@ brew install cmake glm          # macOS
 
 `VC_WITH_OPENCV` (OFF by default) builds `compute` and the tiers on it, which
 need an installed OpenCV 5 (5.0 or a later 5.x; the tests also use its
-imgcodecs module): `brew install opencv` on macOS; on Ubuntu, whose packages
-are OpenCV 4, one you build yourself. `VC_WITH_RIG` (OFF by default) builds
-`capture`, over all of recon, which needs the Vulkan SDK and a GLSL compiler:
-the core's vulkan tier
+imgcodecs and calib modules): `brew install opencv` on macOS; on Ubuntu,
+whose packages are OpenCV 4, one you build yourself. `VC_WITH_RIG` (OFF by
+default) builds `capture`, over all of recon, which needs the Vulkan SDK and
+a GLSL compiler: the core's vulkan tier
 [prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
 (Later tiers add `volumetric_kit_gfx` for `viz`/`app`.) To build against a
 local core or recon checkout instead of the pinned one, pass
