@@ -590,7 +590,7 @@ TEST_F(VizRenderTest, RecordsNothingWithoutANewPicture) {
 // -- another size, I420, chroma gfx cannot site, or no Y'CbCr matrix -- is
 // left out and named, its tile keeping its last picture and ageing, while the
 // other camera's new picture is drawn. Two pictures in different codings on
-// one page are both left out, with nothing recorded.
+// one page are both left out, their tiles as they were.
 TEST_F(VizRenderTest, LeavesOutOnlyThePicturesItCannotTake) {
   std::unique_ptr<RigMosaic> mosaic = make_mosaic({{16, 12}, {16, 12}});
   ASSERT_NE(mosaic, nullptr);
@@ -642,18 +642,33 @@ TEST_F(VizRenderTest, LeavesOutOnlyThePicturesItCannotTake) {
     }
   }
 
+  Picture last = make_picture(16, 12, {2.0f + age, 9.0f}, 160);
   Picture bt709 = make_picture(16, 12, {1.0f, 1.0f}, 160);
   bt709.yuv.kr = 0.2126f;
   bt709.yuv.kb = 0.0722f;
-  ASSERT_TRUE(
-      mosaic->record(VK_NULL_HANDLE, {&pictures[0].yuv, &bt709.yuv}).ok());
+  const Pixels mixed = render(*mosaic, {&pictures[0], &bt709});
+  ASSERT_FALSE(mixed.bytes.empty());
   ASSERT_EQ(mosaic->refused().size(), 2u);
   for (std::size_t i = 0; i < 2; ++i) {
-    EXPECT_EQ(mosaic->refused()[i].camera, i);
-    EXPECT_EQ(mosaic->refused()[i].status.domain(), Code::InvalidArgument);
+    const TileRefusal& refusal = mosaic->refused()[i];
+    EXPECT_EQ(refusal.camera, i);
+    EXPECT_EQ(refusal.status.domain(), Code::InvalidArgument);
+    EXPECT_NE(refusal.status.message().find("a page converts with one"),
+              std::string::npos)
+        << refusal.status.message();
   }
   EXPECT_EQ(mosaic->sets_since_picture(0), 1u);
   EXPECT_EQ(mosaic->sets_since_picture(1), age + 1);
+  const glm::vec2 kept[] = {last.dot, pictures[1].dot};
+  for (std::size_t i = 0; i < 2; ++i) {
+    const glm::vec2 expected = mosaic->view().image_to_target(
+        mosaic->tile_region(i).origin + kept[i] + 0.5f);
+    const std::optional<glm::vec2> dot =
+        centroid(mixed, visible(*mosaic, i), bright);
+    ASSERT_TRUE(dot.has_value()) << i;
+    EXPECT_NEAR(dot->x, expected.x, 0.75f) << i;
+    EXPECT_NEAR(dot->y, expected.y, 0.75f) << i;
+  }
 }
 
 // Each page converts in its own pictures' coding, so cameras of different
