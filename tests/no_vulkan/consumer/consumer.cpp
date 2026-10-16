@@ -8,8 +8,9 @@
 // (VC_CONSUMER_COMPUTE) it includes compute's, detect's and solve's headers
 // too, builds the board and the camera in OpenCV's types, seeks the board in a
 // blank image, builds a rig's tree and a view's ambiguity, refuses to adjust
-// a rig of no cameras, and arms a capture rule, so it links calib_compute,
-// calib_detect, calib_solve, calib_quality and OpenCV.
+// a rig of no cameras, to measure the transfer of one and to format its
+// results, and arms a capture rule, so it links calib_compute, calib_detect,
+// calib_solve, calib_quality and OpenCV.
 
 #include "volumetric_kit/calib/core/capture_meta.hpp"
 #include "volumetric_kit/calib/core/detection.hpp"
@@ -29,8 +30,10 @@
 #include "volumetric_kit/calib/compute/measures.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 #include "volumetric_kit/calib/detect/charuco.hpp"
+#include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
 #include "volumetric_kit/calib/quality/live_checks.hpp"
+#include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
@@ -67,6 +70,13 @@ int main() {
       vc::solve::bundle_adjust({}, *board, {}, {}).status().domain() ==
       volumetric_kit::core::Status::Code::InvalidArgument;
   if (!refused) return 1;
+  const auto none = volumetric_kit::core::Status::Code::InvalidArgument;
+  if (vc::quality::cross_camera_transfer({}, *board, {}, {})
+              .status()
+              .domain() != none ||
+      vc::quality::format_results({}, {}, {}).status().domain() != none) {
+    return 1;
+  }
   auto rule = vc::quality::CaptureRule::create({"A"});
   if (!rule.ok() || !rule->arm({}) || !vc::quality::corner_shift({}, {}).ok() ||
       !vc::quality::SessionChecks::create({{"A", color}}, *board, 0).ok()) {

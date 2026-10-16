@@ -80,6 +80,14 @@ if(VC_WITH_OPENCV)
   vc_add_test(session_checks volumetric_kit::calib_quality vc_synthetic_rig)
   vc_add_test(quality_oom volumetric_kit::calib_quality vc_synthetic_rig)
   target_sources(vc_quality_oom_test PRIVATE support/allocation_failure.cpp)
+  # quality: the solved rig's metrics on the synthetic rig, the transfer against
+  # verify_rig.py's check in OpenCV; its results files read back with nlohmann
+  # and recon's reader.
+  vc_add_test(calibration_metrics volumetric_kit::calib_quality
+              vc_synthetic_rig opencv_geometry)
+  vc_add_test(results volumetric_kit::calib_quality vc_synthetic_rig)
+  target_include_directories(vc_results_test SYSTEM
+                             PRIVATE "${VC_JSON_INCLUDE_DIR}")
 endif()
 
 if(VC_WITH_RIG)

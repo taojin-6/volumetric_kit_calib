@@ -74,6 +74,34 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-16 — The solved rig's metrics and its results files
+
+The `quality` tier measures a solved rig and formats its results directory's
+files (`quality/calibration_metrics.hpp` and `results.hpp` have the
+definitions and the schemas).
+
+- **Formatted, not written.** The brain does no file I/O: the application
+  creates each results directory and writes `array_calibration.json` (recon's
+  own formatter, posed by each camera's T_cw), `report.json` and
+  `residuals.csv` with the core's `write_file(CreateNew)`.
+- **Errors per corner, unweighted, over the corners kept.** The first rig's
+  and the solution's errors are over the same corners, so the legacy RMSE
+  (the RMS over the root of 2, the legacy solve's figure) and its reduction
+  compare like with like.
+- **Transfer is the legacy check.** `verify_rig.py`'s definition, independent
+  of the adjustment: each view's own pose carried into every other camera
+  that poses the capture. A view counts when it fixes a pose, not when it has
+  4 corners.
+- **Re-solves are warm.** Leave one out and the principal-point A/B test run
+  `bundle_adjust` from the solution. A capture without which a link falls
+  short of `min_shared` is recorded as refused, not an error. The A/B sides'
+  RMS is over the corners both keep, and a verdict needs both the RMS and the
+  transfer's median to agree.
+- **The report is written by hand**, as recon writes its calibration file:
+  nlohmann/json makes each number (the shortest form that reads back, `null`
+  when not finite) and string, but none of its containers, whose destructors
+  allocate and so terminate when memory runs out.
+
 ## 2026-10-14 — The bundle adjustment on `cv::LevMarq`
 
 The solve refines the first rig with OpenCV's `cv::LevMarq`, not Ceres

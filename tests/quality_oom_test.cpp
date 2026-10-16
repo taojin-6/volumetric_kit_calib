@@ -4,7 +4,8 @@
 // The quality tier runs out of memory anywhere and returns OutOfMemory,
 // never throwing; the capture rule and the session's checks are then as they
 // were. The one exception is OpenCV's own: solvePnPGeneric swallows what IPPE
-// throws, which view_pose reports as a Backend error naming it.
+// throws, which view_pose reports as a Backend error naming it; a re-solve
+// that IPPE's failure leaves short is recorded as refused, as any refusal.
 
 #include <chrono>
 #include <cstddef>
@@ -16,8 +17,10 @@
 
 #include "allocation_failure.hpp"
 #include "synthetic_rig.hpp"
+#include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
 #include "volumetric_kit/calib/quality/live_checks.hpp"
+#include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
 
 namespace volumetric_kit::calib::quality {
@@ -233,6 +236,78 @@ TEST(QualityOom, SessionChecksAreUnchangedByAFailure) {
   expect_oom_anywhere([&] { return base.summary(); });
   expect_oom_on_a_copy(base,
                        [](SessionChecks& checks) { return checks.drop(7); });
+}
+
+// A solved rig of 3 captures, every camera seeing each, on exact data, so
+// each re-solve takes few iterations; each link needs 2 shared captures, so
+// each capture can be left out.
+struct Solved {
+  compute::Board board = test::femto_board();
+  std::vector<test::SyntheticCamera> rig = test::synthetic_rig();
+  std::vector<solve::RigCamera> cameras;
+  std::vector<Observation> views;
+  solve::InitialRig start;
+  MetricsOptions options;
+  solve::RigSolution solution;
+  CalibrationMetrics metrics;
+
+  Solved() {
+    for (const test::SyntheticCamera& cam : rig) {
+      cameras.push_back({cam.id, cam.model});
+    }
+    test::PlanOptions plan;
+    plan.count = 3;
+    plan.min_cameras = 4;
+    views = test::observe(rig, board, test::synthetic_plan(rig, board, plan),
+                          {0.0, 1});
+    options.bundle_adjust.min_shared = 2;
+    start = solve::initialise(cameras, board, views, 0).value();
+    solution = solve::bundle_adjust(cameras, board, views, start,
+                                    options.bundle_adjust)
+                   .value();
+    metrics =
+        calibration_metrics(cameras, board, views, start, solution, options)
+            .value();
+  }
+};
+
+TEST(QualityOom, CrossCameraTransfer) {
+  const Solved s;
+  expect_oom_anywhere(
+      [&] {
+        return cross_camera_transfer(s.cameras, s.board, s.views,
+                                     s.solution.world_to_camera);
+      },
+      [](const core::Result<Transfer>& r) { return ippe_failed(r.status()); });
+}
+
+// Out of memory in a re-solve, or IPPE's failure, refuses that capture's
+// re-solve or fails the whole.
+TEST(QualityOom, CalibrationMetrics) {
+  const Solved s;
+  ASSERT_EQ(s.metrics.leave_one_out.captures.size(), 3u);
+  for (const LeftOut& left : s.metrics.leave_one_out.captures) {
+    ASSERT_TRUE(left.refused.empty()) << left.refused;
+  }
+  expect_oom_anywhere(
+      [&] {
+        return calibration_metrics(s.cameras, s.board, s.views, s.start,
+                                   s.solution, s.options);
+      },
+      [](const core::Result<CalibrationMetrics>& r) {
+        return ippe_failed(r.status());
+      });
+}
+
+TEST(QualityOom, FormatResults) {
+  const Solved s;
+  expect_oom_anywhere([&] {
+    return format_results(s.cameras, s.solution, s.metrics, s.options);
+  });
+  std::vector<solve::RigCamera> twice = s.cameras;
+  twice[1].id = twice[0].id;
+  expect_oom_anywhere(
+      [&] { return format_results(twice, s.solution, s.metrics, s.options); });
 }
 
 }  // namespace

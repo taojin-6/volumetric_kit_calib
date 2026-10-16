@@ -19,6 +19,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `quality::calibration_metrics`, what a solved rig is worth (DECISIONS.md,
+  2026-10-16): the reprojection error at the first rig and at the solution
+  (overall, without oblique views, per camera, capture and view, the legacy
+  RMSE and a histogram), the rejections by round and reason,
+  `cross_camera_transfer` (the legacy `verify_rig.py`'s check),
+  `leave_one_out` and `principal_point_ab` (warm re-solves), and the
+  cameras' centres and baselines. `format_results` gives the results
+  directory's files as text: recon's calibration file, `report.json` and
+  `residuals.csv`.
+- `solve::check_bundle_adjust_options`, `bundle_adjust`'s check of its
+  options, and `solve::to_string(Dropped)`, the names the report gives the
+  reasons.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds
   and guards, and a `RigSolution` holding the poses, recon's

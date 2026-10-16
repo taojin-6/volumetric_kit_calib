@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -133,6 +134,19 @@ struct BundleAdjustOptions {
   double principal_px = 2.0;
 };
 
+/// @brief Refuse options @ref bundle_adjust cannot take.
+/// @param options  The options.
+/// @param prefix   What each message starts with, before the option's name.
+/// @return OK; `InvalidArgument` naming the first option out of range and
+///         its range; or `OutOfMemory`.
+///
+/// @code
+/// VKC_TRY(check_bundle_adjust_options(options, "app: options.adjust."));
+/// @endcode
+VC_SOLVE_API core::Status check_bundle_adjust_options(
+    const BundleAdjustOptions& options,
+    std::string_view prefix = "bundle_adjust: options.");
+
 /// @brief Why the adjustment left a corner or a view out.
 enum class Dropped {
   /// The corner was nearer its camera than `min_depth_m`, or behind it, as a
@@ -146,6 +160,16 @@ enum class Dropped {
   /// (@ref compute::usable_for_pose), so none of them is kept.
   Unusable,
 };
+
+/// @brief The name calib's results files give @p reason.
+/// @param reason  A reason.
+/// @return `"too_near"`, `"outlier"`, `"outlier_view"` or `"unusable"`;
+///         `"unknown"` for a value @ref Dropped does not name.
+///
+/// @code
+/// for (const Rejection& r : solution.rejections) log(to_string(r.reason));
+/// @endcode
+VC_SOLVE_API const char* to_string(Dropped reason) noexcept;
 
 /// @brief A corner or a view the adjustment left out, and why, so it can be
 ///        named and recaptured.

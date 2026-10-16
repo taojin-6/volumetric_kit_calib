@@ -1466,8 +1466,25 @@ TEST(BundleAdjust, RefusesOptionsOutOfRange) {
                     std::string("bundle_adjust: options.") + c.field + " ", 0),
                 0u)
           << solution.status().message();
+      // The same check on its own, with the caller's prefix.
+      const core::Status checked =
+          check_bundle_adjust_options(options, "app: adjust.");
+      EXPECT_EQ(checked.domain(), Code::InvalidArgument);
+      EXPECT_EQ(checked.message().rfind(
+                    std::string("app: adjust.") + c.field + " must be ", 0),
+                0u)
+          << checked.message();
     }
   }
+  EXPECT_TRUE(check_bundle_adjust_options({}).ok());
+}
+
+TEST(BundleAdjust, NamesEachReason) {
+  EXPECT_STREQ(to_string(Dropped::TooNear), "too_near");
+  EXPECT_STREQ(to_string(Dropped::Outlier), "outlier");
+  EXPECT_STREQ(to_string(Dropped::OutlierView), "outlier_view");
+  EXPECT_STREQ(to_string(Dropped::Unusable), "unusable");
+  EXPECT_STREQ(to_string(static_cast<Dropped>(9)), "unknown");
 }
 
 }  // namespace
