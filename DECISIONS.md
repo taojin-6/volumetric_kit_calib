@@ -43,10 +43,9 @@ domain model and rationale remain in the intentionally gitignored local
   on the same device -- a calib device of its own would copy every frame
   through the host -- and the family keeps one Vulkan core, not three. CUDA is
   added per kernel only where profiling shows a need, in the core; native Metal
-  stays deferred. A CPU backend remains the correctness oracle. The core's
-  vulkan tier has landed, and calib's pin carries it; calib's build leaves it
-  off (`VKC_WITH_VULKAN`), and so needs no Vulkan SDK, until calib writes GPU
-  code.
+  stays deferred. A CPU backend remains the correctness oracle. calib turns
+  the core's vulkan tier on (`VKC_WITH_VULKAN`) only for the rig tiers
+  (`VC_WITH_RIG`), so the brain needs no Vulkan SDK.
 - **The camera model is recon's; capture drivers come from
   `volumetric_kit_recon`'s sensor tier** (2026-10-08, amended 2026-10-12; see
   the dated entry). calib's cameras are recon's `camera::CameraModel`, from its
@@ -131,6 +130,57 @@ definitions and the schemas).
   when not finite) and string, but none of its containers, whose destructors
   allocate and so terminate when memory runs out. The capture tier's session
   files are still to be moved onto it (a `TODO:` in `session_files.cpp`).
+
+## 2026-10-16 — The live view on gfx
+
+The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
+`panels.hpp` and `board_editor.hpp`).
+
+- **Pictures stay on the device.** A tile takes recon's decoded NV12 images
+  as they are; gfx's image pipeline copies and converts them on the GPU, so
+  no picture reaches the host to be shown. Only control data -- corners,
+  checks, counters -- goes from the host to the screen. Planes in a buffer
+  and I420, as Linux's decoders leave them, are refused until the tile takes
+  over their queue family's ownership (and gfx maps I420).
+- **One mosaic, any number of cameras.** Each camera's picture is a tile of
+  one NV12 picture: gfx copies each new picture into its tile, the others
+  keep theirs, and each page with a new picture is converted once per set,
+  so the rig takes one conversion, one mip chain and one draw per page,
+  whatever its camera count, and one view pans and zooms it all. calib picks
+  the tiles: cells of the largest picture's size in a grid as square as it
+  can be, at least 16 texels apart, with origins and extent on multiples of
+  16, so the mosaic's mips to level 4 keep the tiles apart (gfx's
+  `ImageWrite` gives the rule). A mosaic too large for the device's textures
+  or a page's texel budget is paged over several textures in blocks of whole
+  cells, each drawn at its place in the one view over a black backdrop, so
+  the tiles, their marks and the black gutters are where one page would put
+  them. A page's pictures share one coding, as gfx converts a page whole.
+- **One camera's fault leaves the others live.** A picture the mosaic cannot
+  take, or a page whose pictures mix codings or whose write gfx refuses, is
+  left out and named while the rest are recorded, so a rig of many cameras
+  does not freeze for one. A coding change forgets the page's old pictures
+  only after gfx accepts every write. Since gfx validates inside
+  `record_write`, that first write is followed by a discard and a second
+  write on a coding change alone, clearing uncovered tiles before converting
+  the page. A refusal keeps the previous pictures and advances their ages
+  as a set with no new picture does.
+- **Marks in the detector's pixels.** Corners keep OpenCV's integer pixel
+  centres, and gfx's `ImageOverlay` is the one home of the half-pixel and
+  framebuffer-scale mapping onto a tile's region of the mosaic, of the clip
+  to it, and of the title's place in its visible corner.
+- **Models, then ImGui.** The marks and the panels are plain models built from
+  host data, so they are tested without a device; drawing them is a thin pass
+  through gfx. Their tones follow the quality tier's options, so the panels
+  judge as the checks and the capture rule do.
+- **The board locks at the first capture.** Every capture's detections, and
+  the solve, rest on it.
+- **How it builds.** gfx is fetched, pinned by commit, when `VC_WITH_RIG` and
+  `VC_WITH_OPENCV` are both on, since `viz` draws the quality tier's checks.
+  gfx's libraries must build against calib's core pin, the one every sibling
+  compiles against, as gfx's own core pin yields to it. `viz` also links
+  recon's sensor array tier, whose frame sets, counters and decoded pictures
+  its panels and mosaic take. `calib_viz` is build-tree only, as gfx's ui
+  tier is, until gfx installs the ImGui headers.
 
 ## 2026-10-14 — The bundle adjustment on `cv::LevMarq`
 

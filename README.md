@@ -16,9 +16,10 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > `Status`/`Result` — builds and is tested (GoogleTest); so, with
 > `VC_WITH_OPENCV`, do the `compute` tier's OpenCV bridge, the `detect` tier's
 > board detection, the `solve` tier's rig solve and the `quality` tier's live
-> checks and solved-rig metrics, and, with `VC_WITH_RIG`, the `capture` tier's
-> session writer. The depth checks' device kernels and the color, viz, and
-> app tiers are not yet implemented; the legacy `camera_calibration` Python
+> checks and solved-rig metrics; with `VC_WITH_RIG`, the `capture` tier's
+> session writer; and, with both, the `viz` tier's live view. The depth
+> checks' device kernels and the color and app tiers are not yet implemented;
+> the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain the
 > reference oracle.
 
@@ -35,9 +36,8 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
 
 - **Shared core:** every tier builds on
   [`volumetric_kit_core`](https://github.com/taojin-6/volumetric_kit_core), the
-  family's shared foundation. Its base tier supplies calib's `Status`/`Result`
-  today. Its vulkan tier will supply GPU compute -- calib's build leaves it off
-  until calib writes GPU code, so it needs no Vulkan SDK.
+  family's shared foundation. Its base tier supplies calib's `Status`/`Result`;
+  its vulkan tier, the rig tiers' GPU work, so the brain needs no Vulkan SDK.
 - **Cameras and sensors:** cameras are `volumetric_kit_recon`'s
   `CameraModel`, from its camera tier, which calib fetches alone so the brain
   still needs no Vulkan SDK ([DECISIONS.md](DECISIONS.md#locked-decisions)).
@@ -86,6 +86,13 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
   scale and plane from each view's depth, each ordered pair's depth
   agreement, and their verdicts
   ([DECISIONS.md](DECISIONS.md#2026-10-16--depth-checks-the-hosts-geometry-over-the-devices-results)).
+- **Viz:** the live view, on `volumetric_kit_gfx`. Each camera's decoded
+  picture is copied on the device into its tile of one mosaic, for any number
+  of cameras, panned and zoomed as one view, with the corners, markers and
+  coverage marked over each tile in the detector's pixels;
+  panels show each camera's view, the latest set, the session and the
+  capture; the board's editor locks at the first capture
+  ([DECISIONS.md](DECISIONS.md#2026-10-16--the-live-view-on-gfx)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
 
@@ -109,10 +116,12 @@ whose packages are OpenCV 4, one you build yourself. `VC_WITH_RIG` (OFF by
 default) builds `capture`, over all of recon, which needs the Vulkan SDK and
 a GLSL compiler: the core's vulkan tier
 [prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
-(Later tiers add `volumetric_kit_gfx` for `viz`/`app`.) To build against a
-local core or recon checkout instead of the pinned one, pass
-`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>` or
-`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>`.
+With both, it builds `viz` too, which fetches `volumetric_kit_gfx` (pinned by
+commit). To build against a local core, recon or gfx checkout instead of
+the pinned one, pass
+`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>`,
+`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>` or
+`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_GFX=<path>`.
 
 ## Build and test
 
@@ -154,8 +163,10 @@ default ON only when `volumetric_kit_calib` is the top-level project, so a
 FetchContent build of it never fails on a warning your compiler adds. Set
 `VC_WITH_OPENCV` ON before calib is made available to link
 `volumetric_kit::calib_compute`, `volumetric_kit::calib_detect`,
-`volumetric_kit::calib_solve` and `volumetric_kit::calib_quality`, and
-`VC_WITH_RIG` ON to link `volumetric_kit::calib_capture`.
+`volumetric_kit::calib_solve` and `volumetric_kit::calib_quality`,
+`VC_WITH_RIG` ON to link `volumetric_kit::calib_capture`, and both to link
+`volumetric_kit::calib_viz`, which is build-tree only: an installed calib
+lacks it, as an installed gfx lacks its ui tier.
 `VC_SANITIZE` is a semicolon list, empty (off) by default —
 e.g. `-DVC_SANITIZE="address;undefined"`. An installed calib carries the core
 and recon (its camera tier, or all of it with `VC_WITH_RIG`) beside it, and

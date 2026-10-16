@@ -1,0 +1,418 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Tao Jin
+
+// The panels' models: each line's text and tone, from the live checks, the
+// array's counters, the session's summary, the capture rule and the capture
+// records, judged by the quality tier's thresholds; and the stage timings as
+// gfx's metrics panel takes them. No device or ImGui frame needed
+// (viz_render_test draws them).
+
+#include "volumetric_kit/calib/viz/panels.hpp"
+
+#include <string>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+namespace volumetric_kit::calib::viz {
+namespace {
+
+using Code = core::Status::Code;
+
+// The line labelled `label`, or a failure naming the lines there are.
+const PanelLine& line(const std::vector<PanelLine>& lines,
+                      const std::string& label) {
+  for (const PanelLine& l : lines) {
+    if (l.label == label) return l;
+  }
+  ADD_FAILURE() << "no line " << label;
+  static const PanelLine none;
+  return none;
+}
+
+std::vector<PanelLine> labelled(const std::vector<PanelLine>& lines,
+                                const std::string& label) {
+  std::vector<PanelLine> out;
+  for (const PanelLine& l : lines) {
+    if (l.label == label) out.push_back(l);
+  }
+  return out;
+}
+
+TEST(Tone, EachHasItsOwnColour) {
+  const Tone tones[] = {Tone::Normal, Tone::Muted, Tone::Good, Tone::Warn,
+                        Tone::Bad};
+  for (const Tone a : tones) {
+    for (const Tone b : tones) {
+      if (a != b) EXPECT_NE(tone_color(a), tone_color(b));
+    }
+  }
+  EXPECT_EQ(tone_color(static_cast<Tone>(99)), tone_color(Tone::Normal));
+}
+
+TEST(VerdictTone, RedPastTheSolvesTilt) {
+  quality::SessionOptions options;
+  options.solve.oblique_deg = 75.0;
+  ViewCheck oblique;
+  oblique.verdict = ViewVerdict::Oblique;
+  oblique.tilt_deg = 72.0;
+  EXPECT_EQ(verdict_tone(oblique, options), Tone::Warn);
+  oblique.tilt_deg = 75.5;
+  EXPECT_EQ(verdict_tone(oblique, options), Tone::Bad);
+  oblique.tilt_deg.reset();
+  EXPECT_EQ(verdict_tone(oblique, options), Tone::Warn);
+  ViewCheck unknown;
+  unknown.verdict = static_cast<ViewVerdict>(99);
+  EXPECT_EQ(verdict_tone(unknown, options), Tone::Muted);
+}
+
+CameraLive good_camera() {
+  CameraLive camera;
+  camera.present = true;
+  camera.check.corners = 8;
+  camera.check.markers = 7;
+  camera.check.distance_m = 2.8146;
+  camera.check.tilt_deg = 12.04;
+  camera.check.pnp_rms_px = 0.214;
+  camera.check.cell = 4;
+  camera.check.verdict = ViewVerdict::Good;
+  camera.stillness_px = 0.081;
+  camera.frames = {1234, 1200, 30, 0};
+  return camera;
+}
+
+quality::CameraSummary summary_of(int usable, int used, double filled) {
+  quality::CameraSummary session;
+  session.usable_views = usable;
+  session.used_views = used;
+  session.coverage_filled = filled;
+  return session;
+}
+
+TEST(CameraPanel, ShowsWhatTheCameraSees) {
+  const core::Result<std::vector<PanelLine>> lines = camera_panel(
+      good_camera(), summary_of(12, 10, 0.39), legacy_femto_board());
+  ASSERT_TRUE(lines.ok()) << lines.status().message();
+  const std::vector<PanelLine>& l = lines.value();
+  const std::vector<std::string> order = {
+      "verdict", "corners",   "markers", "distance", "tilt",  "fit",
+      "cell",    "stillness", "views",   "coverage", "frames"};
+  ASSERT_EQ(l.size(), order.size());
+  for (std::size_t i = 0; i < order.size(); ++i)
+    EXPECT_EQ(l[i].label, order[i]);
+
+  EXPECT_EQ(line(l, "verdict").value, "good");
+  EXPECT_EQ(line(l, "verdict").tone, Tone::Good);
+  EXPECT_EQ(line(l, "corners").value, "8/8");
+  EXPECT_EQ(line(l, "markers").value, "7/7");
+  EXPECT_EQ(line(l, "distance").value, "2.81 m");
+  EXPECT_EQ(line(l, "tilt").value, "12.0 deg");
+  EXPECT_EQ(line(l, "tilt").tone, Tone::Normal);
+  EXPECT_EQ(line(l, "fit").value, "0.21 px");
+  EXPECT_EQ(line(l, "cell").value, "centre");
+  EXPECT_EQ(line(l, "stillness").value, "0.08 px");
+  EXPECT_EQ(line(l, "stillness").tone, Tone::Good);
+  EXPECT_EQ(line(l, "views").value, "12 usable, 10 used");
+  EXPECT_EQ(line(l, "coverage").value, "39 %");
+  EXPECT_EQ(line(l, "frames").value,
+            "1234 received, 1200 delivered, 30 dropped, 0 failed");
+  EXPECT_EQ(line(l, "frames").tone, Tone::Normal);
+}
+
+// Tilt is amber past the view check's limit and red past the solve's; the
+// limits are the quality tier's options.
+TEST(CameraPanel, TonesTiltStillnessAndLossByTheQualityThresholds) {
+  PanelOptions options;
+  options.session.view.oblique_deg = 50.0;
+  options.session.solve.oblique_deg = 65.0;
+  options.rule.still_px = 0.5;
+  CameraLive camera = good_camera();
+  camera.check.tilt_deg = 55.0;
+  camera.stillness_px = 0.45;
+  camera.lost = 3;
+  const quality::CameraSummary session;
+  std::vector<PanelLine> l =
+      camera_panel(camera, session, legacy_femto_board(), options).value();
+  EXPECT_EQ(line(l, "tilt").tone, Tone::Warn);
+  EXPECT_EQ(line(l, "stillness").tone, Tone::Good);
+  EXPECT_EQ(line(l, "frames").value,
+            "1234 received, 1200 delivered, 30 dropped, 0 failed, 3 lost");
+  EXPECT_EQ(line(l, "frames").tone, Tone::Warn);
+  EXPECT_EQ(line(l, "views").tone, Tone::Muted);
+  EXPECT_EQ(line(l, "coverage").tone, Tone::Muted);
+
+  camera.check.tilt_deg = 66.0;
+  camera.stillness_px = 0.5;
+  camera.lost = 0;
+  camera.frames.failed = 1;
+  l = camera_panel(camera, session, legacy_femto_board(), options).value();
+  EXPECT_EQ(line(l, "tilt").tone, Tone::Bad);
+  EXPECT_EQ(line(l, "stillness").tone, Tone::Warn);
+  EXPECT_EQ(line(l, "frames").tone, Tone::Warn);
+
+  // At a limit, the tilt is not yet past it, as check_view judges.
+  camera.check.tilt_deg = 50.0;
+  l = camera_panel(camera, session, legacy_femto_board(), options).value();
+  EXPECT_EQ(line(l, "tilt").tone, Tone::Normal);
+  camera.check.tilt_deg = 65.0;
+  l = camera_panel(camera, session, legacy_femto_board(), options).value();
+  EXPECT_EQ(line(l, "tilt").tone, Tone::Warn);
+}
+
+// No frame in the set is red; a view with no pose shows no measures.
+TEST(CameraPanel, ShowsAMissingFrameAndAViewWithoutAPose) {
+  CameraLive camera;
+  const std::vector<PanelLine> l =
+      camera_panel(camera, {}, legacy_femto_board()).value();
+  EXPECT_EQ(line(l, "verdict").value, "no frame");
+  EXPECT_EQ(line(l, "verdict").tone, Tone::Bad);
+  EXPECT_EQ(line(l, "corners").value, "0/8");
+  EXPECT_EQ(line(l, "corners").tone, Tone::Muted);
+  for (const char* label : {"distance", "tilt", "fit", "cell", "stillness"}) {
+    EXPECT_EQ(line(l, label).value, "-") << label;
+    EXPECT_EQ(line(l, label).tone, Tone::Muted) << label;
+  }
+  camera.present = true;
+  EXPECT_EQ(
+      line(camera_panel(camera, {}, legacy_femto_board()).value(), "verdict")
+          .value,
+      "none");
+}
+
+recon::sensor::FrameSet set_of(
+    const std::vector<std::optional<std::int64_t>>& at) {
+  recon::sensor::FrameSet set;
+  set.timestamp_ns = 1'000'000'000;
+  for (const std::optional<std::int64_t>& offset_ns : at) {
+    set.frames.emplace_back();
+    if (!offset_ns) continue;
+    set.frames.back().emplace();
+    set.frames.back()->timestamp_ns =
+        static_cast<std::uint64_t>(1'000'000'000 + *offset_ns);
+  }
+  return set;
+}
+
+const std::vector<std::string> kIds = {"N", "G", "6G"};
+
+TEST(SetPanel, ShowsTheSetsFramesSpreadAndSkew) {
+  recon::sensor::SensorArrayStats stats;
+  stats.sets = 900;
+  stats.incomplete = 3;
+  stats.unmatched = 12;
+  const std::vector<PanelLine> l =
+      set_panel(set_of({0, -1'200'000, 2'500'000}), stats, kIds, {1, 4, false})
+          .value();
+  EXPECT_EQ(line(l, "set").value, "3/3 frames");
+  EXPECT_EQ(line(l, "set").tone, Tone::Good);
+  EXPECT_EQ(line(l, "spread").value, "3.70 ms");
+  EXPECT_EQ(line(l, "spread").tone, Tone::Normal);
+  EXPECT_EQ(line(l, "skew N").value, "+0.00 ms");
+  EXPECT_EQ(line(l, "skew G").value, "-1.20 ms");
+  EXPECT_EQ(line(l, "skew 6G").value, "+2.50 ms");
+  EXPECT_EQ(line(l, "sets").value, "900 (3 incomplete, 12 unmatched)");
+  EXPECT_EQ(line(l, "saver").value, "1/4 queued");
+  EXPECT_EQ(line(l, "saver").tone, Tone::Normal);
+}
+
+TEST(SetPanel, WarnsOfAMissingFrameAWideSpreadAndAFullWriter) {
+  PanelOptions options;
+  options.rule.spread_warn_ms = 1.0;
+  const std::vector<PanelLine> l =
+      set_panel(set_of({0, std::nullopt, 1'500'000}), {}, kIds, {4, 4, true},
+                options)
+          .value();
+  EXPECT_EQ(line(l, "set").value, "2/3 frames");
+  EXPECT_EQ(line(l, "set").tone, Tone::Warn);
+  EXPECT_EQ(line(l, "spread").tone, Tone::Warn);
+  EXPECT_EQ(line(l, "skew G").value, "missing");
+  EXPECT_EQ(line(l, "skew G").tone, Tone::Muted);
+  EXPECT_EQ(line(l, "saver").tone, Tone::Warn);
+}
+
+// The writer is full when the caller says so, as it tells the capture rule:
+// the panel keeps no rule of its own.
+TEST(SetPanel, TonesTheWriterAsTheCallerJudgesIt) {
+  const recon::sensor::FrameSet set = set_of({0, 0, 0});
+  EXPECT_EQ(line(set_panel(set, {}, kIds, {4, 4, false}).value(), "saver").tone,
+            Tone::Normal);
+  EXPECT_EQ(line(set_panel(set, {}, kIds, {1, 4, true}).value(), "saver").tone,
+            Tone::Warn);
+}
+
+TEST(SetPanel, WaitsForTheFirstSetAndRefusesIdsThatDoNotMatch) {
+  const std::vector<PanelLine> l =
+      set_panel(recon::sensor::FrameSet{}, {}, {}, {}).value();
+  EXPECT_EQ(line(l, "set").value, "none yet");
+  EXPECT_EQ(line(l, "spread").tone, Tone::Muted);
+  EXPECT_EQ(line(l, "saver").value, "0/0 queued");
+  EXPECT_EQ(line(l, "saver").tone, Tone::Normal);
+  EXPECT_EQ(set_panel(set_of({0, 0}), {}, kIds, {}).status().domain(),
+            Code::InvalidArgument);
+}
+
+// Three cameras: G linked from N strongly, 6G from G weakly; N the
+// reference.
+quality::SessionSummary three_camera_summary() {
+  quality::SessionSummary summary;
+  summary.kept = 14;
+  summary.dropped = 1;
+  summary.cameras.resize(3);
+  summary.cameras[0].linked = true;
+  summary.cameras[1].linked = true;
+  summary.cameras[1].link =
+      quality::PreviewLink{0, 12, quality::LinkStrength::Strong};
+  summary.cameras[2].linked = true;
+  summary.cameras[2].link =
+      quality::PreviewLink{1, 4, quality::LinkStrength::Weak};
+  summary.covisibility = {{14, 12, 0}, {12, 13, 4}, {0, 4, 5}};
+  summary.ready = true;
+  return summary;
+}
+
+TEST(SessionPanel, ShowsTheCapturesAndTheTreePreview) {
+  const core::Result<SessionPanel> panel =
+      session_panel(three_camera_summary(), kIds);
+  ASSERT_TRUE(panel.ok()) << panel.status().message();
+  const std::vector<PanelLine>& l = panel.value().lines;
+  EXPECT_EQ(line(l, "captures").value, "14 kept, 1 dropped");
+  EXPECT_EQ(line(l, "N").value, "reference");
+  EXPECT_EQ(line(l, "N").tone, Tone::Muted);
+  EXPECT_EQ(line(l, "G").value, "from N, 12 shared");
+  EXPECT_EQ(line(l, "G").tone, Tone::Good);
+  EXPECT_EQ(line(l, "6G").value, "from G, 4 shared");
+  EXPECT_EQ(line(l, "6G").tone, Tone::Bad);
+  EXPECT_EQ(line(l, "calibrate").value, "ready");
+  EXPECT_EQ(line(l, "calibrate").tone, Tone::Good);
+  EXPECT_TRUE(panel.value().calibrate);
+  EXPECT_TRUE(labelled(l, "warning").empty());
+}
+
+// The matrix: each tree link in its strength's tone, both ways; the
+// diagonal and pairs that share nothing muted.
+TEST(SessionPanel, TonesTheSharedCapturesByTheTreesLinks) {
+  quality::SessionSummary summary = three_camera_summary();
+  summary.cameras[2].link->strength = quality::LinkStrength::Fair;
+  const SessionPanel panel = session_panel(summary, kIds).value();
+  EXPECT_EQ(panel.ids, kIds);
+  EXPECT_EQ(panel.shared, summary.covisibility);
+  const std::vector<std::vector<Tone>> expected = {
+      {Tone::Muted, Tone::Good, Tone::Muted},
+      {Tone::Good, Tone::Muted, Tone::Warn},
+      {Tone::Muted, Tone::Warn, Tone::Muted}};
+  EXPECT_EQ(panel.shared_tones, expected);
+}
+
+TEST(SessionPanel, WarnsAndHoldsCalibrateBack) {
+  quality::SessionSummary summary = three_camera_summary();
+  summary.cameras[2].linked = false;
+  summary.cameras[2].link.reset();
+  summary.cameras[1].floor_only = true;
+  summary.cameras[0].mostly_frontal = true;
+  summary.duplicates.push_back({7, 3});
+  summary.ready = false;
+  PanelOptions options;
+  options.session.ready_from = 4;
+  const SessionPanel panel = session_panel(summary, kIds, options).value();
+  const std::vector<PanelLine>& l = panel.lines;
+  EXPECT_EQ(line(l, "6G").value, "not linked");
+  EXPECT_EQ(line(l, "6G").tone, Tone::Bad);
+  const std::vector<PanelLine> warnings = labelled(l, "warning");
+  ASSERT_EQ(warnings.size(), 3u);
+  EXPECT_EQ(warnings[0].value, "capture 7 repeats capture 3");
+  EXPECT_EQ(warnings[1].value, "G: its boards nearly all face alike");
+  EXPECT_EQ(warnings[2].value, "N: its views mostly face it; tilt the board");
+  for (const PanelLine& w : warnings) EXPECT_EQ(w.tone, Tone::Warn);
+  EXPECT_EQ(line(l, "calibrate").value,
+            "not yet: every camera needs links of 4 shared captures");
+  EXPECT_EQ(line(l, "calibrate").tone, Tone::Muted);
+  EXPECT_FALSE(panel.calibrate);
+}
+
+TEST(SessionPanel, RefusesASummaryThatDoesNotMatchItsIds) {
+  EXPECT_EQ(session_panel(three_camera_summary(), {"N", "G"}).status().domain(),
+            Code::InvalidArgument);
+  quality::SessionSummary ragged = three_camera_summary();
+  ragged.covisibility[1].pop_back();
+  EXPECT_EQ(session_panel(ragged, kIds).status().domain(),
+            Code::InvalidArgument);
+  quality::SessionSummary far_link = three_camera_summary();
+  far_link.cameras[2].link->parent = 3;
+  EXPECT_EQ(session_panel(far_link, kIds).status().domain(),
+            Code::InvalidArgument);
+}
+
+TEST(CapturePanel, ShowsWhereTheRuleStands) {
+  CaptureStatus status;
+  EXPECT_EQ(line(capture_panel(status).value(), "capture").value, "idle");
+
+  status.decision.state = quality::CaptureState::Waiting;
+  status.decision.message = "board moving (0.82 px)";
+  std::vector<PanelLine> l = capture_panel(status).value();
+  EXPECT_EQ(line(l, "capture").value, "waiting: board moving (0.82 px)");
+  EXPECT_EQ(line(l, "capture").tone, Tone::Warn);
+
+  status.decision.state = quality::CaptureState::Failed;
+  status.decision.message = "CL2A14100A4 missing";
+  l = capture_panel(status).value();
+  EXPECT_EQ(line(l, "capture").value, "failed: CL2A14100A4 missing");
+  EXPECT_EQ(line(l, "capture").tone, Tone::Bad);
+
+  status.decision.state = quality::CaptureState::Take;
+  status.decision.message = "frames spread over 6.10 ms";
+  l = capture_panel(status).value();
+  EXPECT_EQ(line(l, "capture").value, "taken");
+  EXPECT_EQ(line(l, "capture").tone, Tone::Good);
+  EXPECT_EQ(line(l, "warning").value, "frames spread over 6.10 ms");
+  status.decision.message.clear();
+  EXPECT_TRUE(labelled(capture_panel(status).value(), "warning").empty());
+}
+
+TEST(CapturePanel, ShowsTheLastCaptureAndAFailedWrite) {
+  CaptureStatus status;
+  CaptureMeta meta;
+  meta.index = 12;
+  meta.stillness_px = 0.08;
+  meta.spread_ms = 1.4;
+  meta.live_vs_full_px = 0.42;
+  status.last = meta;
+  status.last_usable_views = 3;
+  status.last_flagged = true;
+  status.error = "disk full";
+  const std::vector<PanelLine> l = capture_panel(status).value();
+  EXPECT_EQ(line(l, "last").value,
+            "#12: 3 usable views, still 0.08 px, spread 1.40 ms");
+  EXPECT_EQ(line(l, "live vs full").value, "0.42 px");
+  EXPECT_EQ(line(l, "live vs full").tone, Tone::Warn);
+  EXPECT_EQ(line(l, "save").value, "failed: disk full");
+  EXPECT_EQ(line(l, "save").tone, Tone::Bad);
+
+  status.last->live_vs_full_px.reset();
+  status.last_flagged = false;
+  status.error.clear();
+  const std::vector<PanelLine> unflagged = capture_panel(status).value();
+  EXPECT_EQ(line(unflagged, "live vs full").value, "-");
+  EXPECT_EQ(line(unflagged, "live vs full").tone, Tone::Normal);
+  EXPECT_TRUE(labelled(unflagged, "save").empty());
+}
+
+// The stages' rows go to gfx's panel as they are; the frame's time is their
+// host total without breakdowns.
+TEST(StageFrameMetrics, CarriesTheStagesToGfxsPanel) {
+  core::StageMetrics stages;
+  stages.add_cpu("poll", 1.0);
+  stages.add_cpu("readback", 2.0);
+  stages.add_gpu("readback", 1.5);
+  stages.add_cpu("  ..copy", 1.25);  // a breakdown of readback
+  stages.add_cpu("detect", 9.0);
+  const gfx::FrameMetrics metrics = stage_frame_metrics(stages, 24.5).value();
+  ASSERT_EQ(metrics.sections.size(), 4u);
+  EXPECT_STREQ(metrics.sections[1].name, "readback");
+  EXPECT_TRUE(metrics.sections[1].has_gpu);
+  EXPECT_EQ(metrics.sections[1].gpu_ms, 1.5);
+  EXPECT_EQ(metrics.cpu_frame_ms, 12.0);
+  EXPECT_EQ(metrics.fps, 24.5);
+}
+
+}  // namespace
+}  // namespace volumetric_kit::calib::viz

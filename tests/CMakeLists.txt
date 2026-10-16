@@ -104,6 +104,20 @@ if(VC_WITH_RIG)
   target_sources(vc_capture_oom_test PRIVATE support/allocation_failure.cpp)
 endif()
 
+if(_vc_build_viz)
+  # viz: the mosaic's layout, the marks, the panels and the board editor from
+  # host data; the offscreen render of the mosaic and its marks on a device,
+  # through the core's Vulkan test fixtures (they skip without one).
+  vc_add_test(viz_mosaic volumetric_kit::calib_viz)
+  vc_add_test(viz_overlay volumetric_kit::calib_viz)
+  vc_add_test(viz_panels volumetric_kit::calib_viz)
+  vc_add_test(board_editor volumetric_kit::calib_viz)
+  vc_add_test(viz_render volumetric_kit::calib_viz
+              volumetric_kit::core_test_support)
+  vc_add_test(viz_oom volumetric_kit::calib_viz vc_test_support)
+  target_sources(vc_viz_oom_test PRIVATE support/allocation_failure.cpp)
+endif()
+
 # The core calib requires (third_party/CMakeLists.txt): calib's configure
 # against a stand-in core of each version (core_requirement/) refuses one older
 # than VC_CORE_MIN_VERSION, 0.6.1 -- before 0.1.0 the core has no
@@ -169,7 +183,8 @@ if(VC_WITH_RIG)
 
   # The capture tier from this build's install (rig_package/): a consumer finds
   # calib, the core and all of recon at the prefix, and builds and runs against
-  # calib_capture, with this build's sanitizers, which its libraries need.
+  # calib_capture, with this build's sanitizers, which its libraries need; the
+  # build-tree-only viz tier is not installed.
   list(JOIN _vc_sanitize_flags " " _vc_consumer_flags)
   add_test(
     NAME rig_package.consumer

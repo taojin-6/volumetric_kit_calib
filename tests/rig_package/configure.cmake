@@ -2,10 +2,11 @@
 # Copyright (c) 2026 Tao Jin
 
 # The capture tier from an installed package: installs the calling build,
-# BUILD_DIR, in its CONFIG, to BINARY_DIR/prefix, then configures, builds and
-# runs the consumer (consumer/) against that prefix alone. GENERATOR,
-# CXX_COMPILER, MAKE_PROGRAM, GLM_DIR and FLAGS, its sanitizers' compile and
-# link flags, repeat the calling build's settings (tests/CMakeLists.txt).
+# BUILD_DIR, in its CONFIG, to BINARY_DIR/prefix, checks it carries the capture
+# tier and not the viz tier, then configures, builds and runs the consumer
+# (consumer/) against that prefix alone. GENERATOR, CXX_COMPILER, MAKE_PROGRAM,
+# GLM_DIR and FLAGS, its sanitizers' compile and link flags, repeat the calling
+# build's settings (tests/CMakeLists.txt).
 foreach(_var BUILD_DIR CONFIG BINARY_DIR GENERATOR)
   if(NOT DEFINED ${_var})
     message(FATAL_ERROR "configure.cmake: ${_var} is not set")
@@ -39,6 +40,13 @@ foreach(_header session_writer.hpp export.hpp)
     message(FATAL_ERROR "the install lacks capture/${_header}")
   endif()
 endforeach()
+# The viz tier is build-tree only, as gfx's ui tier is.
+file(GLOB_RECURSE _viz "${_prefix}/include/volumetric_kit/calib/viz/*"
+     "${_prefix}/lib*/*calib_viz*")
+if(_viz)
+  message(
+    FATAL_ERROR "the install carries the build-tree-only viz tier: ${_viz}")
+endif()
 
 _vc_cmake(
   "Configuring against the installed calib"

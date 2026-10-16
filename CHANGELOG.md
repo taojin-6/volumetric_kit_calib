@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `RigMosaic::record` keeps a page's pictures and ages when gfx refuses a
+  replacement in a different coding, including cameras with no new picture.
+- Tile marks keep the last framebuffer column at fractional display scales
+  through gfx's scissor-rounding repair.
+- `draw_tile_marks` keeps the title's text and background inside all four
+  tile edges when the image pans or zooms, including on high-DPI displays.
 - `solve::bundle_adjust` counts a shared capture only when each camera keeps
   enough positive-weight corners to fix a pose, and returns `Numerical` if
   the intrinsics sensitivity diagnostics overflow.
@@ -42,6 +48,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `to_string` of `solve::Dropped`, `solve::ViewFate` and `compute::ViewUse`,
   the names the report gives them.
 - `compute::quantile`, numpy's linear percentile.
+- The `viz` tier, `volumetric_kit::calib_viz`, built with `VC_WITH_RIG` and
+  `VC_WITH_OPENCV`, build-tree only (DECISIONS.md, 2026-10-16): `RigMosaic`
+  copies each camera's decoded NV12 picture on the device into its tile of
+  one mosaic, for any number of cameras of mixed sizes, paged over several
+  textures when one cannot hold it (`mosaic_layout`), each page converted
+  once per set, all shown through one `ImageView2D` (`tile_write` and
+  `tile_conversion` map recon's `YuvImage` to gfx's write and conversion;
+  `tile_region`, `tile_at`, `sets_since_picture`, `refused`, `discard`);
+  `tile_marks` and `draw_tile_marks` mark the corners, markers, ids, verdict
+  and coverage over a tile's region through gfx's `ImageOverlay`, the title
+  as its caption; `camera_panel`, `set_panel`, `session_panel`,
+  `capture_panel` and `stage_frame_metrics` build the live panels, drawn by
+  `draw_panel_lines` and `draw_session_panel`, in `Tone`s that follow the
+  quality tier's options;
+  `BoardEditor` and `draw_board_editor` (its fields through `board_fields`
+  and `apply_fields`) edit the board, checked as the detector's `Board`
+  takes it, until the first capture locks it. `VC_WITH_RIG` with
+  `VC_WITH_OPENCV` fetches `volumetric_kit_gfx`, pinned at `ba7f705` (main
+  after #136 and #137, including the overlay scissor repair).
+- `marker_count`, the markers a board carries, in `calib/core/target.hpp`.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds
   and guards, and a `RigSolution` holding the poses, recon's

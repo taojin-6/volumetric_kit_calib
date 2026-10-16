@@ -5,14 +5,12 @@
 #
 # Vendored via pinned FetchContent: volumetric_kit_core (the family's shared
 # foundation), volumetric_kit_recon's camera tier (the family's camera
-# vocabulary) -- all of recon with VC_WITH_RIG -- nlohmann/json for the quality
-# and capture tiers' files, and googletest when the test suite is built. recon
-# takes GLM, and with VC_WITH_RIG the Vulkan SDK, from the system. OpenCV, with
-# VC_WITH_OPENCV, is a prerequisite the root CMakeLists finds.
-#
-# TODO (as tiers land, mirroring gfx's hybrid system/vendored strategy):
-# volumetric_kit_gfx via FetchContent for the viz / app tiers. GPU work comes
-# from volumetric_kit_core's vulkan tier, not a Vulkan dependency of calib's.
+# vocabulary) -- all of recon with VC_WITH_RIG -- volumetric_kit_gfx for the viz
+# tier, nlohmann/json for the quality and capture tiers' files, and googletest
+# when the test suite is built. recon takes GLM, and with VC_WITH_RIG the Vulkan
+# SDK, from the system. OpenCV, with VC_WITH_OPENCV, is a prerequisite the root
+# CMakeLists finds. GPU work comes from volumetric_kit_core's vulkan tier, not a
+# Vulkan dependency of calib's.
 
 include(FetchContent)
 
@@ -45,6 +43,10 @@ endif()
 # TODO: re-pin core main, or v0.6.1, once core PR #32 merges.
 if(VC_WITH_RIG)
   set(VKC_WITH_VULKAN ON)
+endif()
+# The viz tier's GPU tests derive from the core's Vulkan test fixtures.
+if(_vc_build_viz AND VC_BUILD_TESTS)
+  set(VKC_BUILD_TEST_SUPPORT ON)
 endif()
 FetchContent_Declare(
   volumetric_kit_core
@@ -91,6 +93,24 @@ if(VC_WITH_RIG AND NOT TARGET volumetric_kit::recon_io)
       "VC_WITH_RIG needs all of volumetric_kit_recon, but it was made "
       "available camera-only: set VR_CAMERA_ONLY OFF before the build's first "
       "FetchContent_MakeAvailable(volumetric_kit_recon).")
+endif()
+
+# --- volumetric_kit_gfx: the viz tier's renderer and UI ----------------------
+# The rig mosaic (ImagePipeline's region writes), the marks over its tiles
+# (ImageOverlay's regions), the panels (ImGui, draw_metrics_panel) and the view
+# (ImageView2D). Pinned by commit, never main, and declared after the core, so
+# gfx's own core pin yields to calib's. gfx's tests, examples, install and
+# -Werror stay off in a subproject; its ui tier is build-tree only, so calib_viz
+# is too (src/CMakeLists.txt).
+#
+# The pin is gfx main after PRs #136 and #137: region writes, marks over a
+# region, and the fractional-scale scissor repair (59e2449).
+if(_vc_build_viz)
+  FetchContent_Declare(
+    volumetric_kit_gfx
+    GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_gfx.git
+    GIT_TAG ba7f7059e480ff24ef6907e0535bc90e102f806f)
+  FetchContent_MakeAvailable(volumetric_kit_gfx)
 endif()
 
 # --- nlohmann/json (header-only; the quality and capture tiers' files) -------
