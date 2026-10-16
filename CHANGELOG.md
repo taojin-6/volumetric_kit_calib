@@ -8,6 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `draw_tile_marks` keeps the title's text and background inside all four
+  tile edges when the image pans or zooms, including on high-DPI displays.
 - `solve::bundle_adjust` counts a shared capture only when each camera keeps
   enough positive-weight corners to fix a pose, and returns `Numerical` if
   the intrinsics sensitivity diagnostics overflow.

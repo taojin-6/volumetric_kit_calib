@@ -24,6 +24,8 @@ constexpr float kFullAlpha = 160.0f;
 // there, so its edge is half a pixel before. Added to a view's image
 // coordinates (Vulkan's, texel edges on integers), it gives OpenCV's.
 constexpr glm::vec2 kImageCorner{-0.5f, -0.5f};
+// Also inset the title from the tile edges by this much, leaving room for
+// ImageOverlay's two-display-pixel background padding and text pixel snap.
 constexpr glm::vec2 kTitleOffset{4.0f, 4.0f};
 
 glm::vec2 to_mark(const recon::camera::Vec2d& pixel) noexcept {
@@ -125,13 +127,25 @@ void draw_tile_marks(const gfx::camera::ImageView2D& view,
                   label.offset);
   }
   if (!marks.title.text.empty()) {
-    // The image point under the tile's top-left corner, in OpenCV's pixels:
-    // the title goes no further up or left, so it stays in view.
+    // Clamp the text rectangle in display pixels, including its offset and
+    // room for the background. An oversized title starts at the near edge
+    // and is clipped by ImageOverlay.
     const glm::vec2 tile_corner =
         view.target_to_image(view.viewport_origin()) + kImageCorner;
+    const glm::vec2 tile_end =
+        view.target_to_image(view.viewport_origin() + view.viewport_size()) +
+        kImageCorner;
+    const glm::vec2 tile_min = overlay.to_display(tile_corner);
     const MarkLabel& title = marks.title;
-    overlay.label(glm::max(title.at, tile_corner), title.text.c_str(),
-                  title.color, title.background, title.offset);
+    const ImVec2 size = ImGui::CalcTextSize(title.text.c_str());
+    const glm::vec2 min = tile_min + kTitleOffset;
+    const glm::vec2 max =
+        glm::max(min, overlay.to_display(tile_end) - kTitleOffset -
+                          glm::vec2(size.x, size.y));
+    const glm::vec2 position =
+        glm::clamp(overlay.to_display(title.at) + title.offset, min, max);
+    overlay.label(tile_corner, title.text.c_str(), title.color,
+                  title.background, position - tile_min);
   }
 }
 

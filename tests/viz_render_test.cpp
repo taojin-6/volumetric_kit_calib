@@ -450,6 +450,63 @@ TEST_F(VizRenderTest, KeepsTheTitleInTheTile) {
   EXPECT_LT(zoomed->y, 20.0f);
 }
 
+// Panning toward an edge must preserve every title pixel, including the
+// background, rather than merely leaving some text visible. Also exercise
+// an inset tile and a tile too narrow for the title, where its leading text
+// must stay visible and the rest is clipped consistently.
+TEST_F(VizRenderTest, KeepsTitlePixelsWhenPannedToTileEdges) {
+  std::vector<Picture> pictures;
+  pictures.push_back(make_picture(64, 48, {60.0f, 44.0f}));
+  core::Result<std::unique_ptr<Tiles>> made =
+      Tiles::create(device(), allocator(), color_layout(), {{64, 48}});
+  ASSERT_TRUE(made.ok()) << made.status().message();
+  Tiles& tiles = *made.value();
+  TileOverlay tile;
+  tile.id = "N";
+  tile.check.verdict = ViewVerdict::Collinear;
+  OverlayStyle style;
+  style.label_background = IM_COL32(0, 0, 255, 255);
+  const core::Result<TileMarks> marks = tile_marks(tile, {}, style);
+  ASSERT_TRUE(marks.ok()) << marks.status().message();
+  std::optional<gfx::ui::ImGuiOverlay> overlay = make_overlay();
+  ASSERT_TRUE(overlay.has_value());
+  const auto draw_title = [&]() {
+    overlay->new_frame();
+    draw_tile_marks(tiles.view(0), marks.value());
+    return render(tiles, pictures, &*overlay);
+  };
+
+  for (const TileRect area : {TileRect{{0.0f, 0.0f}, {256.0f, 128.0f}},
+                              TileRect{{24.0f, 16.0f}, {216.0f, 96.0f}},
+                              TileRect{{24.0f, 16.0f}, {64.0f, 96.0f}}}) {
+    SCOPED_TRACE(::testing::Message()
+                 << "tile " << area.size.x << " x " << area.size.y);
+    tiles.set_area(area);
+    tiles.view(0).fit();
+    const Pixels fitted = draw_title();
+    ASSERT_FALSE(fitted.bytes.empty());
+    const int text_pixels = count(fitted, area, red);
+    const int background_pixels = count(fitted, area, blue);
+    ASSERT_GT(text_pixels, 0);
+    ASSERT_GT(background_pixels, 0);
+
+    // Leave ten framebuffer pixels of the image visible at the bottom or
+    // right edge. The full tile's downward pan is the reported {0, 118}.
+    const glm::vec2 far = area.origin + area.size - 10.0f -
+                          tiles.view(0).image_to_target({0.0f, 0.0f});
+    for (const glm::vec2 pan :
+         {glm::vec2(0.0f, far.y), glm::vec2(far.x, 0.0f), far, -area.size}) {
+      SCOPED_TRACE(::testing::Message() << "pan " << pan.x << ", " << pan.y);
+      tiles.view(0).fit();
+      tiles.view(0).pan(pan);
+      const Pixels panned = draw_title();
+      ASSERT_FALSE(panned.bytes.empty());
+      EXPECT_EQ(count(panned, area, red), text_pixels);
+      EXPECT_EQ(count(panned, area, blue), background_pixels);
+    }
+  }
+}
+
 // Zoomed to 4 pixels a texel, a tile shows its white texel as a 4 x 4
 // square at full intensity by default (Nearest), for checking marks against
 // pixels; Linear spreads it over its neighbours.

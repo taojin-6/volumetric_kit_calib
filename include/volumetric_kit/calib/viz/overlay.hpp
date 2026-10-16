@@ -172,9 +172,10 @@ VC_VIZ_API core::Result<TileMarks> tile_marks(
 
 /// @brief Draw @p marks over the tile @p view shows, in @ref TileMarks'
 ///        order, through gfx's `ImageOverlay` with OpenCV's pixel centres
-///        (`gfx::ui::PixelCenters::Integer`). The title stays at the image's
-///        top-left corner until the view pans or zooms past it, then at the
-///        tile's.
+///        (`gfx::ui::PixelCenters::Integer`). The title follows the image's
+///        top-left corner, clamped to keep its text and background inside
+///        every tile edge. An oversized title starts at the tile's near edge
+///        on that axis and is clipped.
 /// @param view       The tile's view (`Tiles::view`).
 /// @param marks      The marks.
 /// @param draw_list  The ImGui list to draw into; null for the background
