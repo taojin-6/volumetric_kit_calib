@@ -89,10 +89,13 @@ calib measures the depth; recon only prepares it, and gfx draws it
   board, so it checks the depth against the printed board. The plane's offset
   and angle do depend on it, so they check `depth_to_color` and the depth's
   units.
-- **Verdicts** rest on means and medians pooled over every capture checked,
-  never on the p90, which resampling inflates. The bounds are first values,
-  to be revisited from a real session (H5). The scale's 0.2 % catches a board
-  printed 0.3 % large, as the 2026-09-29 board was.
+- **Verdicts** rest on means and medians, pooled over every capture checked
+  (a capture's own pairs on that capture's), never on the p90, which
+  resampling inflates. The bounds are first values, to be revisited from a
+  real session (H5). The scale's 0.2 % catches a board printed 0.3 % large,
+  as the 2026-09-29 board was.
+- **One `DepthCheckOptions`** goes to every step, the region's inset
+  included, so the settings the report records are the ones used.
 - **`report.json`** gains `depth`, which is `null` when the depth was not
   checked. Its version stays 1, since nothing reads the report yet.
 

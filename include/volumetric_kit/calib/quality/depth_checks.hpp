@@ -38,6 +38,43 @@ namespace volumetric_kit::calib::quality {
 /// board's edge.
 inline constexpr double kDepthInsetM = 0.02;
 
+/// The fewest samples a pair is judged on unless told otherwise
+/// (@ref DepthCheckOptions::min_overlap).
+inline constexpr std::size_t kMinOverlap = 1000;
+
+// TODO: The verdict bounds are first values, to be set from a real session
+// (H5). CA8b and CA8c add their kernels' settings here, to check_options and
+// to report.json's depth.settings (results.cpp's depth_section).
+/// @brief The depth checks' settings, one object for every step: the region
+///        each plane fit takes, the verdicts' bounds, and what the report
+///        records. Give the same to @ref board_region and
+///        @ref summarize_depth_checks.
+///
+/// @code
+/// DepthCheckOptions options;
+/// options.max_offset_mm = 5.0;
+/// @endcode
+struct DepthCheckOptions {
+  /// How far inside the chessboard's outer edge the board region stays
+  /// (metres, @ref board_region); finite and not negative.
+  double inset_m = kDepthInsetM;
+  /// The fewest samples a pair is judged on (@ref PairCheck::verdict); at
+  /// least 1.
+  std::size_t min_overlap = kMinOverlap;
+  /// The scale's bound on `|mean ratio - 1|` (@ref CameraDepth::scale).
+  double max_scale_error = 0.002;
+  /// The plane's bound on the median offset (millimetres,
+  /// @ref CameraDepth::plane).
+  double max_offset_mm = 10.0;
+  /// The plane's bound on the median angle (degrees).
+  double max_angle_deg = 1.0;
+  /// A pair's bound on its signed median (millimetres,
+  /// @ref PairCheck::verdict).
+  double max_signed_median_mm = 5.0;
+  /// A pair's bound on its median magnitude (millimetres).
+  double max_median_abs_mm = 10.0;
+};
+
 /// @brief The depth pixels one view's plane fit takes: those whose ray meets
 ///        the solved board's plane inside its chessboard, inset.
 ///
@@ -47,7 +84,8 @@ inline constexpr double kDepthInsetM = 0.02;
 ///
 /// @code
 /// VKC_ASSIGN(const BoardRegion region,
-///            board_region(board, board_to_color, info.depth_to_color));
+///            board_region(board, board_to_color, info.depth_to_color,
+///                         options));
 /// upload(Mat4f(region.depth_to_board), region.min, region.max);  // device
 /// @endcode
 struct BoardRegion {
@@ -68,23 +106,24 @@ struct BoardRegion {
 ///                        e.g. `T_cw T_wb` of the solution.
 /// @param depth_to_color  The camera's depth-to-colour transform (recon's
 ///                        `SensorInfo::depth_to_color`).
-/// @param inset_m         How far inside the chessboard's outer edge
-///                        (metres); finite, not negative, and leaving some
-///                        of the board.
+/// @param options         The settings; its inset must leave some of the
+///                        board.
 /// @return The region; or `InvalidArgument` for a transform that is not
-///         rigid (recon's `check_rigid`) or an inset out of range, its
-///         message starting `board_region: `.
+///         rigid (recon's `check_rigid`), an option out of range (naming it,
+///         as @ref summarize_depth_checks does) or an inset that leaves none
+///         of the board, its message starting `board_region: `.
 VC_QUALITY_API core::Result<BoardRegion> board_region(
     const compute::Board& board, const recon::camera::Mat4d& board_to_color,
-    const recon::camera::Mat4d& depth_to_color, double inset_m = kDepthInsetM);
+    const recon::camera::Mat4d& depth_to_color,
+    const DepthCheckOptions& options = {});
 
 /// @brief Whether a depth camera's ray belongs to @p region: it meets the
 ///        board's plane in front of the camera, inside the inset rectangle
 ///        (edges included).
 ///
-/// The host's rule, which the device's membership follows: a pixel's ray is
-/// its unprojection at depth 1, `((u - cx) / fx, (v - cy) / fy, 1)` for the
-/// prepared depth's pinhole.
+/// The reference rule: the device classifies the pixels, and its tests check
+/// it against this. A pixel's ray is its unprojection at depth 1,
+/// `((u - cx) / fx, (v - cy) / fy, 1)` for the prepared depth's pinhole.
 /// @param region  The region.
 /// @param ray     A direction from the depth camera's centre, in its frame;
 ///                any positive length.
@@ -92,8 +131,7 @@ VC_QUALITY_API core::Result<BoardRegion> board_region(
 ///         finite.
 ///
 /// @code
-/// const recon::camera::Vec3d ray((u - k.cx) / k.fx, (v - k.cy) / k.fy, 1.0);
-/// if (in_board_region(region, ray)) ++members;
+/// EXPECT_EQ(device_member[i], in_board_region(region, ray_of(i)));
 /// @endcode
 VC_QUALITY_API bool in_board_region(const BoardRegion& region,
                                     const recon::camera::Vec3d& ray) noexcept;
@@ -115,7 +153,8 @@ struct DepthPlane {
   bool valid = false;
   /// A point on the plane, the inliers' centroid (metres, board frame).
   recon::camera::Vec3d point{std::numeric_limits<double>::quiet_NaN()};
-  /// The plane's normal (board frame); either sign, any length but 0.
+  /// The plane's normal (board frame): either sign, of any finite length
+  /// but 0.
   recon::camera::Vec3d normal{std::numeric_limits<double>::quiet_NaN()};
   /// The inliers' RMS distance from the plane (metres).
   double rms_m = std::numeric_limits<double>::quiet_NaN();
@@ -210,10 +249,10 @@ struct PairAgreement {
   /// The median difference over the samples in the window (millimetres);
   /// not a number for none.
   double signed_median_mm = std::numeric_limits<double>::quiet_NaN();
-  /// The median magnitude of their differences (millimetres).
+  /// The median magnitude over the samples in the window (millimetres).
   double median_abs_mm = std::numeric_limits<double>::quiet_NaN();
-  /// The 90th percentile of the magnitudes (millimetres); no verdict rests
-  /// on it.
+  /// The 90th percentile of the magnitudes over the samples in the window
+  /// (millimetres); no verdict rests on it.
   double p90_abs_mm = std::numeric_limits<double>::quiet_NaN();
 };
 
@@ -233,37 +272,6 @@ enum class DepthVerdict {
 /// show(to_string(summary.scale));
 /// @endcode
 VC_QUALITY_API const char* to_string(DepthVerdict verdict) noexcept;
-
-/// The fewest samples a pair is judged on unless told otherwise
-/// (@ref DepthCheckOptions::min_overlap).
-inline constexpr std::size_t kMinOverlap = 1000;
-
-/// @brief The settings behind the depth checks' verdicts, and those the
-///        report records.
-///
-/// @code
-/// DepthCheckOptions options;
-/// options.max_offset_mm = 5.0;
-/// @endcode
-struct DepthCheckOptions {
-  /// What @ref board_region took (metres): the report records it.
-  double inset_m = kDepthInsetM;
-  /// The fewest samples a pair is judged on (@ref PairCheck::verdict); at
-  /// least 1.
-  std::size_t min_overlap = kMinOverlap;
-  /// The scale's bound on `|mean ratio - 1|` (@ref CameraDepth::scale).
-  double max_scale_error = 0.002;
-  /// The plane's bound on the median offset (millimetres,
-  /// @ref CameraDepth::plane).
-  double max_offset_mm = 10.0;
-  /// The plane's bound on the median angle (degrees).
-  double max_angle_deg = 1.0;
-  /// A pair's bound on its signed median (millimetres,
-  /// @ref PairCheck::verdict).
-  double max_signed_median_mm = 5.0;
-  /// A pair's bound on its median magnitude (millimetres).
-  double max_median_abs_mm = 10.0;
-};
 
 /// @brief A set of ratios' mean and spread.
 ///
@@ -313,9 +321,10 @@ struct CameraDepth {
 struct PairCheck {
   PairAgreement agreement;  ///< As measured.
   /// `Insufficient` when its overlap is below `min_overlap`; else `Off` when
-  /// fewer than half its samples are in the window (the median magnitude is
-  /// beyond it), its signed median is beyond `max_signed_median_mm` or its
-  /// median magnitude beyond `max_median_abs_mm`.
+  /// fewer than half its samples are in the window (the median magnitude
+  /// over every sample is beyond it), its signed median is beyond
+  /// `max_signed_median_mm` or its median magnitude beyond
+  /// `max_median_abs_mm`.
   DepthVerdict verdict = DepthVerdict::Insufficient;
 };
 
@@ -334,7 +343,7 @@ struct CapturePairs {
 ///
 /// @code
 /// VKC_ASSIGN(const DepthSummary s,
-///            summarize_depth_checks(cameras.size(), checks, pairs));
+///            summarize_depth_checks(cameras.size(), checks, pairs, options));
 /// log(to_string(s.scale), s.ratio.mean, s.ratio.sd);
 /// @endcode
 struct DepthSummary {
@@ -362,7 +371,7 @@ struct DepthSummary {
 ///                 per camera and capture.
 /// @param pairs    Each ordered pair's agreement, pooled (no capture) or
 ///                 one capture's; at most one per pair and capture.
-/// @param options  The settings.
+/// @param options  The settings, as @ref board_region took them.
 /// @return The summary; or `InvalidArgument` for no cameras, an option out
 ///         of range (naming it), or a view or pair naming a camera the rig
 ///         does not have, repeated, a pair from a camera to itself or with

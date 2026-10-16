@@ -34,8 +34,17 @@ bool finite(const Vec3d& v) noexcept {
   return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
 }
 
+// TODO: Give a point's rigid transform one home (recon's camera geometry),
+// for this and the copies in the tests, the solve and the metrics.
 Vec3d apply(const Mat4d& m, const Vec3d& p) noexcept {
   return Vec3d(m * glm::dvec4(p, 1.0));
+}
+
+// The largest of `v`'s magnitudes. Divided by it first, a vector of any
+// finite length but 0 has a length from 1 to sqrt(3), which neither
+// overflows nor underflows.
+double largest(const Vec3d& v) noexcept {
+  return std::max({std::abs(v.x), std::abs(v.y), std::abs(v.z)});
 }
 
 // How far along `direction` from the origin a ray meets the plane through
@@ -74,7 +83,7 @@ core::Status check_plane(const DepthPlane& plane) {
         "the plane's inliers and out-of-range pixels exceed its members");
   }
   if (plane.valid && (!finite(plane.point) || !finite(plane.normal) ||
-                      !(glm::length(plane.normal) > 0.0))) {
+                      !(largest(plane.normal) > 0.0))) {
     return core::Status::invalid_argument(
         "a valid plane needs a finite point and a finite, nonzero normal");
   }
@@ -189,7 +198,7 @@ std::vector<PairCheck> every_pair(
 core::Result<BoardRegion> board_region(const compute::Board& board,
                                        const Mat4d& board_to_color,
                                        const Mat4d& depth_to_color,
-                                       double inset_m) {
+                                       const DepthCheckOptions& options) {
   constexpr const char* kWhat = "board_region";
   return compute::guarded(kWhat, [&]() -> core::Result<BoardRegion> {
     core::Status rigid = camera::check_rigid(board_to_color);
@@ -202,14 +211,16 @@ core::Result<BoardRegion> board_region(const compute::Board& board,
       return std::move(rigid).with_context(std::string(kWhat) +
                                            ": depth_to_color");
     }
-    // The chessboard spans twice its centre, from the board frame's origin.
+    core::Status checked = check_options(options);
+    if (!checked.ok()) return std::move(checked).with_context(kWhat);
+    // The chessboard spans twice its centre, from the board frame's origin:
+    // an inset leaves some of it while short of the centre on either side.
     const cv::Point3d centre = board.centre();
-    const double side = 2.0 * std::min(centre.x, centre.y);
-    if (!(inset_m >= 0.0 && 2.0 * inset_m < side)) {
+    const double inset_m = options.inset_m;
+    if (!(inset_m < std::min(centre.x, centre.y))) {
       return core::Status::invalid_argument(
           std::string(kWhat) +
-          ": inset_m must be finite, not negative, and leave some of the "
-          "board");
+          ": options.inset_m must leave some of the board");
     }
     BoardRegion region;
     region.board_to_color = board_to_color;
@@ -225,9 +236,10 @@ bool in_board_region(const BoardRegion& region, const Vec3d& ray) noexcept {
   // The ray from the depth camera's centre, in the board frame, meets z = 0.
   const Vec3d origin(region.depth_to_board[3]);
   const Vec3d direction = Mat3d(region.depth_to_board) * ray;
-  const double s = -origin.z / direction.z;
-  if (!(s > 0.0) || !std::isfinite(s)) return false;
-  const Vec3d at = origin + s * direction;
+  const std::optional<double> s =
+      meet(direction, -origin, Vec3d(0.0, 0.0, 1.0));
+  if (!s) return false;
+  const Vec3d at = origin + *s * direction;
   return at.x >= region.min.x && at.x <= region.max.x && at.y >= region.min.y &&
          at.y <= region.max.y;
 }
@@ -270,7 +282,7 @@ core::Result<BoardDepthCheck> board_depth_check(
     if (!plane.valid) return out;
 
     // The plane against the solved board, z = 0, in the board frame.
-    const Vec3d normal = glm::normalize(plane.normal);
+    const Vec3d normal = glm::normalize(plane.normal / largest(plane.normal));
     const cv::Point3d centre = board.centre();
     const double turn = compute::angle_deg(normal, Vec3d(0.0, 0.0, 1.0));
     out.angle_deg = std::min(turn, 180.0 - turn);

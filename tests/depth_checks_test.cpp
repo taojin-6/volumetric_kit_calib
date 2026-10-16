@@ -71,6 +71,12 @@ Mat4d femto_depth_to_color() {
   return m;
 }
 
+DepthCheckOptions inset_of(double inset_m) {
+  DepthCheckOptions options;
+  options.inset_m = inset_m;
+  return options;
+}
+
 compute::Board board_of(int rows, int cols, double square_m) {
   Target target = legacy_femto_board();
   target.rows = rows;
@@ -138,8 +144,8 @@ TEST(BoardRegion, IsTheChessboardInsetInTheSolvedBoardsFrame) {
   const compute::Board board = test::femto_board();
   const Mat4d board_to_color =
       test::board_facing_camera(board, {0.1, -0.05, 1.6}, 20.0, 10.0);
-  const BoardRegion region = value_of(
-      board_region(board, board_to_color, femto_depth_to_color(), 0.02));
+  const BoardRegion region = value_of(board_region(
+      board, board_to_color, femto_depth_to_color(), inset_of(0.02)));
   // 5 x 3 squares of 0.15 m, 2 cm in from each edge.
   EXPECT_NEAR(region.min.x, 0.02, 1e-15);
   EXPECT_NEAR(region.min.y, 0.02, 1e-15);
@@ -160,8 +166,8 @@ TEST(BoardRegion, IsTheChessboardInsetInTheSolvedBoardsFrame) {
   EXPECT_EQ(by_default.min, region.min);
   EXPECT_EQ(by_default.max, region.max);
   // No inset: the chessboard's outer edge.
-  const BoardRegion edge = value_of(
-      board_region(board, board_to_color, femto_depth_to_color(), 0.0));
+  const BoardRegion edge = value_of(board_region(
+      board, board_to_color, femto_depth_to_color(), inset_of(0.0)));
   EXPECT_NEAR(edge.max.x, 0.75, 1e-15);
   EXPECT_EQ(edge.min, Vec2d(0.0));
 }
@@ -183,10 +189,32 @@ TEST(BoardRegion, RefusesATransformNotRigidAndAnInsetOutOfRange) {
   for (const double inset :
        {-0.001, 0.225, 0.3, kNaN, std::numeric_limits<double>::infinity()}) {
     expect_refused(
-        board_region(board, board_to_color, depth_to_color, inset).status(),
-        "board_region", "inset_m");
+        board_region(board, board_to_color, depth_to_color, inset_of(inset))
+            .status(),
+        "board_region", "options.inset_m");
   }
-  EXPECT_TRUE(board_region(board, board_to_color, depth_to_color, 0.2249).ok());
+  EXPECT_TRUE(
+      board_region(board, board_to_color, depth_to_color, inset_of(0.2249))
+          .ok());
+  // A portrait board: 0.45 m across x, 0.75 m down y.
+  const compute::Board portrait = board_of(4, 2, 0.15);
+  expect_refused(
+      board_region(portrait, board_to_color, depth_to_color, inset_of(0.225))
+          .status(),
+      "board_region", "options.inset_m");
+  EXPECT_TRUE(
+      board_region(portrait, board_to_color, depth_to_color, inset_of(0.2249))
+          .ok());
+  const BoardRegion tall =
+      value_of(board_region(portrait, board_to_color, depth_to_color));
+  EXPECT_NEAR(tall.max.x, 0.43, 1e-15);
+  EXPECT_NEAR(tall.max.y, 0.73, 1e-15);
+  // The options the summary refuses, refused alike.
+  DepthCheckOptions unbounded;
+  unbounded.max_angle_deg = 0.0;
+  expect_refused(
+      board_region(board, board_to_color, depth_to_color, unbounded).status(),
+      "board_region", "options.max_angle_deg");
 }
 
 // Points 1 um inside the inset rectangle's edges, and 1 cm outside them,
@@ -342,15 +370,33 @@ TEST(BoardDepthCheck, FindsAPlaneFiveMillimetresOffAndOneDegreeTurned) {
       EXPECT_EQ(check.ratios.size(), 10u);
     }
   }
-  // Perpendicular to the board: no offset, 90 degrees.
+  // A normal of any finite length but 0, whose length would overflow or
+  // underflow: the same.
+  for (const double scale : {1e-170, 1e200}) {
+    SCOPED_TRACE(scale);
+    const Mat3d turn = rotation({0.6, -0.8, 0.0}, 1.0);
+    DepthPlane plane;
+    plane.valid = true;
+    plane.normal = scale * (turn * Vec3d(0.0, 0.0, 1.0));
+    plane.point = centre + Vec3d(0.0, 0.0, 0.005);
+    const BoardDepthCheck check =
+        value_of(board_depth_check(rig, board, view, region, plane));
+    EXPECT_NEAR(check.offset_mm, 5.0, 1e-9);
+    EXPECT_NEAR(check.angle_deg, 1.0, 1e-9);
+    EXPECT_EQ(check.ratios.size(), 10u);
+  }
+  // Perpendicular to the board: no offset, 90 degrees; its point at the
+  // centre or off it.
   DepthPlane across;
   across.valid = true;
-  across.point = centre;
   across.normal = Vec3d(1.0, 0.0, 0.0);
-  const BoardDepthCheck check =
-      value_of(board_depth_check(rig, board, view, region, across));
-  EXPECT_TRUE(std::isnan(check.offset_mm));
-  EXPECT_NEAR(check.angle_deg, 90.0, 1e-12);
+  for (const Vec3d& at : {centre, centre + Vec3d(0.1, 0.0, 0.0)}) {
+    across.point = at;
+    const BoardDepthCheck check =
+        value_of(board_depth_check(rig, board, view, region, across));
+    EXPECT_TRUE(std::isnan(check.offset_mm)) << at.x;
+    EXPECT_NEAR(check.angle_deg, 90.0, 1e-12);
+  }
 }
 
 // Each two adjacent corners both detected, in row-major order of the first,
@@ -665,6 +711,32 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
             DepthVerdict::Off);
   EXPECT_EQ(value_of(summarize_depth_checks(6, {}, {})).scale,
             DepthVerdict::Insufficient);
+
+  // Exactly at each bound: ok (values a double holds exactly).
+  options.max_scale_error = 0.25;
+  const DepthSummary edge = value_of(summarize_depth_checks(
+      1,
+      {check_of(0, 1, {1.25}, -12.0, 1.5), check_of(0, 2, {}, -10.0, 1.0),
+       check_of(0, 3, {}, 3.0, 0.2)},
+      {}, options));
+  EXPECT_EQ(edge.cameras[0].offset_mm, -10.0);
+  EXPECT_EQ(edge.cameras[0].angle_deg, 1.0);
+  EXPECT_EQ(edge.cameras[0].ratio.mean, 1.25);
+  EXPECT_EQ(edge.cameras[0].scale, DepthVerdict::Ok);
+  EXPECT_EQ(edge.cameras[0].plane, DepthVerdict::Ok);
+  EXPECT_EQ(edge.scale, DepthVerdict::Ok);
+
+  // A view across the board has no offset, which its camera's median leaves
+  // out; its angle counts.
+  const DepthSummary across = value_of(summarize_depth_checks(
+      1,
+      {check_of(0, 1, {}, 1.0, 0.1), check_of(0, 2, {}, kNaN, 90.0),
+       check_of(0, 3, {}, 2.0, 0.2)},
+      {}, options));
+  EXPECT_EQ(across.cameras[0].views, 3u);
+  EXPECT_DOUBLE_EQ(across.cameras[0].offset_mm, 1.5);
+  EXPECT_DOUBLE_EQ(across.cameras[0].angle_deg, 0.2);
+  EXPECT_EQ(across.cameras[0].plane, DepthVerdict::Ok);
 }
 
 // Every ordered pair, by from then to, for rigs of 1, 3, 4 and 5 cameras:
@@ -801,6 +873,11 @@ TEST(SummarizeDepthChecks, RefusesWhatDoesNotFit) {
   }
   option([](DepthCheckOptions& o) { o.inset_m = -0.01; }, "inset_m");
   option([](DepthCheckOptions& o) { o.inset_m = kNaN; }, "inset_m");
+  option(
+      [](DepthCheckOptions& o) {
+        o.inset_m = std::numeric_limits<double>::infinity();
+      },
+      "inset_m");
   option([](DepthCheckOptions& o) { o.min_overlap = 0; }, "min_overlap");
   DepthCheckOptions zero_inset;
   zero_inset.inset_m = 0.0;
