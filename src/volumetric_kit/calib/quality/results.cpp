@@ -99,6 +99,26 @@ core::Status check_fits(const std::vector<std::string>& ids,
   return {};
 }
 
+// Refuses depth checks that index cameras the rig does not have, or hold
+// another count of them.
+core::Status check_depth_fits(std::size_t k, const DepthSummary& d) {
+  const auto pairs_fit = [&](const std::vector<PairCheck>& pairs) {
+    for (const PairCheck& p : pairs) {
+      if (p.agreement.from >= k || p.agreement.to >= k) return false;
+    }
+    return true;
+  };
+  bool fits = d.cameras.size() == k && pairs_fit(d.pairs);
+  for (const BoardDepthCheck& view : d.views) fits = fits && view.camera < k;
+  for (const CapturePairs& capture : d.captures) {
+    fits = fits && pairs_fit(capture.pairs);
+  }
+  if (fits) return {};
+  return core::Status::invalid_argument(
+      "the depth checks do not fit the rig's " + std::to_string(k) +
+      " cameras");
+}
+
 void pair(Writer& w, const camera::Vec2d& v) {
   w.open_array(true);
   w.value(v.x);
@@ -222,6 +242,96 @@ void refused(Writer& w, const std::string& why) {
   }
 }
 
+void ratio_stats(Writer& w, const RatioStats& r) {
+  w.open_object();
+  w.key("count").value(r.count);
+  w.key("mean").value(r.mean);
+  w.key("sd").value(r.sd);
+  w.close_object();
+}
+
+void pair_checks(Writer& w, const std::vector<PairCheck>& pairs,
+                 const std::vector<std::string>& ids) {
+  w.open_array();
+  for (const PairCheck& check : pairs) {
+    const PairAgreement& p = check.agreement;
+    w.open_object();
+    w.key("from").value(ids[p.from]);
+    w.key("to").value(ids[p.to]);
+    w.key("overlap").value(p.overlap);
+    w.key("in_window").value(p.in_window);
+    w.key("signed_median_mm").value(p.signed_median_mm);
+    w.key("median_abs_mm").value(p.median_abs_mm);
+    w.key("p90_abs_mm").value(p.p90_abs_mm);
+    w.key("verdict").value(to_string(check.verdict));
+    w.close_object();
+  }
+  w.close_array();
+}
+
+void depth_section(Writer& w, const DepthSummary& d,
+                   const std::vector<std::string>& ids) {
+  const DepthCheckOptions& o = d.options;
+  w.open_object();
+  w.key("settings").open_object();
+  w.key("inset_m").value(o.inset_m);
+  w.key("min_overlap").value(o.min_overlap);
+  w.key("max_scale_error").value(o.max_scale_error);
+  w.key("max_offset_mm").value(o.max_offset_mm);
+  w.key("max_angle_deg").value(o.max_angle_deg);
+  w.key("max_signed_median_mm").value(o.max_signed_median_mm);
+  w.key("max_median_abs_mm").value(o.max_median_abs_mm);
+  w.close_object();
+  ratio_stats(w.key("ratio"), d.ratio);
+  w.key("scale").value(to_string(d.scale));
+  w.key("cameras").open_object();
+  for (std::size_t c = 0; c < ids.size(); ++c) {
+    const CameraDepth& cam = d.cameras[c];
+    w.key(ids[c]).open_object();
+    w.key("views").value(cam.views);
+    ratio_stats(w.key("ratio"), cam.ratio);
+    w.key("scale").value(to_string(cam.scale));
+    w.key("offset_mm").value(cam.offset_mm);
+    w.key("angle_deg").value(cam.angle_deg);
+    w.key("plane").value(to_string(cam.plane));
+    w.close_object();
+  }
+  w.close_object();
+  w.key("views").open_array();
+  for (const BoardDepthCheck& view : d.views) {
+    const DepthPlane& plane = view.plane;
+    w.open_object();
+    w.key("camera").value(ids[view.camera]);
+    w.key("capture").value(view.capture);
+    w.key("valid").value(plane.valid);
+    w.key("members").value(plane.members);
+    w.key("out_of_range").value(plane.out_of_range);
+    w.key("inliers").value(plane.inliers);
+    if (plane.valid) {
+      w.key("rms_mm").value(1000.0 * plane.rms_m);
+    } else {
+      w.key("rms_mm").null();
+    }
+    w.key("ratios").open_array(true);
+    for (const double r : view.ratios) w.value(r);
+    w.close_array();
+    w.key("offset_mm").value(view.offset_mm);
+    w.key("angle_deg").value(view.angle_deg);
+    w.close_object();
+  }
+  w.close_array();
+  pair_checks(w.key("pairs"), d.pairs, ids);
+  w.key("captures").open_array();
+  for (const CapturePairs& capture : d.captures) {
+    w.open_object();
+    w.key("capture").value(capture.capture);
+    pair_checks(w.key("pairs"), capture.pairs, ids);
+    w.close_object();
+  }
+  w.close_array();
+  w.close_object();
+}
+
 void arm(Writer& w, const PrincipalPointArm& a) {
   w.open_object();
   w.key("rms_px").value(a.rms_px);
@@ -233,7 +343,8 @@ void arm(Writer& w, const PrincipalPointArm& a) {
 
 std::string report_text(const std::vector<std::string>& ids,
                         const solve::RigSolution& solution,
-                        const CalibrationMetrics& metrics) {
+                        const CalibrationMetrics& metrics,
+                        const DepthSummary* depth_checks) {
   const std::size_t k = ids.size();
   Writer w;
   w.open_object();
@@ -436,6 +547,11 @@ std::string report_text(const std::vector<std::string>& ids,
   }
   w.close_array();
   w.close_object();
+  if (depth_checks) {
+    depth_section(w.key("depth"), *depth_checks, ids);
+  } else {
+    w.key("depth").null();
+  }
   w.close_object();
   return std::move(w).text();
 }
@@ -482,7 +598,8 @@ std::string residuals_text(const std::vector<std::string>& ids,
 
 core::Result<ResultFiles> format_results(
     const std::vector<solve::RigCamera>& cameras,
-    const solve::RigSolution& solution, const CalibrationMetrics& metrics) {
+    const solve::RigSolution& solution, const CalibrationMetrics& metrics,
+    const DepthSummary* depth) {
   constexpr const char* kWhat = "format_results";
   return compute::guarded(kWhat, [&]() -> core::Result<ResultFiles> {
     std::vector<std::string> ids;
@@ -490,13 +607,14 @@ core::Result<ResultFiles> format_results(
     for (const solve::RigCamera& cam : cameras) ids.push_back(cam.id);
     core::Status checked = solve::check_camera_ids(ids);
     if (checked.ok()) checked = check_fits(ids, solution, metrics);
+    if (checked.ok() && depth) checked = check_depth_fits(ids.size(), *depth);
     if (!checked.ok()) return std::move(checked).with_context(kWhat);
     core::Result<std::string> calibration =
         camera::format_array_calibration(solution.calibration);
     if (!calibration.ok()) return calibration.status().with_context(kWhat);
     ResultFiles files;
     files.array_calibration = *std::move(calibration);
-    files.report = report_text(ids, solution, metrics);
+    files.report = report_text(ids, solution, metrics, depth);
     files.residuals = residuals_text(ids, solution);
     return files;
   });

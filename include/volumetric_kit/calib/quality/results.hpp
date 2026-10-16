@@ -47,7 +47,17 @@
 ///   `refused`, `corners`, `as_given` and `shifted` (`rms_px`,
 ///   `legacy_rmse_px`, `transfer_median_px`, `transfer_p90_px`), `verdict`;
 /// - `geometry`: `centres_m` by id, and `baselines_m`, each pair once
-///   (`a`, `b`, `m`).
+///   (`a`, `b`, `m`);
+/// - `depth` (@ref DepthSummary), `null` when the depth was not checked:
+///   `settings` (its @ref DepthCheckOptions, by their names); `ratio`
+///   (`count`, `mean`, `sd`) and its `scale` verdict; `cameras` (by id:
+///   `views`, `ratio`, `scale`, `offset_mm`, `angle_deg`, `plane`); `views`
+///   (`camera`, `capture`, `valid`, `members`, `out_of_range`, `inliers`,
+///   `rms_mm`, `ratios`, `offset_mm`, `angle_deg`); `pairs`, pooled, and
+///   `captures` (`capture`, `pairs`), each pair `from`, `to`, `overlap`,
+///   `in_window`, `signed_median_mm`, `median_abs_mm`, `p90_abs_mm`,
+///   `verdict`. Verdicts are @ref to_string(DepthVerdict)'s names; an
+///   invalid plane's `rms_mm` is `null`.
 ///
 /// Numbers are written in the shortest form that reads back to the same
 /// double; one that is not finite, or not measured, is `null`, as are a
@@ -64,6 +74,7 @@
 #include <vector>
 
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
+#include "volumetric_kit/calib/quality/depth_checks.hpp"
 #include "volumetric_kit/calib/quality/export.hpp"
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
@@ -81,7 +92,7 @@ inline constexpr const char* kResidualsFile = "residuals.csv";
 ///
 /// @code
 /// VKC_ASSIGN(const ResultFiles files,
-///            format_results(cameras, solution, metrics));
+///            format_results(cameras, solution, metrics, &depth));
 /// VKC_TRY(core::write_file(dir + "/" + kReportFile, files.report,
 ///                          core::WriteMode::CreateNew));
 /// @endcode
@@ -98,14 +109,17 @@ struct ResultFiles {
 /// @param cameras   The rig's cameras, as the solve took them.
 /// @param solution  The adjustment's solution.
 /// @param metrics   @ref calibration_metrics of it.
+/// @param depth     @ref summarize_depth_checks of its depth; null when the
+///                  depth was not checked.
 /// @return The files; `InvalidArgument` for no cameras, a repeated or empty
-///         id, or a @p solution or @p metrics that names a camera the rig
-///         does not have or has another camera count, or a calibration whose
-///         sensors are not the cameras (naming what); recon's error for a
-///         calibration its writer refuses; or `OutOfMemory`. Each message
-///         starts `format_results: `.
+///         id, or a @p solution, @p metrics or @p depth that names a camera
+///         the rig does not have or has another camera count, or a
+///         calibration whose sensors are not the cameras (naming what);
+///         recon's error for a calibration its writer refuses; or
+///         `OutOfMemory`. Each message starts `format_results: `.
 VC_QUALITY_API core::Result<ResultFiles> format_results(
     const std::vector<solve::RigCamera>& cameras,
-    const solve::RigSolution& solution, const CalibrationMetrics& metrics);
+    const solve::RigSolution& solution, const CalibrationMetrics& metrics,
+    const DepthSummary* depth = nullptr);
 
 }  // namespace volumetric_kit::calib::quality
