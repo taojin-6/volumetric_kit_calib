@@ -54,11 +54,9 @@ jobs:
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
             -DVC_SANITIZE="address;undefined" -DVC_WITH_RIG=ON
 
-      # One job or test per core: a bare `--parallel` runs make with no job
-      # limit, and a hosted runner sets no CTEST_PARALLEL_LEVEL, so ctest would
-      # otherwise run the suite one test at a time.
+      # The level, not a bare --parallel (_build.yml's Build step says why).
       - name: Build
-        run: cmake --build build --parallel "$(nproc)"
+        run: cmake --build build --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
 
       - name: Test
         run: ctest --test-dir build --output-on-failure --parallel "$(nproc)"

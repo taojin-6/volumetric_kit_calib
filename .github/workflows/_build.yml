@@ -73,9 +73,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake build-essential libglm-dev
 
-      # The self-hosted Mac's Homebrew is shared with recon's and gfx's runners
-      # and keeps what it installs, so install only what is missing and never
-      # upgrade a formula another repository's CI builds against.
+      # On the self-hosted Mac a job installs nothing and fails naming any
+      # formula missing (DECISIONS.md, 2026-10-16); a hosted runner installs
+      # what its image lacks.
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         env:
@@ -83,7 +83,6 @@ jobs:
           # auto-update -- its `git fetch` is what flakes on transient DNS.
           HOMEBREW_NO_AUTO_UPDATE: '1'
           HOMEBREW_NO_INSTALL_CLEANUP: '1'
-          HOMEBREW_NO_INSTALL_UPGRADE: '1'
         run: |
           pkgs="cmake glm"
           if [ "${{ inputs.opencv }}" = "true" ]; then
@@ -97,6 +96,10 @@ jobs:
           for pkg in $pkgs; do
             brew list --formula "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"
           done
+          if [ -n "$missing" ] && [ "${{ runner.environment }}" = self-hosted ]; then
+            echo "::error::install by hand on this self-hosted runner's host, while CI is idle:${missing}"
+            exit 1
+          fi
           if [ -n "$missing" ]; then
             # Retry to ride out a transient fetch error; OpenCV brings many
             # bottles.

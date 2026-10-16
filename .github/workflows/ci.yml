@@ -9,12 +9,15 @@ on:
     branches: [main]
   pull_request:
 
-# A new push to a PR supersedes its running CI. A push to main never cancels
-# another: each merged commit keeps its own full `ci / required` result.
+# A new push to a PR supersedes its running CI. A push to main never cancels a
+# running main run, but GitHub keeps one pending run per group, so of several
+# quick merges only the newest waiting one runs.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Only the owner triggers this repository's workflows, so no job carries a fork
+# guard (the core's DECISIONS.md, "Only the owner triggers CI").
 jobs:
   build:
     name: ${{ matrix.os }}

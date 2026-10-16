@@ -87,13 +87,19 @@ of them did.
   rate, and its four hosted macOS legs reinstalled OpenCV and ran the tests
   one at a time on every push. Ubuntu, lint, sanitizers and `required` stay
   hosted, at the Linux rate. `ci.yml` says how to move a Mac leg back to a
-  hosted runner.
+  hosted runner. recon's and gfx's jobs can read calib's checkouts and its
+  runners' credentials there, so its privacy rests on their owner-only
+  policies (the core's
+  [DECISIONS.md](https://github.com/taojin-6/volumetric_kit_core/blob/main/DECISIONS.md#2026-10-16--calibs-mac-runners-and-each-repositorys-own-share-of-a-host)).
 - **Two Mac legs, both on OpenCV:** Debug with shared libraries, and Release
   with the rig tiers, whose GPU tests run on the Mac's GPU under the
   validation layer. Ubuntu 24.04 and 26.04 build Release; Linux Debug is the
   sanitizer job's.
-- **The Mac's Homebrew is shared**, so a job installs only a missing formula
-  and upgrades none; the owner installs a new one there, such as OpenCV.
+- **The Mac's Homebrew is shared**, so a job there installs nothing and fails
+  naming any formula missing; the owner installs it by hand, such as OpenCV.
+  Installing a formula can upgrade its dependencies, which recon's and gfx's
+  CI build against, and the two Mac legs installing at once would collide on
+  Homebrew's locks.
 - **Protecting `main`** with the `required` check is the owner's choice.
 
 ## 2026-10-16 — Depth checks are calib's kernels
