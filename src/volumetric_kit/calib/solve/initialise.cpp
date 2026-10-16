@@ -11,6 +11,7 @@
 #include <numeric>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -200,10 +201,11 @@ core::Result<RigLenses> check_rig(const std::vector<RigCamera>& cameras,
 }
 
 core::Status check_initialise_options(const InitialiseOptions& options,
-                                      const std::string& prefix) {
+                                      std::string_view prefix) {
   return compute::guarded("check_initialise_options", [&]() -> core::Status {
     const auto refuse = [&](const char* name, const char* rule) {
-      return core::Status::invalid_argument(prefix + name + " must be " + rule);
+      return core::Status::invalid_argument(std::string(prefix) + name +
+                                            " must be " + rule);
     };
     if (!(options.max_pnp_rms_px > 0.0) ||
         !std::isfinite(options.max_pnp_rms_px)) {

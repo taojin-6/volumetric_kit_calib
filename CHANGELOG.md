@@ -11,6 +11,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `solve::bundle_adjust` counts a shared capture only when each camera keeps
   enough positive-weight corners to fix a pose, and returns `Numerical` if
   the intrinsics sensitivity diagnostics overflow.
+- `check_initialise_options` takes its diagnostic prefix as a
+  `std::string_view`, so constructing a default or literal prefix cannot
+  allocate before the error guard.
+- `CaptureRule::update` returns `OutOfMemory` if formatting a motion or spread
+  message runs out of memory, preserving its armed state and previous hold.
 
 ### Added
 

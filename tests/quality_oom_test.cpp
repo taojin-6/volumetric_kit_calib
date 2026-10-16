@@ -126,6 +126,11 @@ TEST(QualityOom, CaptureRuleIsUnchangedByAFailure) {
   LiveSet warned = incomplete;
   warned.present.assign(3, true);
   warned.spread_ms = 12.5;
+  // Fixed formatting must grow its buffer on both libc++ and libstdc++.
+  LiveSet large_spread = warned;
+  large_spread.spread_ms = 1.8e30;
+  LiveSet large_motion = warned;
+  large_motion.motion_px = 1.8e30;
   // Waiting on cameras whose names outgrow a short string's buffer.
   CaptureRule waiting = armed;
   ASSERT_TRUE(waiting.update(incomplete, press).ok());
@@ -137,11 +142,15 @@ TEST(QualityOom, CaptureRuleIsUnchangedByAFailure) {
   };
   for (const Case& c :
        {Case{&armed, &incomplete, press}, Case{&armed, &warned, press},
+        Case{&waiting, &large_spread, press},
+        Case{&waiting, &large_motion, press},
         Case{&waiting, &warned, press + milliseconds(3000)}}) {
     CaptureRule fresh = *c.rule;
     const CaptureDecision expected = fresh.update(*c.set, c.now).value();
     std::size_t oom = 0;
     for (std::size_t after = 0;; ++after) {
+      SCOPED_TRACE(expected.message);
+      SCOPED_TRACE(after);
       CaptureRule rule = *c.rule;
       std::optional<core::Result<CaptureDecision>> result;
       EXPECT_NO_THROW({
@@ -149,8 +158,16 @@ TEST(QualityOom, CaptureRuleIsUnchangedByAFailure) {
         result.emplace(rule.update(*c.set, c.now));
       });
       ASSERT_TRUE(result.has_value());
-      if (!test::allocation_failure.injected) break;
-      ASSERT_EQ(result->status().domain(), Code::OutOfMemory);
+      if (!test::allocation_failure.injected) {
+        ASSERT_TRUE(result->ok());
+        EXPECT_EQ(result->value().state, expected.state);
+        EXPECT_EQ(result->value().hold, expected.hold);
+        EXPECT_EQ(result->value().message, expected.message);
+        EXPECT_EQ(rule.armed(), fresh.armed());
+        break;
+      }
+      ASSERT_EQ(result->status().domain(), Code::OutOfMemory)
+          << result->status().message();
       ++oom;
       EXPECT_TRUE(rule.armed());
       // Its last hold as it was, and its answer to the set as it would have.
@@ -163,6 +180,7 @@ TEST(QualityOom, CaptureRuleIsUnchangedByAFailure) {
       EXPECT_EQ(again.state, expected.state) << after;
       EXPECT_EQ(again.hold, expected.hold) << after;
       EXPECT_EQ(again.message, expected.message) << after;
+      EXPECT_EQ(rule.armed(), fresh.armed()) << after;
     }
     EXPECT_GT(oom, 0u) << expected.message;
   }

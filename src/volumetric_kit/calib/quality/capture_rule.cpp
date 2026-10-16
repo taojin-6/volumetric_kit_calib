@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <iomanip>
+#include <new>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -26,6 +27,9 @@ core::Status refuse_option(const char* name, const char* rule) {
 std::string format(double value) {
   std::ostringstream out;
   out << std::fixed << std::setprecision(2) << value;
+  // A string buffer can turn allocation failure into EOF, even with stream
+  // exceptions enabled. Propagate it before a partial message changes state.
+  if (!out) throw std::bad_alloc();
   return out.str();
 }
 

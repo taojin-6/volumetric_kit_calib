@@ -152,5 +152,16 @@ TEST(SolveOom, RigChecks) {
       [&] { return core::Result<bool>(check_initialise_options(options)); });
 }
 
+// A literal prefix outgrows the inline buffer on both libc++ and libstdc++.
+// Its conversion at the call site must not allocate before the error guard.
+TEST(SolveOom, InitialiseOptionsWithALongLiteralPrefix) {
+  InitialiseOptions options;
+  options.min_ambiguity = 0.5;
+  expect_oom_anywhere([&] {
+    return core::Result<bool>(check_initialise_options(
+        options, "calibration application: initialise options."));
+  });
+}
+
 }  // namespace
 }  // namespace volumetric_kit::calib::solve

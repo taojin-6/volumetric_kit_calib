@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "volumetric_kit/calib/compute/board.hpp"
@@ -258,7 +259,7 @@ VC_SOLVE_API core::Result<InitialRig> initialise(
 /// @endcode
 VC_SOLVE_API core::Status check_initialise_options(
     const InitialiseOptions& options,
-    const std::string& prefix = "initialise: options.");
+    std::string_view prefix = "initialise: options.");
 
 /// @brief What @ref initialise does with a view it has poses for: step 1's
 ///        rule, which the session's checks share.
