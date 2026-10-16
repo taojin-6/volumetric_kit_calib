@@ -3,9 +3,10 @@
 
 # --- calib_quality: Tier 3 ---------------------------------------------------
 # What the views and the captures are worth, before and after the solve: the
-# live checks of each view and set, the capture rule, and the session's checks.
-# Pure and geometric, on core's detection records and solve's poses, view rule
-# and tree. Built with VC_WITH_OPENCV.
+# live checks of each view and set, the capture rule, the session's checks, the
+# solved rig's metrics and its results files' text. Pure and geometric, on
+# core's detection records and solve's poses, view rule, tree and adjustment.
+# Built with VC_WITH_OPENCV.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
@@ -14,8 +15,9 @@ set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 add_library(calib_quality)
 add_library(volumetric_kit::calib_quality ALIAS calib_quality)
 
-target_sources(calib_quality PRIVATE capture_rule.cpp live_checks.cpp
-                                     session_checks.cpp)
+target_sources(
+  calib_quality PRIVATE calibration_metrics.cpp capture_rule.cpp
+                        live_checks.cpp results.cpp session_checks.cpp)
 
 # The tier's own export macro and guard (see calib_core).
 generate_export_header(
@@ -43,8 +45,12 @@ target_include_directories(
                        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
 # The public headers name compute's board and camera and solve's rig cameras,
-# poses, options and covisibility; nothing calls OpenCV directly.
+# poses, options, covisibility and solution; nothing calls OpenCV directly.
 target_link_libraries(calib_quality PUBLIC calib_solve)
+# nlohmann/json writes the report, privately, through calib's JSON writer
+# (core/json_text.hpp): no public header names it.
+target_include_directories(calib_quality SYSTEM
+                           PRIVATE "${VC_JSON_INCLUDE_DIR}")
 
 vc_target_warnings(calib_quality)
 

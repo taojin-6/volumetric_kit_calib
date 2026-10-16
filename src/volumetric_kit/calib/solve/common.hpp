@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
@@ -37,8 +38,9 @@ core::Result<RigCameras> read_rig_cameras(const std::vector<RigCamera>& cameras,
 core::Status check_one_view_each(const std::vector<Observation>& views,
                                  const std::string& prefix);
 
-// "<prefix>options.<name> must be <rule>", as InvalidArgument.
-core::Status refuse_option(const std::string& prefix, const char* name,
+// "<prefix><name> must be <rule>", as InvalidArgument: an options check's
+// refusal, `prefix` naming the options ("initialise: options.").
+core::Status refuse_option(std::string_view prefix, const char* name,
                            const char* rule);
 
 // The median of `values`, which are not empty.

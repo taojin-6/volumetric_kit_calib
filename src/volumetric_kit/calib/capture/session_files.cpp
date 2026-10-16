@@ -17,6 +17,10 @@
 namespace volumetric_kit::calib::capture::detail {
 namespace {
 
+// TODO: write these files with core/json_text.hpp's JsonWriter, as the
+// report is (DECISIONS.md, 2026-10-16): nlohmann's containers built here, on
+// the writer thread, allocate in their destructors and so terminate when
+// memory runs out.
 using json = nlohmann::ordered_json;
 
 // The capture's index as its file names give it: three digits or more.

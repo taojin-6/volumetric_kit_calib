@@ -5,9 +5,9 @@
 #
 # Vendored via pinned FetchContent: volumetric_kit_core (the family's shared
 # foundation), volumetric_kit_recon's camera tier (the family's camera
-# vocabulary) -- all of recon with VC_WITH_RIG -- nlohmann/json for the capture
-# tier's files, and googletest when the test suite is built. recon takes GLM,
-# and with VC_WITH_RIG the Vulkan SDK, from the system. OpenCV, with
+# vocabulary) -- all of recon with VC_WITH_RIG -- nlohmann/json for the quality
+# and capture tiers' files, and googletest when the test suite is built. recon
+# takes GLM, and with VC_WITH_RIG the Vulkan SDK, from the system. OpenCV, with
 # VC_WITH_OPENCV, is a prerequisite the root CMakeLists finds.
 #
 # TODO (as tiers land, mirroring gfx's hybrid system/vendored strategy):
@@ -93,11 +93,12 @@ if(VC_WITH_RIG AND NOT TARGET volumetric_kit::recon_io)
       "FetchContent_MakeAvailable(volumetric_kit_recon).")
 endif()
 
-# --- nlohmann/json (header-only; the capture tier's files) -------------------
-# calib_capture writes its session and capture files with it, as a PRIVATE
-# SYSTEM include, never part of its installed interface. Declared under recon's
-# name and pin, after recon, so the one copy recon fetched is the one used.
-if(VC_WITH_RIG)
+# --- nlohmann/json (header-only; the quality and capture tiers' files) -------
+# calib_quality writes its report, and calib_capture its session and capture
+# files, with it, as a PRIVATE SYSTEM include, never part of an installed
+# interface. Declared under recon's name and pin, after recon, so the one copy
+# recon fetched is the one used.
+if(VC_WITH_OPENCV OR VC_WITH_RIG)
   if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW) # extracted files get the extraction time
   endif()

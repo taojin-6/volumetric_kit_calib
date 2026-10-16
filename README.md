@@ -16,9 +16,9 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > `Status`/`Result` — builds and is tested (GoogleTest); so, with
 > `VC_WITH_OPENCV`, do the `compute` tier's OpenCV bridge, the `detect` tier's
 > board detection, the `solve` tier's rig solve and the `quality` tier's live
-> checks, and, with `VC_WITH_RIG`, the `capture` tier's session writer. The
-> metrics after a solve and the color, viz, and app tiers are not yet
-> implemented; the legacy `camera_calibration` Python
+> checks and solved-rig metrics, and, with `VC_WITH_RIG`, the `capture` tier's
+> session writer. The depth checks and the color, viz, and app tiers are not
+> yet implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain the
 > reference oracle.
 
@@ -75,6 +75,13 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
   them by, when Calibrate may run, and warnings of repeated, floor-only and
   mostly frontal views. All geometric
   ([DECISIONS.md](DECISIONS.md#2026-10-14--live-checks-and-the-capture-rule)).
+  After the solve, what the rig is worth: the reprojection error before and
+  after, what was left out, the cross-camera transfer (the legacy
+  `verify_rig.py`'s check), each camera's move with one capture left out, a
+  principal-point A/B test and the cameras' baselines; and the text of the
+  results directory's files -- recon's calibration file, `report.json` and
+  `residuals.csv` -- which the application writes
+  ([DECISIONS.md](DECISIONS.md#2026-10-16--the-solved-rigs-metrics-and-its-results-files)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
 

@@ -154,12 +154,18 @@ TEST(SolveOom, RigChecks) {
 
 // A literal prefix outgrows the inline buffer on both libc++ and libstdc++.
 // Its conversion at the call site must not allocate before the error guard.
-TEST(SolveOom, InitialiseOptionsWithALongLiteralPrefix) {
+TEST(SolveOom, OptionsWithALongLiteralPrefix) {
   InitialiseOptions options;
   options.min_ambiguity = 0.5;
   expect_oom_anywhere([&] {
     return core::Result<bool>(check_initialise_options(
         options, "calibration application: initialise options."));
+  });
+  BundleAdjustOptions adjust;
+  adjust.huber_px = 0.0;
+  expect_oom_anywhere([&] {
+    return core::Result<bool>(check_bundle_adjust_options(
+        adjust, "calibration application: bundle adjust options."));
   });
 }
 

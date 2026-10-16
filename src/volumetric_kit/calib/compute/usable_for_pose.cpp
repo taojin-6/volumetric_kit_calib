@@ -82,4 +82,20 @@ const char* describe(ViewUse use) noexcept {
   return "an unknown use";
 }
 
+const char* to_string(ViewUse use) noexcept {
+  switch (use) {
+    case ViewUse::Usable:
+      return "usable";
+    case ViewUse::TooFewCorners:
+      return "too_few_corners";
+    case ViewUse::UnknownCorner:
+      return "unknown_corner";
+    case ViewUse::OutsideImage:
+      return "outside_image";
+    case ViewUse::Collinear:
+      return "collinear";
+  }
+  return "unknown";
+}
+
 }  // namespace volumetric_kit::calib::compute

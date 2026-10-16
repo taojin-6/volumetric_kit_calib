@@ -83,37 +83,6 @@ std::string number(double v) {
 
 bool positive(double v) noexcept { return v > 0.0 && std::isfinite(v); }
 
-core::Status check_options(const BundleAdjustOptions& o) {
-  const struct {
-    const char* name;
-    double value;
-  } positives[] = {{"huber_px", o.huber_px},
-                   {"min_depth_m", o.min_depth_m},
-                   {"outlier_px", o.outlier_px},
-                   {"outlier_mads", o.outlier_mads},
-                   {"outlier_view_ratio", o.outlier_view_ratio},
-                   {"outlier_view_px", o.outlier_view_px},
-                   {"focal_fraction", o.focal_fraction},
-                   {"principal_px", o.principal_px}};
-  for (const auto& option : positives) {
-    if (!positive(option.value)) {
-      return detail::refuse_option(kWhat, option.name, "positive and finite");
-    }
-  }
-  if (o.max_iterations < 1)
-    return detail::refuse_option(kWhat, "max_iterations", "at least 1");
-  if (o.outlier_rounds < 0)
-    return detail::refuse_option(kWhat, "outlier_rounds", "at least 0");
-  if (o.min_shared < 1)
-    return detail::refuse_option(kWhat, "min_shared", "at least 1");
-  if (!(o.max_condition > 1.0)) {
-    return detail::refuse_option(kWhat, "max_condition", "above 1");
-  }
-  if (o.max_captures < 1)
-    return detail::refuse_option(kWhat, "max_captures", "at least 1");
-  return {};
-}
-
 // One view the adjustment takes.
 struct View {
   std::size_t observation = 0;
@@ -590,9 +559,7 @@ core::Result<Problem> read_problem(const std::vector<RigCamera>& cameras,
           "bundle_adjust: start's record of " + what +
           " is not of its camera and capture");
     }
-    if (record.fate != ViewFate::Used && record.fate != ViewFate::Ambiguous) {
-      continue;
-    }
+    if (!adjusts(record)) continue;
     if (start_boards.count(view.frame_id) == 0) {
       return core::Status::invalid_argument(
           "bundle_adjust: start places no board for capture " +
@@ -975,6 +942,55 @@ void write_solution(const Problem& p, const std::vector<RigCamera>& cameras,
 
 }  // namespace
 
+core::Status check_bundle_adjust_options(const BundleAdjustOptions& o,
+                                         std::string_view prefix) {
+  return compute::guarded("check_bundle_adjust_options", [&]() -> core::Status {
+    const auto refuse = [&](const char* name, const char* rule) {
+      return detail::refuse_option(prefix, name, rule);
+    };
+    const struct {
+      const char* name;
+      double value;
+    } positives[] = {{"huber_px", o.huber_px},
+                     {"min_depth_m", o.min_depth_m},
+                     {"outlier_px", o.outlier_px},
+                     {"outlier_mads", o.outlier_mads},
+                     {"outlier_view_ratio", o.outlier_view_ratio},
+                     {"outlier_view_px", o.outlier_view_px},
+                     {"focal_fraction", o.focal_fraction},
+                     {"principal_px", o.principal_px}};
+    for (const auto& option : positives) {
+      if (!positive(option.value)) {
+        return refuse(option.name, "positive and finite");
+      }
+    }
+    if (o.max_iterations < 1) return refuse("max_iterations", "at least 1");
+    if (o.outlier_rounds < 0) return refuse("outlier_rounds", "at least 0");
+    if (o.min_shared < 1) return refuse("min_shared", "at least 1");
+    if (!(o.max_condition > 1.0)) return refuse("max_condition", "above 1");
+    if (o.max_captures < 1) return refuse("max_captures", "at least 1");
+    return {};
+  });
+}
+
+bool adjusts(const ViewRecord& record) noexcept {
+  return record.fate == ViewFate::Used || record.fate == ViewFate::Ambiguous;
+}
+
+const char* to_string(Dropped reason) noexcept {
+  switch (reason) {
+    case Dropped::TooNear:
+      return "too_near";
+    case Dropped::Outlier:
+      return "outlier";
+    case Dropped::OutlierView:
+      return "outlier_view";
+    case Dropped::Unusable:
+      return "unusable";
+  }
+  return "unknown";
+}
+
 core::Result<ViewResiduals> view_residuals(
     const compute::CvCamera& camera, const compute::Board& board,
     const Observation& view, const camera::RodriguesTransform& world_to_camera,
@@ -1026,7 +1042,7 @@ core::Result<RigSolution> bundle_adjust(const std::vector<RigCamera>& cameras,
                                         const BundleAdjustOptions& options) {
   return compute::guarded("bundle_adjust", [&]() -> core::Result<RigSolution> {
     const auto began = std::chrono::steady_clock::now();
-    VKC_TRY(check_options(options));
+    VKC_TRY(check_bundle_adjust_options(options));
     VKC_ASSIGN(Problem p, read_problem(cameras, board, views, start, options));
     RigSolution out;
     // The solves, with corners too near dropped before each, and outliers
