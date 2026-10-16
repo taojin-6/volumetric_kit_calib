@@ -161,6 +161,12 @@ Run the demo:
 ./build/examples/example_01_project_point --config config/project_point.json
 ```
 
+The demo reads the family's versioned JSON scenario format through
+`volumetric_kit::core_config`. Core owns defaults and static validation, including
+unknown fields and application compatibility. Edit `config/project_point.json`
+to change the camera and point. The demo accepts only `--config PATH` and `--help`;
+the calibration library itself keeps its core_base/recon_camera dependency.
+
 Run calib_rig on a rig (the session root must exist):
 
 ```bash
@@ -178,12 +184,6 @@ The modes default to 3840x2160 MJPEG colour and 640x576 depth at 25 fps
 Paths are relative to the scenario. The core's
 [CONFIG.md](https://github.com/taojin-6/volumetric_kit_core/blob/main/CONFIG.md)
 has every field.
-
-The demo reads the family's versioned JSON scenario format through
-`volumetric_kit::core_config`. Core owns defaults and static validation, including
-unknown fields and application compatibility. Edit `config/project_point.json`
-to change the camera and point. The demo accepts only `--config PATH` and `--help`;
-the calibration library itself keeps its core_base/recon_camera dependency.
 
 ## Use it in your project
 
