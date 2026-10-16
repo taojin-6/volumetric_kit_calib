@@ -128,12 +128,12 @@ struct LiveWorker::State {
     return compute::guarded("live detection", [&]() -> core::Status {
       const detect::LumaView luma{view->width, view->height, view->stride,
                                   view->luma};
-      VKC_ASSIGN(found,
-                 detect::detect_charuco(luma, board_used, detect::Mode::Hybrid));
+      VKC_ASSIGN(found, detect::detect_charuco(luma, board_used,
+                                               detect::Mode::Hybrid));
       // A view the check refuses still shows what was found.
-      VKC_ASSIGN(const quality::CheckedView checked,
-                 quality::check_view(cameras[i], board_used, found,
-                                     options.view));
+      VKC_ASSIGN(
+          const quality::CheckedView checked,
+          quality::check_view(cameras[i], board_used, found, options.view));
       check = checked.check;
       return {};
     });
