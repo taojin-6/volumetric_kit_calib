@@ -271,6 +271,24 @@ TEST(Target, AprilGridCarriesOneTagPerFeature) {
   EXPECT_TRUE(RefusedNaming(check_target(grid), "first_marker_id"));
 }
 
+// A ChArUco board has a marker in every other square, from the second; an
+// AprilGrid one per tag; other patterns none.
+TEST(Target, CountsItsMarkers) {
+  EXPECT_EQ(marker_count(legacy_femto_board()), 7);  // 5 x 3 squares
+  Target even = legacy_femto_board();
+  even.rows = 3;  // 5 x 4 squares
+  EXPECT_EQ(marker_count(even), 10);
+  Target grid;
+  grid.kind = TargetKind::AprilGrid;
+  grid.rows = 6;
+  grid.cols = 5;
+  EXPECT_EQ(marker_count(grid), 30);
+  EXPECT_EQ(marker_count(checkerboard()), 0);
+  Target unknown = legacy_femto_board();
+  unknown.kind = static_cast<TargetKind>(99);
+  EXPECT_EQ(marker_count(unknown), 0);
+}
+
 TEST(Target, PatternWithoutMarkersTakesNone) {
   for (const TargetKind kind :
        {TargetKind::Checkerboard, TargetKind::SymmetricCircleGrid,
