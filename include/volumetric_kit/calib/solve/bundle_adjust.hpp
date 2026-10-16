@@ -117,7 +117,8 @@ struct BundleAdjustOptions {
   /// The RMS (pixels) a view must be above to be an outlier.
   double outlier_view_px = 1.0;
   /// Each link of the tree must keep at least this many shared captures
-  /// after the outliers are dropped; at least 1.
+  /// after the outliers are dropped, with enough positive-weight corners
+  /// in each camera's view to fix a pose; at least 1.
   int min_shared = 3;
   /// Each camera's 6 x 6 block of the normal matrix, with the boards
   /// eliminated, must have a condition number below this; above 1.
@@ -322,8 +323,9 @@ struct RigSolution {
 ///    corner costs its view nothing more. A view whose kept corners no longer
 ///    fix a pose is dropped whole. The rounds stop when none is dropped.
 /// 4. **Guards.** Each link of @p start's tree keeps `min_shared` captures
-///    in which both its cameras keep a view; each camera's 6 x 6 block of
-///    the normal matrix, the boards eliminated, has a condition number below
+///    in which both its cameras' kept, positive-weight corners fix a pose
+///    (@ref compute::usable_for_pose); each camera's 6 x 6 block of the normal
+///    matrix, the boards eliminated, has a condition number below
 ///    `max_condition`.
 /// 5. **Uncertainty.** The covariance (@ref PoseCovariance) and the
 ///    intrinsics sensitivity (@ref IntrinsicsSensitivity), at the solution.
@@ -348,8 +350,9 @@ struct RigSolution {
 ///         solve does not converge or meets a value that is not finite, for
 ///         fewer weighted residuals than parameters, for a board or a camera
 ///         poorly constrained (naming its capture or its id), or for the
-///         cameras poorly constrained together; or what OpenCV threw
-///         (@ref compute::guarded). Each message starts `bundle_adjust: `.
+///         cameras poorly constrained together, or for sensitivity diagnostics
+///         that are not finite; or what OpenCV threw (@ref compute::guarded).
+///         Each message starts `bundle_adjust: `.
 VC_SOLVE_API core::Result<RigSolution> bundle_adjust(
     const std::vector<RigCamera>& cameras, const compute::Board& board,
     const std::vector<Observation>& views, const InitialRig& start,

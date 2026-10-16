@@ -1213,6 +1213,37 @@ TEST(BundleAdjust, HonoursMinShared) {
   }
 }
 
+// Zero-weight corners cannot make a view count toward min_shared: the
+// positive-weight corners alone must fix a pose in each shared capture.
+TEST(BundleAdjust, SharedCapturesNeedPositiveWeightPoseSupport) {
+  for (const std::vector<int>& positive : std::vector<std::vector<int>>{
+           {}, {0, 1, 4}, {0, 1, 2, 3}, {0, 1, 4, 5}}) {
+    SCOPED_TRACE(testing::PrintToString(positive));
+    Pair pair = facing_pair(pair_boards());
+    pair.scene.views =
+        test::observe(pair.scene.rig, pair.scene.board, pair.scene.plan,
+                      test::ObserveOptions{0.0, 1});
+    for (Observation& view : pair.scene.views) {
+      if (view.camera_id != "FAR" || view.frame_id == 0) continue;
+      for (DetectedPoint& point : view.points) {
+        point.weight = std::find(positive.begin(), positive.end(), point.id) !=
+                               positive.end()
+                           ? 0.5
+                           : 0.0;
+      }
+    }
+    const core::Result<RigSolution> solution = adjust(pair.scene, pair.start);
+    if (positive == std::vector<int>({0, 1, 4, 5})) {
+      EXPECT_TRUE(solution.ok()) << solution.status().message();
+    } else {
+      EXPECT_EQ(solution.status().domain(), Code::InvalidArgument);
+      EXPECT_EQ(solution.status().message(),
+                "bundle_adjust: FAR and NEAR share 1 capture in which both "
+                "keep a view, fewer than min_shared (3)");
+    }
+  }
+}
+
 TEST(BundleAdjust, HonoursMaxConditionAndMaxCaptures) {
   const Scene scene = make_scene(20);
   const InitialRig start = first_rig(scene);
@@ -1263,6 +1294,33 @@ TEST(BundleAdjust, HonoursTheSensitivityAmounts) {
                     other.sensitivity[j].principal_y[c], 0.25);
     }
     EXPECT_EQ(base.sensitivity[j].focal[0].rotation_deg, 0.0);  // reference
+  }
+}
+
+// Finite sensitivity amounts may overflow the linear prediction or its
+// rotation norm. Such diagnostics must not escape in a successful result.
+TEST(BundleAdjust, NonFiniteSensitivityIsNumerical) {
+  const Scene scene = make_scene(20);
+  const InitialRig start = first_rig(scene);
+  for (const double amount : {1e160, 1e308}) {
+    SCOPED_TRACE(amount);
+    for (const bool focal : {false, true}) {
+      SCOPED_TRACE(focal ? "focal_fraction" : "principal_px");
+      BundleAdjustOptions options;
+      if (focal) {
+        options.focal_fraction = amount;
+      } else {
+        options.principal_px = amount;
+      }
+      const core::Result<RigSolution> solution = adjust(scene, start, options);
+      EXPECT_EQ(solution.status().domain(), Code::Numerical);
+      EXPECT_NE(solution.status().message().find("sensitivity"),
+                std::string::npos)
+          << solution.status().message();
+      EXPECT_NE(solution.status().message().find("not finite"),
+                std::string::npos)
+          << solution.status().message();
+    }
   }
 }
 

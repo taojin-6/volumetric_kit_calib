@@ -650,17 +650,34 @@ core::Result<Problem> read_problem(const std::vector<RigCamera>& cameras,
   return p;
 }
 
-// Each link of the start's tree keeps min_shared captures both its cameras
-// keep a view of.
-core::Status check_links(const Problem& p, const InitialRig& start,
+// Each link of the start's tree keeps min_shared captures in which both
+// cameras' kept, positive-weight corners still fix a pose.
+core::Status check_links(const Problem& p, const compute::Board& board,
+                         const InitialRig& start,
                          const BundleAdjustOptions& options) {
   const std::size_t k = p.cameras.size();
   const std::size_t n = p.captures.size();
   std::vector<std::vector<bool>> adjusted(k, std::vector<bool>(n, false));
   std::vector<std::vector<bool>> kept(k, std::vector<bool>(n, false));
   for (const View& view : p.views) {
-    adjusted[view.camera][view.board] = true;
-    if (counts(view)) kept[view.camera][view.board] = true;
+    Observation weighted;
+    Observation remaining;
+    for (std::size_t i = 0; i < view.ids.size(); ++i) {
+      if (view.weights[i] == 0.0) continue;
+      const DetectedPoint point{
+          view.ids[i], {view.pixels[i].x, view.pixels[i].y}, view.weights[i]};
+      weighted.points.push_back(point);
+      if (view.kept[i]) remaining.points.push_back(point);
+    }
+    VKC_ASSIGN(
+        const compute::ViewUse before,
+        compute::usable_for_pose(board, weighted, p.lenses[view.camera].size));
+    adjusted[view.camera][view.board] = before == compute::ViewUse::Usable;
+    if (!counts(view)) continue;
+    VKC_ASSIGN(
+        const compute::ViewUse use,
+        compute::usable_for_pose(board, remaining, p.lenses[view.camera].size));
+    kept[view.camera][view.board] = use == compute::ViewUse::Usable;
   }
   for (const PlacedLink& link : start.links) {
     int shared = 0;
@@ -846,7 +863,8 @@ core::Status uncertainty(const Problem& p, const BundleAdjustOptions& options,
 
   // The sensitivity: for each camera's J^T W J_int d_int on the right, each
   // camera's step -S^-1 (g_c - sum_b B_b D_b^-1 g_b).
-  const auto shifts = [&](const cv::Mat_<double>& g) {
+  const auto shifts =
+      [&](const cv::Mat_<double>& g) -> core::Result<std::vector<PoseShift>> {
     std::vector<PoseShift> shift(k);
     if (nc == 0) return shift;
     cv::Mat_<double> reduced = g.rowRange(0, nc).clone();
@@ -863,6 +881,13 @@ core::Status uncertainty(const Problem& p, const BundleAdjustOptions& options,
       shift[c] = shift_of(derivatives[c],
                           cv::Vec6d(step(oc), step(oc + 1), step(oc + 2),
                                     step(oc + 3), step(oc + 4), step(oc + 5)));
+      if (!std::isfinite(shift[c].rotation_deg) ||
+          !std::isfinite(shift[c].centre_mm.x) ||
+          !std::isfinite(shift[c].centre_mm.y) ||
+          !std::isfinite(shift[c].centre_mm.z)) {
+        return core::Status::numerical("bundle_adjust: sensitivity of camera " +
+                                       p.ids[c] + " is not finite");
+      }
     }
     return shift;
   };
@@ -893,9 +918,9 @@ core::Status uncertainty(const Problem& p, const BundleAdjustOptions& options,
         }
       }
     }
-    out.sensitivity[j].focal = shifts(g_focal);
-    out.sensitivity[j].principal_x = shifts(g_x);
-    out.sensitivity[j].principal_y = shifts(g_y);
+    VKC_ASSIGN(out.sensitivity[j].focal, shifts(g_focal));
+    VKC_ASSIGN(out.sensitivity[j].principal_x, shifts(g_x));
+    VKC_ASSIGN(out.sensitivity[j].principal_y, shifts(g_y));
   }
   return {};
 }
@@ -1014,7 +1039,7 @@ core::Result<RigSolution> bundle_adjust(const std::vector<RigCamera>& cameras,
                  drop_outliers(p, board, options, round + 1, out));
       if (!dropped) break;
     }
-    VKC_TRY(check_links(p, start, options));
+    VKC_TRY(check_links(p, board, start, options));
     VKC_TRY(uncertainty(p, options, out));
     write_solution(p, cameras, views.size(), start, options, out);
     out.seconds =
