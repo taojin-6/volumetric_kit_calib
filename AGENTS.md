@@ -60,18 +60,21 @@ Read only the sections needed for the current task.
   examples, from the core's own headers. calib re-exports none of them.
 - CMake: `find_package(volumetric_kit_calib)`; component targets
   `volumetric_kit::calib_core`, `…_compute`, `…_detect`, `…_solve`, `…_quality`,
-  `…_color`, `…_capture`, `…_viz`, `…_app`; umbrella alias `volumetric_kit::calib`.
+  `…_color`, `…_capture`, `…_depth`, `…_viz`, `…_app`; umbrella alias
+  `volumetric_kit::calib`.
 - Macros/export: `VC_*` for calib's own (e.g. `VC_CORE_API`, `VC_BUILD_TESTS`);
   the error-handling macros are the core's (`VKC_TRY`, `VKC_ASSIGN`,
   `VKC_CHECK`).
 
 ## Architecture
 
-`core` → `compute` → {`detect`, `solve`, `color`} → `quality` → `viz` → `app`
-(+ `capture` off `core`). The dependency rule is strict: a tier may depend only
-on tiers to its left. The headless **brain**
+`core` → `compute` → {`detect`, `solve`, `color`} → `quality` →
+{`depth`, `viz`} → `app` (+ `capture` off `core`). The dependency rule is
+strict: a tier may depend only on tiers to its left. The headless **brain**
 (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no**
 `volumetric_kit_gfx` dependency; only `viz`/`app` pull in the renderer.
+`depth` runs the depth checks' kernels on the core's vulkan tier, with neither
+gfx nor recon's sensor tiers.
 
 ## Error handling
 
@@ -143,9 +146,9 @@ git -C "$calib_root" diff --check
   contracts or the change's scope warrant it.
 - Documentation-only changes need formatting, link, and consistency checks;
   no build is needed. Hooks can be scoped with `pre-commit run --files`.
-- Core tests are CPU-only. The `viz` tier's GPU tests use the core's Vulkan
-  fixtures, which skip without a device; run them under the validation layer
-  with `VKC_TEST_VALIDATION=1` (on macOS, with
+- Core tests are CPU-only. The `depth` and `viz` tiers' GPU tests use the
+  core's Vulkan fixtures, which skip without a device; run them under the
+  validation layer with `VKC_TEST_VALIDATION=1` (on macOS, with
   `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib` so the layer loads).
 
 ## Keeping guidance current

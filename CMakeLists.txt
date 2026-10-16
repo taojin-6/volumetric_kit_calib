@@ -47,11 +47,14 @@ option(
 option(VC_WITH_RIG
        "Build the rig tiers, from capture on (fetches all of recon; Vulkan SDK)"
        OFF)
-# The viz tier draws the quality tier's checks with volumetric_kit_gfx, so it is
-# built, and gfx fetched, when both are on: derived, not an option.
+# The depth tier runs the quality tier's depth checks on the core's vulkan tier,
+# and the viz tier draws the checks with volumetric_kit_gfx, so both are built,
+# and gfx fetched, when both are on: derived, not options.
 if(VC_WITH_RIG AND VC_WITH_OPENCV)
+  set(_vc_build_depth ON)
   set(_vc_build_viz ON)
 else()
+  set(_vc_build_depth OFF)
   set(_vc_build_viz OFF)
 endif()
 

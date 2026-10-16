@@ -3,10 +3,10 @@
 
 # The capture tier from an installed package: installs the calling build,
 # BUILD_DIR, in its CONFIG, to BINARY_DIR/prefix, checks it carries the capture
-# tier and not the viz tier, then configures, builds and runs the consumer
-# (consumer/) against that prefix alone. GENERATOR, CXX_COMPILER, MAKE_PROGRAM,
-# GLM_DIR and FLAGS, its sanitizers' compile and link flags, repeat the calling
-# build's settings (tests/CMakeLists.txt).
+# tier, the depth tier when WITH_DEPTH, and not the viz tier, then configures,
+# builds and runs the consumer (consumer/) against that prefix alone. GENERATOR,
+# CXX_COMPILER, MAKE_PROGRAM, GLM_DIR and FLAGS, its sanitizers' compile and
+# link flags, repeat the calling build's settings (tests/CMakeLists.txt).
 foreach(_var BUILD_DIR CONFIG BINARY_DIR GENERATOR)
   if(NOT DEFINED ${_var})
     message(FATAL_ERROR "configure.cmake: ${_var} is not set")
@@ -40,6 +40,15 @@ foreach(_header session_writer.hpp export.hpp)
     message(FATAL_ERROR "the install lacks capture/${_header}")
   endif()
 endforeach()
+# The depth tier's headers ship exactly when it is built.
+foreach(_header depth_checks.hpp export.hpp)
+  set(_path "${_prefix}/include/volumetric_kit/calib/depth/${_header}")
+  if(WITH_DEPTH AND NOT EXISTS "${_path}")
+    message(FATAL_ERROR "the install lacks depth/${_header}")
+  elseif(NOT WITH_DEPTH AND EXISTS "${_path}")
+    message(FATAL_ERROR "the install carries depth/${_header}, never built")
+  endif()
+endforeach()
 # The viz tier is build-tree only, as gfx's ui tier is.
 file(GLOB_RECURSE _viz "${_prefix}/include/volumetric_kit/calib/viz/*"
      "${_prefix}/lib*/*calib_viz*")
@@ -62,7 +71,8 @@ _vc_cmake(
   "-DCMAKE_BUILD_TYPE=${CONFIG}"
   "-DCMAKE_CXX_FLAGS=${FLAGS}"
   "-DCMAKE_EXE_LINKER_FLAGS=${FLAGS}"
-  "-DCMAKE_PREFIX_PATH=${_prefix}")
+  "-DCMAKE_PREFIX_PATH=${_prefix}"
+  "-DWITH_DEPTH=${WITH_DEPTH}")
 _vc_cmake("Building against the installed calib" --build
           "${BINARY_DIR}/consumer" --config "${CONFIG}")
 

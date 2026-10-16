@@ -870,7 +870,14 @@ TEST(SummarizeDepthChecks, RefusesWhatDoesNotFit) {
            "max_signed_median_mm");
     option([&](DepthCheckOptions& o) { o.max_median_abs_mm = bad; },
            "max_median_abs_mm");
+    option([&](DepthCheckOptions& o) { o.seed_mm = bad; }, "seed_mm");
+    option([&](DepthCheckOptions& o) { o.min_gate_mm = bad; }, "min_gate_mm");
+    option([&](DepthCheckOptions& o) { o.sigma_gate = bad; }, "sigma_gate");
   }
+  option([](DepthCheckOptions& o) { o.min_inliers = 2; }, "min_inliers");
+  DepthCheckOptions three_inliers;
+  three_inliers.min_inliers = 3;
+  EXPECT_TRUE(summarize_depth_checks(1, {}, {}, three_inliers).ok());
   option([](DepthCheckOptions& o) { o.inset_m = -0.01; }, "inset_m");
   option([](DepthCheckOptions& o) { o.inset_m = kNaN; }, "inset_m");
   option(
@@ -882,6 +889,45 @@ TEST(SummarizeDepthChecks, RefusesWhatDoesNotFit) {
   DepthCheckOptions zero_inset;
   zero_inset.inset_m = 0.0;
   EXPECT_TRUE(summarize_depth_checks(1, {}, {}, zero_inset).ok());
+}
+
+// The checks every step runs, on their own: the defaults pass, and a refusal
+// names what it refuses, unprefixed, for its caller to prefix.
+TEST(DepthChecks, CheckTheOptionsAndTheRegionOnTheirOwn) {
+  const DepthCheckOptions defaults;
+  EXPECT_TRUE(check_depth_options(defaults).ok());
+  EXPECT_EQ(defaults.seed_mm, 30.0);
+  EXPECT_EQ(defaults.min_gate_mm, 5.0);
+  EXPECT_EQ(defaults.sigma_gate, 3.0);
+  EXPECT_EQ(defaults.min_inliers, kMinPlaneInliers);
+  DepthCheckOptions seed;
+  seed.seed_mm = 0.0;
+  const core::Status refused = check_depth_options(seed);
+  EXPECT_EQ(refused.domain(), Code::InvalidArgument);
+  EXPECT_EQ(refused.message(), "options.seed_mm must be positive and finite");
+
+  BoardRegion region;
+  region.min = Vec2d(0.02);
+  region.max = Vec2d(0.73, 0.43);
+  region.depth_to_board[3] = glm::dvec4(0.3, 0.2, -1.5, 1.0);
+  EXPECT_TRUE(check_board_region(region).ok());
+  BoardRegion empty = region;
+  empty.max.y = empty.min.y;
+  EXPECT_EQ(check_board_region(empty).message(),
+            "the region's rectangle must be finite and not empty");
+  BoardRegion unbounded = region;
+  unbounded.max.x = std::numeric_limits<double>::infinity();
+  EXPECT_EQ(check_board_region(unbounded).domain(), Code::InvalidArgument);
+  BoardRegion scaled = region;
+  scaled.depth_to_board[1] *= 2.0;
+  EXPECT_EQ(check_board_region(scaled).message().rfind(
+                "the region's depth_to_board", 0),
+            0u);
+  BoardRegion turned = region;
+  turned.board_to_color[0][1] = 0.5;
+  EXPECT_EQ(check_board_region(turned).message().rfind(
+                "the region's board_to_color", 0),
+            0u);
 }
 
 TEST(DepthVerdict, NamesEachVerdict) {

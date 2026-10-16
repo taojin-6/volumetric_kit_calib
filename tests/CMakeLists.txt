@@ -104,6 +104,24 @@ if(VC_WITH_RIG)
   target_sources(vc_capture_oom_test PRIVATE support/allocation_failure.cpp)
 endif()
 
+if(_vc_build_depth)
+  # depth: the board-plane fit on a device, through the core's Vulkan test
+  # fixtures (they skip without one), against references in double made here;
+  # and the board region's rule on the device, pixel by pixel, through a kernel
+  # of the test's own over the tier's GLSL (shaders/board_member_cases.comp).
+  vc_add_test(depth_plane_fit volumetric_kit::calib_depth
+              volumetric_kit::core_test_support vc_synthetic_rig)
+  get_target_property(_vc_glsl_roots calib_depth VC_SHADER_INCLUDE_DIRS)
+  vkc_embed_shaders(
+    vc_depth_plane_fit_test
+    SYMBOL_PREFIX
+    vc_test_
+    INCLUDE_DIRS
+    ${_vc_glsl_roots}
+    SHADERS
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/board_member_cases.comp")
+endif()
+
 if(_vc_build_viz)
   # viz: the mosaic's layout, the marks, the panels and the board editor from
   # host data; the offscreen render of the mosaic and its marks on a device,
@@ -183,13 +201,15 @@ if(VC_WITH_RIG)
 
   # The capture tier from this build's install (rig_package/): a consumer finds
   # calib, the core and all of recon at the prefix, and builds and runs against
-  # calib_capture, with this build's sanitizers, which its libraries need; the
-  # build-tree-only viz tier is not installed.
+  # calib_capture, and calib_depth when it is built, with this build's
+  # sanitizers, which its libraries need; the build-tree-only viz tier is not
+  # installed.
   list(JOIN _vc_sanitize_flags " " _vc_consumer_flags)
   add_test(
     NAME rig_package.consumer
     COMMAND
       ${CMAKE_COMMAND} -DBUILD_DIR=${PROJECT_BINARY_DIR} -DCONFIG=$<CONFIG>
+      -DWITH_DEPTH=${_vc_build_depth}
       -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/rig_package
       -DGENERATOR=${CMAKE_GENERATOR} -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} -DGLM_DIR=${glm_DIR}

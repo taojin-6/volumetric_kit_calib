@@ -464,6 +464,10 @@ TEST(Results, TheReportHasItsSchema) {
 DepthSummary depth_checks() {
   DepthCheckOptions options;
   options.inset_m = 0.025;
+  options.seed_mm = 25.0;
+  options.min_gate_mm = 4.5;
+  options.sigma_gate = 2.5;
+  options.min_inliers = 250;
   options.min_overlap = 900;
   options.max_scale_error = 0.003;
   options.max_offset_mm = 8.5;
@@ -547,7 +551,9 @@ TEST(Results, TheReportHasItsDepthSection) {
             (std::vector<std::string>{"settings", "ratio", "scale", "cameras",
                                       "views", "pairs", "captures"}));
   EXPECT_EQ(depth["settings"],
-            json::parse(R"({"inset_m": 0.025, "min_overlap": 900,
+            json::parse(R"({"inset_m": 0.025, "seed_mm": 25.0,
+                            "min_gate_mm": 4.5, "sigma_gate": 2.5,
+                            "min_inliers": 250, "min_overlap": 900,
                             "max_scale_error": 0.003, "max_offset_mm": 8.5,
                             "max_angle_deg": 1.25,
                             "max_signed_median_mm": 4.5,

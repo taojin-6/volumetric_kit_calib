@@ -44,8 +44,9 @@ endif()
 if(VC_WITH_RIG)
   set(VKC_WITH_VULKAN ON)
 endif()
-# The viz tier's GPU tests derive from the core's Vulkan test fixtures.
-if(_vc_build_viz AND VC_BUILD_TESTS)
+# The depth and viz tiers' GPU tests derive from the core's Vulkan test
+# fixtures.
+if((_vc_build_depth OR _vc_build_viz) AND VC_BUILD_TESTS)
   set(VKC_BUILD_TEST_SUPPORT ON)
 endif()
 FetchContent_Declare(
@@ -73,10 +74,13 @@ endif()
 # stay off in a subproject; its install follows calib's, as calib's exported
 # targets link recon_camera. It leaves an application's VR_CAMERA_ONLY as set,
 # so an application that turns it off keeps the rest of recon.
+#
+# The pin is recon main after PR #245 (bdbe26e), whose recon_core exports
+# pinhole.glsl under its VR_SHADER_INCLUDE_DIR for calib_depth's kernels.
 FetchContent_Declare(
   volumetric_kit_recon
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_recon.git
-  GIT_TAG 2f8d6eaf2d7cec17f3815240c27f7450095d4a12)
+  GIT_TAG bdbe26e1378a3d4ab46bb89da05b318f6cfe82c2)
 # VC_WITH_RIG takes all of recon: the capture tier links its sensor and io
 # tiers. An application's own VR_WITH_ORBBEC / VR_WITH_FFMPEG still apply.
 if(VC_WITH_RIG)

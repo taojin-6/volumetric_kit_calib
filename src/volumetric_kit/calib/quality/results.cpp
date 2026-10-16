@@ -275,6 +275,10 @@ void depth_section(Writer& w, const DepthSummary& d,
   w.open_object();
   w.key("settings").open_object();
   w.key("inset_m").value(o.inset_m);
+  w.key("seed_mm").value(o.seed_mm);
+  w.key("min_gate_mm").value(o.min_gate_mm);
+  w.key("sigma_gate").value(o.sigma_gate);
+  w.key("min_inliers").value(o.min_inliers);
   w.key("min_overlap").value(o.min_overlap);
   w.key("max_scale_error").value(o.max_scale_error);
   w.key("max_offset_mm").value(o.max_offset_mm);

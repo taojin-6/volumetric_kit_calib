@@ -113,7 +113,7 @@ jobs:
 
       # Keep the ref at calib's recon pin (third_party/CMakeLists.txt).
       - name: Install the Orbbec SDK
-        uses: taojin-6/volumetric_kit_recon/.github/actions/install-orbbec-sdk@2f8d6eaf2d7cec17f3815240c27f7450095d4a12
+        uses: taojin-6/volumetric_kit_recon/.github/actions/install-orbbec-sdk@bdbe26e1378a3d4ab46bb89da05b318f6cfe82c2
 
       - name: Cache third-party deps
         uses: actions/cache@v4
