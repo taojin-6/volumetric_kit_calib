@@ -8,8 +8,6 @@
 #include <string>
 #include <utility>
 
-#include <glm/common.hpp>
-
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/gfx/ui/image_overlay.hpp"
 
@@ -19,14 +17,6 @@ namespace {
 // The heat map's alpha for one corner, and from `coverage_full` on.
 constexpr float kFirstAlpha = 48.0f;
 constexpr float kFullAlpha = 160.0f;
-
-// The image's top-left corner in OpenCV's pixels: texel 0's centre is at 0
-// there, so its edge is half a pixel before. Added to a view's image
-// coordinates (Vulkan's, texel edges on integers), it gives OpenCV's.
-constexpr glm::vec2 kImageCorner{-0.5f, -0.5f};
-// Also inset the title from the tile edges by this much, leaving room for
-// ImageOverlay's two-display-pixel background padding and text pixel snap.
-constexpr glm::vec2 kTitleOffset{4.0f, 4.0f};
 
 glm::vec2 to_mark(const recon::camera::Vec2d& pixel) noexcept {
   return {static_cast<float>(pixel.x), static_cast<float>(pixel.y)};
@@ -65,12 +55,10 @@ core::Result<TileMarks> tile_marks(const TileOverlay& tile,
     }
 
     if (!tile.id.empty()) {
-      marks.title.at = kImageCorner;
       marks.title.text =
           std::string(tile.id) + ": " + to_string(tile.check.verdict);
       marks.title.color = tone;
       marks.title.background = style.label_background;
-      marks.title.offset = kTitleOffset;
     }
 
     if (tile.detection != nullptr) {
@@ -108,9 +96,10 @@ core::Result<TileMarks> tile_marks(const TileOverlay& tile,
 }
 
 void draw_tile_marks(const gfx::camera::ImageView2D& view,
+                     const gfx::ui::OverlayRegion& region,
                      const TileMarks& marks, ImDrawList* draw_list) {
   const gfx::ui::ImageOverlay overlay(view, gfx::ui::PixelCenters::Integer,
-                                      draw_list);
+                                      region, draw_list);
   if (marks.grid_columns > 0 && marks.grid_rows > 0) {
     overlay.grid(marks.grid_columns, marks.grid_rows, marks.grid_fills.data(),
                  marks.grid_fills.size(), marks.grid_line);
@@ -126,27 +115,8 @@ void draw_tile_marks(const gfx::camera::ImageView2D& view,
     overlay.label(label.at, label.text.c_str(), label.color, label.background,
                   label.offset);
   }
-  if (!marks.title.text.empty()) {
-    // Clamp the text rectangle in display pixels, including its offset and
-    // room for the background. An oversized title starts at the near edge
-    // and is clipped by ImageOverlay.
-    const glm::vec2 tile_corner =
-        view.target_to_image(view.viewport_origin()) + kImageCorner;
-    const glm::vec2 tile_end =
-        view.target_to_image(view.viewport_origin() + view.viewport_size()) +
-        kImageCorner;
-    const glm::vec2 tile_min = overlay.to_display(tile_corner);
-    const MarkLabel& title = marks.title;
-    const ImVec2 size = ImGui::CalcTextSize(title.text.c_str());
-    const glm::vec2 min = tile_min + kTitleOffset;
-    const glm::vec2 max =
-        glm::max(min, overlay.to_display(tile_end) - kTitleOffset -
-                          glm::vec2(size.x, size.y));
-    const glm::vec2 position =
-        glm::clamp(overlay.to_display(title.at) + title.offset, min, max);
-    overlay.label(tile_corner, title.text.c_str(), title.color,
-                  title.background, position - tile_min);
-  }
+  overlay.caption(marks.title.text.c_str(), marks.title.color,
+                  marks.title.background);
 }
 
 }  // namespace volumetric_kit::calib::viz

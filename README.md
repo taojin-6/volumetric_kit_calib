@@ -83,8 +83,9 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
   `residuals.csv` -- which the application writes
   ([DECISIONS.md](DECISIONS.md#2026-10-16--the-solved-rigs-metrics-and-its-results-files)).
 - **Viz:** the live view, on `volumetric_kit_gfx`. Each camera's decoded
-  picture is drawn in place from the device as a tile, panned and zoomed, with
-  the corners, markers and coverage marked over it in the detector's pixels;
+  picture is copied on the device into its tile of one mosaic, for any number
+  of cameras, panned and zoomed as one view, with the corners, markers and
+  coverage marked over each tile in the detector's pixels;
   panels show each camera's view, the latest set, the session and the
   capture; the board's editor locks at the first capture
   ([DECISIONS.md](DECISIONS.md#2026-10-16--the-live-view-on-gfx)).

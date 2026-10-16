@@ -14,9 +14,9 @@
 
 #include "allocation_failure.hpp"
 #include "volumetric_kit/calib/viz/board_editor.hpp"
+#include "volumetric_kit/calib/viz/mosaic.hpp"
 #include "volumetric_kit/calib/viz/overlay.hpp"
 #include "volumetric_kit/calib/viz/panels.hpp"
-#include "volumetric_kit/calib/viz/tiles.hpp"
 #include "volumetric_kit/core/vulkan/image.hpp"
 
 namespace volumetric_kit::calib::viz {
@@ -26,7 +26,18 @@ using Code = core::Status::Code;
 using test::expect_oom_anywhere;
 using test::expect_oom_when_reporting;
 
-TEST(VizOom, TileUpdateRefusals) {
+TEST(VizOom, MosaicLayout) {
+  MosaicLimits limits;
+  limits.max_extent = {144, 112};  // paged
+  const std::vector<recon::camera::ImageSize> sizes(5, {64, 48});
+  expect_oom_anywhere(
+      [&] { return mosaic_layout(sizes, kMosaicGutter, limits); });
+  const std::vector<recon::camera::ImageSize> odd = {{65, 48}};
+  expect_oom_when_reporting([&] { return mosaic_layout(odd); },
+                            Code::InvalidArgument);
+}
+
+TEST(VizOom, TileWriteAndConversionRefusals) {
   recon::sensor::YuvImage picture;
   picture.layout = recon::sensor::YuvLayout::Nv12;
   picture.image[0] = std::make_shared<core::Image>();
@@ -34,10 +45,20 @@ TEST(VizOom, TileUpdateRefusals) {
   picture.width = 64;
   picture.height = 48;
   picture.chroma_location = recon::sensor::ChromaLocation::TopLeft;
-  expect_oom_when_reporting([&] { return tile_update(picture); },
+  // Built outside the calls, whose own allocations alone are swept.
+  const std::vector<const recon::sensor::YuvImage*> unsited = {&picture};
+  expect_oom_when_reporting([&] { return tile_conversion(unsited); },
                             Code::Unsupported);
+  expect_oom_when_reporting([&] { return tile_write(picture, {32, 24}, {}); },
+                            Code::InvalidArgument);
+  recon::sensor::YuvImage other = picture;
+  picture.chroma_location = recon::sensor::ChromaLocation::Center;
+  other.chroma_location = recon::sensor::ChromaLocation::Left;
+  const std::vector<const recon::sensor::YuvImage*> mixed = {&picture, &other};
+  expect_oom_when_reporting([&] { return tile_conversion(mixed); },
+                            Code::InvalidArgument);
   picture.image[1].reset();
-  expect_oom_when_reporting([&] { return tile_update(picture); },
+  expect_oom_when_reporting([&] { return tile_write(picture, {64, 48}, {}); },
                             Code::InvalidArgument);
 }
 

@@ -102,10 +102,10 @@ if(VC_WITH_RIG)
 endif()
 
 if(_vc_build_viz)
-  # viz: the tiles' layout, the marks, the panels and the board editor from host
-  # data; the offscreen render of tiles and marks on a device, through the
-  # core's Vulkan test fixtures (they skip without one).
-  vc_add_test(viz_tiles volumetric_kit::calib_viz)
+  # viz: the mosaic's layout, the marks, the panels and the board editor from
+  # host data; the offscreen render of the mosaic and its marks on a device,
+  # through the core's Vulkan test fixtures (they skip without one).
+  vc_add_test(viz_mosaic volumetric_kit::calib_viz)
   vc_add_test(viz_overlay volumetric_kit::calib_viz)
   vc_add_test(viz_panels volumetric_kit::calib_viz)
   vc_add_test(board_editor volumetric_kit::calib_viz)

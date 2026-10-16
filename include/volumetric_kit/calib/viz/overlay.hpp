@@ -10,8 +10,8 @@
 ///
 /// @ref tile_marks decides the marks, from host data alone; @ref
 /// draw_tile_marks draws them through gfx's `ImageOverlay`, which maps
-/// OpenCV's pixels (centres on integers) onto the tile however its view pans
-/// and zooms, and onto a high-DPI display.
+/// OpenCV's pixels (centres on integers) onto the camera's tile of the mosaic
+/// however its view pans and zooms, and onto a high-DPI display.
 
 #include <array>
 #include <string>
@@ -28,6 +28,7 @@
 #include "volumetric_kit/calib/viz/tone.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/gfx/camera/image_view_2d.hpp"
+#include "volumetric_kit/gfx/ui/image_overlay.hpp"
 
 namespace volumetric_kit::calib::viz {
 
@@ -94,12 +95,24 @@ struct MarkLabel {
   glm::vec2 offset{0.0f, 0.0f};  ///< From the anchor to its top-left.
 };
 
+/// @brief Text in the top-left corner of a tile's visible part: its title.
+///
+/// @code
+/// const MarkCaption title{"CL2A141000N: good", IM_COL32(0, 200, 0, 255),
+///                         IM_COL32(0, 0, 0, 160)};
+/// @endcode
+struct MarkCaption {
+  std::string text;      ///< The text; empty for none.
+  ImU32 color = 0;       ///< Its colour.
+  ImU32 background = 0;  ///< Behind it; 0 for none.
+};
+
 /// @brief The marks over one tile, in OpenCV's pixels, drawn in this order:
 ///        the grid, the outlines, the dots, the labels, then the title.
 ///
 /// @code
 /// VKC_ASSIGN(const TileMarks marks, tile_marks(tile));
-/// draw_tile_marks(tiles->view(i), marks);
+/// draw_tile_marks(mosaic->view(), mosaic->tile_region(i), marks);
 /// @endcode
 struct TileMarks {
   int grid_columns = 0;  ///< The grid's cells across; 0 for no grid.
@@ -110,9 +123,8 @@ struct TileMarks {
   std::vector<MarkOutline> outlines;  ///< The markers'.
   std::vector<MarkPoint> points;      ///< The corners'.
   std::vector<MarkLabel> labels;      ///< The corners' ids.
-  /// The camera's title, at the image's top-left corner and held inside the
-  /// tile however its view pans and zooms; empty text for none.
-  MarkLabel title;
+  /// The camera's title, in the top-left corner of the tile's visible part.
+  MarkCaption title;
 };
 
 /// @brief What one tile shows, from the live view's host data.
@@ -156,8 +168,8 @@ VC_VIZ_API ImU32 coverage_fill(int corners, const OverlayStyle& style) noexcept;
 /// - **Dots.** Each corner found, in its view's @ref verdict_tone: green for a
 ///   usable view, amber or red for a flagged one, grey for one with no pose.
 /// - **Labels.** Each corner's id, when `style.corner_ids`.
-/// - **Title.** `"<id>: <verdict>"` in the corners' tone, at the image's
-///   top-left corner, when the tile has an id.
+/// - **Title.** `"<id>: <verdict>"` in the corners' tone, when the tile has
+///   an id.
 /// @param tile        What the tile shows.
 /// @param thresholds  The session's thresholds (@ref verdict_tone).
 /// @param style       How the marks look.
@@ -170,22 +182,25 @@ VC_VIZ_API core::Result<TileMarks> tile_marks(
     const TileOverlay& tile, const quality::SessionOptions& thresholds = {},
     const OverlayStyle& style = {});
 
-/// @brief Draw @p marks over the tile @p view shows, in @ref TileMarks'
-///        order, through gfx's `ImageOverlay` with OpenCV's pixel centres
-///        (`gfx::ui::PixelCenters::Integer`). The title follows the image's
-///        top-left corner, clamped to keep its text and background inside
-///        every tile edge. An oversized title starts at the tile's near edge
-///        on that axis and is clipped.
-/// @param view       The tile's view (`Tiles::view`).
+/// @brief Draw @p marks over a tile, in @ref TileMarks' order, through gfx's
+///        `ImageOverlay` with OpenCV's pixel centres
+///        (`gfx::ui::PixelCenters::Integer`), clipped to the tile's visible
+///        part. The title is the overlay's caption: its text and background
+///        stay inside every tile edge however the view pans and zooms, at the
+///        tile's top-left corner while that is in view, and a title larger
+///        than the visible part is clipped.
+/// @param view       The mosaic's view (`RigMosaic::view`).
+/// @param region     The tile's region of it (`RigMosaic::tile_region`).
 /// @param marks      The marks.
 /// @param draw_list  The ImGui list to draw into; null for the background
 ///                   list, behind every ImGui window.
 /// @pre An ImGui frame is active, with its context current.
 ///
 /// @code
-/// draw_tile_marks(tiles->view(i), marks);
+/// draw_tile_marks(mosaic->view(), mosaic->tile_region(i), marks);
 /// @endcode
 VC_VIZ_API void draw_tile_marks(const gfx::camera::ImageView2D& view,
+                                const gfx::ui::OverlayRegion& region,
                                 const TileMarks& marks,
                                 ImDrawList* draw_list = nullptr);
 

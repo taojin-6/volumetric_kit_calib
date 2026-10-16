@@ -2,11 +2,11 @@
 # Copyright (c) 2026 Tao Jin
 
 # --- calib_viz: Tier 4 -------------------------------------------------------
-# The live view: each camera's decoded picture drawn in place from the device as
-# a tile, the marks over it, the panels and the board editor, on gfx's image
-# pipeline, ImGui overlay and image views. Built with VC_WITH_RIG and
-# VC_WITH_OPENCV. Build-tree only, as gfx_ui is: neither is installed until gfx
-# co-installs the ImGui headers.
+# The live view: every camera's decoded picture copied on the device into its
+# tile of one mosaic, the marks over each tile, the panels and the board editor,
+# on gfx's image pipeline, ImGui overlay and image view. Built with VC_WITH_RIG
+# and VC_WITH_OPENCV. Build-tree only, as gfx_ui is: neither is installed until
+# gfx co-installs the ImGui headers.
 include(GenerateExportHeader)
 
 set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
@@ -14,8 +14,8 @@ set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 add_library(calib_viz)
 add_library(volumetric_kit::calib_viz ALIAS calib_viz)
 
-target_sources(calib_viz PRIVATE board_editor.cpp overlay.cpp panels.cpp
-                                 tiles.cpp tone.cpp)
+target_sources(calib_viz PRIVATE board_editor.cpp mosaic.cpp overlay.cpp
+                                 panels.cpp tone.cpp)
 
 # The tier's own export macro and guard (see calib_core).
 generate_export_header(
@@ -42,10 +42,10 @@ target_include_directories(calib_viz
                            PUBLIC "$<BUILD_INTERFACE:${_vc_generated_inc}>")
 
 # The public headers name quality's checks and summaries, gfx's pipeline,
-# overlay, views and metrics, and recon's pictures, sets and counters.
+# overlay, view and metrics, and recon's pictures, sets and counters.
+# gfx_pipelines brings gfx_camera, the view's tier.
 target_link_libraries(
-  calib_viz
-  PUBLIC calib_quality volumetric_kit::gfx_pipelines volumetric_kit::gfx_ui
-         volumetric_kit::gfx_camera volumetric_kit::recon_sensor_array)
+  calib_viz PUBLIC calib_quality volumetric_kit::gfx_pipelines
+                   volumetric_kit::gfx_ui volumetric_kit::recon_sensor_array)
 
 vc_target_warnings(calib_viz)

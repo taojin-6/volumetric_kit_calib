@@ -36,20 +36,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the names the report gives them.
 - `compute::quantile`, numpy's linear percentile.
 - The `viz` tier, `volumetric_kit::calib_viz`, built with `VC_WITH_RIG` and
-  `VC_WITH_OPENCV`, build-tree only (DECISIONS.md, 2026-10-16): `Tiles` draws
-  each camera's decoded NV12 picture in place from the device (`tile_update`
-  maps recon's `YuvImage` to gfx's update) in a grid (`tile_grid`,
-  `tile_rect`), each panned and zoomed by its own `ImageView2D`;
-  `tile_marks` and `draw_tile_marks` mark the corners, markers, ids, verdict
-  and coverage over a tile through gfx's `ImageOverlay`; `camera_panel`,
+  `VC_WITH_OPENCV`, build-tree only (DECISIONS.md, 2026-10-16): `RigMosaic`
+  copies each camera's decoded NV12 picture on the device into its tile of
+  one mosaic, for any number of cameras of mixed sizes, paged over several
+  textures when one cannot hold it (`mosaic_layout`), converted once per set
+  and shown through one `ImageView2D` (`tile_write` and `tile_conversion` map
+  recon's `YuvImage` to gfx's write and conversion; `tile_region`, `tile_at`,
+  `sets_since_picture`, `discard`); `tile_marks` and `draw_tile_marks` mark
+  the corners, markers, ids, verdict and coverage over a tile's region
+  through gfx's `ImageOverlay`, the title as its caption; `camera_panel`,
   `set_panel`, `session_panel`, `capture_panel` and `stage_frame_metrics`
   build the live panels, drawn by `draw_panel_lines` and
   `draw_session_panel`, in `Tone`s that follow the quality tier's options;
   `BoardEditor` and `draw_board_editor` (its fields through `board_fields`
   and `apply_fields`) edit the board, checked as the detector's `Board`
   takes it, until the first capture locks it. `VC_WITH_RIG` with
-  `VC_WITH_OPENCV` fetches `volumetric_kit_gfx`, pinned at `bc887a4` (main
-  after its #135).
+  `VC_WITH_OPENCV` fetches `volumetric_kit_gfx`, pinned at `3edc692` (the
+  head of its #137, over #136).
 - `marker_count`, the markers a board carries, in `calib/core/target.hpp`.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds

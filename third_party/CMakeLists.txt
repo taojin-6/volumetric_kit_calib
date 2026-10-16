@@ -96,18 +96,22 @@ if(VC_WITH_RIG AND NOT TARGET volumetric_kit::recon_io)
 endif()
 
 # --- volumetric_kit_gfx: the viz tier's renderer and UI ----------------------
-# The tiles (ImagePipeline), the marks over them (ImageOverlay), the panels
-# (ImGui, draw_metrics_panel) and the views (ImageView2D). Pinned by commit,
-# never main, and declared after the core, so gfx's own core pin yields to
-# calib's. gfx's tests, examples, install and -Werror stay off in a subproject;
-# its ui tier is build-tree only, so calib_viz is too (src/CMakeLists.txt).
+# The rig mosaic (ImagePipeline's region writes), the marks over its tiles
+# (ImageOverlay's regions), the panels (ImGui, draw_metrics_panel) and the view
+# (ImageView2D). Pinned by commit, never main, and declared after the core, so
+# gfx's own core pin yields to calib's. gfx's tests, examples, install and
+# -Werror stay off in a subproject; its ui tier is build-tree only, so calib_viz
+# is too (src/CMakeLists.txt).
 #
-# The pin is gfx main after its #135, whose core pin calib's includes.
+# The pin is gfx PR #137's head, which holds #136: the region writes and the
+# marks over a region. Both merge first.
+#
+# TODO: re-pin gfx main once gfx PRs #136 and #137 merge.
 if(_vc_build_viz)
   FetchContent_Declare(
     volumetric_kit_gfx
     GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_gfx.git
-    GIT_TAG bc887a4a14349870450f7c3fbbcd48d809faa451)
+    GIT_TAG 3edc692f1e75479319e74efc2491cc3b20e27fd7)
   FetchContent_MakeAvailable(volumetric_kit_gfx)
 endif()
 

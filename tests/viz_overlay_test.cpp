@@ -3,7 +3,7 @@
 
 // The marks over a tile, decided from host data: the corners and markers
 // found, the ids, the title and the coverage heat map, each in its tone; no
-// device needed (viz_render_test draws them over a tile).
+// device needed (viz_render_test draws them over a tile of the mosaic).
 
 #include "volumetric_kit/calib/viz/overlay.hpp"
 
@@ -117,16 +117,18 @@ TEST(TileMarks, TonesTheCornersByTheirViewsVerdict) {
   }
 }
 
-// The title names the camera and its verdict at the image's top-left corner,
-// half a pixel before texel 0's centre.
-TEST(TileMarks, TitlesTheTileAtTheImagesCorner) {
+// The title names the camera and its verdict, in the corners' tone, over
+// the labels' background.
+TEST(TileMarks, TitlesTheTileWithItsCameraAndVerdict) {
   TileOverlay tile;
   tile.id = "CL2A141000N";
   tile.check = check_of(ViewVerdict::Far);
-  const TileMarks marks = marks_of(tile);
+  OverlayStyle style;
+  style.label_background = IM_COL32(1, 2, 3, 4);
+  const TileMarks marks = marks_of(tile, style);
   EXPECT_EQ(marks.title.text, "CL2A141000N: far");
-  EXPECT_EQ(marks.title.at, glm::vec2(-0.5f, -0.5f));
   EXPECT_EQ(marks.title.color, tone_color(Tone::Warn));
+  EXPECT_EQ(marks.title.background, IM_COL32(1, 2, 3, 4));
   EXPECT_TRUE(marks.labels.empty());
   EXPECT_TRUE(marks.points.empty());
   EXPECT_TRUE(marks.outlines.empty());

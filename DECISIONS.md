@@ -110,7 +110,7 @@ definitions and the schemas).
 
 ## 2026-10-16 — The live view on gfx
 
-The `viz` tier draws the live view (`viz/tiles.hpp`, `overlay.hpp`,
+The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
 `panels.hpp` and `board_editor.hpp`).
 
 - **Pictures stay on the device.** A tile takes recon's decoded NV12 images
@@ -119,9 +119,22 @@ The `viz` tier draws the live view (`viz/tiles.hpp`, `overlay.hpp`,
   checks, counters -- goes from the host to the screen. Planes in a buffer
   and I420, as Linux's decoders leave them, are refused until the tile takes
   over their queue family's ownership (and gfx maps I420).
+- **One mosaic, any number of cameras.** Each camera's picture is a tile of
+  one NV12 picture: gfx copies each new picture into its tile, the others
+  keep theirs, and the picture is converted once per set, so the rig takes
+  one conversion, one mip chain and one draw whatever its size, and one view
+  pans and zooms it all. calib picks the tiles: cells of the largest
+  picture's size in a grid as square as it can be, at least 16 texels apart,
+  with origins and extent on multiples of 16, so the mosaic's mips to level 4
+  keep the tiles apart (gfx's `ImageWrite` gives the rule). A mosaic too
+  large for the device's textures or a page's texel budget is paged
+  over several textures in blocks of whole cells, each drawn at its place in
+  the one view, so paging changes nothing a caller sees. A set's pictures
+  share one coding, as gfx converts a page whole.
 - **Marks in the detector's pixels.** Corners keep OpenCV's integer pixel
   centres, and gfx's `ImageOverlay` is the one home of the half-pixel and
-  framebuffer-scale mapping onto a tile's view.
+  framebuffer-scale mapping onto a tile's region of the mosaic, of the clip
+  to it, and of the title's place in its visible corner.
 - **Models, then ImGui.** The marks and the panels are plain models built from
   host data, so they are tested without a device; drawing them is a thin pass
   through gfx. Their tones follow the quality tier's options, so the panels
@@ -130,11 +143,11 @@ The `viz` tier draws the live view (`viz/tiles.hpp`, `overlay.hpp`,
   the solve, rest on it.
 - **How it builds.** gfx is fetched, pinned by commit, when `VC_WITH_RIG` and
   `VC_WITH_OPENCV` are both on, since `viz` draws the quality tier's checks.
-  gfx's core pin must be an ancestor of calib's, the one every sibling
-  compiles against. `viz` also links recon's sensor array tier, whose frame
-  sets, counters and decoded pictures its panels and tiles take. `calib_viz`
-  is build-tree only, as gfx's ui tier is, until gfx installs the ImGui
-  headers.
+  gfx's libraries must build against calib's core pin, the one every sibling
+  compiles against, as gfx's own core pin yields to it. `viz` also links
+  recon's sensor array tier, whose frame sets, counters and decoded pictures
+  its panels and mosaic take. `calib_viz` is build-tree only, as gfx's ui
+  tier is, until gfx installs the ImGui headers.
 
 ## 2026-10-14 — The bundle adjustment on `cv::LevMarq`
 
