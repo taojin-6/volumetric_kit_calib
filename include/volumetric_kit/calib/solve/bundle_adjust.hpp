@@ -147,6 +147,18 @@ VC_SOLVE_API core::Status check_bundle_adjust_options(
     const BundleAdjustOptions& options,
     std::string_view prefix = "bundle_adjust: options.");
 
+/// @brief Whether @ref bundle_adjust adjusts a view: step 1's rule, which the
+///        metrics share.
+/// @param record  @ref initialise's record of the view.
+/// @return Whether its fate is `Used` or `Ambiguous`.
+///
+/// @code
+/// for (const ViewRecord& view : rig.views) {
+///   if (!adjusts(view)) recapture(view.camera, view.capture);
+/// }
+/// @endcode
+VC_SOLVE_API bool adjusts(const ViewRecord& record) noexcept;
+
 /// @brief Why the adjustment left a corner or a view out.
 enum class Dropped {
   /// The corner was nearer its camera than `min_depth_m`, or behind it, as a
@@ -286,8 +298,8 @@ struct IntrinsicsSensitivity {
 /// @code
 /// VKC_ASSIGN(const RigSolution solution,
 ///            bundle_adjust(cameras, board, views, rig));
-/// VKC_TRY(recon::camera::write_array_calibration(
-///     path, solution.calibration, core::WriteMode::CreateNew));
+/// log(cameras[1].id, solution.world_to_camera[1].tvec,
+///     solution.covariance[1].centre_mm);  // 1 sigma
 /// @endcode
 struct RigSolution {
   std::size_t reference = 0;  ///< The camera the world is.
@@ -327,8 +339,9 @@ struct RigSolution {
 /// @brief Refine @p start: every non-reference camera and every board, from
 ///        the views @p start uses or left as ambiguous.
 ///
-/// 1. **Views.** A view of @p start's `Used` or `Ambiguous` fate is adjusted,
-///    on its capture's board; every other is left out (@p start says why).
+/// 1. **Views.** A view of @p start's `Used` or `Ambiguous` fate is adjusted
+///    (@ref adjusts), on its capture's board; every other is left out
+///    (@p start says why).
 /// 2. **Solves.** `cv::LevMarq` with a dense normal-equations callback
 ///    (Cholesky) minimises `sum weight * huber(|e|)` over the kept corners,
 ///    each corner's Huber weight its IRLS weight in `J^T W J` and `J^T W e`.

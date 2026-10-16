@@ -13,40 +13,46 @@
 /// `write_file(WriteMode::CreateNew)`.
 ///
 /// **`report.json`** (`"format": "volumetric_kit_calib.report"`,
-/// `"version": 1`), cameras named by id:
+/// `"version": 1`), cameras named by id, each figure once:
 /// - `settings`: `reference`, `cameras`, and the `initialise`,
-///   `bundle_adjust` and `metrics` options;
+///   `bundle_adjust` and `metrics` options the metrics were measured with
+///   (@ref CalibrationMetrics::options);
 /// - `solver`: `solves`, `iterations`, `initial_energy`, `final_energy`,
 ///   `variance`, `seconds`; `tree`: each link's `camera`, `parent`, `shared`,
 ///   `inliers` and `weak`;
 /// - `reprojection`: `initial` and `solved`, each `overall`,
-///   `without_oblique`, `legacy_rmse_px`, `histogram` (`bin_px`, `counts`),
-///   `cameras` (by id), `captures` and `views`, every group
-///   `{count, rms_px, p90_px, max_px, mean_px: [x, y]}`; and
-///   `legacy_reduction_percent`;
-/// - `rejections`: `counts` by round and reason, and `list`, each `camera`,
-///   `capture`, `corner` (-1 for a view), `round`, `reason`, `value`, `bound`;
+///   `without_oblique`, `legacy_rmse_px`, `histogram` (the counts, in bins of
+///   `settings.metrics.histogram_bin_px`), `cameras` (by id), `captures` and
+///   `views`, every group `{count, rms_px, p90_px, max_px, mean_px: [x, y]}`;
+///   and `legacy_reduction_percent`;
+/// - `rejections`: `views_left_out`, each view @ref solve::initialise left
+///   out (`camera`, `capture`, `fate`, `use`, `pnp_rms_px`, `ambiguity`,
+///   `tilt_deg`); `counts` of the adjustment's, by round and reason; and its
+///   `list`, each `camera`, `capture`, `corner` (-1 for a view), `round`,
+///   `reason`, `value`, `bound`;
 /// - `transfer`: `median_px`, `p90_px`, `worst_px`, `pairs` (`from`, `to`,
 ///   `count`, `mean_px`, for each pair with a capture) and `errors`
 ///   (`capture`, `from`, `to`, `error_px`);
 /// - `leave_one_out`: `cameras` (by id: `centre_mm`, `centre_capture`,
 ///   `rotation_deg`, `rotation_capture`) and `captures` (`capture`,
-///   `refused`, and `cameras` by id: `centre_mm`, `rotation_deg`);
+///   `refused`, `rms_px`, `legacy_rmse_px`, and `cameras` by id:
+///   `centre_mm`, `rotation_deg`);
 /// - `covariance`: by id, `rotation_deg`, `centre_mm` and the 6 x 6
 ///   `matrix`, rows of (rvec, tvec);
-/// - `sensitivity`: `focal_fraction`, `principal_px`, and `cameras` by the id
-///   whose intrinsics are off: `focal`, `principal_x` and `principal_y`, each
-///   by the id moved, `{rotation_deg, centre_mm: [x, y, z]}`;
-/// - `principal_point_ab`: `shift_px`, `corners`, `as_given` and `shifted`
-///   (`rms_px`, `legacy_rmse_px`, `transfer_median_px`, `transfer_p90_px`),
-///   `verdict`;
+/// - `sensitivity`: by the id whose intrinsics are off (by
+///   `settings.bundle_adjust`'s `focal_fraction` and `principal_px`):
+///   `focal`, `principal_x` and `principal_y`, each by the id moved,
+///   `{rotation_deg, centre_mm: [x, y, z]}`;
+/// - `principal_point_ab` (its shift `settings.metrics.principal_shift_px`):
+///   `refused`, `corners`, `as_given` and `shifted` (`rms_px`,
+///   `legacy_rmse_px`, `transfer_median_px`, `transfer_p90_px`), `verdict`;
 /// - `geometry`: `centres_m` by id, and `baselines_m`, each pair once
 ///   (`a`, `b`, `m`).
 ///
 /// Numbers are written in the shortest form that reads back to the same
-/// double; one that is not finite is `null`, as are a `centre_capture` or
-/// `rotation_capture` when no capture moved the camera, and `refused` when
-/// the re-solve ran.
+/// double; one that is not finite, or not measured, is `null`, as are a
+/// `centre_capture` or `rotation_capture` when no capture moved the camera,
+/// and `refused` when the re-solve ran.
 ///
 /// **`residuals.csv`**: the header
 /// `capture,serial,corner_id,u,v,du,dv,weight,dropped`, then every corner
@@ -75,7 +81,7 @@ inline constexpr const char* kResidualsFile = "residuals.csv";
 ///
 /// @code
 /// VKC_ASSIGN(const ResultFiles files,
-///            format_results(cameras, solution, metrics, options));
+///            format_results(cameras, solution, metrics));
 /// VKC_TRY(core::write_file(dir + "/" + kReportFile, files.report,
 ///                          core::WriteMode::CreateNew));
 /// @endcode
@@ -92,15 +98,14 @@ struct ResultFiles {
 /// @param cameras   The rig's cameras, as the solve took them.
 /// @param solution  The adjustment's solution.
 /// @param metrics   @ref calibration_metrics of it.
-/// @param options   The settings the metrics took, which the report records.
 /// @return The files; `InvalidArgument` for no cameras, a repeated or empty
 ///         id, or a @p solution or @p metrics that names a camera the rig
-///         does not have or has another camera count (naming what); recon's
-///         error for a calibration its writer refuses; or `OutOfMemory`.
-///         Each message starts `format_results: `.
+///         does not have or has another camera count, or a calibration whose
+///         sensors are not the cameras (naming what); recon's error for a
+///         calibration its writer refuses; or `OutOfMemory`. Each message
+///         starts `format_results: `.
 VC_QUALITY_API core::Result<ResultFiles> format_results(
     const std::vector<solve::RigCamera>& cameras,
-    const solve::RigSolution& solution, const CalibrationMetrics& metrics,
-    const MetricsOptions& options = {});
+    const solve::RigSolution& solution, const CalibrationMetrics& metrics);
 
 }  // namespace volumetric_kit::calib::quality

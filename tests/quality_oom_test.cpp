@@ -4,8 +4,8 @@
 // The quality tier runs out of memory anywhere and returns OutOfMemory,
 // never throwing; the capture rule and the session's checks are then as they
 // were. The one exception is OpenCV's own: solvePnPGeneric swallows what IPPE
-// throws, which view_pose reports as a Backend error naming it; a re-solve
-// that IPPE's failure leaves short is recorded as refused, as any refusal.
+// throws, which view_pose reports as a Backend error naming it; in the
+// transfer, that fails the metrics.
 
 #include <chrono>
 #include <cstddef>
@@ -281,8 +281,8 @@ TEST(QualityOom, CrossCameraTransfer) {
       [](const core::Result<Transfer>& r) { return ippe_failed(r.status()); });
 }
 
-// Out of memory in a re-solve, or IPPE's failure, refuses that capture's
-// re-solve or fails the whole.
+// Out of memory anywhere, a re-solve's included, fails the whole, as IPPE's
+// failure in the transfer does.
 TEST(QualityOom, CalibrationMetrics) {
   const Solved s;
   ASSERT_EQ(s.metrics.leave_one_out.captures.size(), 3u);
@@ -301,13 +301,12 @@ TEST(QualityOom, CalibrationMetrics) {
 
 TEST(QualityOom, FormatResults) {
   const Solved s;
-  expect_oom_anywhere([&] {
-    return format_results(s.cameras, s.solution, s.metrics, s.options);
-  });
+  expect_oom_anywhere(
+      [&] { return format_results(s.cameras, s.solution, s.metrics); });
   std::vector<solve::RigCamera> twice = s.cameras;
   twice[1].id = twice[0].id;
   expect_oom_anywhere(
-      [&] { return format_results(twice, s.solution, s.metrics, s.options); });
+      [&] { return format_results(twice, s.solution, s.metrics); });
 }
 
 }  // namespace

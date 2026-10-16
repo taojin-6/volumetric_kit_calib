@@ -7,26 +7,28 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
-#include <nlohmann/json.hpp>
-
+#include "../core/json_text.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
+#include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 #include "volumetric_kit/recon/camera/array_calibration.hpp"
 
 namespace volumetric_kit::calib::quality {
 namespace {
 
 namespace camera = recon::camera;
-using json = nlohmann::json;
+using Writer = detail::JsonWriter;
 
 // Refuses a solution or metrics that index cameras the rig does not have,
-// or hold another count of them.
-core::Status check_fits(std::size_t k, const solve::RigSolution& s,
+// or hold another count of them, or a calibration of other sensors.
+core::Status check_fits(const std::vector<std::string>& ids,
+                        const solve::RigSolution& s,
                         const CalibrationMetrics& m) {
+  const std::size_t k = ids.size();
   const auto refuse = [&](const char* what) {
     return core::Status::invalid_argument(std::string(what) +
                                           " do not fit the rig's " +
@@ -61,6 +63,17 @@ core::Status check_fits(std::size_t k, const solve::RigSolution& s,
       return refuse("the solution's links");
     }
   }
+  std::set<std::string> sensors;
+  for (const camera::SensorCalibration& sensor : s.calibration.sensors) {
+    sensors.insert(sensor.id);
+  }
+  if (s.calibration.sensors.size() != k ||
+      sensors != std::set<std::string>(ids.begin(), ids.end())) {
+    return refuse("the solution's calibration's sensors");
+  }
+  for (const solve::ViewRecord& view : m.views_left_out) {
+    if (view.camera >= k) return refuse("the metrics' views left out");
+  }
   for (const ReprojectionStats* at :
        {&m.reprojection.initial, &m.reprojection.solved}) {
     if (at->cameras.size() != k) return refuse("the metrics' reprojections");
@@ -86,108 +99,6 @@ core::Status check_fits(std::size_t k, const solve::RigSolution& s,
   return {};
 }
 
-// A double in the shortest form that reads back to it, as nlohmann/json
-// writes one; `null` for one not finite.
-std::string number(double v) { return json(v).dump(); }
-
-// JSON text written in order, by hand, as recon writes its calibration file:
-// nlohmann makes each number and string, and none of its containers, whose
-// destructors allocate and so, out of memory, terminate. Objects and arrays
-// open on the line they are named on, each member on a line of its own,
-// indented by 2; a flat array keeps its elements on one line.
-class Writer {
- public:
-  void open_object() { open('{', false); }
-  void open_array(bool flat = false) { open('[', flat); }
-  void close_object() { close('}'); }
-  void close_array() { close(']'); }
-
-  Writer& key(std::string_view name) {
-    before_value();
-    text_ += quoted(name);
-    text_ += ": ";
-    after_key_ = true;
-    return *this;
-  }
-
-  void value(double v) {
-    before_value();
-    text_ += number(v);
-  }
-  void value(std::int64_t v) {
-    before_value();
-    text_ += std::to_string(v);
-  }
-  void value(int v) { value(static_cast<std::int64_t>(v)); }
-  void value(std::size_t v) {
-    before_value();
-    text_ += std::to_string(v);
-  }
-  void value(bool v) {
-    before_value();
-    text_ += v ? "true" : "false";
-  }
-  void value(std::string_view v) {
-    before_value();
-    text_ += quoted(v);
-  }
-  void value(const char* v) { value(std::string_view(v)); }
-  void null() {
-    before_value();
-    text_ += "null";
-  }
-
-  // The finished document.
-  std::string text() && { return std::move(text_) + "\n"; }
-
- private:
-  struct Scope {
-    bool flat = false;
-    bool empty = true;
-  };
-
-  // An id from a driver may not be UTF-8: its bad bytes become U+FFFD
-  // rather than a throw.
-  static std::string quoted(std::string_view s) {
-    return json(std::string(s))
-        .dump(-1, ' ', false, json::error_handler_t::replace);
-  }
-
-  void newline(std::size_t depth) {
-    text_ += '\n';
-    text_.append(2 * depth, ' ');
-  }
-
-  void before_value() {
-    if (after_key_) {
-      after_key_ = false;
-      return;
-    }
-    if (scopes_.empty()) return;
-    Scope& scope = scopes_.back();
-    if (!scope.empty) text_ += scope.flat ? ", " : ",";
-    if (!scope.flat) newline(scopes_.size());
-    scope.empty = false;
-  }
-
-  void open(char bracket, bool flat) {
-    before_value();
-    text_ += bracket;
-    scopes_.push_back({flat || (!scopes_.empty() && scopes_.back().flat)});
-  }
-
-  void close(char bracket) {
-    const Scope scope = scopes_.back();
-    scopes_.pop_back();
-    if (!scope.empty && !scope.flat) newline(scopes_.size());
-    text_ += bracket;
-  }
-
-  std::string text_;
-  std::vector<Scope> scopes_;
-  bool after_key_ = false;
-};
-
 void pair(Writer& w, const camera::Vec2d& v) {
   w.open_array(true);
   w.value(v.x);
@@ -203,9 +114,10 @@ void triple(Writer& w, const camera::Vec3d& v) {
   w.close_array();
 }
 
-void capture_or_null(Writer& w, const std::optional<std::int64_t>& capture) {
-  if (capture) {
-    w.value(*capture);
+template <class T>
+void value_or_null(Writer& w, const std::optional<T>& value) {
+  if (value) {
+    w.value(*value);
   } else {
     w.null();
   }
@@ -232,12 +144,9 @@ void reprojection(Writer& w, const ReprojectionStats& s,
   stats(w.key("overall"), s.overall);
   stats(w.key("without_oblique"), s.without_oblique);
   w.key("legacy_rmse_px").value(s.legacy_rmse_px);
-  w.key("histogram").open_object();
-  w.key("bin_px").value(s.histogram.bin_px);
-  w.key("counts").open_array(true);
+  w.key("histogram").open_array(true);
   for (const std::size_t count : s.histogram.counts) w.value(count);
   w.close_array();
-  w.close_object();
   w.key("cameras").open_object();
   for (std::size_t c = 0; c < ids.size(); ++c)
     stats(w.key(ids[c]), s.cameras[c]);
@@ -304,6 +213,15 @@ void settings(Writer& w, const std::vector<std::string>& ids,
   w.close_object();
 }
 
+// A re-solve's refusal: null when it ran.
+void refused(Writer& w, const std::string& why) {
+  if (why.empty()) {
+    w.null();
+  } else {
+    w.value(why);
+  }
+}
+
 void arm(Writer& w, const PrincipalPointArm& a) {
   w.open_object();
   w.key("rms_px").value(a.rms_px);
@@ -315,14 +233,13 @@ void arm(Writer& w, const PrincipalPointArm& a) {
 
 std::string report_text(const std::vector<std::string>& ids,
                         const solve::RigSolution& solution,
-                        const CalibrationMetrics& metrics,
-                        const MetricsOptions& options) {
+                        const CalibrationMetrics& metrics) {
   const std::size_t k = ids.size();
   Writer w;
   w.open_object();
   w.key("format").value("volumetric_kit_calib.report");
   w.key("version").value(1);
-  settings(w.key("settings"), ids, solution, options);
+  settings(w.key("settings"), ids, solution, metrics.options);
 
   w.key("solver").open_object();
   w.key("solves").value(solution.solves);
@@ -352,6 +269,19 @@ std::string report_text(const std::vector<std::string>& ids,
   w.close_object();
 
   w.key("rejections").open_object();
+  w.key("views_left_out").open_array();
+  for (const solve::ViewRecord& view : metrics.views_left_out) {
+    w.open_object();
+    w.key("camera").value(ids[view.camera]);
+    w.key("capture").value(view.capture);
+    w.key("fate").value(solve::to_string(view.fate));
+    w.key("use").value(compute::to_string(view.use));
+    value_or_null(w.key("pnp_rms_px"), view.pnp_rms_px);
+    value_or_null(w.key("ambiguity"), view.ambiguity);
+    value_or_null(w.key("tilt_deg"), view.tilt_deg);
+    w.close_object();
+  }
+  w.close_array();
   w.key("counts").open_array();
   for (const RejectionCount& count : metrics.rejections) {
     w.open_object();
@@ -415,9 +345,9 @@ std::string report_text(const std::vector<std::string>& ids,
     const CameraStability& s = loo.cameras[c];
     w.key(ids[c]).open_object();
     w.key("centre_mm").value(s.centre_mm);
-    capture_or_null(w.key("centre_capture"), s.centre_capture);
+    value_or_null(w.key("centre_capture"), s.centre_capture);
     w.key("rotation_deg").value(s.rotation_deg);
-    capture_or_null(w.key("rotation_capture"), s.rotation_capture);
+    value_or_null(w.key("rotation_capture"), s.rotation_capture);
     w.close_object();
   }
   w.close_object();
@@ -425,11 +355,9 @@ std::string report_text(const std::vector<std::string>& ids,
   for (const LeftOut& left : loo.captures) {
     w.open_object();
     w.key("capture").value(left.capture);
-    if (left.refused.empty()) {
-      w.key("refused").null();
-    } else {
-      w.key("refused").value(left.refused);
-    }
+    refused(w.key("refused"), left.refused);
+    w.key("rms_px").value(left.rms_px);
+    w.key("legacy_rmse_px").value(left.legacy_rmse_px);
     w.key("cameras").open_object();
     for (std::size_t c = 0; c < left.cameras.size(); ++c) {
       w.key(ids[c]).open_object();
@@ -461,9 +389,6 @@ std::string report_text(const std::vector<std::string>& ids,
   w.close_object();
 
   w.key("sensitivity").open_object();
-  w.key("focal_fraction").value(options.bundle_adjust.focal_fraction);
-  w.key("principal_px").value(options.bundle_adjust.principal_px);
-  w.key("cameras").open_object();
   for (std::size_t j = 0; j < k; ++j) {
     const solve::IntrinsicsSensitivity& s = solution.sensitivity[j];
     w.key(ids[j]).open_object();
@@ -483,11 +408,10 @@ std::string report_text(const std::vector<std::string>& ids,
     w.close_object();
   }
   w.close_object();
-  w.close_object();
 
   const PrincipalPointAB& ab = metrics.principal_point;
   w.key("principal_point_ab").open_object();
-  w.key("shift_px").value(ab.shift_px);
+  refused(w.key("refused"), ab.refused);
   w.key("corners").value(ab.corners);
   arm(w.key("as_given"), ab.as_given);
   arm(w.key("shifted"), ab.shifted);
@@ -521,7 +445,7 @@ std::string report_text(const std::vector<std::string>& ids,
 std::string csv_number(double v) {
   if (std::isnan(v)) return "nan";
   if (std::isinf(v)) return v > 0.0 ? "inf" : "-inf";
-  return number(v);
+  return detail::json_number(v);
 }
 
 // A text field, quoted when it holds a comma, a quote or a line break.
@@ -558,22 +482,21 @@ std::string residuals_text(const std::vector<std::string>& ids,
 
 core::Result<ResultFiles> format_results(
     const std::vector<solve::RigCamera>& cameras,
-    const solve::RigSolution& solution, const CalibrationMetrics& metrics,
-    const MetricsOptions& options) {
+    const solve::RigSolution& solution, const CalibrationMetrics& metrics) {
   constexpr const char* kWhat = "format_results";
   return compute::guarded(kWhat, [&]() -> core::Result<ResultFiles> {
     std::vector<std::string> ids;
     ids.reserve(cameras.size());
     for (const solve::RigCamera& cam : cameras) ids.push_back(cam.id);
     core::Status checked = solve::check_camera_ids(ids);
-    if (checked.ok()) checked = check_fits(ids.size(), solution, metrics);
+    if (checked.ok()) checked = check_fits(ids, solution, metrics);
     if (!checked.ok()) return std::move(checked).with_context(kWhat);
     core::Result<std::string> calibration =
         camera::format_array_calibration(solution.calibration);
     if (!calibration.ok()) return calibration.status().with_context(kWhat);
     ResultFiles files;
     files.array_calibration = *std::move(calibration);
-    files.report = report_text(ids, solution, metrics, options);
+    files.report = report_text(ids, solution, metrics);
     files.residuals = residuals_text(ids, solution);
     return files;
   });

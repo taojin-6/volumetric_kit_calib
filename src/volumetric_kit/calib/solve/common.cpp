@@ -56,9 +56,9 @@ core::Status check_one_view_each(const std::vector<Observation>& views,
   return {};
 }
 
-core::Status refuse_option(const std::string& prefix, const char* name,
+core::Status refuse_option(std::string_view prefix, const char* name,
                            const char* rule) {
-  return core::Status::invalid_argument(prefix + "options." + name +
+  return core::Status::invalid_argument(std::string(prefix) + name +
                                         " must be " + rule);
 }
 

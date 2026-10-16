@@ -204,8 +204,7 @@ core::Status check_initialise_options(const InitialiseOptions& options,
                                       std::string_view prefix) {
   return compute::guarded("check_initialise_options", [&]() -> core::Status {
     const auto refuse = [&](const char* name, const char* rule) {
-      return core::Status::invalid_argument(std::string(prefix) + name +
-                                            " must be " + rule);
+      return detail::refuse_option(prefix, name, rule);
     };
     if (!(options.max_pnp_rms_px > 0.0) ||
         !std::isfinite(options.max_pnp_rms_px)) {
@@ -228,6 +227,22 @@ core::Status check_initialise_options(const InitialiseOptions& options,
     }
     return {};
   });
+}
+
+const char* to_string(ViewFate fate) noexcept {
+  switch (fate) {
+    case ViewFate::Used:
+      return "used";
+    case ViewFate::Ambiguous:
+      return "ambiguous";
+    case ViewFate::NotUsable:
+      return "not_usable";
+    case ViewFate::NoPose:
+      return "no_pose";
+    case ViewFate::PoorFit:
+      return "poor_fit";
+  }
+  return "unknown";
 }
 
 ViewFate view_fate(const ViewPose& pose,

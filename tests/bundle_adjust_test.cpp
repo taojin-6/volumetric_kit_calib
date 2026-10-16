@@ -1479,6 +1479,19 @@ TEST(BundleAdjust, RefusesOptionsOutOfRange) {
   EXPECT_TRUE(check_bundle_adjust_options({}).ok());
 }
 
+// The views the adjustment takes: those initialise used or found ambiguous.
+TEST(BundleAdjust, AdjustsTheViewsUsedOrAmbiguous) {
+  ViewRecord record;
+  for (const auto& [fate, adjusted] :
+       {std::pair{ViewFate::Used, true}, std::pair{ViewFate::Ambiguous, true},
+        std::pair{ViewFate::NotUsable, false},
+        std::pair{ViewFate::NoPose, false},
+        std::pair{ViewFate::PoorFit, false}}) {
+    record.fate = fate;
+    EXPECT_EQ(adjusts(record), adjusted) << to_string(fate);
+  }
+}
+
 TEST(BundleAdjust, NamesEachReason) {
   EXPECT_STREQ(to_string(Dropped::TooNear), "too_near");
   EXPECT_STREQ(to_string(Dropped::Outlier), "outlier");

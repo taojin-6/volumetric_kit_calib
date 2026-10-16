@@ -29,8 +29,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   directory's files as text: recon's calibration file, `report.json` and
   `residuals.csv`.
 - `solve::check_bundle_adjust_options`, `bundle_adjust`'s check of its
-  options, and `solve::to_string(Dropped)`, the names the report gives the
-  reasons.
+  options; `solve::adjusts`, its rule for the views it takes; and
+  `to_string` of `solve::Dropped`, `solve::ViewFate` and `compute::ViewUse`,
+  the names the report gives them.
+- `compute::quantile`, numpy's linear percentile.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds
   and guards, and a `RigSolution` holding the poses, recon's

@@ -3,7 +3,6 @@
 
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -11,6 +10,8 @@
 #include <map>
 #include <set>
 #include <string>
+#include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -32,26 +33,6 @@ constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 constexpr double kInfinity = std::numeric_limits<double>::infinity();
 constexpr std::size_t kNone = std::numeric_limits<std::size_t>::max();
 
-// Ascending, a NaN after every number, so the order is strict and weak.
-void sort_numbers(std::vector<double>& values) {
-  std::sort(values.begin(), values.end(), [](double a, double b) {
-    return a < b || (!std::isnan(a) && std::isnan(b));
-  });
-}
-
-// The q-th quantile of `sorted`, interpolated linearly between ranks as
-// numpy's percentile is by default; NaN for no values. An infinite upper
-// neighbour gives infinity, never inf - inf.
-double quantile(const std::vector<double>& sorted, double q) {
-  if (sorted.empty()) return kNaN;
-  const double at = q * static_cast<double>(sorted.size() - 1);
-  const auto lo = static_cast<std::size_t>(at);
-  const std::size_t hi = std::min(lo + 1, sorted.size() - 1);
-  const double fraction = at - static_cast<double>(lo);
-  if (fraction == 0.0 || sorted[lo] == sorted[hi]) return sorted[lo];
-  return sorted[lo] + fraction * (sorted[hi] - sorted[lo]);
-}
-
 ErrorStats stats_of(const std::vector<camera::Vec2d>& residuals) {
   ErrorStats s;
   s.count = residuals.size();
@@ -65,11 +46,10 @@ ErrorStats stats_of(const std::vector<camera::Vec2d>& residuals) {
     squared += glm::dot(e, e);
     sum += e;
   }
-  sort_numbers(norms);
   const auto n = static_cast<double>(residuals.size());
   s.rms_px = std::sqrt(squared / n);
-  s.p90_px = quantile(norms, 0.9);
-  s.max_px = norms.back();
+  s.p90_px = compute::quantile(norms, 0.9);
+  s.max_px = compute::quantile(std::move(norms), 1.0);
   s.mean_px = sum / n;
   return s;
 }
@@ -81,6 +61,15 @@ double legacy_rmse(const std::vector<camera::Vec2d>& residuals) {
   double squared = 0.0;
   for (const camera::Vec2d& e : residuals) squared += e.x * e.x + e.y * e.y;
   return std::sqrt(squared / (2.0 * static_cast<double>(residuals.size())));
+}
+
+// The RMS and the legacy RMSE of a solution's kept corners.
+std::pair<double, double> kept_rms(const solve::RigSolution& solution) {
+  std::vector<camera::Vec2d> kept;
+  for (const solve::CornerResidual& r : solution.residuals) {
+    if (!r.dropped) kept.push_back(r.residual);
+  }
+  return {stats_of(kept).rms_px, legacy_rmse(kept)};
 }
 
 Histogram histogram_of(const std::vector<camera::Vec2d>& residuals,
@@ -99,9 +88,13 @@ Histogram histogram_of(const std::vector<camera::Vec2d>& residuals,
   return h;
 }
 
+// A camera's centre, `-R^T t` of its T_cw.
+camera::Vec3d centre_of(const camera::Mat4d& world_to_camera) {
+  return camera::Vec3d(camera::rigid_inverse(world_to_camera)[3]);
+}
+
 camera::Vec3d centre_of(const camera::RodriguesTransform& world_to_camera) {
-  return camera::Vec3d(
-      camera::rigid_inverse(camera::matrix_from_rodrigues(world_to_camera))[3]);
+  return centre_of(camera::matrix_from_rodrigues(world_to_camera));
 }
 
 bool finite(const camera::RodriguesTransform& t) noexcept {
@@ -109,11 +102,6 @@ bool finite(const camera::RodriguesTransform& t) noexcept {
     if (!std::isfinite(t.rvec[i]) || !std::isfinite(t.tvec[i])) return false;
   }
   return true;
-}
-
-bool adjusted(const solve::ViewRecord& record) noexcept {
-  return record.fate == solve::ViewFate::Used ||
-         record.fate == solve::ViewFate::Ambiguous;
 }
 
 std::string capture_name(std::int64_t capture) {
@@ -169,7 +157,7 @@ core::Result<Fit> read_fit(const std::vector<solve::RigCamera>& cameras,
           "the start's record of " + what +
           " is not of its camera and capture");
     }
-    if (!adjusted(record)) continue;
+    if (!solve::adjusts(record)) continue;
     fit.first[i] = next;
     for (const DetectedPoint& point : views[i].points) {
       if (next >= solution.residuals.size() ||
@@ -409,10 +397,9 @@ core::Result<Transfer> transfer_of(
   std::vector<double> errors;
   errors.reserve(out.errors.size());
   for (const TransferError& e : out.errors) errors.push_back(e.error_px);
-  sort_numbers(errors);
-  out.median_px = quantile(errors, 0.5);
-  out.p90_px = quantile(errors, 0.9);
-  if (!errors.empty()) out.worst_px = errors.back();
+  out.median_px = compute::median(errors);
+  out.p90_px = compute::quantile(errors, 0.9);
+  out.worst_px = compute::quantile(std::move(errors), 1.0);
   for (std::size_t from = 0; from < k; ++from) {
     for (std::size_t to = 0; to < k; ++to) {
       PairTransfer& pair = out.pairs[from][to];
@@ -495,13 +482,12 @@ core::Result<LeaveOneOut> leave_one_out_of(
       }
       left.refused = again.status().message();
     } else {
+      std::tie(left.rms_px, left.legacy_rmse_px) = kept_rms(*again);
       for (std::size_t c = 0; c < k; ++c) {
         const camera::Mat4d moved =
             camera::matrix_from_rodrigues(again->world_to_camera[c]);
         const PoseChange change{
-            1000.0 *
-                glm::length(camera::Vec3d(camera::rigid_inverse(moved)[3]) -
-                            camera::Vec3d(camera::rigid_inverse(solved[c])[3])),
+            1000.0 * glm::length(centre_of(moved) - centre_of(solved[c])),
             compute::rotation_angle_deg(camera::Mat3d(solved[c]),
                                         camera::Mat3d(moved))};
         left.cameras.push_back(change);
@@ -522,10 +508,11 @@ core::Result<LeaveOneOut> leave_one_out_of(
   return out;
 }
 
-core::Status check_shift(double shift_px) {
+// Refuses a shift not finite or 0, naming it `name`.
+core::Status check_shift(double shift_px, std::string_view name) {
   if (!std::isfinite(shift_px) || shift_px == 0.0) {
-    return core::Status::invalid_argument(
-        "the principal points' shift must be finite and not 0");
+    return core::Status::invalid_argument(std::string(name) +
+                                          " must be finite and not 0");
   }
   return {};
 }
@@ -544,9 +531,18 @@ core::Result<PrincipalPointAB> principal_point_of(
   core::Result<solve::RigLenses> lenses =
       solve::check_rig(shifted, solution.reference);
   if (!lenses.ok()) return lenses.status().with_context("shifted");
+  PrincipalPointAB out;
+  out.shift_px = shift_px;
   core::Result<solve::RigSolution> again = solve::bundle_adjust(
       shifted, board, views, warm_start(start, solution), options);
-  if (!again.ok()) return again.status().with_context("shifted");
+  if (!again.ok()) {
+    const Code code = again.status().domain();
+    if (code != Code::InvalidArgument && code != Code::Numerical) {
+      return again.status().with_context("shifted");
+    }
+    out.refused = again.status().message();
+    return out;
+  }
   // The corners both keep: the same views were adjusted, so the residuals
   // are in the same order.
   std::vector<camera::Vec2d> given_residuals;
@@ -571,8 +567,6 @@ core::Result<PrincipalPointAB> principal_point_of(
       transfer_of(*lenses, board, views, again->world_to_camera);
   if (!moved.ok()) return moved.status().with_context("shifted");
 
-  PrincipalPointAB out;
-  out.shift_px = shift_px;
   out.corners = given_residuals.size();
   const auto arm = [](const std::vector<camera::Vec2d>& residuals,
                       const Transfer& transfer) {
@@ -585,13 +579,7 @@ core::Result<PrincipalPointAB> principal_point_of(
   };
   out.as_given = arm(given_residuals, as_given);
   out.shifted = arm(shifted_residuals, *moved);
-  if (out.shifted.rms_px < out.as_given.rms_px &&
-      out.shifted.transfer_median_px < out.as_given.transfer_median_px) {
-    out.verdict = PrincipalPointVerdict::Shifted;
-  } else if (out.as_given.rms_px < out.shifted.rms_px &&
-             out.as_given.transfer_median_px < out.shifted.transfer_median_px) {
-    out.verdict = PrincipalPointVerdict::AsGiven;
-  }
+  out.verdict = principal_point_verdict(out.as_given, out.shifted);
   return out;
 }
 
@@ -615,11 +603,8 @@ core::Status check_options(const MetricsOptions& options) {
                                           "options.initialise."));
   VKC_TRY(solve::check_bundle_adjust_options(options.bundle_adjust,
                                              "options.bundle_adjust."));
-  if (!std::isfinite(options.principal_shift_px) ||
-      options.principal_shift_px == 0.0) {
-    return core::Status::invalid_argument(
-        "options.principal_shift_px must be finite and not 0");
-  }
+  VKC_TRY(
+      check_shift(options.principal_shift_px, "options.principal_shift_px"));
   if (!(options.histogram_bin_px > 0.0) ||
       !std::isfinite(options.histogram_bin_px)) {
     return core::Status::invalid_argument(
@@ -633,6 +618,20 @@ core::Status check_options(const MetricsOptions& options) {
 }
 
 }  // namespace
+
+PrincipalPointVerdict principal_point_verdict(
+    const PrincipalPointArm& as_given,
+    const PrincipalPointArm& shifted) noexcept {
+  if (shifted.rms_px < as_given.rms_px &&
+      shifted.transfer_median_px < as_given.transfer_median_px) {
+    return PrincipalPointVerdict::Shifted;
+  }
+  if (as_given.rms_px < shifted.rms_px &&
+      as_given.transfer_median_px < shifted.transfer_median_px) {
+    return PrincipalPointVerdict::AsGiven;
+  }
+  return PrincipalPointVerdict::Mixed;
+}
 
 const char* to_string(PrincipalPointVerdict verdict) noexcept {
   switch (verdict) {
@@ -688,7 +687,7 @@ core::Result<PrincipalPointAB> principal_point_ab(
   return compute::guarded(kWhat, [&]() -> core::Result<PrincipalPointAB> {
     VKC_TRY(solve::check_bundle_adjust_options(options,
                                                "principal_point_ab: options."));
-    core::Status shift = check_shift(shift_px);
+    core::Status shift = check_shift(shift_px, "shift_px");
     if (!shift.ok()) return shift.with_context(kWhat);
     core::Result<Fit> fit = read_fit(cameras, views, start, solution);
     if (!fit.ok()) return fit.status().with_context(kWhat);
@@ -718,10 +717,14 @@ core::Result<CalibrationMetrics> calibration_metrics(
     if (!fit.ok()) return fit.status().with_context(kWhat);
 
     CalibrationMetrics metrics;
+    metrics.options = options;
     core::Result<Reprojection> reprojection =
         reprojection_of(*fit, board, views, start, solution, options);
     if (!reprojection.ok()) return in("reprojection", reprojection.status());
     metrics.reprojection = *std::move(reprojection);
+    for (const solve::ViewRecord& record : start.views) {
+      if (!solve::adjusts(record)) metrics.views_left_out.push_back(record);
+    }
     metrics.rejections = rejection_counts(solution);
     core::Result<Transfer> transfer =
         transfer_of(fit->rig, board, views, solution.world_to_camera);

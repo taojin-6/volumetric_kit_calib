@@ -979,6 +979,15 @@ TEST(ViewFate, IsInitialisesRuleForAPosedView) {
   EXPECT_EQ(fate(0.3, 0.9, options), ViewFate::PoorFit);
 }
 
+TEST(ViewFate, NamesEachFate) {
+  EXPECT_STREQ(to_string(ViewFate::Used), "used");
+  EXPECT_STREQ(to_string(ViewFate::Ambiguous), "ambiguous");
+  EXPECT_STREQ(to_string(ViewFate::NotUsable), "not_usable");
+  EXPECT_STREQ(to_string(ViewFate::NoPose), "no_pose");
+  EXPECT_STREQ(to_string(ViewFate::PoorFit), "poor_fit");
+  EXPECT_STREQ(to_string(static_cast<ViewFate>(9)), "unknown");
+}
+
 // The options initialise refuses, each message the prefix and its name.
 TEST(CheckInitialiseOptions, NamesTheOptionAfterThePrefix) {
   EXPECT_TRUE(check_initialise_options({}).ok());

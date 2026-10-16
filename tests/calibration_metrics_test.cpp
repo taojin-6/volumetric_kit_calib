@@ -3,9 +3,10 @@
 
 // The solved rig's metrics on the synthetic rig: zero on exact data, the
 // legacy RMSE, the groups of errors, the transfer against verify_rig.py's
-// definition, leave one out flagging a bad capture and recording a refused
-// one, the principal-point A/B test both ways, the geometry, the rejections,
-// and refusals.
+// definition, leave one out against re-solves run here, flagging a bad
+// capture and recording refused ones, the principal-point A/B test both ways
+// and against a re-solve run here, its verdict, the geometry, the views left
+// out, the rejections, and refusals.
 
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 
@@ -30,6 +31,8 @@
 #include "synthetic_scene.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/cv_pose.hpp"
+#include "volumetric_kit/calib/compute/usable_for_pose.hpp"
+#include "volumetric_kit/calib/solve/view_pose.hpp"
 
 namespace volumetric_kit::calib::quality {
 namespace {
@@ -97,6 +100,38 @@ std::vector<camera::Vec2d> kept_residuals(const RigSolution& solution) {
     if (!r.dropped) out.push_back(r.residual);
   }
   return out;
+}
+
+double rms_of(const std::vector<camera::Vec2d>& residuals) {
+  double squared = 0.0;
+  for (const camera::Vec2d& e : residuals) squared += e.x * e.x + e.y * e.y;
+  return std::sqrt(squared / static_cast<double>(residuals.size()));
+}
+
+// Where a re-solve starts: the solution's cameras, the reference exactly at
+// the identity, and its boards (the start's for a capture it has none of),
+// with the start's tree and view records.
+InitialRig warm_from(const InitialRig& start, const RigSolution& solution) {
+  InitialRig warm;
+  warm.reference = solution.reference;
+  for (std::size_t c = 0; c < solution.world_to_camera.size(); ++c) {
+    warm.world_to_camera.push_back(
+        c == solution.reference
+            ? camera::Mat4d(1.0)
+            : camera::matrix_from_rodrigues(solution.world_to_camera[c]));
+  }
+  std::map<std::int64_t, camera::Mat4d> boards;
+  for (const solve::SolvedBoard& b : solution.boards) {
+    boards[b.capture] = camera::matrix_from_rodrigues(b.board_to_world);
+  }
+  for (const solve::BoardPose& b : start.boards) {
+    const auto it = boards.find(b.capture);
+    warm.boards.push_back(
+        {b.capture, it != boards.end() ? it->second : b.board_to_world});
+  }
+  warm.links = start.links;
+  warm.views = start.views;
+  return warm;
 }
 
 TEST(CalibrationMetrics, ExactDataGivesZeroRmsTransferAndLeaveOneOut) {
@@ -206,6 +241,10 @@ TEST(CalibrationMetrics, GroupsTheErrors) {
   options.histogram_bins = 12;
   const CalibrationMetrics m = measured(scene, start, solution, options);
   const ReprojectionStats& s = m.reprojection.solved;
+  // The settings, as measured with.
+  EXPECT_EQ(m.options.initialise.oblique_deg, 35.0);
+  EXPECT_EQ(m.options.histogram_bin_px, 0.05);
+  EXPECT_EQ(m.options.histogram_bins, 12);
 
   std::map<std::size_t, std::vector<camera::Vec2d>> by_camera;
   std::map<std::int64_t, std::vector<camera::Vec2d>> by_capture;
@@ -439,8 +478,70 @@ TEST(CrossCameraTransfer, BehindACameraIsInfiniteAndAnUnusableViewIsSkipped) {
                  (e.from == 2 || e.to == 2));
   }
   EXPECT_TRUE(into_one);
+  // A quarter of the errors are infinite: the 90th percentile falls between
+  // two of them.
+  EXPECT_EQ(t->p90_px, kInfinity);
   EXPECT_EQ(t->worst_px, kInfinity);
   EXPECT_EQ(t->pairs[0][1].mean_px, kInfinity);
+}
+
+// A usable view whose every IPPE pose puts a corner behind its camera (a
+// board straddling the camera, seen through a pinhole) poses nothing: its
+// capture's pairs are skipped, not an error.
+TEST(CrossCameraTransfer, SkipsAViewWithNoPoseInFront) {
+  const compute::Board board = test::femto_board();
+  const camera::CameraModel pinhole{
+      {3840, 2160}, {2240.0, 2240.0, 1919.5, 1079.5}, {}};
+  const std::vector<solve::RigCamera> cameras = {{"A", pinhole},
+                                                 {"B", pinhole}};
+  camera::Mat4d to_b(1.0);  // B 0.3 m right of A, the world
+  to_b[3] = glm::dvec4(-0.3, 0.0, 0.0, 1.0);
+  const std::vector<camera::RodriguesTransform> poses = {
+      camera::rodrigues_from_matrix(camera::Mat4d(1.0)),
+      camera::rodrigues_from_matrix(to_b)};
+  const auto view_of = [&](const char* id, std::int64_t capture,
+                           const camera::Mat4d& board_to_camera,
+                           const std::vector<int>& ids) {
+    const std::vector<cv::Point2d> pixels =
+        test::project(pinhole, board_to_camera, board.object_points());
+    Observation view;
+    view.camera_id = id;
+    view.frame_id = capture;
+    for (const int i : ids) {
+      const cv::Point2d& p = pixels[static_cast<std::size_t>(i)];
+      view.points.push_back({i, {p.x, p.y}, 1.0});
+    }
+    return view;
+  };
+  const std::vector<int> all = {0, 1, 2, 3, 4, 5, 6, 7};
+  const camera::Mat4d in_front =
+      test::board_facing_camera(board, {0.0, 0.0, 2.5}, 20.0, 10.0);
+  // The board's x along the camera's -z, its y along the camera's x.
+  camera::Mat4d straddling(0.0);
+  straddling[0] = glm::dvec4(0.0, 0.0, -1.0, 0.0);
+  straddling[1] = glm::dvec4(1.0, 0.0, 0.0, 0.0);
+  straddling[2] = glm::dvec4(0.0, -1.0, 0.0, 0.0);
+  straddling[3] = glm::dvec4(-0.225, 0.05, 0.3, 1.0);
+  const std::vector<Observation> views = {
+      view_of("A", 1, in_front, all), view_of("B", 1, to_b * in_front, all),
+      view_of("A", 2, straddling, {0, 3, 4, 7}),
+      view_of("B", 2, to_b * in_front, all)};
+  const compute::CvCamera lens = compute::cv_camera(pinhole).value();
+  ASSERT_EQ(compute::usable_for_pose(board, views[2], lens.size).value(),
+            compute::ViewUse::Usable);
+  ASSERT_EQ(solve::view_pose(lens, board, views[2]).status().domain(),
+            Code::Numerical);
+
+  core::Result<Transfer> t = core::Status::invalid_argument("unset");
+  EXPECT_NO_THROW(t = cross_camera_transfer(cameras, board, views, poses));
+  ASSERT_TRUE(t.ok()) << t.status().message();
+  ASSERT_EQ(t->errors.size(), 2u);
+  for (const TransferError& e : t->errors) {
+    EXPECT_EQ(e.capture, 1);
+    EXPECT_LT(e.error_px, 1e-6);
+  }
+  EXPECT_EQ(t->pairs[0][1].count, 1u);
+  EXPECT_EQ(t->pairs[1][0].count, 1u);
 }
 
 TEST(CrossCameraTransfer, RefusesWhatItCannotCheck) {
@@ -528,6 +629,62 @@ TEST(LeaveOneOut, FlagsABadCapture) {
   }
 }
 
+// Each re-solve, run here as leave_one_out describes it, moves each camera's
+// centre, -R^T t, by the millimetres reported, turns it by the degrees
+// reported, and fits its kept corners by the RMS reported. On this rig a
+// camera's centre and its translation move by clearly different amounts.
+TEST(LeaveOneOut, EachMoveIsTheCentresAndTheRotations) {
+  const Scene scene = make_scene(10);
+  const InitialRig start = first_rig(scene);
+  const RigSolution solution = solved(scene, start);
+  const LeaveOneOut loo = value_of(
+      leave_one_out(scene.cameras, scene.board, scene.views, start, solution));
+  const InitialRig warm = warm_from(start, solution);
+  const std::size_t k = scene.cameras.size();
+  ASSERT_EQ(loo.captures.size(), solution.boards.size());
+  double apart = 0.0;  // the most a translation's move and a centre's differ
+  for (const LeftOut& left : loo.captures) {
+    SCOPED_TRACE(left.capture);
+    ASSERT_TRUE(left.refused.empty()) << left.refused;
+    ASSERT_EQ(left.cameras.size(), k);
+    std::vector<Observation> views;
+    InitialRig less = warm;
+    less.views.clear();
+    less.boards.clear();
+    for (std::size_t i = 0; i < scene.views.size(); ++i) {
+      if (scene.views[i].frame_id == left.capture) continue;
+      views.push_back(scene.views[i]);
+      less.views.push_back(warm.views[i]);
+    }
+    for (const solve::BoardPose& b : warm.boards) {
+      if (b.capture != left.capture) less.boards.push_back(b);
+    }
+    const RigSolution again =
+        value_of(solve::bundle_adjust(scene.cameras, scene.board, views, less));
+    EXPECT_NEAR(left.rms_px, rms_of(kept_residuals(again)), 1e-12);
+    EXPECT_NEAR(left.legacy_rmse_px, left.rms_px / std::sqrt(2.0), 1e-12);
+    for (std::size_t c = 0; c < k; ++c) {
+      const camera::Mat4d before =
+          camera::matrix_from_rodrigues(solution.world_to_camera[c]);
+      const camera::Mat4d after =
+          camera::matrix_from_rodrigues(again.world_to_camera[c]);
+      const double centre_mm = 1000.0 * glm::length(test::centre_of(after) -
+                                                    test::centre_of(before));
+      EXPECT_NEAR(left.cameras[c].centre_mm, centre_mm, 1e-9) << c;
+      EXPECT_NEAR(left.cameras[c].rotation_deg, test::angle_deg(before, after),
+                  1e-9)
+          << c;
+      const double translation_mm =
+          1000.0 * glm::length(camera::Vec3d(after[3] - before[3]));
+      if (centre_mm > 0.01) {
+        apart =
+            std::max(apart, std::abs(translation_mm - centre_mm) / centre_mm);
+      }
+    }
+  }
+  EXPECT_GT(apart, 0.2);
+}
+
 // A capture without which a link shares fewer than min_shared captures is
 // refused, naming why, and moves nothing; progress counts every re-solve.
 TEST(LeaveOneOut, RecordsARefusedCaptureAndReportsProgress) {
@@ -566,6 +723,30 @@ TEST(LeaveOneOut, RecordsARefusedCaptureAndReportsProgress) {
   for (std::size_t i = 0; i < calls.size(); ++i) {
     EXPECT_EQ(calls[i].first, i + 1);
     EXPECT_EQ(calls[i].second, calls.size());
+  }
+}
+
+// A re-solve bundle_adjust refuses as Numerical -- every camera poorly
+// constrained, under a condition bound just above 1 -- is refused too.
+TEST(LeaveOneOut, RecordsANumericalRefusal) {
+  const Scene scene = make_scene(6);
+  const InitialRig start = first_rig(scene);
+  const RigSolution solution = solved(scene, start);
+  BundleAdjustOptions strict;
+  strict.max_condition = 1.0 + 1e-9;
+  core::Result<LeaveOneOut> loo = LeaveOneOut{};
+  EXPECT_NO_THROW(loo = leave_one_out(scene.cameras, scene.board, scene.views,
+                                      start, solution, strict));
+  ASSERT_TRUE(loo.ok()) << loo.status().message();
+  ASSERT_FALSE(loo->captures.empty());
+  for (const LeftOut& left : loo->captures) {
+    EXPECT_NE(left.refused.find("poorly constrained"), std::string::npos)
+        << left.refused;
+    EXPECT_TRUE(left.cameras.empty());
+    EXPECT_TRUE(std::isnan(left.rms_px));
+  }
+  for (const CameraStability& c : loo->cameras) {
+    EXPECT_FALSE(c.centre_capture.has_value());
   }
 }
 
@@ -618,6 +799,97 @@ TEST(PrincipalPointAB, PrefersTheShiftWhenTheTruthHasIt) {
   }
 }
 
+// The sides' RMS is over the corners both adjustments kept: re-solved here
+// as principal_point_ab describes it, with outlier rounds strict enough that
+// the shifted solve drops corners the solution kept.
+TEST(PrincipalPointAB, ComparesTheCornersBothKeep) {
+  const Scene scene = make_scene(12);
+  const InitialRig start = first_rig(scene);
+  const RigSolution solution = solved(scene, start);
+  BundleAdjustOptions strict;
+  strict.outlier_px = 0.01;
+  strict.outlier_mads = 2.5;
+  core::Result<PrincipalPointAB> ab = PrincipalPointAB{};
+  EXPECT_NO_THROW(ab =
+                      principal_point_ab(scene.cameras, scene.board,
+                                         scene.views, start, solution, strict));
+  ASSERT_TRUE(ab.ok()) << ab.status().message();
+  ASSERT_TRUE(ab->refused.empty()) << ab->refused;
+
+  std::vector<solve::RigCamera> shifted = scene.cameras;
+  for (solve::RigCamera& cam : shifted) {
+    cam.model.intrinsics.cx += 2.5;
+    cam.model.intrinsics.cy += 2.5;
+  }
+  const RigSolution again = value_of(solve::bundle_adjust(
+      shifted, scene.board, scene.views, warm_from(start, solution), strict));
+  ASSERT_EQ(again.residuals.size(), solution.residuals.size());
+  std::vector<camera::Vec2d> given;
+  std::vector<camera::Vec2d> moved;
+  std::size_t kept = 0;
+  for (std::size_t j = 0; j < solution.residuals.size(); ++j) {
+    kept += solution.residuals[j].dropped ? 0 : 1;
+    if (solution.residuals[j].dropped || again.residuals[j].dropped) continue;
+    given.push_back(solution.residuals[j].residual);
+    moved.push_back(again.residuals[j].residual);
+  }
+  EXPECT_LT(given.size(), kept);  // the shifted solve dropped some
+  EXPECT_EQ(ab->corners, given.size());
+  EXPECT_NEAR(ab->as_given.rms_px, rms_of(given), 1e-12);
+  EXPECT_NEAR(ab->shifted.rms_px, rms_of(moved), 1e-12);
+  const Transfer t = value_of(cross_camera_transfer(
+      shifted, scene.board, scene.views, again.world_to_camera));
+  EXPECT_EQ(ab->shifted.transfer_median_px, t.median_px);
+  EXPECT_EQ(ab->shifted.transfer_p90_px, t.p90_px);
+}
+
+// A shifted re-solve bundle_adjust refuses -- here one that does not
+// converge, every principal point 1000 px off -- is recorded as refused, not
+// an error, and the other metrics are measured all the same.
+TEST(PrincipalPointAB, RecordsARefusedReSolve) {
+  const Scene scene = make_scene(6);
+  const InitialRig start = first_rig(scene);
+  const RigSolution solution = solved(scene, start);
+  core::Result<PrincipalPointAB> ab = PrincipalPointAB{};
+  EXPECT_NO_THROW(ab = principal_point_ab(scene.cameras, scene.board,
+                                          scene.views, start, solution, {},
+                                          1000.0));
+  ASSERT_TRUE(ab.ok()) << ab.status().message();
+  EXPECT_EQ(ab->shift_px, 1000.0);
+  EXPECT_EQ(ab->refused.rfind("bundle_adjust: ", 0), 0u) << ab->refused;
+  EXPECT_EQ(ab->corners, 0u);
+  EXPECT_TRUE(std::isnan(ab->as_given.rms_px));
+  EXPECT_TRUE(std::isnan(ab->shifted.transfer_median_px));
+  EXPECT_EQ(ab->verdict, PrincipalPointVerdict::Mixed);
+
+  MetricsOptions options;
+  options.principal_shift_px = 1000.0;
+  const CalibrationMetrics m = measured(scene, start, solution, options);
+  EXPECT_EQ(m.principal_point.refused, ab->refused);
+  EXPECT_EQ(m.leave_one_out.captures.size(), solution.boards.size());
+  EXPECT_FALSE(m.transfer.errors.empty());
+}
+
+// A verdict needs both the RMS and the transfer's median to agree; a tie or
+// a figure not a number is mixed.
+TEST(PrincipalPointAB, AVerdictNeedsBothFiguresToAgree) {
+  const auto arm = [](double rms_px, double median_px) {
+    PrincipalPointArm a;
+    a.rms_px = rms_px;
+    a.transfer_median_px = median_px;
+    return a;
+  };
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  using V = PrincipalPointVerdict;
+  EXPECT_EQ(principal_point_verdict(arm(1.0, 2.0), arm(0.9, 1.9)), V::Shifted);
+  EXPECT_EQ(principal_point_verdict(arm(0.9, 1.9), arm(1.0, 2.0)), V::AsGiven);
+  EXPECT_EQ(principal_point_verdict(arm(1.0, 2.0), arm(0.9, 2.1)), V::Mixed);
+  EXPECT_EQ(principal_point_verdict(arm(0.9, 2.1), arm(1.0, 2.0)), V::Mixed);
+  EXPECT_EQ(principal_point_verdict(arm(1.0, 2.0), arm(1.0, 1.9)), V::Mixed);
+  EXPECT_EQ(principal_point_verdict(arm(1.0, nan), arm(0.9, 1.9)), V::Mixed);
+  EXPECT_EQ(principal_point_verdict(arm(0.9, 1.9), arm(nan, nan)), V::Mixed);
+}
+
 TEST(PrincipalPointAB, RefusesAShiftOfNothing) {
   const Scene scene = make_scene(6);
   const InitialRig start = first_rig(scene);
@@ -658,6 +930,40 @@ TEST(CalibrationMetrics, GeometryIsTheCentresAndBaselines) {
   }
   EXPECT_EQ(m.geometry.centres_m[0], camera::Vec3d(0.0));
   EXPECT_GT(m.geometry.baselines_m[0][1], 1.0);
+}
+
+// The views initialise left out are listed, in the observations' order,
+// each as initialise recorded it.
+TEST(CalibrationMetrics, ListsTheViewsInitialiseLeftOut) {
+  Scene scene = make_scene(12);
+  // View 6's corners 9 px either way in turn: its own pose fits poorly.
+  for (std::size_t j = 0; j < scene.views[6].points.size(); ++j) {
+    scene.views[6].points[j].pixel.x += j % 2 == 0 ? 9.0 : -9.0;
+  }
+  const InitialRig start = first_rig(scene);
+  ASSERT_EQ(start.views[6].fate, solve::ViewFate::PoorFit);
+  const RigSolution solution = solved(scene, start);
+  const CalibrationMetrics m = measured(scene, start, solution);
+  std::vector<const solve::ViewRecord*> want;
+  for (const solve::ViewRecord& record : start.views) {
+    if (!solve::adjusts(record)) want.push_back(&record);
+  }
+  ASSERT_EQ(m.views_left_out.size(), want.size());
+  bool poor = false;
+  for (std::size_t i = 0; i < want.size(); ++i) {
+    const solve::ViewRecord& got = m.views_left_out[i];
+    EXPECT_EQ(got.camera, want[i]->camera);
+    EXPECT_EQ(got.capture, want[i]->capture);
+    EXPECT_EQ(got.fate, want[i]->fate);
+    EXPECT_EQ(got.use, want[i]->use);
+    EXPECT_EQ(got.pnp_rms_px, want[i]->pnp_rms_px);
+    EXPECT_EQ(got.ambiguity, want[i]->ambiguity);
+    EXPECT_EQ(got.tilt_deg, want[i]->tilt_deg);
+    poor =
+        poor || (got.capture == start.views[6].capture &&
+                 got.camera == start.views[6].camera && got.pnp_rms_px > 5.0);
+  }
+  EXPECT_TRUE(poor);
 }
 
 // Outliers injected: the rejections counted by round and reason, corners and
@@ -744,6 +1050,13 @@ TEST(CalibrationMetrics, RefusesOptionsAndASolutionThatDoNotFit) {
   InitialRig short_start = start;
   short_start.views.pop_back();
   refused(short_start, solution, {}, "the start has");
+  InitialRig swapped = start;
+  std::swap(swapped.views[0], swapped.views[1]);
+  ASSERT_NE(swapped.views[0].camera, start.views[0].camera);
+  refused(swapped, solution, {}, "the start's record of observation 0 ");
+  InitialRig moved = start;
+  moved.views[2].capture += 100;
+  refused(moved, solution, {}, "the start's record of observation 2 ");
   InitialRig other = start;
   other.reference = 1;
   refused(other, solution, {}, "the start's reference");

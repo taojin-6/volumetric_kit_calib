@@ -93,14 +93,21 @@ definitions and the schemas).
   that poses the capture. A view counts when it fixes a pose, not when it has
   4 corners.
 - **Re-solves are warm.** Leave one out and the principal-point A/B test run
-  `bundle_adjust` from the solution. A capture without which a link falls
-  short of `min_shared` is recorded as refused, not an error. The A/B sides'
-  RMS is over the corners both keep, and a verdict needs both the RMS and the
-  transfer's median to agree.
-- **The report is written by hand**, as recon writes its calibration file:
+  `bundle_adjust` from the solution. A re-solve `bundle_adjust` refuses
+  (`InvalidArgument` or `Numerical`, e.g. a link short of `min_shared`) is
+  recorded as refused, not an error, so it costs no other metric. The A/B
+  sides' RMS is over the corners both keep, and a verdict needs both the RMS
+  and the transfer's median to agree.
+- **Everything left out is listed:** the views `initialise` excluded, with
+  what it measured, beside the adjustment's rejections, so each can be
+  recaptured.
+- **calib's JSON files are written by hand**, as recon writes its
+  calibration file, with the one private writer,
+  `src/volumetric_kit/calib/core/json_text.hpp`:
   nlohmann/json makes each number (the shortest form that reads back, `null`
   when not finite) and string, but none of its containers, whose destructors
-  allocate and so terminate when memory runs out.
+  allocate and so terminate when memory runs out. The capture tier's session
+  files are still to be moved onto it (a `TODO:` in `session_files.cpp`).
 
 ## 2026-10-14 — The bundle adjustment on `cv::LevMarq`
 

@@ -129,6 +129,16 @@ enum class ViewFate {
   PoorFit,
 };
 
+/// @brief The name calib's results files give @p fate.
+/// @param fate  A fate.
+/// @return `"used"`, `"ambiguous"`, `"not_usable"`, `"no_pose"` or
+///         `"poor_fit"`; `"unknown"` for a value @ref ViewFate does not name.
+///
+/// @code
+/// for (const ViewRecord& view : rig.views) log(to_string(view.fate));
+/// @endcode
+VC_SOLVE_API const char* to_string(ViewFate fate) noexcept;
+
 /// @brief What @ref initialise found in one view, so a view left out can be
 ///        named and recaptured.
 ///

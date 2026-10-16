@@ -47,7 +47,8 @@ target_include_directories(
 # The public headers name compute's board and camera and solve's rig cameras,
 # poses, options, covisibility and solution; nothing calls OpenCV directly.
 target_link_libraries(calib_quality PUBLIC calib_solve)
-# nlohmann/json writes the report, privately: no public header names it.
+# nlohmann/json writes the report, privately, through calib's JSON writer
+# (core/json_text.hpp): no public header names it.
 target_include_directories(calib_quality SYSTEM
                            PRIVATE "${VC_JSON_INCLUDE_DIR}")
 

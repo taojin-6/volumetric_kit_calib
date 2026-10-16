@@ -105,7 +105,8 @@ struct ViewErrors {
 /// @endcode
 struct ReprojectionStats {
   ErrorStats overall;  ///< Every corner kept.
-  /// The corners of the views not oblique (@ref ViewErrors::oblique).
+  /// The corners of the views not oblique (@ref ViewErrors::oblique); its
+  /// legacy RMSE is its `rms_px / sqrt(2)`.
   ErrorStats without_oblique;
   /// The root of the mean squared residual component, x and y alike, as the
   /// legacy solve reports it: `overall.rms_px / sqrt(2)`.
@@ -229,6 +230,12 @@ struct LeftOut {
   /// Each camera's move from the solution, in the rig's order; empty when
   /// refused.
   std::vector<PoseChange> cameras;
+  /// The re-solve's RMS over the corners it kept; not a number when
+  /// refused.
+  double rms_px = std::numeric_limits<double>::quiet_NaN();
+  /// Their legacy RMSE (@ref ReprojectionStats::legacy_rmse_px): the legacy
+  /// solve's figure for the rig without this capture.
+  double legacy_rmse_px = std::numeric_limits<double>::quiet_NaN();
 };
 
 /// @brief How far one camera moves, at most, when one capture is left out,
@@ -266,7 +273,9 @@ struct LeaveOneOut {
 enum class PrincipalPointVerdict {
   AsGiven,  ///< The lenses as given: both the RMS and the transfer are less.
   Shifted,  ///< The principal points shifted: both are less.
-  Mixed,    ///< Neither: one is less, the other not.
+  /// Neither side wins both: one is less and the other not, or a tie, or a
+  /// figure not a number.
+  Mixed,
 };
 
 /// @brief The name the report gives @p verdict.
@@ -296,6 +305,20 @@ struct PrincipalPointArm {
   double transfer_p90_px = std::numeric_limits<double>::quiet_NaN();
 };
 
+/// @brief The side of the principal-point A/B test both its RMS and its
+///        transfer's median favour.
+/// @param as_given  The lenses as given.
+/// @param shifted   The principal points shifted.
+/// @return `Shifted` when both of @p shifted's are less than @p as_given's,
+///         `AsGiven` when both are greater, else `Mixed`.
+///
+/// @code
+/// ab.verdict = principal_point_verdict(ab.as_given, ab.shifted);
+/// @endcode
+VC_QUALITY_API PrincipalPointVerdict
+principal_point_verdict(const PrincipalPointArm& as_given,
+                        const PrincipalPointArm& shifted) noexcept;
+
 /// @brief Whether every camera's principal point fits better shifted: the
 ///        rig re-solved with `cx` and `cy` @ref shift_px larger on every
 ///        camera, against the solution.
@@ -311,11 +334,16 @@ struct PrincipalPointArm {
 /// @endcode
 struct PrincipalPointAB {
   double shift_px = 0.0;  ///< The shift tried, on `cx` and `cy` (pixels).
+  /// Why the shifted rig could not be solved (@ref solve::bundle_adjust's
+  /// message); empty when it was. When refused, @ref corners is 0, the arms
+  /// are not numbers and the verdict is `Mixed`.
+  std::string refused;
   /// The corners both sides' adjustments kept, which the RMS is over.
   std::size_t corners = 0;
   PrincipalPointArm as_given;  ///< The lenses as given: the solution.
   PrincipalPointArm shifted;   ///< The principal points shifted, re-solved.
-  /// Which side both the RMS and the transfer's median favour.
+  /// Which side both the RMS and the transfer's median favour
+  /// (@ref principal_point_verdict).
   PrincipalPointVerdict verdict = PrincipalPointVerdict::Mixed;
 };
 
@@ -334,23 +362,9 @@ struct RigGeometry {
   std::vector<std::vector<double>> baselines_m;
 };
 
-/// @brief Everything @ref calibration_metrics measures.
-///
-/// @code
-/// VKC_ASSIGN(const CalibrationMetrics m,
-///            calibration_metrics(cameras, board, views, rig, solution));
-/// log(m.reprojection.solved.legacy_rmse_px, m.transfer.median_px);
-/// @endcode
-struct CalibrationMetrics {
-  Reprojection reprojection;  ///< Before and after the adjustment.
-  /// What the adjustment left out, by round, then by reason, in
-  /// @ref solve::Dropped's order.
-  std::vector<RejectionCount> rejections;
-  Transfer transfer;                 ///< At the solution.
-  LeaveOneOut leave_one_out;         ///< Each capture left out.
-  PrincipalPointAB principal_point;  ///< The principal-point A/B test.
-  RigGeometry geometry;              ///< Where the cameras are.
-};
+/// The principal points' shift the A/B test tries unless told otherwise
+/// (pixels), on `cx` and `cy`.
+inline constexpr double kPrincipalShiftPx = 2.5;
 
 /// @brief The settings behind the metrics, and those the report records.
 ///
@@ -365,9 +379,32 @@ struct MetricsOptions {
   /// re-solves (@ref leave_one_out, @ref principal_point_ab) take it.
   solve::BundleAdjustOptions bundle_adjust;
   /// The principal points' shift the A/B test tries (pixels); finite, not 0.
-  double principal_shift_px = 2.5;
+  double principal_shift_px = kPrincipalShiftPx;
   double histogram_bin_px = 0.1;  ///< The histograms' bin width; positive.
   int histogram_bins = 30;        ///< Their bins before the last; at least 1.
+};
+
+/// @brief Everything @ref calibration_metrics measures.
+///
+/// @code
+/// VKC_ASSIGN(const CalibrationMetrics m,
+///            calibration_metrics(cameras, board, views, rig, solution));
+/// log(m.reprojection.solved.legacy_rmse_px, m.transfer.median_px);
+/// @endcode
+struct CalibrationMetrics {
+  MetricsOptions options;     ///< The settings they were measured with.
+  Reprojection reprojection;  ///< Before and after the adjustment.
+  /// The views @ref solve::initialise left out, which the adjustment did not
+  /// take (@ref solve::adjusts), in the observations' order, so each can be
+  /// named and recaptured.
+  std::vector<solve::ViewRecord> views_left_out;
+  /// What the adjustment left out, by round, then by reason, in
+  /// @ref solve::Dropped's order.
+  std::vector<RejectionCount> rejections;
+  Transfer transfer;                 ///< At the solution.
+  LeaveOneOut leave_one_out;         ///< Each capture left out.
+  PrincipalPointAB principal_point;  ///< The principal-point A/B test.
+  RigGeometry geometry;              ///< Where the cameras are.
 };
 
 /// @brief How far through the leave-one-out re-solves: called on the
@@ -408,9 +445,10 @@ VC_QUALITY_API core::Result<Transfer> cross_camera_transfer(
 ///        records less the capture's.
 ///
 /// Each camera's move is its centre's and its rotation's from
-/// @p solution's. A re-solve @ref solve::bundle_adjust refuses as
-/// `InvalidArgument` or `Numerical` -- a link left short of `min_shared`
-/// captures, say -- is recorded as refused, and moves nothing.
+/// @p solution's, and each re-solve's RMS is over the corners it kept. A
+/// re-solve @ref solve::bundle_adjust refuses as `InvalidArgument` or
+/// `Numerical` -- a link left short of `min_shared` captures, say -- is
+/// recorded as refused, and moves nothing.
 /// @param cameras   The rig's cameras, as the solve took them.
 /// @param board     The board seen.
 /// @param views     The observations, as the solve took them.
@@ -419,9 +457,10 @@ VC_QUALITY_API core::Result<Transfer> cross_camera_transfer(
 /// @param solution  The adjustment's solution.
 /// @param options   The adjustment's options, which each re-solve takes.
 /// @param progress  Called after each re-solve; may be empty.
-/// @return The re-solves; `InvalidArgument` when @p solution does not fit
-///         the others (naming what does not); another error of a re-solve's,
-///         such as `OutOfMemory` or OpenCV's (@ref compute::guarded); or what
+/// @return The re-solves; `InvalidArgument` for an option out of range
+///         (naming it) or a @p solution that does not fit the others (naming
+///         what does not); another error of a re-solve's, such as
+///         `OutOfMemory` or OpenCV's (@ref compute::guarded); or what
 ///         @p progress threw. Each message starts `leave_one_out: `.
 VC_QUALITY_API core::Result<LeaveOneOut> leave_one_out(
     const std::vector<solve::RigCamera>& cameras, const compute::Board& board,
@@ -434,6 +473,10 @@ VC_QUALITY_API core::Result<LeaveOneOut> leave_one_out(
 ///        @p solution, with every camera's `cx` and `cy` @p shift_px larger,
 ///        and both sides' RMS and cross-camera transfer
 ///        (@ref cross_camera_transfer).
+///
+/// A re-solve @ref solve::bundle_adjust refuses as `InvalidArgument` or
+/// `Numerical` is recorded as refused (@ref PrincipalPointAB::refused), as
+/// @ref leave_one_out records one.
 /// @param cameras   The rig's cameras, as the solve took them.
 /// @param board     The board seen.
 /// @param views     The observations, as the solve took them.
@@ -442,21 +485,24 @@ VC_QUALITY_API core::Result<LeaveOneOut> leave_one_out(
 /// @param solution  The adjustment's solution.
 /// @param options   The adjustment's options, which the re-solve takes.
 /// @param shift_px  The shift (pixels); finite, not 0.
-/// @return The test; `InvalidArgument` when @p solution does not fit the
-///         others, or for a shift out of range; or the re-solve's or the
-///         transfer's error. Each message starts `principal_point_ab: `.
+/// @return The test; `InvalidArgument` for an option or a shift out of range
+///         (naming it), or when @p solution does not fit the others; or
+///         another error of the re-solve's, or the transfer's. Each message
+///         starts `principal_point_ab: `.
 VC_QUALITY_API core::Result<PrincipalPointAB> principal_point_ab(
     const std::vector<solve::RigCamera>& cameras, const compute::Board& board,
     const std::vector<Observation>& views, const solve::InitialRig& start,
     const solve::RigSolution& solution,
-    const solve::BundleAdjustOptions& options = {}, double shift_px = 2.5);
+    const solve::BundleAdjustOptions& options = {},
+    double shift_px = kPrincipalShiftPx);
 
 /// @brief Everything a solved rig is measured by.
 ///
 /// - **Reprojection.** Over the corners @p solution kept, at @p start's
 ///   poses and at @p solution's: overall, without the oblique views, per
 ///   camera, per capture and per view, the legacy RMSE and a histogram.
-/// - **Rejections.** @p solution's, counted by round and reason.
+/// - **Rejections.** The views @p start left out, and @p solution's
+///   rejections, counted by round and reason.
 /// - **Transfer** (@ref cross_camera_transfer), **leave one out**
 ///   (@ref leave_one_out, with @p progress) and the **principal-point A/B
 ///   test** (@ref principal_point_ab), each as its function gives it.

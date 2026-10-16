@@ -559,9 +559,7 @@ core::Result<Problem> read_problem(const std::vector<RigCamera>& cameras,
           "bundle_adjust: start's record of " + what +
           " is not of its camera and capture");
     }
-    if (record.fate != ViewFate::Used && record.fate != ViewFate::Ambiguous) {
-      continue;
-    }
+    if (!adjusts(record)) continue;
     if (start_boards.count(view.frame_id) == 0) {
       return core::Status::invalid_argument(
           "bundle_adjust: start places no board for capture " +
@@ -948,8 +946,7 @@ core::Status check_bundle_adjust_options(const BundleAdjustOptions& o,
                                          std::string_view prefix) {
   return compute::guarded("check_bundle_adjust_options", [&]() -> core::Status {
     const auto refuse = [&](const char* name, const char* rule) {
-      return core::Status::invalid_argument(std::string(prefix) + name +
-                                            " must be " + rule);
+      return detail::refuse_option(prefix, name, rule);
     };
     const struct {
       const char* name;
@@ -974,6 +971,10 @@ core::Status check_bundle_adjust_options(const BundleAdjustOptions& o,
     if (o.max_captures < 1) return refuse("max_captures", "at least 1");
     return {};
   });
+}
+
+bool adjusts(const ViewRecord& record) noexcept {
+  return record.fate == ViewFate::Used || record.fate == ViewFate::Ambiguous;
 }
 
 const char* to_string(Dropped reason) noexcept {

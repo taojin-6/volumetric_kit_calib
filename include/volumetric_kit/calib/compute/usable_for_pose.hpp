@@ -65,4 +65,15 @@ VC_COMPUTE_API core::Result<ViewUse> usable_for_pose(const Board& board,
 /// @endcode
 VC_COMPUTE_API const char* describe(ViewUse use) noexcept;
 
+/// @brief The name calib's results files give @p use.
+/// @param use  @ref usable_for_pose's answer.
+/// @return `"usable"`, `"too_few_corners"`, `"unknown_corner"`,
+///         `"outside_image"` or `"collinear"`; `"unknown"` for a value
+///         @ref ViewUse does not name.
+///
+/// @code
+/// log(to_string(use));
+/// @endcode
+VC_COMPUTE_API const char* to_string(ViewUse use) noexcept;
+
 }  // namespace volumetric_kit::calib::compute

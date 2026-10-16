@@ -125,6 +125,15 @@ TEST(UsableForPose, DescribesEachAnswer) {
   EXPECT_STREQ(describe(static_cast<ViewUse>(99)), "an unknown use");
 }
 
+TEST(UsableForPose, NamesEachAnswer) {
+  EXPECT_STREQ(to_string(ViewUse::Usable), "usable");
+  EXPECT_STREQ(to_string(ViewUse::TooFewCorners), "too_few_corners");
+  EXPECT_STREQ(to_string(ViewUse::UnknownCorner), "unknown_corner");
+  EXPECT_STREQ(to_string(ViewUse::OutsideImage), "outside_image");
+  EXPECT_STREQ(to_string(ViewUse::Collinear), "collinear");
+  EXPECT_STREQ(to_string(static_cast<ViewUse>(99)), "unknown");
+}
+
 TEST(UsableForPose, RefusesAnImageOfNoArea) {
   for (const cv::Size& image : {cv::Size(0, 2160), cv::Size(3840, -1)}) {
     core::Result<ViewUse> use = ViewUse::Usable;
