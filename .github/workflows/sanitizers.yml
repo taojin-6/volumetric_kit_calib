@@ -5,31 +5,47 @@ name: sanitizers
 # not sufficient — this is what turns the move-only / lifetime tests into actual
 # leak / use-after-free / double-free detectors. It builds the rig tiers too
 # (VC_WITH_RIG), whose session writer runs a thread of its own; they take all
-# of recon, so the Vulkan SDK's headers, loader and shader compiler.
+# of recon, so the Vulkan SDK's headers, loader and shader compiler. Invoked by
+# ci.yml, which owns the push / pull_request triggers and the concurrency group.
 on:
-  pull_request:
-  push:
-    branches: [main]
-
-concurrency:
-  group: sanitizers-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
 
 jobs:
   asan-ubsan-lsan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45 # recon builds too, sanitized
     env:
       ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake clang libglm-dev libvulkan-dev glslang-tools spirv-tools
+
+      # Cache the FetchContent dependency tree, as _build.yml does. Here the
+      # dependencies are compiled with the sanitizers too (VC_SANITIZE sets its
+      # flags globally), so besides the pins the key carries everything that
+      # changes their objects, as recon's sanitizer job keys it: the compiler,
+      # the runner image, this workflow and vc_sanitizers.cmake, and the
+      # workspace path, which FetchContent bakes in. No restore-keys: a stale
+      # match would link objects built for something else.
+      - name: Dependency cache key
+        id: deps
+        run: |
+          hash() { sha256sum | cut -c1-12; }
+          ws=$(printf '%s' "${GITHUB_WORKSPACE}" | hash)
+          cc=$(clang --version | head -1 | hash)
+          echo "key=sanitizers-deps-ws${ws}-cc${cc}-img${ImageVersion:-none}" >> "${GITHUB_OUTPUT}"
+
+      - name: Cache third-party deps
+        uses: actions/cache@v6
+        with:
+          path: build/_deps
+          key: ${{ steps.deps.outputs.key }}-${{ hashFiles('third_party/CMakeLists.txt', 'CMakeLists.txt', 'cmake/vc_sanitizers.cmake', '.github/workflows/sanitizers.yml') }}
 
       - name: Configure
         run: |
@@ -38,8 +54,11 @@ jobs:
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
             -DVC_SANITIZE="address;undefined" -DVC_WITH_RIG=ON
 
+      # One job or test per core: a bare `--parallel` runs make with no job
+      # limit, and a hosted runner sets no CTEST_PARALLEL_LEVEL, so ctest would
+      # otherwise run the suite one test at a time.
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel "$(nproc)"
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --parallel "$(nproc)"

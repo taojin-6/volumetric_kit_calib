@@ -73,6 +73,29 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-16 — CI on the family's layout, macOS on the Mac
+
+calib's CI takes its siblings' layout: `ci.yml` calls `_build.yml`,
+`lint.yml` and `sanitizers.yml`, and its `required` job passes only when all
+of them did.
+
+- **macOS runs on calib's self-hosted `mac` runners**, on the Mac that runs
+  recon's and gfx's, registered by the core's
+  [runner tooling](https://github.com/taojin-6/volumetric_kit_core/blob/main/tools/runners/README.md),
+  which also sets each runner's build and test levels. Why: calib is
+  private, so GitHub bills every hosted macOS minute, at ten times the Linux
+  rate, and its four hosted macOS legs reinstalled OpenCV and ran the tests
+  one at a time on every push. Ubuntu, lint, sanitizers and `required` stay
+  hosted, at the Linux rate. `ci.yml` says how to move a Mac leg back to a
+  hosted runner.
+- **Two Mac legs, both on OpenCV:** Debug with shared libraries, and Release
+  with the rig tiers, whose GPU tests run on the Mac's GPU under the
+  validation layer. Ubuntu 24.04 and 26.04 build Release; Linux Debug is the
+  sanitizer job's.
+- **The Mac's Homebrew is shared**, so a job installs only a missing formula
+  and upgrades none; the owner installs a new one there, such as OpenCV.
+- **Protecting `main`** with the `required` check is the owner's choice.
+
 ## 2026-10-16 — Depth checks are calib's kernels
 
 The depth checks' per-pixel work -- each view's board plane, and each

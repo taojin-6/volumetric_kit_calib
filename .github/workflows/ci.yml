@@ -1,0 +1,85 @@
+name: ci
+
+# Umbrella CI. Every build leg, lint and sanitizers fan out from here, and the
+# single `required` job at the bottom succeeds only if all of them did. Branch
+# protection, where main has it, requires just that one check ("ci /
+# required"), so the required list stays stable as legs are added or renamed.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to a PR supersedes its running CI. A push to main never cancels
+# another: each merged commit keeps its own full `ci / required` result.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # Ubuntu on GitHub-hosted runners, with no OpenCV (Ubuntu's is 4) and no
+      # Vulkan installed; macOS on calib's self-hosted Mac (label `mac`), on
+      # Homebrew's OpenCV 5 (DECISIONS.md, 2026-10-16). The rig leg is static:
+      # shared libraries there would build core, recon and gfx shared too,
+      # which none of them is.
+      #
+      # While the Mac is offline its legs queue and `required` waits; set
+      # `runner: ''` on a leg to run it on a GitHub-hosted runner instead,
+      # billed at the macOS rate.
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            build_types: '["Release"]'
+          - os: ubuntu-26.04
+            build_types: '["Release"]'
+          - os: macos-26
+            runner: mac
+            build_types: '["Debug"]'
+            opencv: true
+            shared: true
+          - os: macos-26
+            runner: mac
+            build_types: '["Release"]'
+            opencv: true
+            rig: true
+    uses: ./.github/workflows/_build.yml
+    with:
+      os: ${{ matrix.os }}
+      runner: ${{ matrix.runner || '' }}
+      build_types: ${{ matrix.build_types }}
+      opencv: ${{ matrix.opencv || false }}
+      shared: ${{ matrix.shared || false }}
+      rig: ${{ matrix.rig || false }}
+
+  lint:
+    uses: ./.github/workflows/lint.yml
+
+  sanitizers:
+    uses: ./.github/workflows/sanitizers.yml
+
+  required:
+    # The one status check branch protection requires. It passes only when
+    # every build leg, lint and sanitizers succeeded, and FAILS (never skips)
+    # on any other outcome: a skipped required check never reports and would
+    # block every merge.
+    needs: [build, lint, sanitizers]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Assert every required job succeeded
+        run: |
+          echo "build=${{ needs.build.result }}" \
+               "lint=${{ needs.lint.result }}" \
+               "sanitizers=${{ needs.sanitizers.result }}"
+          if [ "${{ needs.build.result }}" = success ] \
+             && [ "${{ needs.lint.result }}" = success ] \
+             && [ "${{ needs.sanitizers.result }}" = success ]; then
+            echo "All required CI jobs passed."
+          else
+            echo "::error::one or more required CI jobs did not succeed (see results above)"
+            exit 1
+          fi
