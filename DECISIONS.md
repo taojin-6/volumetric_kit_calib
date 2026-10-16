@@ -15,9 +15,10 @@ domain model and rationale remain in the intentionally gitignored local
   params → OpenCV's `cv::LevMarq`, which ships for iOS and Android, on an ARM
   CPU in tens of ms; see the 2026-10-14 entry), so the solve runs on CPU
   everywhere; the GPU (Vulkan) is for dense per-pixel work.
-- **The physically-parameterized sensor/lens model is the spine** — the quality
-  tier is physical, not heuristic, so `SensorProfile`/`LensProfile` are required
-  inputs, not optional metadata.
+- **The physically-parameterized sensor/lens model is the spine** (amended
+  2026-10-14; see the dated entry) — `SensorProfile`/`LensProfile` are calib's
+  physical description of a camera, optional inputs until intrinsics work
+  gives them a use; the extrinsics checks and metrics are geometric.
 - **The legacy `camera_calibration` Python scripts are the reference oracle**
   (parity target), then subsumed. They are a separate checkout beside the
   `volumetric_kit/` folder: `../../camera_calibration/` from the primary
@@ -94,6 +95,41 @@ The solve refines the first rig with OpenCV's `cv::LevMarq`, not Ceres
 - **Ambiguous views are adjusted.** A capture whose views are all ambiguous
   takes its board from them in `initialise`, so the adjustment can use them
   rather than drop the capture.
+
+## 2026-10-14 — Live checks and the capture rule
+
+The `quality` tier's first part says, set by set, what each camera's view is
+worth and which set a capture takes, and sums up the captures kept
+(`quality/live_checks.hpp`, `capture_rule.hpp` and `session_checks.hpp` hold
+the thresholds).
+
+- **Why the profiles became optional.** Every check reads the detection, the
+  view's own pose (IPPE), coverage and shared captures, so the locked "spine"
+  entry is amended rather than given a use invented for v1; intrinsics work
+  is what will need them (noise-weighted corners, blur and rolling-shutter
+  gates).
+- **Stillness gates; spread and views only warn.** A press arms the rule,
+  which takes the first set with every camera's frame whose board is still
+  since the set before, or fails after a timeout naming what held the last
+  set. The whole set is saved however many cameras see the board. The
+  frames' spread mostly reflects the SDK's clock skew under the hardware
+  trigger, so it is recorded and warned of, never a gate; a set with too few
+  usable views adds nothing to the extrinsics and is warned of too. The set
+  the rule would take is refused at once when the writer is full.
+- **Live corners are flagged, not refused.** The live view's hybrid corners
+  are for display; the solver takes the capture's full-resolution ones. A
+  capture whose two disagree is flagged.
+- **Tilted views are favoured.** The rig's 5 x 3 board fixes its own rotation
+  far worse facing the camera: at 0.3 px of corner noise the worst axis's
+  1-sigma is 0.86 degrees face-on at 2 m (2.64 at 3.5 m), against 0.22 at a
+  20-degree tilt and 0.11 at 45. A view tilted under 20 degrees is frontal,
+  and a camera whose views are mostly frontal is warned, beside the duplicate
+  and floor-only warnings. Coverage counts every usable view.
+- **The session counts what the solve uses.** Shared captures, the tree
+  preview and when Calibrate may run count only the views `initialise` places
+  cameras by (`solve::view_fate`), so Calibrate is never offered on links the
+  solve then lacks. An ambiguous view, mostly a board facing the camera,
+  still counts toward coverage.
 
 ## 2026-10-13 — Sessions on disk
 

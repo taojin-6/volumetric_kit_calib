@@ -1137,8 +1137,13 @@ TEST(BundleAdjust, HonoursTheViewBounds) {
   const double median = solution.rejections[0].bound / 3.0;
   ASSERT_GT(3.0 * median, 1.0);  // the ratio's bound, not the floor
   BundleAdjustOptions options;
-  options.outlier_view_ratio = rms / median;
+  // Division then multiplication can round below rms: check ratios just
+  // above and below the boundary, beyond that rounding error.
+  options.outlier_view_ratio = (rms / median) * (1.0 + 1e-9);
   EXPECT_TRUE(solved(scene, start, options).rejections.empty());
+  options.outlier_view_ratio = (rms / median) * (1.0 - 1e-9);
+  EXPECT_EQ(rejected(solved(scene, start, options), Dropped::OutlierView),
+            std::set<Key>{Key(c, capture, -1)});
   options.outlier_view_ratio = 3.0;
   options.outlier_view_px = rms;
   EXPECT_TRUE(solved(scene, start, options).rejections.empty());

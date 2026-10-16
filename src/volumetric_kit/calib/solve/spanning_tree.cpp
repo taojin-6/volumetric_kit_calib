@@ -21,17 +21,19 @@
 namespace volumetric_kit::calib::solve {
 namespace {
 
-// Refuses a matrix that is not K x K, symmetric and non-negative.
-core::Status check_covisibility(const Covisibility& shared, std::size_t k) {
+// Refuses a matrix that is not K x K, symmetric and non-negative, each
+// message starting with `what`.
+core::Status check_covisibility(const Covisibility& shared, std::size_t k,
+                                const std::string& what) {
   if (shared.size() != k) {
     return core::Status::invalid_argument(
-        "spanning_tree: the covisibility has " + std::to_string(shared.size()) +
+        what + ": the covisibility has " + std::to_string(shared.size()) +
         " rows for " + std::to_string(k) + " cameras");
   }
   for (std::size_t a = 0; a < k; ++a) {
     if (shared[a].size() != k) {
       return core::Status::invalid_argument(
-          "spanning_tree: covisibility row " + std::to_string(a) + " has " +
+          what + ": covisibility row " + std::to_string(a) + " has " +
           std::to_string(shared[a].size()) + " counts for " +
           std::to_string(k) + " cameras");
     }
@@ -40,8 +42,8 @@ core::Status check_covisibility(const Covisibility& shared, std::size_t k) {
     for (std::size_t b = 0; b < k; ++b) {
       if (shared[a][b] < 0 || shared[a][b] != shared[b][a]) {
         return core::Status::invalid_argument(
-            "spanning_tree: the covisibility must be symmetric and "
-            "non-negative, but [" +
+            what +
+            ": the covisibility must be symmetric and non-negative, but [" +
             std::to_string(a) + "][" + std::to_string(b) + "] is " +
             std::to_string(shared[a][b]) + " and [" + std::to_string(b) + "][" +
             std::to_string(a) + "] is " + std::to_string(shared[b][a]));
@@ -49,6 +51,34 @@ core::Status check_covisibility(const Covisibility& shared, std::size_t k) {
     }
   }
   return {};
+}
+
+core::Status check_reference(std::size_t reference, std::size_t k,
+                             const std::string& what) {
+  if (reference < k) return {};
+  return core::Status::invalid_argument(
+      what + ": reference " + std::to_string(reference) +
+      " is not one of the rig's " + std::to_string(k) + " cameras");
+}
+
+// Which cameras `reference` reaches, breadth first; the inputs are checked.
+std::vector<bool> reach(const Covisibility& covisibility,
+                        std::size_t reference) {
+  const std::size_t k = covisibility.size();
+  std::vector<bool> reached(k, false);
+  reached[reference] = true;
+  std::deque<std::size_t> queue{reference};
+  while (!queue.empty()) {
+    const std::size_t a = queue.front();
+    queue.pop_front();
+    for (std::size_t b = 0; b < k; ++b) {
+      if (!reached[b] && covisibility[a][b] > 0) {
+        reached[b] = true;
+        queue.push_back(b);
+      }
+    }
+  }
+  return reached;
 }
 
 }  // namespace
@@ -82,6 +112,17 @@ core::Result<Covisibility> covisibility(
   });
 }
 
+core::Result<std::vector<bool>> reached_from(const Covisibility& covisibility,
+                                             std::size_t reference) {
+  return compute::guarded(
+      "reached_from", [&]() -> core::Result<std::vector<bool>> {
+        const std::size_t k = covisibility.size();
+        VKC_TRY(check_covisibility(covisibility, k, "reached_from"));
+        VKC_TRY(check_reference(reference, k, "reached_from"));
+        return reach(covisibility, reference);
+      });
+}
+
 core::Result<SpanningTree> spanning_tree(const Covisibility& covisibility,
                                          const std::vector<std::string>& ids,
                                          std::size_t reference,
@@ -96,12 +137,8 @@ core::Result<SpanningTree> spanning_tree(const Covisibility& covisibility,
       return core::Status::invalid_argument(
           "spanning_tree: more cameras than OpenCV's int counts");
     }
-    VKC_TRY(check_covisibility(covisibility, k));
-    if (reference >= k) {
-      return core::Status::invalid_argument(
-          "spanning_tree: reference " + std::to_string(reference) +
-          " is not one of the rig's " + std::to_string(k) + " cameras");
-    }
+    VKC_TRY(check_covisibility(covisibility, k, "spanning_tree"));
+    VKC_TRY(check_reference(reference, k, "spanning_tree"));
     if (weak_below < 0) {
       return core::Status::invalid_argument(
           "spanning_tree: weak_below must not be negative");
@@ -120,20 +157,7 @@ core::Result<SpanningTree> spanning_tree(const Covisibility& covisibility,
       }
     }
 
-    // Which cameras the reference reaches through shared captures.
-    std::vector<bool> reached(k, false);
-    reached[reference] = true;
-    std::deque<std::size_t> queue{reference};
-    while (!queue.empty()) {
-      const std::size_t a = queue.front();
-      queue.pop_front();
-      for (std::size_t b = 0; b < k; ++b) {
-        if (!reached[b] && covisibility[a][b] > 0) {
-          reached[b] = true;
-          queue.push_back(b);
-        }
-      }
-    }
+    const std::vector<bool> reached = reach(covisibility, reference);
     std::string outside;
     for (const std::size_t c : by_id) {
       if (reached[c]) continue;
@@ -192,7 +216,7 @@ core::Result<SpanningTree> spanning_tree(const Covisibility& covisibility,
     }
     std::vector<bool> placed(k, false);
     placed[reference] = true;
-    queue.assign(1, reference);
+    std::deque<std::size_t> queue{reference};
     while (!queue.empty()) {
       const std::size_t parent = queue.front();
       queue.pop_front();

@@ -15,9 +15,10 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > sensor profiles) over recon's camera model and the core's exception-free
 > `Status`/`Result` — builds and is tested (GoogleTest); so, with
 > `VC_WITH_OPENCV`, do the `compute` tier's OpenCV bridge, the `detect` tier's
-> board detection and the `solve` tier's rig solve, and, with `VC_WITH_RIG`,
-> the `capture` tier's session writer. The quality, color, viz, and app tiers
-> are not yet implemented; the legacy `camera_calibration` Python
+> board detection, the `solve` tier's rig solve and the `quality` tier's live
+> checks, and, with `VC_WITH_RIG`, the `capture` tier's session writer. The
+> metrics after a solve and the color, viz, and app tiers are not yet
+> implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain the
 > reference oracle.
 
@@ -49,10 +50,11 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
 - **Compute:** a CPU backend is the correctness oracle: OpenCV, behind
   recon's and calib's types. The `compute` tier holds the bridge -- the camera
   model and rigid transforms in OpenCV's types, the ChArUco board and whether a
-  view of it fixes a pose, and `guarded()`, which returns what OpenCV throws as
-  a `Status`. GPU work runs on the core's vulkan tier, on a `VkDevice` shared
-  with `recon` and `gfx`, so frames pass between them without copies (MoltenVK
-  on Apple; native Metal deferred).
+  view of it fixes a pose, the measures the solve and the checks share, and
+  `guarded()`, which returns what OpenCV throws as a `Status`. GPU work runs
+  on the core's vulkan tier, on a `VkDevice` shared with `recon` and `gfx`, so
+  frames pass between them without copies (MoltenVK on Apple; native Metal
+  deferred).
 - **Detection:** the `detect` tier finds the ChArUco board in an 8-bit luma
   image with OpenCV's detector, as corners by id and markers, at full
   resolution or by the live view's faster hybrid.
@@ -64,6 +66,15 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
   with a Huber loss and outlier rounds, and reports each camera's covariance
   and its sensitivity to the intrinsics, and the poses as recon's
   calibration.
+- **Quality:** before any solve, what each view and set is worth and which
+  set a capture takes. Each view's verdict, distance, tilt, fit and cell come
+  from its own pose; a capture takes the first complete set whose board is
+  still, warning of a wide frame spread or too few views; and the captures
+  kept add up to views and image coverage per camera, the captures each pair
+  of cameras shares through views the solve uses, the tree it would place
+  them by, when Calibrate may run, and warnings of repeated, floor-only and
+  mostly frontal views. All geometric
+  ([DECISIONS.md](DECISIONS.md#2026-10-14--live-checks-and-the-capture-rule)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
 
@@ -131,9 +142,9 @@ target_link_libraries(your_app PRIVATE volumetric_kit::calib_core)
 default ON only when `volumetric_kit_calib` is the top-level project, so a
 FetchContent build of it never fails on a warning your compiler adds. Set
 `VC_WITH_OPENCV` ON before calib is made available to link
-`volumetric_kit::calib_compute`, `volumetric_kit::calib_detect` and
-`volumetric_kit::calib_solve`, and `VC_WITH_RIG` ON to link
-`volumetric_kit::calib_capture`.
+`volumetric_kit::calib_compute`, `volumetric_kit::calib_detect`,
+`volumetric_kit::calib_solve` and `volumetric_kit::calib_quality`, and
+`VC_WITH_RIG` ON to link `volumetric_kit::calib_capture`.
 `VC_SANITIZE` is a semicolon list, empty (off) by default —
 e.g. `-DVC_SANITIZE="address;undefined"`. An installed calib carries the core
 and recon (its camera tier, or all of it with `VC_WITH_RIG`) beside it, and

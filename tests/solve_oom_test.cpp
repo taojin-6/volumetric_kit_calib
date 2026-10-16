@@ -9,9 +9,7 @@
 // solvePnPGeneric.
 
 #include <cstddef>
-#include <optional>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -28,41 +26,7 @@ namespace {
 
 using Code = core::Status::Code;
 
-// Fail the n-th allocation of `fn`, for n = 0, 1, ... until a run allocates
-// fewer: each run that failed one returns OutOfMemory, or what `swallowed`
-// accepts as a failure OpenCV swallowed; the first that did not returns what
-// an unhindered run does.
-template <class Fn, class Swallowed>
-void expect_oom_anywhere(const Fn& fn, const Swallowed& swallowed) {
-  const auto original = fn();
-  std::size_t oom = 0;
-  for (std::size_t after = 0; after < 100000; ++after) {
-    std::optional<std::invoke_result_t<const Fn&>> result;
-    EXPECT_NO_THROW({
-      const test::FailAllocation failure(after);
-      result.emplace(fn());
-    });
-    ASSERT_TRUE(result.has_value());
-    if (!test::allocation_failure.injected) {
-      EXPECT_GT(oom, 0u);
-      EXPECT_EQ(result->status().domain(), original.status().domain());
-      EXPECT_EQ(result->status().message(), original.status().message());
-      return;
-    }
-    if (result->status().domain() == Code::OutOfMemory) {
-      ++oom;
-    } else {
-      ASSERT_TRUE(swallowed(*result))
-          << "allocation " << after << ": " << result->status().message();
-    }
-  }
-  FAIL() << "did not finish without an injected allocation failure";
-}
-
-template <class Fn>
-void expect_oom_anywhere(const Fn& fn) {
-  expect_oom_anywhere(fn, [](const auto&) { return false; });
-}
+using test::expect_oom_anywhere;
 
 struct Small {
   compute::Board board = compute::Board::create(legacy_femto_board()).value();
@@ -167,6 +131,36 @@ TEST(SolveOom, TreeAndCovisibility) {
   const std::vector<std::vector<std::size_t>> fine = {{0, 1}, {1, 2}};
   expect_oom_anywhere([&] { return covisibility(3, twice); });
   expect_oom_anywhere([&] { return covisibility(3, fine); });
+  expect_oom_anywhere([&] { return reached_from(apart, 0); });
+  expect_oom_anywhere([&] { return reached_from(apart, 3); });
+}
+
+// Checking a rig keeps cv_camera's OutOfMemory, never recoding it.
+TEST(SolveOom, RigChecks) {
+  Small scene;
+  expect_oom_anywhere([&] { return check_rig(scene.cameras, 0); });
+  expect_oom_anywhere([&] { return check_rig(scene.cameras, 4); });
+  // Refusals, as Results (a Status has no status()).
+  const std::vector<std::string> twice = {"A", "B", "A"};
+  expect_oom_anywhere(
+      [&] { return core::Result<bool>(check_camera_ids(twice)); });
+  scene.cameras[3].model.intrinsics.fx = 0.0;
+  expect_oom_anywhere([&] { return check_rig(scene.cameras, 0); });
+  InitialiseOptions options;
+  options.min_ambiguity = 0.5;
+  expect_oom_anywhere(
+      [&] { return core::Result<bool>(check_initialise_options(options)); });
+}
+
+// A literal prefix outgrows the inline buffer on both libc++ and libstdc++.
+// Its conversion at the call site must not allocate before the error guard.
+TEST(SolveOom, InitialiseOptionsWithALongLiteralPrefix) {
+  InitialiseOptions options;
+  options.min_ambiguity = 0.5;
+  expect_oom_anywhere([&] {
+    return core::Result<bool>(check_initialise_options(
+        options, "calibration application: initialise options."));
+  });
 }
 
 }  // namespace

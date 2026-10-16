@@ -17,6 +17,7 @@
 #include "reprojection.hpp"
 #include "volumetric_kit/calib/compute/cv_pose.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
+#include "volumetric_kit/calib/compute/measures.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 
 namespace volumetric_kit::calib::solve {
@@ -183,18 +184,8 @@ core::Result<ViewPose> view_pose(const compute::CvCamera& camera,
 
 double tilt_deg(const compute::Board& board,
                 const camera::Mat4d& board_to_camera) noexcept {
-  const Target& target = board.target();
-  const double s = target.square_size_m;
-  // The chessboard's middle: OpenCV's board has one square more than corners
-  // on each axis.
-  const camera::Vec3d centre(board_to_camera *
-                             glm::dvec4(0.5 * s * (target.cols + 1),
-                                        0.5 * s * (target.rows + 1), 0.0, 1.0));
-  // The board's z points into it, away from the printed face.
-  const camera::Vec3d face = -camera::Vec3d(board_to_camera[2]);
-  const camera::Vec3d to_camera = -centre;
-  return glm::degrees(std::atan2(glm::length(glm::cross(face, to_camera)),
-                                 glm::dot(face, to_camera)));
+  return compute::angle_deg(compute::face_normal(board_to_camera),
+                            -compute::centre_in(board, board_to_camera));
 }
 
 }  // namespace volumetric_kit::calib::solve

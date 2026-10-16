@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
@@ -900,6 +901,94 @@ TEST(Initialise, RefusesOptionsOutOfRange) {
           << rig.status().message();
     }
   }
+}
+
+// The rig's ids and lenses, or what is wrong with them, named for the caller
+// to prefix; a lens cv_camera refuses keeps its domain.
+TEST(CheckRig, GivesEachCamerasIdAndLensOrSaysWhatIsWrong) {
+  const Scene scene = make_scene(10);
+  core::Result<RigLenses> rig = core::Status::invalid_argument("unset");
+  EXPECT_NO_THROW(rig = check_rig(scene.cameras, 2));
+  ASSERT_TRUE(rig.ok()) << rig.status().message();
+  ASSERT_EQ(rig->ids.size(), scene.cameras.size());
+  ASSERT_EQ(rig->lenses.size(), scene.cameras.size());
+  for (std::size_t c = 0; c < scene.cameras.size(); ++c) {
+    EXPECT_EQ(rig->ids[c], scene.cameras[c].id);
+    const compute::CvCamera lens =
+        compute::cv_camera(scene.cameras[c].model).value();
+    EXPECT_EQ(rig->lenses[c].size, lens.size);
+    EXPECT_EQ(rig->lenses[c].camera_matrix, lens.camera_matrix);
+    EXPECT_EQ(rig->lenses[c].distortion, lens.distortion);
+  }
+
+  std::vector<RigCamera> repeated = scene.cameras;
+  repeated[2].id = repeated[0].id;
+  std::vector<RigCamera> unnamed = scene.cameras;
+  unnamed[1].id.clear();
+  std::vector<RigCamera> bad_lens = scene.cameras;
+  bad_lens[3].model.intrinsics.fx = 0.0;
+  const auto refused = [](const std::vector<RigCamera>& cameras,
+                          std::size_t reference) {
+    core::Result<RigLenses> result = core::Status::invalid_argument("unset");
+    EXPECT_NO_THROW(result = check_rig(cameras, reference));
+    EXPECT_EQ(result.status().domain(), Code::InvalidArgument);
+    return result.status().message();
+  };
+  EXPECT_EQ(refused({}, 0), "the rig has no cameras");
+  EXPECT_EQ(refused(unnamed, 0), "camera 1 has no id");
+  EXPECT_EQ(refused(repeated, 0), "camera id \"SYN0\" appears twice");
+  EXPECT_EQ(refused(scene.cameras, 4),
+            "reference 4 is not one of the rig's 4 cameras");
+  const std::string lens = refused(bad_lens, 0);
+  EXPECT_EQ(lens.rfind("camera SYN3: cv_camera: ", 0), 0u) << lens;
+
+  EXPECT_TRUE(check_camera_ids({"A", "B"}).ok());
+  EXPECT_EQ(check_camera_ids({"A", "B", "A"}).message(),
+            "camera id \"A\" appears twice");
+  EXPECT_EQ(check_camera_ids({""}).message(), "camera 0 has no id");
+  EXPECT_EQ(check_camera_ids({}).message(), "the rig has no cameras");
+}
+
+// What initialise does with a posed view: a fit worse than max_pnp_rms_px
+// leaves it out, whatever its ambiguity; otherwise an ambiguity below
+// min_ambiguity keeps it from placing cameras.
+TEST(ViewFate, IsInitialisesRuleForAPosedView) {
+  const auto fate = [](double best_px, std::optional<double> alternative_px,
+                       const InitialiseOptions& options = {}) {
+    ViewPose pose;
+    pose.best.rms_px = best_px;
+    if (alternative_px) {
+      pose.alternative = PoseCandidate{camera::Mat4d(1.0), *alternative_px};
+    }
+    return view_fate(pose, options);
+  };
+  EXPECT_EQ(fate(0.3, 0.9), ViewFate::Used);
+  EXPECT_EQ(fate(0.3, 0.6), ViewFate::Used);  // at min_ambiguity, 2
+  EXPECT_EQ(fate(0.3, 0.59), ViewFate::Ambiguous);
+  EXPECT_EQ(fate(0.3, std::nullopt), ViewFate::Used);
+  EXPECT_EQ(fate(5.0, 20.0), ViewFate::Used);  // at max_pnp_rms_px
+  EXPECT_EQ(fate(5.1, 20.0), ViewFate::PoorFit);
+  EXPECT_EQ(fate(5.1, 5.2), ViewFate::PoorFit);
+  EXPECT_EQ(fate(std::numeric_limits<double>::quiet_NaN(), 1.0),
+            ViewFate::PoorFit);
+  InitialiseOptions options;
+  options.min_ambiguity = 1.5;
+  options.max_pnp_rms_px = 0.2;
+  EXPECT_EQ(fate(0.1, 0.16, options), ViewFate::Used);
+  EXPECT_EQ(fate(0.1, 0.14, options), ViewFate::Ambiguous);
+  EXPECT_EQ(fate(0.3, 0.9, options), ViewFate::PoorFit);
+}
+
+// The options initialise refuses, each message the prefix and its name.
+TEST(CheckInitialiseOptions, NamesTheOptionAfterThePrefix) {
+  EXPECT_TRUE(check_initialise_options({}).ok());
+  InitialiseOptions options;
+  options.min_ambiguity = 0.5;
+  EXPECT_EQ(check_initialise_options(options).message(),
+            "initialise: options.min_ambiguity must be at least 1 and finite");
+  EXPECT_EQ(check_initialise_options(options, "app: solve.").message(),
+            "app: solve.min_ambiguity must be at least 1 and finite");
+  EXPECT_EQ(check_initialise_options(options).domain(), Code::InvalidArgument);
 }
 
 }  // namespace

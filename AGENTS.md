@@ -14,7 +14,9 @@ The implemented core and planned tiers are distinguished in
 - Use `volumetric_kit_gfx` for rendering and UI; keep the headless brain free
   of that dependency.
 - Mobile is first-class and fully on-device; the board-constrained solve runs
-  on CPU. `SensorProfile` and `LensProfile` are required physical inputs.
+  on CPU. `SensorProfile` and `LensProfile` are optional until intrinsics work
+  uses them; the extrinsics checks are geometric
+  ([DECISIONS.md](DECISIONS.md#2026-10-14--live-checks-and-the-capture-rule)).
 - calib builds on [`volumetric_kit_core`](https://github.com/taojin-6/volumetric_kit_core)
   (fetched, pinned by commit). Code two or more siblings need belongs in the
   core, as a task in that repository; cameras and sensors do not

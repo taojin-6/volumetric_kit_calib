@@ -5,7 +5,8 @@
 
 /// @file initialise.hpp
 /// @brief The first rig: every camera and every board placed from the
-///        views alone, the bundle adjustment's starting point.
+///        views alone, the bundle adjustment's starting point; and its rules
+///        for the rig and the views, which the session's checks share.
 ///
 /// The solver's state, which the adjustment refines:
 /// - `world_to_camera` (T_cw) for each colour camera, OpenCV's extrinsic;
@@ -18,13 +19,16 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "volumetric_kit/calib/compute/board.hpp"
+#include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 #include "volumetric_kit/calib/core/observation.hpp"
 #include "volumetric_kit/calib/solve/export.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
+#include "volumetric_kit/calib/solve/view_pose.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/recon/camera/camera_model.hpp"
 #include "volumetric_kit/recon/camera/geometry.hpp"
@@ -44,6 +48,46 @@ struct RigCamera {
   /// The lens, at the size of the images its views were detected in.
   recon::camera::CameraModel model;
 };
+
+/// @brief Refuse a rig's camera ids that are none, empty or repeated.
+/// @param ids  Each camera's id, in the rig's order.
+/// @return OK; or `InvalidArgument` for the first fault, e.g. `the rig has no
+///         cameras`, `camera 2 has no id` or `camera id "A" appears twice`
+///         (a caller adds its name with `with_context`); or `OutOfMemory`.
+///
+/// @code
+/// VKC_TRY(check_camera_ids(serials).with_context("CaptureRule"));
+/// @endcode
+VC_SOLVE_API core::Status check_camera_ids(const std::vector<std::string>& ids);
+
+/// @brief A rig's cameras as the solve takes them: each one's id and lens,
+///        in the rig's order.
+///
+/// @code
+/// VKC_ASSIGN(const RigLenses rig, check_rig(cameras, primary));
+/// const compute::CvCamera& lens = rig.lenses[c];  // camera c, rig.ids[c]
+/// @endcode
+struct RigLenses {
+  std::vector<std::string> ids;           ///< Each camera's id.
+  std::vector<compute::CvCamera> lenses;  ///< Each camera's lens.
+};
+
+/// @brief Check a rig and its reference, and put each lens in OpenCV's
+///        types.
+/// @param cameras    The rig's cameras.
+/// @param reference  The camera the world is, by index in @p cameras.
+/// @return The ids and lenses; `InvalidArgument` for ids
+///         @ref check_camera_ids refuses, a reference outside the rig, or a
+///         camera model @ref compute::cv_camera refuses (`camera ID: ` and its
+///         message), a caller adding its name with `with_context`; or
+///         `OutOfMemory`.
+///
+/// @code
+/// core::Result<RigLenses> rig = check_rig(cameras, primary);
+/// if (!rig.ok()) return rig.status().with_context("SessionChecks");
+/// @endcode
+VC_SOLVE_API core::Result<RigLenses> check_rig(
+    const std::vector<RigCamera>& cameras, std::size_t reference);
 
 /// @brief The thresholds @ref initialise applies.
 ///
@@ -165,8 +209,8 @@ struct InitialRig {
 ///
 /// 1. **Views.** A view is used when it is usable
 ///    (@ref compute::usable_for_pose), has a pose, fits it within
-///    `max_pnp_rms_px`, and is not ambiguous (`min_ambiguity`); its tilt is
-///    flagged above `oblique_deg`.
+///    `max_pnp_rms_px`, and is not ambiguous (`min_ambiguity`), as
+///    @ref view_fate says; its tilt is flagged above `oblique_deg`.
 /// 2. **Tree.** @ref spanning_tree of the used views' @ref covisibility.
 /// 3. **Cameras.** Each link's camera is placed from its parent, from the
 ///    reference outwards. Each capture both use gives a relative pose
@@ -203,5 +247,34 @@ VC_SOLVE_API core::Result<InitialRig> initialise(
     const std::vector<RigCamera>& cameras, const compute::Board& board,
     const std::vector<Observation>& views, std::size_t reference,
     const InitialiseOptions& options = {});
+
+/// @brief Refuse options @ref initialise cannot take.
+/// @param options  The options.
+/// @param prefix   What each message starts with, before the option's name.
+/// @return OK; `InvalidArgument` naming the first option out of range and
+///         its range; or `OutOfMemory`.
+///
+/// @code
+/// VKC_TRY(check_initialise_options(options.solve, "app: options.solve."));
+/// @endcode
+VC_SOLVE_API core::Status check_initialise_options(
+    const InitialiseOptions& options,
+    std::string_view prefix = "initialise: options.");
+
+/// @brief What @ref initialise does with a view it has poses for: step 1's
+///        rule, which the session's checks share.
+/// @param pose     The view's poses (@ref view_pose).
+/// @param options  The thresholds; @ref check_initialise_options accepts
+///                 them.
+/// @return `PoorFit` when its best pose fits worse than `max_pnp_rms_px`;
+///         else `Ambiguous` when its @ref ViewPose::ambiguity is below
+///         `min_ambiguity`; else `Used`.
+///
+/// @code
+/// VKC_ASSIGN(const ViewPose pose, view_pose(cam, board, view));
+/// if (view_fate(pose, options) == ViewFate::Ambiguous) hint("tilt the board");
+/// @endcode
+VC_SOLVE_API ViewFate view_fate(const ViewPose& pose,
+                                const InitialiseOptions& options) noexcept;
 
 }  // namespace volumetric_kit::calib::solve

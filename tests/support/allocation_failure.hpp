@@ -60,4 +60,40 @@ void expect_oom_when_reporting(const Fn& fn, core::Status::Code expected) {
   FAIL() << "did not reach a refusal without an injected allocation failure";
 }
 
+// Fail the n-th allocation of `fn`, for n = 0, 1, ... until a run allocates
+// fewer: each run that failed one returns OutOfMemory, or what `swallowed`
+// accepts as a failure OpenCV swallowed; the first that did not returns what
+// an unhindered run does.
+template <class Fn, class Swallowed>
+void expect_oom_anywhere(const Fn& fn, const Swallowed& swallowed) {
+  const auto original = fn();
+  std::size_t oom = 0;
+  for (std::size_t after = 0; after < 100000; ++after) {
+    std::optional<std::invoke_result_t<const Fn&>> result;
+    EXPECT_NO_THROW({
+      const FailAllocation failure(after);
+      result.emplace(fn());
+    });
+    ASSERT_TRUE(result.has_value());
+    if (!allocation_failure.injected) {
+      EXPECT_GT(oom, 0u);
+      EXPECT_EQ(result->status().domain(), original.status().domain());
+      EXPECT_EQ(result->status().message(), original.status().message());
+      return;
+    }
+    if (result->status().domain() == core::Status::Code::OutOfMemory) {
+      ++oom;
+    } else {
+      ASSERT_TRUE(swallowed(*result))
+          << "allocation " << after << ": " << result->status().message();
+    }
+  }
+  FAIL() << "did not finish without an injected allocation failure";
+}
+
+template <class Fn>
+void expect_oom_anywhere(const Fn& fn) {
+  expect_oom_anywhere(fn, [](const auto&) { return false; });
+}
+
 }  // namespace volumetric_kit::calib::test
