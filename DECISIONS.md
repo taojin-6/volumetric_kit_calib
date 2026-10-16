@@ -109,6 +109,30 @@ definitions and the schemas).
   allocate and so terminate when memory runs out. The capture tier's session
   files are still to be moved onto it (a `TODO:` in `session_files.cpp`).
 
+## 2026-10-16 — The live view on gfx
+
+The `viz` tier draws the live view (`viz/tiles.hpp`, `overlay.hpp`,
+`panels.hpp` and `board_editor.hpp`).
+
+- **Pictures stay on the device.** A tile takes recon's decoded NV12 images
+  as they are; gfx's image pipeline copies and converts them on the GPU, so
+  no picture reaches the host to be shown. Only control data -- corners,
+  checks, counters -- goes from the host to the screen. Planes in a buffer
+  and I420, as Linux's decoders leave them, are refused until gfx maps them.
+- **Marks in the detector's pixels.** Corners keep OpenCV's integer pixel
+  centres, and gfx's `ImageOverlay` is the one home of the half-pixel and
+  framebuffer-scale mapping onto a tile's view.
+- **Models, then ImGui.** The marks and the panels are plain models built from
+  host data, so they are tested without a device; drawing them is a thin pass
+  through gfx. Their tones follow the quality tier's options, so the panels
+  judge as the checks and the capture rule do.
+- **The board locks at the first capture.** Every capture's detections, and
+  the solve, rest on it.
+- **How it builds.** gfx is fetched, pinned by commit, when `VC_WITH_RIG` and
+  `VC_WITH_OPENCV` are both on, since `viz` draws the quality tier's checks.
+  `calib_viz` is build-tree only, as gfx's ui tier is, until gfx installs the
+  ImGui headers. gfx main builds against calib's core pin, which is unchanged.
+
 ## 2026-10-14 — The bundle adjustment on `cv::LevMarq`
 
 The solve refines the first rig with OpenCV's `cv::LevMarq`, not Ceres

@@ -17,8 +17,10 @@ endif()
 if(VC_WITH_RIG)
   add_subdirectory(volumetric_kit/calib/capture)
 endif()
-# TODO: add_subdirectory() for color / viz / app as those tiers land (see
-# DESIGN.md). viz/app need volumetric_kit_gfx.
+if(VC_WITH_VIZ)
+  add_subdirectory(volumetric_kit/calib/viz)
+endif()
+# TODO: add_subdirectory() for color / app as those tiers land (see DESIGN.md).
 
 # --- calib: umbrella alias ---------------------------------------------------
 # Consumers link `volumetric_kit::calib` and get whatever tiers are built.
@@ -31,6 +33,11 @@ if(VC_WITH_OPENCV)
 endif()
 if(VC_WITH_RIG)
   target_link_libraries(calib INTERFACE calib_capture)
+endif()
+# calib_viz is build-tree only (viz/CMakeLists.txt), so it joins the umbrella
+# for in-tree consumers without entering the installed export set.
+if(VC_WITH_VIZ)
+  target_link_libraries(calib INTERFACE $<BUILD_INTERFACE:calib_viz>)
 endif()
 
 # --- Install / export --------------------------------------------------------
@@ -50,6 +57,8 @@ if(VC_INSTALL)
   if(NOT VC_WITH_RIG)
     list(APPEND _vc_unbuilt_headers PATTERN "capture" EXCLUDE)
   endif()
+  # viz is never installed (viz/CMakeLists.txt).
+  list(APPEND _vc_unbuilt_headers PATTERN "viz" EXCLUDE)
   install(
     DIRECTORY "${PROJECT_SOURCE_DIR}/include/"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"

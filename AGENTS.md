@@ -25,7 +25,7 @@ The implemented core and planned tiers are distinguished in
 - Cameras are `volumetric_kit_recon`'s camera tier (`CameraModel`, rigid
   transforms), fetched alone (`VR_CAMERA_ONLY`) so the brain needs no Vulkan;
   calib keeps no camera model of its own. `VC_WITH_RIG` fetches all of recon
-  for the `capture` tier.
+  for the `capture` tier, and, with `VC_WITH_OPENCV`, gfx for the `viz` tier.
 - GPU work runs on the core's vulkan tier, on a `VkDevice` shared with `recon`
   and `gfx` ([DECISIONS.md](DECISIONS.md#locked-decisions)); calib keeps no
   GPU backend of its own. A CPU backend is the correctness oracle.
@@ -121,9 +121,10 @@ MSVC flags.
 ## Build and validation
 
 Run from the task's worktree. The build requires CMake ≥ 3.21, a C++17
-compiler, GLM, and network access on the first configure (the core, recon and
-googletest are fetched); `VC_WITH_OPENCV` needs an installed OpenCV 5, and
-`VC_WITH_RIG` the Vulkan SDK. See README and CI for platform dependencies.
+compiler, GLM, and network access on the first configure (the core, recon,
+gfx with `viz`, and googletest are fetched); `VC_WITH_OPENCV` needs an
+installed OpenCV 5, and `VC_WITH_RIG` the Vulkan SDK. See README and CI for
+platform dependencies.
 
 ```sh
 calib_root="$(git rev-parse --show-toplevel)"
@@ -142,7 +143,10 @@ git -C "$calib_root" diff --check
   contracts or the change's scope warrant it.
 - Documentation-only changes need formatting, link, and consistency checks;
   no build is needed. Hooks can be scoped with `pre-commit run --files`.
-- Core tests are CPU-only.
+- Core tests are CPU-only. The `viz` tier's GPU tests use the core's Vulkan
+  fixtures, which skip without a device; run them under the validation layer
+  with `VKC_TEST_VALIDATION=1` (on macOS, with
+  `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib` so the layer loads).
 
 ## Keeping guidance current
 

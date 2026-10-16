@@ -33,6 +33,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `to_string` of `solve::Dropped`, `solve::ViewFate` and `compute::ViewUse`,
   the names the report gives them.
 - `compute::quantile`, numpy's linear percentile.
+- The `viz` tier, `volumetric_kit::calib_viz`, built with `VC_WITH_RIG` and
+  `VC_WITH_OPENCV`, build-tree only (DECISIONS.md, 2026-10-16): `Tiles` draws
+  each camera's decoded NV12 picture in place from the device (`tile_update`
+  maps recon's `YuvImage` to gfx's update) in a grid (`tile_grid`,
+  `tile_rect`), each panned and zoomed by its own `ImageView2D`;
+  `tile_marks` and `draw_tile_marks` mark the corners, markers, ids, verdict
+  and coverage over a tile through gfx's `ImageOverlay`; `camera_panel`,
+  `set_panel`, `session_panel`, `capture_panel` and `stage_frame_metrics`
+  build the live panels, drawn by `draw_panel_lines` and
+  `draw_session_panel`, in `Tone`s that follow the quality tier's options;
+  `BoardEditor` and `draw_board_editor` edit the board until the first
+  capture locks it. `VC_WITH_RIG` with `VC_WITH_OPENCV` fetches
+  `volumetric_kit_gfx`, pinned at `bc887a4` (main after its #135).
+- `marker_count`, the markers a board carries, in `calib/core/target.hpp`.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds
   and guards, and a `RigSolution` holding the poses, recon's

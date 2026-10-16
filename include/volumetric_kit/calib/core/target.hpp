@@ -12,6 +12,7 @@
 /// tolerance scale every metric extrinsic, and board non-planarity (bow) leaks
 /// straight into the intrinsics (see DESIGN.md "Target fidelity").
 
+#include <cstdint>
 #include <optional>
 
 #include "volumetric_kit/calib/core/export.hpp"
@@ -125,6 +126,17 @@ struct Target {
 /// @param target  The board.
 /// @return OK; or `Status::Code::InvalidArgument` naming the field.
 VC_CORE_API core::Status check_target(const Target& target);
+
+/// @brief How many markers a board carries: a ChArUco board one in every
+///        other square, from the second, and an AprilGrid one per feature.
+/// @param target  The board, as @ref check_target accepts it.
+/// @return Its markers (7 for @ref legacy_femto_board); 0 for a pattern
+///         without markers or a value that is not a @ref TargetKind.
+///
+/// @code
+/// const auto markers = marker_count(legacy_femto_board());  // 7
+/// @endcode
+VC_CORE_API std::int64_t marker_count(const Target& target) noexcept;
 
 /// @brief The name calib's files write for a board's pattern.
 /// @param kind  The pattern.

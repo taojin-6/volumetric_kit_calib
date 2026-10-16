@@ -69,15 +69,6 @@ std::optional<bool> carries_markers(TargetKind kind) {
   return std::nullopt;
 }
 
-// How many markers the board carries: a ChArUco board one in every other
-// square, starting from the second, and an AprilGrid one per feature.
-std::int64_t marker_count(const Target& t) {
-  if (t.kind == TargetKind::ChArUco) {
-    return (std::int64_t{t.rows} + 1) * (std::int64_t{t.cols} + 1) / 2;
-  }
-  return std::int64_t{t.rows} * t.cols;
-}
-
 core::Status invalid(const std::string& field, const std::string& what) {
   return core::Status::invalid_argument("target." + field + " " + what);
 }
@@ -140,6 +131,23 @@ core::Status check_target(const Target& target) {
                                           std::to_string(codes) + " codes");
   }
   return {};
+}
+
+std::int64_t marker_count(const Target& target) noexcept {
+  switch (target.kind) {
+    case TargetKind::ChArUco:
+      // One in every other square, from the second.
+      return (std::int64_t{target.rows} + 1) * (std::int64_t{target.cols} + 1) /
+             2;
+    case TargetKind::AprilGrid:
+      return std::int64_t{target.rows} * target.cols;
+    case TargetKind::Checkerboard:
+    case TargetKind::SymmetricCircleGrid:
+    case TargetKind::AsymmetricCircleGrid:
+    case TargetKind::Screen:
+      return 0;
+  }
+  return 0;
 }
 
 const char* to_string(TargetKind kind) noexcept {
