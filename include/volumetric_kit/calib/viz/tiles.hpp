@@ -60,7 +60,7 @@ struct TileGrid {
 /// @param count  The tiles.
 /// @return The smallest square grid that holds them, less its last row when
 ///         one fewer suffices: 1 x 1 for 1, 2 x 1 for 2, 2 x 2 for 3 and 4,
-///         3 x 2 for 5 and 6; 0 x 0 for none.
+///         3 x 2 for 5 and 6; 0 x 0 for none, or for more than `INT_MAX`.
 ///
 /// @code
 /// const TileGrid grid = tile_grid(cameras.size());
@@ -78,7 +78,8 @@ VC_VIZ_API TileGrid tile_grid(std::size_t count) noexcept;
 /// @param gap    Pixels between neighbouring tiles; negative or not finite
 ///               counts as 0.
 /// @return The tile's rectangle; an empty one at @p area's origin for an
-///         index past the last, or an area that is empty or not finite.
+///         index past the last, a count @ref tile_grid lays out in no grid,
+///         or an area that is empty or not finite.
 ///
 /// @code
 /// const TileRect rect = tile_rect(area, 4, 3, 4.0f);  // the bottom right
@@ -153,6 +154,8 @@ class VC_VIZ_API Tiles {
       const gfx::RenderTargetLayout& layout,
       const std::vector<recon::camera::ImageSize>& pictures);
 
+  /// @brief Destroy the textures and the pipeline.
+  /// @pre The GPU is done with every frame that updated or drew the tiles.
   ~Tiles();
   Tiles(const Tiles&) = delete;
   Tiles& operator=(const Tiles&) = delete;
@@ -197,7 +200,8 @@ class VC_VIZ_API Tiles {
   core::Status record_update(VkCommandBuffer cmd, std::size_t index,
                              const recon::sensor::YuvImage& picture);
 
-  /// @brief Record every tile with a picture into its rectangle.
+  /// @brief Record every tile with a picture into its rectangle, held inside
+  ///        the target.
   /// @param cmd      A command buffer in the recording state, inside a
   ///                 rendering scope of a target of the layout @ref create
   ///                 took.

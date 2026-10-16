@@ -17,7 +17,7 @@ endif()
 if(VC_WITH_RIG)
   add_subdirectory(volumetric_kit/calib/capture)
 endif()
-if(VC_WITH_VIZ)
+if(_vc_build_viz)
   add_subdirectory(volumetric_kit/calib/viz)
 endif()
 # TODO: add_subdirectory() for color / app as those tiers land (see DESIGN.md).
@@ -36,7 +36,7 @@ if(VC_WITH_RIG)
 endif()
 # calib_viz is build-tree only (viz/CMakeLists.txt), so it joins the umbrella
 # for in-tree consumers without entering the installed export set.
-if(VC_WITH_VIZ)
+if(_vc_build_viz)
   target_link_libraries(calib INTERFACE $<BUILD_INTERFACE:calib_viz>)
 endif()
 

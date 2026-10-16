@@ -112,10 +112,11 @@ default) builds `capture`, over all of recon, which needs the Vulkan SDK and
 a GLSL compiler: the core's vulkan tier
 [prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
 With both, it builds `viz` too, which fetches `volumetric_kit_gfx` (pinned by
-commit). To build against a local core or recon checkout instead of the
-pinned one, pass
-`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>` or
-`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>`.
+commit). To build against a local core, recon or gfx checkout instead of
+the pinned one, pass
+`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>`,
+`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>` or
+`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_GFX=<path>`.
 
 ## Build and test
 

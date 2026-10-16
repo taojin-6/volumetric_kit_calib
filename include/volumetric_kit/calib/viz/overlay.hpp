@@ -57,6 +57,10 @@ struct OverlayStyle {
 };
 
 /// @brief A dot centred on a pixel.
+///
+/// @code
+/// marks.points.push_back({{812.0f, 390.5f}, IM_COL32(0, 255, 0, 255), 3.0f});
+/// @endcode
 struct MarkPoint {
   glm::vec2 at{0.0f, 0.0f};  ///< The pixel (OpenCV's).
   ImU32 color = 0;           ///< Its colour.
@@ -64,6 +68,13 @@ struct MarkPoint {
 };
 
 /// @brief A closed outline through four pixels: a marker's.
+///
+/// @code
+/// MarkOutline outline;
+/// outline.corners = {{{700, 300}, {780, 300}, {780, 380}, {700, 380}}};
+/// outline.color = IM_COL32(255, 220, 0, 255);
+/// outline.thickness = 1.5f;
+/// @endcode
 struct MarkOutline {
   std::array<glm::vec2, 4> corners{};  ///< The pixels, in order.
   ImU32 color = 0;                     ///< Its colour.
@@ -71,6 +82,10 @@ struct MarkOutline {
 };
 
 /// @brief Text by a pixel.
+///
+/// @code
+/// marks.labels.push_back({{812.0f, 390.5f}, "0", IM_COL32_WHITE});
+/// @endcode
 struct MarkLabel {
   glm::vec2 at{0.0f, 0.0f};      ///< The anchor pixel.
   std::string text;              ///< The text.
@@ -80,7 +95,7 @@ struct MarkLabel {
 };
 
 /// @brief The marks over one tile, in OpenCV's pixels, drawn in this order:
-///        the grid, the outlines, the dots, then the labels.
+///        the grid, the outlines, the dots, the labels, then the title.
 ///
 /// @code
 /// VKC_ASSIGN(const TileMarks marks, tile_marks(tile));
@@ -94,9 +109,10 @@ struct TileMarks {
   ImU32 grid_line = 0;                ///< Its borders' colour.
   std::vector<MarkOutline> outlines;  ///< The markers'.
   std::vector<MarkPoint> points;      ///< The corners'.
-  /// The camera's title at the image's top-left corner, then the corners'
-  /// ids.
-  std::vector<MarkLabel> labels;
+  std::vector<MarkLabel> labels;      ///< The corners' ids.
+  /// The camera's title, at the image's top-left corner and held inside the
+  /// tile however its view pans and zooms; empty text for none.
+  MarkLabel title;
 };
 
 /// @brief What one tile shows, from the live view's host data.
@@ -139,8 +155,9 @@ VC_VIZ_API ImU32 coverage_fill(int corners, const OverlayStyle& style) noexcept;
 /// - **Outlines.** Each marker found, when `style.markers`.
 /// - **Dots.** Each corner found, in its view's @ref verdict_tone: green for a
 ///   usable view, amber or red for a flagged one, grey for one with no pose.
-/// - **Labels.** The title, `"<id>: <verdict>"` in the same tone, at the
-///   image's top-left corner; then each corner's id, when `style.corner_ids`.
+/// - **Labels.** Each corner's id, when `style.corner_ids`.
+/// - **Title.** `"<id>: <verdict>"` in the corners' tone, at the image's
+///   top-left corner, when the tile has an id.
 /// @param tile        What the tile shows.
 /// @param thresholds  The session's thresholds (@ref verdict_tone).
 /// @param style       How the marks look.
@@ -155,7 +172,9 @@ VC_VIZ_API core::Result<TileMarks> tile_marks(
 
 /// @brief Draw @p marks over the tile @p view shows, in @ref TileMarks'
 ///        order, through gfx's `ImageOverlay` with OpenCV's pixel centres
-///        (`gfx::ui::PixelCenters::Integer`).
+///        (`gfx::ui::PixelCenters::Integer`). The title stays at the image's
+///        top-left corner until the view pans or zooms past it, then at the
+///        tile's.
 /// @param view       The tile's view (`Tiles::view`).
 /// @param marks      The marks.
 /// @param draw_list  The ImGui list to draw into; null for the background

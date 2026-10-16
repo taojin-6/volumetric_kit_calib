@@ -43,10 +43,9 @@ domain model and rationale remain in the intentionally gitignored local
   on the same device -- a calib device of its own would copy every frame
   through the host -- and the family keeps one Vulkan core, not three. CUDA is
   added per kernel only where profiling shows a need, in the core; native Metal
-  stays deferred. A CPU backend remains the correctness oracle. The core's
-  vulkan tier has landed, and calib's pin carries it; calib's build leaves it
-  off (`VKC_WITH_VULKAN`), and so needs no Vulkan SDK, until calib writes GPU
-  code.
+  stays deferred. A CPU backend remains the correctness oracle. calib turns
+  the core's vulkan tier on (`VKC_WITH_VULKAN`) only for the rig tiers
+  (`VC_WITH_RIG`), so the brain needs no Vulkan SDK.
 - **The camera model is recon's; capture drivers come from
   `volumetric_kit_recon`'s sensor tier** (2026-10-08, amended 2026-10-12; see
   the dated entry). calib's cameras are recon's `camera::CameraModel`, from its
@@ -118,7 +117,8 @@ The `viz` tier draws the live view (`viz/tiles.hpp`, `overlay.hpp`,
   as they are; gfx's image pipeline copies and converts them on the GPU, so
   no picture reaches the host to be shown. Only control data -- corners,
   checks, counters -- goes from the host to the screen. Planes in a buffer
-  and I420, as Linux's decoders leave them, are refused until gfx maps them.
+  and I420, as Linux's decoders leave them, are refused until the tile takes
+  over their queue family's ownership (and gfx maps I420).
 - **Marks in the detector's pixels.** Corners keep OpenCV's integer pixel
   centres, and gfx's `ImageOverlay` is the one home of the half-pixel and
   framebuffer-scale mapping onto a tile's view.
@@ -130,8 +130,11 @@ The `viz` tier draws the live view (`viz/tiles.hpp`, `overlay.hpp`,
   the solve, rest on it.
 - **How it builds.** gfx is fetched, pinned by commit, when `VC_WITH_RIG` and
   `VC_WITH_OPENCV` are both on, since `viz` draws the quality tier's checks.
-  `calib_viz` is build-tree only, as gfx's ui tier is, until gfx installs the
-  ImGui headers. gfx main builds against calib's core pin, which is unchanged.
+  gfx's core pin must be an ancestor of calib's, the one every sibling
+  compiles against. `viz` also links recon's sensor array tier, whose frame
+  sets, counters and decoded pictures its panels and tiles take. `calib_viz`
+  is build-tree only, as gfx's ui tier is, until gfx installs the ImGui
+  headers.
 
 ## 2026-10-14 — The bundle adjustment on `cv::LevMarq`
 

@@ -101,7 +101,7 @@ if(VC_WITH_RIG)
   target_sources(vc_capture_oom_test PRIVATE support/allocation_failure.cpp)
 endif()
 
-if(VC_WITH_VIZ)
+if(_vc_build_viz)
   # viz: the tiles' layout, the marks, the panels and the board editor from host
   # data; the offscreen render of tiles and marks on a device, through the
   # core's Vulkan test fixtures (they skip without one).

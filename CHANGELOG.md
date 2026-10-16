@@ -43,9 +43,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `set_panel`, `session_panel`, `capture_panel` and `stage_frame_metrics`
   build the live panels, drawn by `draw_panel_lines` and
   `draw_session_panel`, in `Tone`s that follow the quality tier's options;
-  `BoardEditor` and `draw_board_editor` edit the board until the first
-  capture locks it. `VC_WITH_RIG` with `VC_WITH_OPENCV` fetches
-  `volumetric_kit_gfx`, pinned at `bc887a4` (main after its #135).
+  `BoardEditor` and `draw_board_editor` (its fields through `board_fields`
+  and `apply_fields`) edit the board, checked as the detector's `Board`
+  takes it, until the first capture locks it. `VC_WITH_RIG` with
+  `VC_WITH_OPENCV` fetches `volumetric_kit_gfx`, pinned at `bc887a4` (main
+  after its #135).
 - `marker_count`, the markers a board carries, in `calib/core/target.hpp`.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds

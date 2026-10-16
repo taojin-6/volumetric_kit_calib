@@ -45,7 +45,7 @@ if(VC_WITH_RIG)
   set(VKC_WITH_VULKAN ON)
 endif()
 # The viz tier's GPU tests derive from the core's Vulkan test fixtures.
-if(VC_WITH_VIZ AND VC_BUILD_TESTS)
+if(_vc_build_viz AND VC_BUILD_TESTS)
   set(VKC_BUILD_TEST_SUPPORT ON)
 endif()
 FetchContent_Declare(
@@ -103,7 +103,7 @@ endif()
 # its ui tier is build-tree only, so calib_viz is too (src/CMakeLists.txt).
 #
 # The pin is gfx main after its #135, whose core pin calib's includes.
-if(VC_WITH_VIZ)
+if(_vc_build_viz)
   FetchContent_Declare(
     volumetric_kit_gfx
     GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_gfx.git

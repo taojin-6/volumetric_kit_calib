@@ -18,7 +18,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include "volumetric_kit/calib/core/capture_meta.hpp"
@@ -68,7 +67,6 @@ struct PanelOptions {
 ///
 /// @code
 /// CameraLive camera;
-/// camera.id = serials[i];
 /// camera.present = set.frames[i].has_value();
 /// camera.check = views[i].check;           // quality::check_view's
 /// camera.stillness_px = shift.cameras[i];  // quality::corner_shift's
@@ -76,7 +74,6 @@ struct PanelOptions {
 /// camera.lost = orbbec_stats.lost;         // where the driver counts it
 /// @endcode
 struct CameraLive {
-  std::string_view id;   ///< The camera's id.
   bool present = false;  ///< The set has its frame.
   ViewCheck check;       ///< Its view's live check.
   /// How far its corners moved since the set before (pixels); empty when no
@@ -93,9 +90,9 @@ struct CameraLive {
 /// found of the board's; `distance`, `tilt` (amber above
 /// `session.view.oblique_deg`, red above `session.solve.oblique_deg`) and
 /// `fit` from the view's own pose; `cell`, where the board's centre is in a
-/// 3 x 3 grid; `stillness` (green below `rule.still_px`); `views` captured,
-/// usable and used by the solve; `coverage` filled; and `frames`, amber once
-/// any failed or was lost.
+/// 3 x 3 grid; `stillness` (green below `rule.still_px`); `views` usable and
+/// used by the solve; `coverage` filled; and `frames`, amber once any failed
+/// or was lost.
 /// @param camera   The camera in the latest set.
 /// @param session  Its part of the session.
 /// @param board    The board, for its corners and markers.
@@ -113,11 +110,19 @@ VC_VIZ_API core::Result<std::vector<PanelLine>> camera_panel(
 /// @brief How full the session writer is.
 ///
 /// @code
-/// const SaverQueue saver{writer->pending(), writer_options.queue_capacity};
+/// const std::size_t pending = writer->pending();
+/// const bool full = pending >= writer_options.queue_capacity;
+/// live_set.saver_full = full;  // the capture rule judges the same
+/// const SaverQueue saver{pending, writer_options.queue_capacity, full};
 /// @endcode
 struct SaverQueue {
   std::size_t pending = 0;   ///< Captures queued or being written.
   std::size_t capacity = 0;  ///< The most it holds.
+  // TODO: the writer's own full() once the capture tier gives SessionWriter
+  // one (quality::LiveSet::saver_full's TODO).
+  /// It holds as many as it may: what the caller gives the capture rule as
+  /// @ref quality::LiveSet::saver_full.
+  bool full = false;
 };
 
 /// @brief The latest set's panel.
@@ -125,7 +130,7 @@ struct SaverQueue {
 /// Lines, in order: `set`, the frames it holds (amber when incomplete);
 /// `spread` (amber above `rule.spread_warn_ms`); `skew <id>` for each camera,
 /// its frame's time less the trigger's; `sets`, the array's counters; and
-/// `saver`, the writer's queue (amber when full).
+/// `saver`, the writer's queue (amber when `saver.full`).
 /// @param set      The latest set; one with no frames before the first.
 /// @param stats    The array's counters.
 /// @param ids      Each camera's id, in the set's order.

@@ -171,11 +171,10 @@ core::Result<std::vector<PanelLine>> set_panel(
                              " incomplete, " + std::to_string(stats.unmatched) +
                              " unmatched)",
                          Tone::Normal});
-        const bool full = saver.capacity > 0 && saver.pending >= saver.capacity;
         lines.push_back({"saver",
                          std::to_string(saver.pending) + "/" +
                              std::to_string(saver.capacity) + " queued",
-                         full ? Tone::Warn : Tone::Normal});
+                         saver.full ? Tone::Warn : Tone::Normal});
         return lines;
       });
 }

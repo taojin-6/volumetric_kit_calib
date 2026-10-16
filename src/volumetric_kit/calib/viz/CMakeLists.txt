@@ -5,8 +5,8 @@
 # The live view: each camera's decoded picture drawn in place from the device as
 # a tile, the marks over it, the panels and the board editor, on gfx's image
 # pipeline, ImGui overlay and image views. Built with VC_WITH_RIG and
-# VC_WITH_OPENCV (VC_WITH_VIZ). Build-tree only, as gfx_ui is: neither is
-# installed until gfx co-installs the ImGui headers.
+# VC_WITH_OPENCV. Build-tree only, as gfx_ui is: neither is installed until gfx
+# co-installs the ImGui headers.
 include(GenerateExportHeader)
 
 set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")

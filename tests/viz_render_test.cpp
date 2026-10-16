@@ -5,9 +5,11 @@
 // draws them: synthetic NV12 pictures in device images -- as a decoder leaves
 // them, read in place -- each with a bright dot, laid out, zoomed, and
 // marked through each tile's view on a high-DPI ImGui frame. The dot each
-// tile draws must sit under the mark its overlay draws. Then every panel and
-// the board editor drawn in one frame. Runs under the validation layer when
-// the environment asks (VKC_TEST_VALIDATION); skips without a Vulkan device.
+// tile draws must sit under the mark its overlay draws; the coverage cell,
+// the marker's outline and the title must land where their marks say. Then
+// every panel and the board editor drawn in one frame. Runs under the
+// validation layer when the environment asks (VKC_TEST_VALIDATION); skips
+// without a Vulkan device.
 
 #include <gtest/gtest.h>
 
@@ -19,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include <glm/common.hpp>
 #include <glm/vec2.hpp>
 
 #include "imgui.h"
@@ -97,11 +100,61 @@ std::optional<glm::vec2> centroid(const Pixels& pixels, const TileRect& rect,
   return glm::vec2(static_cast<float>(sx / sum), static_cast<float>(sy / sum));
 }
 
+// The top-left corner, in target pixels, of the pixels in `rect` whose
+// weight is positive.
+template <class Weight>
+std::optional<glm::vec2> top_left(const Pixels& pixels, const TileRect& rect,
+                                  Weight weight) {
+  std::optional<glm::vec2> corner;
+  const auto x0 = static_cast<std::uint32_t>(rect.origin.x);
+  const auto y0 = static_cast<std::uint32_t>(rect.origin.y);
+  for (std::uint32_t y = y0; y < y0 + static_cast<std::uint32_t>(rect.size.y);
+       ++y) {
+    for (std::uint32_t x = x0; x < x0 + static_cast<std::uint32_t>(rect.size.x);
+         ++x) {
+      if (weight(pixels.at(x, y)) <= 0.0) continue;
+      const glm::vec2 p(static_cast<float>(x), static_cast<float>(y));
+      corner = corner ? glm::min(*corner, p) : p;
+    }
+  }
+  return corner;
+}
+
+// How many pixels in `rect` have a positive weight.
+template <class Weight>
+int count(const Pixels& pixels, const TileRect& rect, Weight weight) {
+  int n = 0;
+  for (std::uint32_t y = static_cast<std::uint32_t>(rect.origin.y);
+       y < static_cast<std::uint32_t>(rect.origin.y + rect.size.y); ++y) {
+    for (std::uint32_t x = static_cast<std::uint32_t>(rect.origin.x);
+         x < static_cast<std::uint32_t>(rect.origin.x + rect.size.x); ++x) {
+      if (weight(pixels.at(x, y)) > 0.0) ++n;
+    }
+  }
+  return n;
+}
+
 double white(const std::uint8_t* px) {
   return px[0] > 128 && px[1] > 128 && px[2] > 128 ? px[1] : 0.0;
 }
 double red(const std::uint8_t* px) {
   return px[0] > 128 && px[1] < 96 && px[2] < 96 ? px[0] : 0.0;
+}
+double blue(const std::uint8_t* px) {
+  return px[2] > 64 && px[0] < 32 && px[1] < 32 ? px[2] : 0.0;
+}
+// Weighted by coverage, faint anti-aliased edges included, so a line's
+// centroid is its middle.
+double yellow(const std::uint8_t* px) {
+  return px[0] > 16 && px[1] > 16 && px[2] < 32 ? px[1] : 0.0;
+}
+// Lit at all: black, through the NV12 matrix, stays below 8.
+double lit(const std::uint8_t* px) {
+  return px[0] > 8 || px[1] > 8 || px[2] > 8 ? 1.0 : 0.0;
+}
+// At full intensity.
+double full(const std::uint8_t* px) {
+  return px[0] >= 250 && px[1] >= 250 && px[2] >= 250 ? 1.0 : 0.0;
 }
 
 class VizRenderTest : public core::test::VulkanDeviceTest {
@@ -180,10 +233,12 @@ class VizRenderTest : public core::test::VulkanDeviceTest {
     return std::move(overlay).value();
   }
 
-  // Updates every tile from its picture, draws the tiles, then the ImGui
-  // frame `overlay` built (when given), into a fresh target; its pixels.
+  // Updates every tile from its picture, draws the tiles (magnified by
+  // `magnify`, or submit's default), then the ImGui frame `overlay` built
+  // (when given), into a fresh target; its pixels.
   Pixels render(Tiles& tiles, std::vector<Picture>& pictures,
-                gfx::ui::ImGuiOverlay* overlay) {
+                gfx::ui::ImGuiOverlay* overlay,
+                std::optional<gfx::pipelines::ImageFilter> magnify = {}) {
     gfx::OffscreenTargetDesc desc;
     desc.extent = kExtent;
     desc.color_format = kFormat;
@@ -210,7 +265,11 @@ class VizRenderTest : public core::test::VulkanDeviceTest {
     target.value().prepare(raw);
     const gfx::RenderTarget rt = target.value().target();
     rt.begin(raw, {});  // cleared to black
-    tiles.submit(raw, kExtent);
+    if (magnify) {
+      tiles.submit(raw, kExtent, *magnify);
+    } else {
+      tiles.submit(raw, kExtent);
+    }
     if (overlay != nullptr) overlay->render(raw);
     rt.end(raw);
     target.value().record_readback(raw);
@@ -277,6 +336,169 @@ TEST_F(VizRenderTest, EachTilesDotSitsUnderItsMark) {
     EXPECT_NEAR(mark->x, dot->x, 0.75f);
     EXPECT_NEAR(mark->y, dot->y, 0.75f);
   }
+}
+
+// One coverage cell filled, at row 1, column 6 of the 8 x 6 grid, and one
+// marker. The fill must cover that cell's texels -- a grid of 6 columns by 8
+// rows would put it elsewhere -- and the marker's outline must run round its
+// quad, closed on all four sides.
+TEST_F(VizRenderTest, MarksTheCoverageCellAndTheMarkerWhereTheyAre) {
+  std::vector<Picture> pictures;
+  pictures.push_back(make_picture(64, 48, {60.0f, 44.0f}));  // out of the way
+  core::Result<std::unique_ptr<Tiles>> made =
+      Tiles::create(device(), allocator(), color_layout(), {{64, 48}});
+  ASSERT_TRUE(made.ok()) << made.status().message();
+  Tiles& tiles = *made.value();
+  tiles.set_area({{0.0f, 0.0f}, {256.0f, 128.0f}});
+
+  constexpr int kRow = 1;
+  constexpr int kColumn = 6;
+  quality::CameraSummary session;
+  session.coverage[kRow * quality::kCoverageCols + kColumn] = 50;
+  Detection found;
+  DetectedMarker marker;
+  marker.corners = {
+      recon::camera::Vec2d{8.0, 8.0}, {24.0, 8.0}, {24.0, 24.0}, {8.0, 24.0}};
+  found.markers.push_back(marker);
+  TileOverlay tile;
+  tile.detection = &found;
+  tile.session = &session;
+  OverlayStyle style;
+  style.coverage_color = IM_COL32(0, 0, 255, 0);
+  style.grid_line = 0;  // the fill alone
+  style.marker_color = IM_COL32(255, 255, 0, 255);
+  const core::Result<TileMarks> marks = tile_marks(tile, {}, style);
+  ASSERT_TRUE(marks.ok()) << marks.status().message();
+
+  std::optional<gfx::ui::ImGuiOverlay> overlay = make_overlay();
+  ASSERT_TRUE(overlay.has_value());
+  overlay->new_frame();
+  draw_tile_marks(tiles.view(0), marks.value());
+  const Pixels marked = render(tiles, pictures, &*overlay);
+  ASSERT_FALSE(marked.bytes.empty());
+  const gfx::camera::ImageView2D& view = tiles.view(0);
+
+  // The cell spans texels [c * w / 8, (c + 1) * w / 8) across and
+  // [r * h / 6, (r + 1) * h / 6) down: its middle, in Vulkan's image
+  // coordinates.
+  const glm::vec2 cell_middle((kColumn + 0.5f) * 64.0f / quality::kCoverageCols,
+                              (kRow + 0.5f) * 48.0f / quality::kCoverageRows);
+  const glm::vec2 cell = view.image_to_target(cell_middle);
+  const std::optional<glm::vec2> fill = centroid(marked, tiles.rect(0), blue);
+  ASSERT_TRUE(fill.has_value());
+  EXPECT_NEAR(fill->x, cell.x, 1.0f);
+  EXPECT_NEAR(fill->y, cell.y, 1.0f);
+
+  // OpenCV's corners at their texels' centres; the outline's middle is the
+  // quad's only when all four sides are drawn.
+  const glm::vec2 lo = view.image_to_target(glm::vec2(8.5f));
+  const glm::vec2 hi = view.image_to_target(glm::vec2(24.5f));
+  const std::optional<glm::vec2> outline =
+      centroid(marked, tiles.rect(0), yellow);
+  ASSERT_TRUE(outline.has_value());
+  EXPECT_NEAR(outline->x, 0.5f * (lo.x + hi.x), 1.0f);
+  EXPECT_NEAR(outline->y, 0.5f * (lo.y + hi.y), 1.0f);
+  const glm::vec2 mid = 0.5f * (lo + hi);
+  for (const glm::vec2 side :
+       {glm::vec2(mid.x, lo.y), glm::vec2(hi.x, mid.y), glm::vec2(mid.x, hi.y),
+        glm::vec2(lo.x, mid.y)}) {
+    const TileRect near{side - 2.0f, glm::vec2(4.0f)};
+    EXPECT_GT(count(marked, near, yellow), 0)
+        << "no outline near (" << side.x << ", " << side.y << ")";
+  }
+}
+
+// The title stays in the tile: at the image's top-left corner while that
+// is in view, at the tile's once the view zooms past it.
+TEST_F(VizRenderTest, KeepsTheTitleInTheTile) {
+  std::vector<Picture> pictures;
+  pictures.push_back(make_picture(64, 48, {60.0f, 44.0f}));
+  core::Result<std::unique_ptr<Tiles>> made =
+      Tiles::create(device(), allocator(), color_layout(), {{64, 48}});
+  ASSERT_TRUE(made.ok()) << made.status().message();
+  Tiles& tiles = *made.value();
+  tiles.set_area({{0.0f, 0.0f}, {256.0f, 128.0f}});
+  TileOverlay tile;
+  tile.id = "N";
+  tile.check.verdict = ViewVerdict::Collinear;  // a red title
+  const core::Result<TileMarks> marks = tile_marks(tile);
+  ASSERT_TRUE(marks.ok()) << marks.status().message();
+  std::optional<gfx::ui::ImGuiOverlay> overlay = make_overlay();
+  ASSERT_TRUE(overlay.has_value());
+  const auto title = [&]() -> std::optional<glm::vec2> {
+    overlay->new_frame();
+    draw_tile_marks(tiles.view(0), marks.value());
+    const Pixels drawn = render(tiles, pictures, &*overlay);
+    if (drawn.bytes.empty()) return std::nullopt;
+    return top_left(drawn, tiles.rect(0), red);
+  };
+
+  // Fitted, the image is letterboxed: its corner is inside the tile.
+  const glm::vec2 corner = tiles.view(0).image_to_target({0.0f, 0.0f});
+  ASSERT_GT(corner.x, 32.0f);
+  const std::optional<glm::vec2> fitted = title();
+  ASSERT_TRUE(fitted.has_value());
+  EXPECT_GE(fitted->x, corner.x);
+  EXPECT_LT(fitted->x, corner.x + 20.0f);
+  EXPECT_LT(fitted->y, 20.0f);
+
+  tiles.view(0).zoom_about({128.0f, 64.0f}, 4.0f);  // H4's 400 %
+  ASSERT_LT(tiles.view(0).image_to_target({0.0f, 0.0f}).x, -100.0f);
+  const std::optional<glm::vec2> zoomed = title();
+  ASSERT_TRUE(zoomed.has_value());
+  EXPECT_LT(zoomed->x, 20.0f);
+  EXPECT_LT(zoomed->y, 20.0f);
+}
+
+// Zoomed to 4 pixels a texel, a tile shows its white texel as a 4 x 4
+// square at full intensity by default (Nearest), for checking marks against
+// pixels; Linear spreads it over its neighbours.
+TEST_F(VizRenderTest, MagnifiesEachTexelAsASquareByDefault) {
+  std::vector<Picture> pictures;
+  pictures.push_back(make_picture(32, 24, {10.0f, 15.0f}));
+  core::Result<std::unique_ptr<Tiles>> made =
+      Tiles::create(device(), allocator(), color_layout(), {{32, 24}});
+  ASSERT_TRUE(made.ok()) << made.status().message();
+  Tiles& tiles = *made.value();
+  tiles.set_area({{0.0f, 0.0f}, {128.0f, 96.0f}});
+  ASSERT_EQ(tiles.view(0).scale(), 4.0f);
+  ASSERT_EQ(tiles.view(0).origin(), glm::vec2(0.0f));
+
+  const Pixels nearest = render(tiles, pictures, nullptr);
+  ASSERT_FALSE(nearest.bytes.empty());
+  const TileRect texel{{40.0f, 60.0f}, {4.0f, 4.0f}};  // texel (10, 15)
+  EXPECT_EQ(count(nearest, tiles.rect(0), lit), 16);
+  EXPECT_EQ(count(nearest, texel, full), 16);
+
+  const Pixels linear =
+      render(tiles, pictures, nullptr, gfx::pipelines::ImageFilter::Linear);
+  ASSERT_FALSE(linear.bytes.empty());
+  EXPECT_GT(count(linear, tiles.rect(0), lit), 16);
+  EXPECT_EQ(count(linear, tiles.rect(0), full), 0);
+}
+
+// An area beyond the target, even past int's range, is drawn clipped to the
+// target, the picture where the tile's view puts it.
+TEST_F(VizRenderTest, DrawsAnAreaBeyondTheTarget) {
+  std::vector<Picture> pictures;
+  pictures.push_back(make_picture(64, 48, {40.0f, 20.0f}));
+  core::Result<std::unique_ptr<Tiles>> made =
+      Tiles::create(device(), allocator(), color_layout(), {{64, 48}});
+  ASSERT_TRUE(made.ok()) << made.status().message();
+  Tiles& tiles = *made.value();
+  tiles.set_area({{-3e9f, -3e9f}, {9e9f, 9e9f}});
+  EXPECT_FALSE(render(tiles, pictures, nullptr).bytes.empty());
+
+  tiles.set_area({{-64.0f, -32.0f}, {384.0f, 192.0f}});
+  const Pixels drawn = render(tiles, pictures, nullptr);
+  ASSERT_FALSE(drawn.bytes.empty());
+  const glm::vec2 expected =
+      tiles.view(0).image_to_target(pictures[0].dot + 0.5f);
+  const std::optional<glm::vec2> dot =
+      centroid(drawn, {{0.0f, 0.0f}, {256.0f, 128.0f}}, white);
+  ASSERT_TRUE(dot.has_value());
+  EXPECT_NEAR(dot->x, expected.x, 0.75f);
+  EXPECT_NEAR(dot->y, expected.y, 0.75f);
 }
 
 // Laid out again, a tile keeps its zoom and the image point at its centre;
@@ -358,7 +580,6 @@ TEST_F(VizRenderTest, DrawsEveryPanel) {
   made.value()->set_area({{0.0f, 0.0f}, {256.0f, 128.0f}});
 
   CameraLive camera;
-  camera.id = "N";
   camera.present = true;
   quality::SessionSummary summary;
   summary.cameras.resize(2);

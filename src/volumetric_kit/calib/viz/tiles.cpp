@@ -6,10 +6,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <utility>
-
-#include <glm/common.hpp>
 
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/core/base/check.hpp"
@@ -31,22 +30,39 @@ void cell_span(float origin, float size, int cells, std::size_t cell, float gap,
   length = std::max(0.0f, std::round(lo + step) - start);
 }
 
-// A tile's rectangle as a draw's viewport, clamped to non-negative pixels.
-VkRect2D to_viewport(const TileRect& rect) noexcept {
-  const glm::vec2 lo = glm::max(rect.origin, glm::vec2(0.0f));
-  const glm::vec2 hi = glm::max(rect.origin + rect.size, lo);
+// `value` held in [lo, hi]; NaN goes to lo.
+double hold(double value, double lo, double hi) noexcept {
+  return value >= lo ? std::min(value, hi) : lo;
+}
+
+// A tile's rectangle as a draw's viewport, held inside the target (and
+// Vulkan's signed offsets), so any rectangle converts to whole pixels.
+VkRect2D to_viewport(const TileRect& rect, VkExtent2D extent) noexcept {
+  constexpr double kMax = std::numeric_limits<std::int32_t>::max();
+  const double width = std::min<double>(extent.width, kMax);
+  const double height = std::min<double>(extent.height, kMax);
+  const double x0 = hold(rect.origin.x, 0.0, width);
+  const double y0 = hold(rect.origin.y, 0.0, height);
+  const double x1 =
+      hold(static_cast<double>(rect.origin.x) + rect.size.x, x0, width);
+  const double y1 =
+      hold(static_cast<double>(rect.origin.y) + rect.size.y, y0, height);
   VkRect2D viewport{};
-  viewport.offset = {static_cast<std::int32_t>(lo.x),
-                     static_cast<std::int32_t>(lo.y)};
-  viewport.extent = {static_cast<std::uint32_t>(hi.x - lo.x),
-                     static_cast<std::uint32_t>(hi.y - lo.y)};
+  viewport.offset = {static_cast<std::int32_t>(x0),
+                     static_cast<std::int32_t>(y0)};
+  viewport.extent = {static_cast<std::uint32_t>(x1 - x0),
+                     static_cast<std::uint32_t>(y1 - y0)};
   return viewport;
 }
 
 }  // namespace
 
 TileGrid tile_grid(std::size_t count) noexcept {
-  if (count == 0) return {};
+  // Past INT_MAX a grid's counts would not fit TileGrid's ints.
+  if (count == 0 ||
+      count > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    return {};
+  }
   std::size_t columns = 1;
   while (columns * columns < count) ++columns;
   const std::size_t rows = (count + columns - 1) / columns;
@@ -65,6 +81,7 @@ TileRect tile_rect(const TileRect& area, std::size_t count, std::size_t index,
   }
   if (!(gap >= 0.0f) || !std::isfinite(gap)) gap = 0.0f;
   const TileGrid grid = tile_grid(count);
+  if (grid.columns == 0) return rect;  // too many tiles to lay out
   const auto columns = static_cast<std::size_t>(grid.columns);
   cell_span(area.origin.x, area.size.x, grid.columns, index % columns, gap,
             rect.origin.x, rect.size.x);
@@ -208,7 +225,7 @@ void Tiles::submit(VkCommandBuffer cmd, VkExtent2D extent,
   for (std::size_t i = 0; i < textures_.size(); ++i) {
     pipelines::ImageDraw& draw = draws_[i];
     draw.texture = &textures_[i];
-    draw.viewport = to_viewport(rects_[i]);
+    draw.viewport = to_viewport(rects_[i], extent);
     draw.origin = views_[i].origin();
     draw.scale = views_[i].scale();
     draw.magnify = magnify;

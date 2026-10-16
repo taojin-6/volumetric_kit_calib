@@ -8,6 +8,8 @@
 #include <string>
 #include <utility>
 
+#include <glm/common.hpp>
+
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/gfx/ui/image_overlay.hpp"
 
@@ -18,8 +20,9 @@ namespace {
 constexpr float kFirstAlpha = 48.0f;
 constexpr float kFullAlpha = 160.0f;
 
-// The title sits at the image's top-left corner: texel 0's centre is at 0 in
-// OpenCV's pixels, so its edge is half a pixel before.
+// The image's top-left corner in OpenCV's pixels: texel 0's centre is at 0
+// there, so its edge is half a pixel before. Added to a view's image
+// coordinates (Vulkan's, texel edges on integers), it gives OpenCV's.
 constexpr glm::vec2 kImageCorner{-0.5f, -0.5f};
 constexpr glm::vec2 kTitleOffset{4.0f, 4.0f};
 
@@ -60,13 +63,12 @@ core::Result<TileMarks> tile_marks(const TileOverlay& tile,
     }
 
     if (!tile.id.empty()) {
-      MarkLabel title;
-      title.at = kImageCorner;
-      title.text = std::string(tile.id) + ": " + to_string(tile.check.verdict);
-      title.color = tone;
-      title.background = style.label_background;
-      title.offset = kTitleOffset;
-      marks.labels.push_back(std::move(title));
+      marks.title.at = kImageCorner;
+      marks.title.text =
+          std::string(tile.id) + ": " + to_string(tile.check.verdict);
+      marks.title.color = tone;
+      marks.title.background = style.label_background;
+      marks.title.offset = kTitleOffset;
     }
 
     if (tile.detection != nullptr) {
@@ -121,6 +123,15 @@ void draw_tile_marks(const gfx::camera::ImageView2D& view,
   for (const MarkLabel& label : marks.labels) {
     overlay.label(label.at, label.text.c_str(), label.color, label.background,
                   label.offset);
+  }
+  if (!marks.title.text.empty()) {
+    // The image point under the tile's top-left corner, in OpenCV's pixels:
+    // the title goes no further up or left, so it stays in view.
+    const glm::vec2 tile_corner =
+        view.target_to_image(view.viewport_origin()) + kImageCorner;
+    const MarkLabel& title = marks.title;
+    overlay.label(glm::max(title.at, tile_corner), title.text.c_str(),
+                  title.color, title.background, title.offset);
   }
 }
 

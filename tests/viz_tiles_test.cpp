@@ -44,6 +44,24 @@ TEST(TileGrid, IsAsSquareAsItCanBeAndNeverTallerThanWide) {
   }
 }
 
+// Up to INT_MAX tiles, TileGrid's ints hold the grid; past it there is none,
+// and no tile has a place.
+TEST(TileGrid, LaysOutAtMostIntMaxTiles) {
+  constexpr auto kMax =
+      static_cast<std::size_t>(std::numeric_limits<int>::max());
+  const TileGrid most = tile_grid(kMax);
+  EXPECT_EQ(most.columns, 46341);  // 46340^2 < INT_MAX <= 46341^2
+  EXPECT_EQ(most.rows, 46341);
+  for (const std::size_t count : {kMax + 1, std::size_t{1} << 62,
+                                  std::numeric_limits<std::size_t>::max()}) {
+    const TileGrid none = tile_grid(count);
+    ASSERT_EQ(none.columns, 0) << count;  // stop before a count that hangs
+    EXPECT_EQ(none.rows, 0) << count;
+    expect_rect(tile_rect({{5.0f, 6.0f}, {200.0f, 100.0f}}, count, 0), 5, 6, 0,
+                0);
+  }
+}
+
 // The rig's four cameras fill a 2 x 2 grid, row-major, the gap between
 // neighbours and none at the area's edges.
 TEST(TileRect, LaysTheRigOutTwoByTwo) {

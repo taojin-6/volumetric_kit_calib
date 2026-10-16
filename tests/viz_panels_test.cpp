@@ -68,7 +68,6 @@ TEST(VerdictTone, RedPastTheSolvesTilt) {
 
 CameraLive good_camera() {
   CameraLive camera;
-  camera.id = "CL2A141000N";
   camera.present = true;
   camera.check.corners = 8;
   camera.check.markers = 7;
@@ -150,12 +149,19 @@ TEST(CameraPanel, TonesTiltStillnessAndLossByTheQualityThresholds) {
   EXPECT_EQ(line(l, "tilt").tone, Tone::Bad);
   EXPECT_EQ(line(l, "stillness").tone, Tone::Warn);
   EXPECT_EQ(line(l, "frames").tone, Tone::Warn);
+
+  // At a limit, the tilt is not yet past it, as check_view judges.
+  camera.check.tilt_deg = 50.0;
+  l = camera_panel(camera, session, legacy_femto_board(), options).value();
+  EXPECT_EQ(line(l, "tilt").tone, Tone::Normal);
+  camera.check.tilt_deg = 65.0;
+  l = camera_panel(camera, session, legacy_femto_board(), options).value();
+  EXPECT_EQ(line(l, "tilt").tone, Tone::Warn);
 }
 
 // No frame in the set is red; a view with no pose shows no measures.
 TEST(CameraPanel, ShowsAMissingFrameAndAViewWithoutAPose) {
   CameraLive camera;
-  camera.id = "CL2A14100A4";
   const std::vector<PanelLine> l =
       camera_panel(camera, {}, legacy_femto_board()).value();
   EXPECT_EQ(line(l, "verdict").value, "no frame");
@@ -195,7 +201,7 @@ TEST(SetPanel, ShowsTheSetsFramesSpreadAndSkew) {
   stats.incomplete = 3;
   stats.unmatched = 12;
   const std::vector<PanelLine> l =
-      set_panel(set_of({0, -1'200'000, 2'500'000}), stats, kIds, {1, 4})
+      set_panel(set_of({0, -1'200'000, 2'500'000}), stats, kIds, {1, 4, false})
           .value();
   EXPECT_EQ(line(l, "set").value, "3/3 frames");
   EXPECT_EQ(line(l, "set").tone, Tone::Good);
@@ -213,7 +219,8 @@ TEST(SetPanel, WarnsOfAMissingFrameAWideSpreadAndAFullWriter) {
   PanelOptions options;
   options.rule.spread_warn_ms = 1.0;
   const std::vector<PanelLine> l =
-      set_panel(set_of({0, std::nullopt, 1'500'000}), {}, kIds, {4, 4}, options)
+      set_panel(set_of({0, std::nullopt, 1'500'000}), {}, kIds, {4, 4, true},
+                options)
           .value();
   EXPECT_EQ(line(l, "set").value, "2/3 frames");
   EXPECT_EQ(line(l, "set").tone, Tone::Warn);
@@ -221,6 +228,16 @@ TEST(SetPanel, WarnsOfAMissingFrameAWideSpreadAndAFullWriter) {
   EXPECT_EQ(line(l, "skew G").value, "missing");
   EXPECT_EQ(line(l, "skew G").tone, Tone::Muted);
   EXPECT_EQ(line(l, "saver").tone, Tone::Warn);
+}
+
+// The writer is full when the caller says so, as it tells the capture rule:
+// the panel keeps no rule of its own.
+TEST(SetPanel, TonesTheWriterAsTheCallerJudgesIt) {
+  const recon::sensor::FrameSet set = set_of({0, 0, 0});
+  EXPECT_EQ(line(set_panel(set, {}, kIds, {4, 4, false}).value(), "saver").tone,
+            Tone::Normal);
+  EXPECT_EQ(line(set_panel(set, {}, kIds, {1, 4, true}).value(), "saver").tone,
+            Tone::Warn);
 }
 
 TEST(SetPanel, WaitsForTheFirstSetAndRefusesIdsThatDoNotMatch) {

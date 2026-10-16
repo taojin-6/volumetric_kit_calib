@@ -48,11 +48,11 @@ option(VC_WITH_RIG
        "Build the rig tiers, from capture on (fetches all of recon; Vulkan SDK)"
        OFF)
 # The viz tier draws the quality tier's checks with volumetric_kit_gfx, so it is
-# built, and gfx fetched, when both are on.
+# built, and gfx fetched, when both are on: derived, not an option.
 if(VC_WITH_RIG AND VC_WITH_OPENCV)
-  set(VC_WITH_VIZ ON)
+  set(_vc_build_viz ON)
 else()
-  set(VC_WITH_VIZ OFF)
+  set(_vc_build_viz OFF)
 endif()
 
 # Semicolon list of sanitizers (e.g. "address;undefined"); empty = off. Applied

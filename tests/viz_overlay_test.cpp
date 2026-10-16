@@ -73,7 +73,8 @@ TEST(TileMarks, MarksEachCornerAndMarkerOnItsPixels) {
   EXPECT_EQ(marks.points[1].at, glm::vec2(1012.0f, 391.75f));
   EXPECT_EQ(marks.points[0].radius, 2.5f);
 
-  ASSERT_EQ(marks.labels.size(), 2u);  // no id, so no title
+  ASSERT_EQ(marks.labels.size(), 2u);
+  EXPECT_TRUE(marks.title.text.empty());  // no id, so no title
   EXPECT_EQ(marks.labels[0].text, "0");
   EXPECT_EQ(marks.labels[1].text, "5");
   EXPECT_EQ(marks.labels[1].at, glm::vec2(1012.0f, 391.75f));
@@ -123,10 +124,10 @@ TEST(TileMarks, TitlesTheTileAtTheImagesCorner) {
   tile.id = "CL2A141000N";
   tile.check = check_of(ViewVerdict::Far);
   const TileMarks marks = marks_of(tile);
-  ASSERT_EQ(marks.labels.size(), 1u);
-  EXPECT_EQ(marks.labels[0].text, "CL2A141000N: far");
-  EXPECT_EQ(marks.labels[0].at, glm::vec2(-0.5f, -0.5f));
-  EXPECT_EQ(marks.labels[0].color, tone_color(Tone::Warn));
+  EXPECT_EQ(marks.title.text, "CL2A141000N: far");
+  EXPECT_EQ(marks.title.at, glm::vec2(-0.5f, -0.5f));
+  EXPECT_EQ(marks.title.color, tone_color(Tone::Warn));
+  EXPECT_TRUE(marks.labels.empty());
   EXPECT_TRUE(marks.points.empty());
   EXPECT_TRUE(marks.outlines.empty());
 }
@@ -162,7 +163,8 @@ TEST(TileMarks, LeavesOutWhatTheStyleTurnsOff) {
   style.coverage = false;
   const TileMarks marks = marks_of(tile, style);
   EXPECT_EQ(marks.points.size(), 2u);
-  EXPECT_EQ(marks.labels.size(), 1u);  // the title alone
+  EXPECT_TRUE(marks.labels.empty());
+  EXPECT_EQ(marks.title.text, "A: none");
   EXPECT_TRUE(marks.outlines.empty());
   EXPECT_EQ(marks.grid_columns, 0);
   EXPECT_TRUE(marks.grid_fills.empty());

@@ -80,9 +80,11 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   # The rig tiers, which take all of recon and so the Vulkan SDK: calib builds
-  # recon's sensor, video and Orbbec tiers against calib's core pin, the core
-  # every sibling compiles against in the rig application. No test needs a
-  # GPU. The Orbbec SDK comes from recon's own action, at calib's recon pin.
+  # recon's sensor, video and Orbbec tiers, and gfx for the viz tier, against
+  # calib's core pin, the core every sibling compiles against in the rig
+  # application. The viz tier's GPU tests need a device (MoltenVK) and run
+  # under the validation layer. The Orbbec SDK comes from recon's own action,
+  # at calib's recon pin.
   rig:
     name: macos-latest Release rig
     runs-on: macos-latest
@@ -97,11 +99,17 @@ jobs:
         run: |
           for attempt in 1 2 3; do
             brew install cmake glm opencv molten-vk vulkan-headers \
-              vulkan-loader shaderc ffmpeg pkgconf && exit 0
+              vulkan-loader vulkan-validationlayers shaderc ffmpeg pkgconf &&
+              break
             echo "::warning::brew install attempt ${attempt} failed; retrying"
+            [ "${attempt}" = 3 ] && exit 1
             sleep 15
           done
-          exit 1
+          # The layer's manifest names its library without a path; the Test
+          # step alone searches Homebrew's lib for it, as job-wide its
+          # libraries would shadow those of every other tool.
+          echo "VC_LAYER_LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
+          echo "VK_LAYER_PATH=$(brew --prefix)/share/vulkan/explicit_layer.d" >> "$GITHUB_ENV"
 
       # Keep the ref at calib's recon pin (third_party/CMakeLists.txt).
       - name: Install the Orbbec SDK
@@ -124,4 +132,14 @@ jobs:
         run: cmake --build build --parallel
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        env:
+          # The core's test policy: a GPU test fails, rather than skips,
+          # without a device or the validation layer, and fails on any error
+          # the layer reports.
+          VKC_REQUIRE_VULKAN_DEVICE: '1'
+          VKC_TEST_VALIDATION: '1'
+        # Set on the command, as macOS strips DYLD_* from a step's env when it
+        # starts the system's bash.
+        run: |
+          DYLD_FALLBACK_LIBRARY_PATH="${VC_LAYER_LIBRARY_PATH}" \
+            ctest --test-dir build --output-on-failure

@@ -56,7 +56,6 @@ TEST(VizOom, TileMarks) {
 
 TEST(VizOom, Panels) {
   CameraLive camera;
-  camera.id = "N";
   camera.present = true;
   camera.check.distance_m = 2.5;
   camera.lost = 1;
