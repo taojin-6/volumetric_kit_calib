@@ -9,10 +9,11 @@
 // overlay draws, for 1, 3 and 5 cameras, of mixed sizes, on one page or
 // several; the coverage cell, the marker's outline and the title must land
 // where their marks say, inside their tile. Then what a set leaves: a missing
-// camera's last picture, a black gutter, nothing recorded without a picture,
-// a clean record after a discard. Then every panel and the board editor drawn
-// in one frame. Runs under the validation layer when the environment asks
-// (VKC_TEST_VALIDATION); skips without a Vulkan device.
+// camera's last picture, a black gutter, paged or not, nothing recorded
+// without a picture, a picture or a page it cannot take left out while the
+// others are recorded, a clean record after a discard. Then every panel and
+// the board editor drawn in one frame. Runs under the validation layer when the
+// environment asks (VKC_TEST_VALIDATION); skips without a Vulkan device.
 
 #include <gtest/gtest.h>
 
@@ -193,6 +194,11 @@ double lit(const std::uint8_t* px) {
 double full(const std::uint8_t* px) {
   return px[0] >= 250 && px[1] >= 250 && px[2] >= 250 ? 1.0 : 0.0;
 }
+// The grey the target is cleared to, where a test asks for it.
+double grey(const std::uint8_t* px) {
+  const auto near = [](std::uint8_t v) { return v >= 125 && v <= 131; };
+  return near(px[0]) && near(px[1]) && near(px[2]) ? 1.0 : 0.0;
+}
 
 std::vector<Picture*> all(std::vector<Picture>& pictures) {
   std::vector<Picture*> pointers;
@@ -292,9 +298,13 @@ class VizRenderTest : public core::test::VulkanDeviceTest {
     return std::move(overlay).value();
   }
 
+  // What render clears its target to: black, unless a test asks otherwise.
+  VkClearColorValue clear_{};
+
   // Records each camera's new picture (null for none) into the mosaic, then
   // draws it (magnified by `magnify`, or draw's default), then the ImGui
-  // frame `overlay` built (when given), into a fresh target; its pixels.
+  // frame `overlay` built (when given), into a fresh target cleared to
+  // `clear_`; its pixels.
   Pixels render(RigMosaic& mosaic, const std::vector<Picture*>& pictures,
                 gfx::ui::ImGuiOverlay* overlay = nullptr,
                 std::optional<gfx::pipelines::ImageFilter> magnify = {}) {
@@ -326,7 +336,9 @@ class VizRenderTest : public core::test::VulkanDeviceTest {
     EXPECT_TRUE(recorded.ok()) << recorded.message();
     target.value().prepare(raw);
     const gfx::RenderTarget rt = target.value().target();
-    rt.begin(raw, {});  // cleared to black
+    gfx::RenderTargetBeginInfo begin;
+    begin.clear_color = clear_;
+    rt.begin(raw, begin);
     if (magnify) {
       mosaic.draw(raw, kExtent, *magnify);
     } else {
@@ -431,71 +443,108 @@ TEST_F(VizRenderTest, EachTilesDotSitsUnderItsMark) {
   }
 }
 
-// A set without camera 1 keeps its last picture while camera 0's changes;
-// the gutters, the cell past a smaller picture and the empty cell stay
-// black. On one page and on a page each.
+// Over a grey target, a set without camera 1 keeps its last picture while
+// camera 0's changes, and the gutters, the cell past a smaller picture and the
+// empty cell stay black. Paged a cell a page, the mosaic draws the very
+// pixels it draws on one page: its backdrop is black between the pages and
+// in the empty block, and cut at the mosaic's edges, for a wide mosaic and a
+// tall one too.
 TEST_F(VizRenderTest, KeepsAMissingCamerasLastPictureAndTheGutterBlack) {
-  MosaicLimits one_cell;
-  one_cell.max_texels = 16 * 16;
-  for (const MosaicLimits& limits : {MosaicLimits{}, one_cell}) {
-    SCOPED_TRACE(limits.max_texels);
-    const std::vector<ImageSize> sizes = {{16, 12}, {8, 6}, {16, 12}};
-    std::unique_ptr<RigMosaic> mosaic = make_mosaic(sizes, limits);
-    ASSERT_NE(mosaic, nullptr);
-    fit(*mosaic);
-    std::vector<Picture> first;
-    first.push_back(make_picture(16, 12, {3.0f, 2.0f}, 160));
-    first.push_back(make_picture(8, 6, {5.0f, 3.0f}, 160));
-    first.push_back(make_picture(16, 12, {9.0f, 7.0f}, 160));
-    ASSERT_FALSE(render(*mosaic, all(first)).bytes.empty());
-    Picture moved = make_picture(16, 12, {12.0f, 9.0f}, 160);
-    const Pixels second = render(*mosaic, {&moved, nullptr, &first[2]});
-    ASSERT_FALSE(second.bytes.empty());
+  clear_.float32[0] = 0.5f;
+  clear_.float32[1] = 0.5f;
+  clear_.float32[2] = 0.5f;
+  clear_.float32[3] = 1.0f;
+  const struct {
+    const char* name;
+    std::vector<ImageSize> sizes;
+    std::uint64_t one_cell;  // a page's texels for one cell a page
+  } cases[] = {
+      {"mixed", {{16, 12}, {8, 6}, {16, 12}}, 16 * 16},
+      {"wide", {{16, 12}, {16, 12}}, 16 * 16},
+      {"tall", {{2, 30}, {2, 30}, {2, 30}}, 16 * 32},
+  };
+  for (const auto& c : cases) {
+    SCOPED_TRACE(c.name);
+    MosaicLimits one_cell;
+    one_cell.max_texels = c.one_cell;
+    std::vector<Pixels> seconds;
+    for (const MosaicLimits& limits : {MosaicLimits{}, one_cell}) {
+      SCOPED_TRACE(limits.max_texels);
+      std::unique_ptr<RigMosaic> mosaic = make_mosaic(c.sizes, limits);
+      ASSERT_NE(mosaic, nullptr);
+      ASSERT_EQ(mosaic->layout().pages.size(),
+                seconds.empty() ? 1u : c.sizes.size());
+      fit(*mosaic);
+      ASSERT_GT(mosaic->view().scale(), 1.0f);  // magnified, nearest
+      std::vector<Picture> first;
+      for (std::size_t i = 0; i < c.sizes.size(); ++i) {
+        const ImageSize& size = c.sizes[i];
+        first.push_back(
+            make_picture(size.width, size.height,
+                         {static_cast<float>((size.width - 1) / 2),
+                          static_cast<float>((size.height - 1) / 2 + i)},
+                         160));
+      }
+      ASSERT_FALSE(render(*mosaic, all(first)).bytes.empty());
+      Picture moved = make_picture(c.sizes[0].width, c.sizes[0].height,
+                                   {static_cast<float>(c.sizes[0].width - 2),
+                                    static_cast<float>(c.sizes[0].height - 2)},
+                                   160);
+      std::vector<Picture*> next = all(first);
+      next[0] = &moved;
+      next[1] = nullptr;
+      seconds.push_back(render(*mosaic, next));
+      const Pixels& second = seconds.back();
+      ASSERT_FALSE(second.bytes.empty());
 
-    const std::vector<glm::vec2> dots = {moved.dot, first[1].dot, first[2].dot};
-    for (std::size_t i = 0; i < dots.size(); ++i) {
-      SCOPED_TRACE(i);
-      const glm::vec2 expected = mosaic->view().image_to_target(
-          mosaic->tile_region(i).origin + dots[i] + 0.5f);
-      const std::optional<glm::vec2> dot =
-          centroid(second, visible(*mosaic, i), bright);
-      ASSERT_TRUE(dot.has_value());
-      EXPECT_NEAR(dot->x, expected.x, 0.75f);
-      EXPECT_NEAR(dot->y, expected.y, 0.75f);
+      for (std::size_t i = 0; i < c.sizes.size(); ++i) {
+        SCOPED_TRACE(i);
+        const glm::vec2 dot = i == 0 ? moved.dot : first[i].dot;
+        const glm::vec2 expected = mosaic->view().image_to_target(
+            mosaic->tile_region(i).origin + dot + 0.5f);
+        const std::optional<glm::vec2> found =
+            centroid(second, visible(*mosaic, i), bright);
+        ASSERT_TRUE(found.has_value());
+        EXPECT_NEAR(found->x, expected.x, 0.75f);
+        EXPECT_NEAR(found->y, expected.y, 0.75f);
+        EXPECT_EQ(mosaic->sets_since_picture(i), i == 1 ? 1u : 0u);
+      }
+      // The tiles themselves are lit -- their grey and their dots -- and the
+      // grey target shows around the mosaic.
+      const gfx::camera::ImageView2D& view = mosaic->view();
+      for (std::size_t i = 0; i < c.sizes.size(); ++i) {
+        const gfx::ui::OverlayRegion region = mosaic->tile_region(i);
+        const Rect inside =
+            target_rect(view, region.origin, region.origin + region.size, 1.0f);
+        EXPECT_EQ(count(second, inside, lit),
+                  static_cast<int>(inside.size.x * inside.size.y))
+            << i;
+      }
+      EXPECT_GT(count(second, kWhole, grey), 0);
+      if (std::string(c.name) != "mixed") continue;
+      // Cells 32 texels apart: the gutters beside and below tile 0, the rest
+      // of tile 1's cell, and the empty fourth cell.
+      for (const Rect& black :
+           {target_rect(view, {16.0f, 0.0f}, {32.0f, 12.0f}, 1.0f),
+            target_rect(view, {0.0f, 12.0f}, {16.0f, 32.0f}, 1.0f),
+            target_rect(view, {40.0f, 0.0f}, {48.0f, 12.0f}, 1.0f),
+            target_rect(view, {32.0f, 6.0f}, {40.0f, 12.0f}, 1.0f),
+            target_rect(view, {32.0f, 32.0f}, {48.0f, 44.0f}, 1.0f)}) {
+        SCOPED_TRACE(::testing::Message()
+                     << black.origin.x << ", " << black.origin.y);
+        ASSERT_GT(black.size.x * black.size.y, 0.0f);
+        EXPECT_EQ(count(second, black, lit), 0);
+      }
     }
-    EXPECT_EQ(mosaic->sets_since_picture(0), 0u);
-    EXPECT_EQ(mosaic->sets_since_picture(1), 1u);
-    EXPECT_EQ(mosaic->sets_since_picture(2), 0u);
-
-    // Cells 32 texels apart: the gutters beside and below tile 0, the rest
-    // of tile 1's cell, and the empty fourth cell.
-    const gfx::camera::ImageView2D& view = mosaic->view();
-    for (const Rect& black :
-         {target_rect(view, {16.0f, 0.0f}, {32.0f, 12.0f}, 1.0f),
-          target_rect(view, {0.0f, 12.0f}, {16.0f, 32.0f}, 1.0f),
-          target_rect(view, {40.0f, 0.0f}, {48.0f, 12.0f}, 1.0f),
-          target_rect(view, {32.0f, 6.0f}, {40.0f, 12.0f}, 1.0f),
-          target_rect(view, {32.0f, 32.0f}, {48.0f, 44.0f}, 1.0f)}) {
-      SCOPED_TRACE(::testing::Message()
-                   << black.origin.x << ", " << black.origin.y);
-      ASSERT_GT(black.size.x * black.size.y, 0.0f);
-      EXPECT_EQ(count(second, black, lit), 0);
-    }
-    // The tiles themselves are lit: their grey and their dots.
-    for (std::size_t i = 0; i < sizes.size(); ++i) {
-      const gfx::ui::OverlayRegion region = mosaic->tile_region(i);
-      const Rect inside =
-          target_rect(view, region.origin, region.origin + region.size, 1.0f);
-      EXPECT_EQ(count(second, inside, lit),
-                static_cast<int>(inside.size.x * inside.size.y))
-          << i;
-    }
+    ASSERT_EQ(seconds.size(), 2u);
+    EXPECT_TRUE(seconds[0].bytes == seconds[1].bytes);
   }
 }
 
 // A set with no new picture records nothing -- no command buffer is touched
-// -- and ages the pictures; so does none of the refusals, which leave the
-// pictures' ages as they were.
+// -- and ages the pictures, and so does one whose only picture is left out;
+// a set with a picture short or extra is refused, leaving the pictures' ages
+// as they were and naming no picture left out.
 TEST_F(VizRenderTest, RecordsNothingWithoutANewPicture) {
   std::unique_ptr<RigMosaic> mosaic = make_mosaic({{16, 12}, {16, 12}});
   ASSERT_NE(mosaic, nullptr);
@@ -508,37 +557,25 @@ TEST_F(VizRenderTest, RecordsNothingWithoutANewPicture) {
   pictures.push_back(make_picture(16, 12, {9.0f, 7.0f}));
   ASSERT_FALSE(render(*mosaic, all(pictures)).bytes.empty());
   ASSERT_TRUE(mosaic->record(VK_NULL_HANDLE, {nullptr, nullptr}).ok());
+  EXPECT_TRUE(mosaic->refused().empty());
   EXPECT_EQ(mosaic->sets_since_picture(0), 1u);
   EXPECT_EQ(mosaic->sets_since_picture(1), 1u);
-
-  Picture i420 = make_picture(16, 12, {1.0f, 1.0f});
-  i420.yuv.layout = sensor::YuvLayout::I420;
   Picture small = make_picture(8, 6, {1.0f, 1.0f});
-  Picture bt709 = make_picture(16, 12, {1.0f, 1.0f});
-  bt709.yuv.kr = 0.2126f;
-  bt709.yuv.kb = 0.0722f;
-  const struct {
-    const char* name;
-    std::vector<const sensor::YuvImage*> pictures;
-    Code code;
-  } refusals[] = {
-      {"a picture short", {&pictures[0].yuv}, Code::InvalidArgument},
-      {"a picture extra",
-       {&pictures[0].yuv, &pictures[1].yuv, &pictures[1].yuv},
-       Code::InvalidArgument},
-      {"a picture of another size",
-       {nullptr, &small.yuv},
-       Code::InvalidArgument},
-      {"an I420 picture", {&i420.yuv, nullptr}, Code::Unsupported},
-      {"mixed codings", {&pictures[0].yuv, &bt709.yuv}, Code::InvalidArgument},
-  };
-  for (const auto& refusal : refusals) {
-    SCOPED_TRACE(refusal.name);
-    const core::Status status =
-        mosaic->record(VK_NULL_HANDLE, refusal.pictures);
-    EXPECT_EQ(status.domain(), refusal.code) << status.message();
-    EXPECT_EQ(mosaic->sets_since_picture(0), 1u);
-    EXPECT_EQ(mosaic->sets_since_picture(1), 1u);
+  ASSERT_TRUE(mosaic->record(VK_NULL_HANDLE, {nullptr, &small.yuv}).ok());
+  EXPECT_EQ(mosaic->refused().size(), 1u);
+  EXPECT_EQ(mosaic->sets_since_picture(0), 2u);
+  EXPECT_EQ(mosaic->sets_since_picture(1), 2u);
+
+  const std::vector<const sensor::YuvImage*> short_set = {&pictures[0].yuv};
+  const std::vector<const sensor::YuvImage*> extra_set = {
+      &pictures[0].yuv, &pictures[1].yuv, &pictures[1].yuv};
+  for (const auto* set : {&short_set, &extra_set}) {
+    SCOPED_TRACE(set->size());
+    const core::Status status = mosaic->record(VK_NULL_HANDLE, *set);
+    EXPECT_EQ(status.domain(), Code::InvalidArgument) << status.message();
+    EXPECT_TRUE(mosaic->refused().empty());
+    EXPECT_EQ(mosaic->sets_since_picture(0), 2u);
+    EXPECT_EQ(mosaic->sets_since_picture(1), 2u);
   }
 
   // The pictures stay drawn.
@@ -546,13 +583,179 @@ TEST_F(VizRenderTest, RecordsNothingWithoutANewPicture) {
   ASSERT_FALSE(kept.bytes.empty());
   EXPECT_TRUE(centroid(kept, visible(*mosaic, 0), white).has_value());
   EXPECT_TRUE(centroid(kept, visible(*mosaic, 1), white).has_value());
-  EXPECT_EQ(mosaic->sets_since_picture(0), 2u);
+  EXPECT_EQ(mosaic->sets_since_picture(0), 3u);
+}
+
+// One camera's fault leaves the other live: a picture the mosaic cannot take
+// -- another size, I420, chroma gfx cannot site, or no Y'CbCr matrix -- is
+// left out and named, its tile keeping its last picture and ageing, while the
+// other camera's new picture is drawn. Two pictures in different codings on
+// one page are both left out, with nothing recorded.
+TEST_F(VizRenderTest, LeavesOutOnlyThePicturesItCannotTake) {
+  std::unique_ptr<RigMosaic> mosaic = make_mosaic({{16, 12}, {16, 12}});
+  ASSERT_NE(mosaic, nullptr);
+  fit(*mosaic);
+  std::vector<Picture> pictures;
+  pictures.push_back(make_picture(16, 12, {3.0f, 2.0f}, 160));
+  pictures.push_back(make_picture(16, 12, {9.0f, 7.0f}, 160));
+  ASSERT_FALSE(render(*mosaic, all(pictures)).bytes.empty());
+
+  Picture small = make_picture(8, 6, {1.0f, 1.0f}, 160);
+  Picture i420 = make_picture(16, 12, {1.0f, 1.0f}, 160);
+  i420.yuv.layout = sensor::YuvLayout::I420;
+  Picture unsited = make_picture(16, 12, {1.0f, 1.0f}, 160);
+  unsited.yuv.chroma_location = sensor::ChromaLocation::TopLeft;
+  Picture no_matrix = make_picture(16, 12, {1.0f, 1.0f}, 160);
+  no_matrix.yuv.kr = 0.0f;
+  const struct {
+    const char* name;
+    Picture* picture;
+    Code code;
+  } refused[] = {
+      {"another size", &small, Code::InvalidArgument},
+      {"I420", &i420, Code::Unsupported},
+      {"chroma gfx cannot site", &unsited, Code::Unsupported},
+      {"no Y'CbCr matrix", &no_matrix, Code::InvalidArgument},
+  };
+  std::uint64_t age = 0;
+  for (const auto& r : refused) {
+    SCOPED_TRACE(r.name);
+    ++age;
+    Picture moved = make_picture(16, 12, {2.0f + age, 9.0f}, 160);
+    const Pixels drawn = render(*mosaic, {&moved, r.picture});
+    ASSERT_FALSE(drawn.bytes.empty());
+    ASSERT_EQ(mosaic->refused().size(), 1u);
+    EXPECT_EQ(mosaic->refused()[0].camera, 1u);
+    EXPECT_EQ(mosaic->refused()[0].status.domain(), r.code)
+        << mosaic->refused()[0].status.message();
+    EXPECT_EQ(mosaic->sets_since_picture(0), 0u);
+    EXPECT_EQ(mosaic->sets_since_picture(1), age);
+    const glm::vec2 dots[] = {moved.dot, pictures[1].dot};
+    for (std::size_t i = 0; i < 2; ++i) {
+      const glm::vec2 expected = mosaic->view().image_to_target(
+          mosaic->tile_region(i).origin + dots[i] + 0.5f);
+      const std::optional<glm::vec2> dot =
+          centroid(drawn, visible(*mosaic, i), bright);
+      ASSERT_TRUE(dot.has_value()) << i;
+      EXPECT_NEAR(dot->x, expected.x, 0.75f) << i;
+      EXPECT_NEAR(dot->y, expected.y, 0.75f) << i;
+    }
+  }
+
+  Picture bt709 = make_picture(16, 12, {1.0f, 1.0f}, 160);
+  bt709.yuv.kr = 0.2126f;
+  bt709.yuv.kb = 0.0722f;
+  ASSERT_TRUE(
+      mosaic->record(VK_NULL_HANDLE, {&pictures[0].yuv, &bt709.yuv}).ok());
+  ASSERT_EQ(mosaic->refused().size(), 2u);
+  for (std::size_t i = 0; i < 2; ++i) {
+    EXPECT_EQ(mosaic->refused()[i].camera, i);
+    EXPECT_EQ(mosaic->refused()[i].status.domain(), Code::InvalidArgument);
+  }
+  EXPECT_EQ(mosaic->sets_since_picture(0), 1u);
+  EXPECT_EQ(mosaic->sets_since_picture(1), age + 1);
+}
+
+// Each page converts in its own pictures' coding, so cameras of different
+// codings on pages of their own are both drawn.
+TEST_F(VizRenderTest, ConvertsEachPageInItsPicturesCoding) {
+  MosaicLimits one_cell;
+  one_cell.max_texels = 16 * 16;
+  std::unique_ptr<RigMosaic> mosaic =
+      make_mosaic({{16, 12}, {16, 12}}, one_cell);
+  ASSERT_NE(mosaic, nullptr);
+  ASSERT_EQ(mosaic->layout().pages.size(), 2u);
+  fit(*mosaic);
+  std::vector<Picture> pictures;
+  pictures.push_back(make_picture(16, 12, {3.0f, 2.0f}, 160));
+  pictures.push_back(make_picture(16, 12, {9.0f, 7.0f}, 160));
+  pictures[1].yuv.kr = 0.2126f;  // HEVC: BT.709, limited range, left-sited
+  pictures[1].yuv.kb = 0.0722f;
+  pictures[1].yuv.full_range = false;
+  pictures[1].yuv.chroma_location = sensor::ChromaLocation::Left;
+  const Pixels drawn = render(*mosaic, all(pictures));
+  ASSERT_FALSE(drawn.bytes.empty());
+  EXPECT_TRUE(mosaic->refused().empty());
+  for (std::size_t i = 0; i < 2; ++i) {
+    EXPECT_EQ(mosaic->sets_since_picture(i), 0u);
+    EXPECT_TRUE(centroid(drawn, visible(*mosaic, i), bright).has_value()) << i;
+  }
+}
+
+// A picture calib takes but gfx refuses -- its luma image of the wrong format
+// -- leaves out its page alone: the other page is recorded, the refused one
+// keeps its picture, and the frame renders under validation. Recorded into a
+// command buffer that never runs, then discarded, the mosaic records cleanly
+// again.
+TEST_F(VizRenderTest, LeavesOutAPageGfxRefuses) {
+  MosaicLimits one_cell;
+  one_cell.max_texels = 16 * 16;
+  std::unique_ptr<RigMosaic> mosaic =
+      make_mosaic({{16, 12}, {16, 12}}, one_cell);
+  ASSERT_NE(mosaic, nullptr);
+  ASSERT_EQ(mosaic->layout().pages.size(), 2u);
+  fit(*mosaic);
+  std::vector<Picture> pictures;
+  pictures.push_back(make_picture(16, 12, {3.0f, 2.0f}, 160));
+  pictures.push_back(make_picture(16, 12, {9.0f, 7.0f}, 160));
+  ASSERT_FALSE(render(*mosaic, all(pictures)).bytes.empty());
+
+  Picture moved = make_picture(16, 12, {12.0f, 9.0f}, 160);
+  Picture wrong = make_picture(16, 12, {1.0f, 1.0f}, 160);
+  wrong.luma = upload(VK_FORMAT_R8G8_UNORM, {16, 12},
+                      std::vector<std::uint8_t>(16 * 12 * 2, 160));
+  wrong.yuv.image[0] = wrong.luma;
+  const Pixels drawn = render(*mosaic, {&moved, &wrong});
+  ASSERT_FALSE(drawn.bytes.empty());
+  ASSERT_EQ(mosaic->refused().size(), 1u);
+  EXPECT_EQ(mosaic->refused()[0].camera, 1u);
+  EXPECT_EQ(mosaic->refused()[0].status.domain(), Code::InvalidArgument);
+  EXPECT_NE(mosaic->refused()[0].status.message().find("page 1"),
+            std::string::npos)
+      << mosaic->refused()[0].status.message();
+  EXPECT_EQ(mosaic->sets_since_picture(0), 0u);
+  EXPECT_EQ(mosaic->sets_since_picture(1), 1u);
+  const glm::vec2 dots[] = {moved.dot, pictures[1].dot};
+  for (std::size_t i = 0; i < 2; ++i) {
+    const glm::vec2 expected = mosaic->view().image_to_target(
+        mosaic->tile_region(i).origin + dots[i] + 0.5f);
+    const std::optional<glm::vec2> dot =
+        centroid(drawn, visible(*mosaic, i), bright);
+    ASSERT_TRUE(dot.has_value()) << i;
+    EXPECT_NEAR(dot->x, expected.x, 0.75f) << i;
+    EXPECT_NEAR(dot->y, expected.y, 0.75f) << i;
+  }
+
+  {
+    core::Result<core::CommandPool> pool =
+        core::CommandPool::create(device().handle(), device().queue_family());
+    ASSERT_TRUE(pool.ok()) << pool.status().message();
+    core::Result<core::CommandBuffer> dropped = pool.value().allocate_primary();
+    ASSERT_TRUE(dropped.ok()) << dropped.status().message();
+    ASSERT_TRUE(dropped.value()
+                    .begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
+                    .ok());
+    ASSERT_TRUE(
+        mosaic->record(dropped.value().handle(), {&pictures[0].yuv, &wrong.yuv})
+            .ok());
+    EXPECT_EQ(mosaic->refused().size(), 1u);
+    // Never submitted: the frame failed.
+  }
+  mosaic->discard();
+  const Pixels again = render(*mosaic, all(pictures));
+  ASSERT_FALSE(again.bytes.empty());
+  EXPECT_TRUE(mosaic->refused().empty());
+  for (std::size_t i = 0; i < 2; ++i) {
+    EXPECT_EQ(mosaic->sets_since_picture(i), 0u);
+    EXPECT_TRUE(centroid(again, visible(*mosaic, i), bright).has_value()) << i;
+  }
 }
 
 // A record whose command buffer never runs, then discard: the mosaic shows
 // nothing, and the next record -- of camera 1 alone -- clears the page
 // first, under validation, so camera 0's tile is black until its next
-// picture.
+// picture. Paged, a first record that never ran leaves the backdrop
+// unwritten too.
 TEST_F(VizRenderTest, RecordsCleanlyAfterADiscard) {
   std::unique_ptr<RigMosaic> mosaic = make_mosaic({{16, 12}, {16, 12}});
   ASSERT_NE(mosaic, nullptr);
@@ -591,11 +794,48 @@ TEST_F(VizRenderTest, RecordsCleanlyAfterADiscard) {
   EXPECT_TRUE(centroid(one, visible(*mosaic, 1), bright).has_value());
   EXPECT_EQ(mosaic->sets_since_picture(0), std::nullopt);
   EXPECT_EQ(mosaic->sets_since_picture(1), 0u);
+
+  MosaicLimits one_cell;
+  one_cell.max_texels = 16 * 16;
+  std::unique_ptr<RigMosaic> paged =
+      make_mosaic({{16, 12}, {16, 12}}, one_cell);
+  ASSERT_NE(paged, nullptr);
+  ASSERT_EQ(paged->layout().pages.size(), 2u);
+  fit(*paged);
+  {
+    core::Result<core::CommandPool> pool =
+        core::CommandPool::create(device().handle(), device().queue_family());
+    ASSERT_TRUE(pool.ok()) << pool.status().message();
+    core::Result<core::CommandBuffer> dropped = pool.value().allocate_primary();
+    ASSERT_TRUE(dropped.ok()) << dropped.status().message();
+    ASSERT_TRUE(dropped.value()
+                    .begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
+                    .ok());
+    ASSERT_TRUE(paged
+                    ->record(dropped.value().handle(),
+                             {&pictures[0].yuv, &pictures[1].yuv})
+                    .ok());
+  }
+  paged->discard();
+  const Pixels paged_blank = render(*paged, {nullptr, nullptr});
+  ASSERT_FALSE(paged_blank.bytes.empty());
+  EXPECT_EQ(count(paged_blank, kWhole, lit), 0);
+  const Pixels paged_one = render(*paged, {nullptr, &pictures[1]});
+  ASSERT_FALSE(paged_one.bytes.empty());
+  EXPECT_EQ(count(paged_one, visible(*paged, 0), lit), 0);
+  EXPECT_TRUE(centroid(paged_one, visible(*paged, 1), bright).has_value());
 }
 
 // A set in another coding than the page holds blanks the page's other tiles
-// rather than convert them wrong, until their own pictures come.
+// rather than convert them wrong, until their own pictures come; on that page
+// alone, when the mosaic is paged.
 TEST_F(VizRenderTest, BlanksTilesACodingChangeWouldConvertWrong) {
+  const auto to_hevc = [](Picture& picture) {
+    picture.yuv.kr = 0.2126f;
+    picture.yuv.kb = 0.0722f;
+    picture.yuv.full_range = false;
+    picture.yuv.chroma_location = sensor::ChromaLocation::Left;
+  };
   std::unique_ptr<RigMosaic> mosaic = make_mosaic({{16, 12}, {16, 12}});
   ASSERT_NE(mosaic, nullptr);
   fit(*mosaic);
@@ -607,12 +847,7 @@ TEST_F(VizRenderTest, BlanksTilesACodingChangeWouldConvertWrong) {
   std::vector<Picture> hevc;
   hevc.push_back(make_picture(16, 12, {3.0f, 2.0f}, 160));
   hevc.push_back(make_picture(16, 12, {9.0f, 7.0f}, 160));
-  for (Picture& picture : hevc) {
-    picture.yuv.kr = 0.2126f;
-    picture.yuv.kb = 0.0722f;
-    picture.yuv.full_range = false;
-    picture.yuv.chroma_location = sensor::ChromaLocation::Left;
-  }
+  for (Picture& picture : hevc) to_hevc(picture);
   const Pixels switched = render(*mosaic, {&hevc[0], nullptr});
   ASSERT_FALSE(switched.bytes.empty());
   EXPECT_GT(count(switched, visible(*mosaic, 0), lit), 0);
@@ -624,6 +859,28 @@ TEST_F(VizRenderTest, BlanksTilesACodingChangeWouldConvertWrong) {
   ASSERT_FALSE(both.bytes.empty());
   EXPECT_GT(count(both, visible(*mosaic, 0), lit), 0);
   EXPECT_GT(count(both, visible(*mosaic, 1), lit), 0);
+
+  // Paged, cameras 0 and 1 on page 0 and camera 2 on page 1: camera 0's new
+  // coding blanks camera 1 alone.
+  MosaicLimits row;
+  row.max_extent = {48, 16};
+  std::unique_ptr<RigMosaic> paged =
+      make_mosaic(std::vector<ImageSize>(3, ImageSize{16, 12}), row);
+  ASSERT_NE(paged, nullptr);
+  ASSERT_EQ(paged->layout().pages.size(), 2u);
+  ASSERT_EQ(paged->layout().tiles[1].page, 0u);
+  ASSERT_EQ(paged->layout().tiles[2].page, 1u);
+  fit(*paged);
+  mjpeg.push_back(make_picture(16, 12, {5.0f, 4.0f}, 160));
+  ASSERT_FALSE(render(*paged, all(mjpeg)).bytes.empty());
+  const Pixels one = render(*paged, {&hevc[0], nullptr, nullptr});
+  ASSERT_FALSE(one.bytes.empty());
+  EXPECT_GT(count(one, visible(*paged, 0), lit), 0);
+  EXPECT_EQ(count(one, visible(*paged, 1), lit), 0);
+  EXPECT_TRUE(centroid(one, visible(*paged, 2), bright).has_value());
+  EXPECT_EQ(paged->sets_since_picture(0), 0u);
+  EXPECT_EQ(paged->sets_since_picture(1), std::nullopt);
+  EXPECT_EQ(paged->sets_since_picture(2), 1u);
 }
 
 // One coverage cell filled, at row 1, column 6 of the 8 x 6 grid over

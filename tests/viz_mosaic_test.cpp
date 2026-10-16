@@ -8,7 +8,9 @@
 #include "volumetric_kit/calib/viz/mosaic.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -202,7 +204,7 @@ TEST(MosaicLayout, PagesAMosaicWiderThanAPage) {
 }
 
 // Over the memory budget, a page gives up a column or a row from its longer
-// side until it fits.
+// side until it fits, and a row once it is one column wide.
 TEST(MosaicLayout, PagesAMosaicOverTheTexelBudget) {
   const std::vector<ImageSize> sizes(4, ImageSize{64, 48});
   MosaicLimits limits;
@@ -227,6 +229,18 @@ TEST(MosaicLayout, PagesAMosaicOverTheTexelBudget) {
   expect_well_formed(single, limits, 3);
   ASSERT_EQ(single.pages.size(), 3u);
   expect_offset(single.pages[2].origin, 0, 64);
+
+  // Wide, short cells: a block one column wide and still wider than tall
+  // gives up its second row.
+  limits.max_texels = 64 * 16;
+  const MosaicLayout flat = layout_of(
+      std::vector<ImageSize>(4, ImageSize{64, 2}), kMosaicGutter, limits);
+  expect_well_formed(flat, limits, 4);
+  ASSERT_EQ(flat.pages.size(), 4u);
+  for (std::size_t i = 0; i < flat.tiles.size(); ++i) {
+    EXPECT_EQ(flat.tiles[i].page, i);
+    expect_extent(flat.pages[i].extent, 64, 16);
+  }
 }
 
 // Sixteen 4K cameras: a page of 4 x 4 cells is over the default budget, so
@@ -249,19 +263,30 @@ TEST(MosaicLayout, RefusesWhatNoMosaicHolds) {
     EXPECT_EQ(mosaic_layout({{64, 48}, bad}).status().domain(),
               Code::InvalidArgument);
   }
+  // A cell wider, or taller, than a page.
   MosaicLimits limits;
-  limits.max_extent = {63, 48};
-  EXPECT_EQ(mosaic_layout({{64, 48}}, kMosaicGutter, limits).status().domain(),
-            Code::InvalidArgument);
+  for (const VkExtent2D page : {VkExtent2D{63, 48}, VkExtent2D{64, 47}}) {
+    limits.max_extent = page;
+    EXPECT_EQ(
+        mosaic_layout({{64, 48}}, kMosaicGutter, limits).status().domain(),
+        Code::InvalidArgument)
+        << page.width << "x" << page.height;
+  }
   limits = {};
   limits.max_texels = 64 * 48 - 1;
   EXPECT_EQ(mosaic_layout({{64, 48}}, kMosaicGutter, limits).status().domain(),
             Code::InvalidArgument);
-  // Beyond 2^24 texels across, whatever the limits.
+  // Beyond 2^24 texels across or down, whatever the limits.
   limits.max_extent = {~0u, ~0u};
   limits.max_texels = ~std::uint64_t{0};
   EXPECT_TRUE(mosaic_layout({{1u << 23, 2}}, 0, limits).ok());
   EXPECT_EQ(mosaic_layout({{1u << 23, 2}, {1u << 23, 2}}, 16, limits)
+                .status()
+                .domain(),
+            Code::InvalidArgument);
+  EXPECT_TRUE(mosaic_layout({{2, 1u << 23}, {2, 1u << 23}}, 16, limits).ok());
+  EXPECT_EQ(mosaic_layout(std::vector<ImageSize>(3, ImageSize{2, 1u << 23}), 16,
+                          limits)
                 .status()
                 .domain(),
             Code::InvalidArgument);
@@ -358,7 +383,7 @@ TEST(TileConversion, KeepsThePicturesMatrixRangeAndSiting) {
   EXPECT_EQ(conversion.value().chroma_siting, pipelines::ChromaSiting::Left);
 }
 
-TEST(TileConversion, RefusesMixedCodingsAndUnsitedChroma) {
+TEST(TileConversion, RefusesWhatOnePageCannotConvert) {
   const sensor::YuvImage mjpeg = mjpeg_picture();
   sensor::YuvImage matrix = mjpeg_picture();
   matrix.kr = 0.2126f;
@@ -378,6 +403,18 @@ TEST(TileConversion, RefusesMixedCodingsAndUnsitedChroma) {
     sited.chroma_location = location;
     EXPECT_EQ(tile_conversion({&sited}).status().domain(), Code::Unsupported)
         << static_cast<int>(location);
+  }
+
+  // Weights that are no Y'CbCr matrix's, which gfx would not convert.
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  for (const auto& [kr, kb] : {std::pair{0.0f, 0.114f}, std::pair{0.299f, 0.0f},
+                               std::pair{0.5f, 0.5f}, std::pair{nan, 0.114f}}) {
+    sensor::YuvImage weighted = mjpeg_picture();
+    weighted.kr = kr;
+    weighted.kb = kb;
+    EXPECT_EQ(tile_conversion({&weighted}).status().domain(),
+              Code::InvalidArgument)
+        << kr << ", " << kb;
   }
 
   EXPECT_EQ(tile_conversion({}).status().domain(), Code::InvalidArgument);

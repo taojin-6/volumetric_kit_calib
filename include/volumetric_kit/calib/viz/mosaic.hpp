@@ -10,11 +10,11 @@
 ///
 /// No picture passes through the host: gfx's `ImagePipeline::record_write`
 /// copies each decoder's planes into its camera's tile, and `record_convert`
-/// converts the mosaic for display. Any number of cameras, of any sizes, take
-/// equal cells of one grid (@ref mosaic_layout); a mosaic too large for one
-/// texture is paged over several, which its view shows as one. Marks drawn over
-/// a tile's region (@ref RigMosaic::tile_region, @ref overlay.hpp) land on the
-/// texels they name.
+/// converts the mosaic for display. Any number of cameras, of mixed even
+/// sizes, take equal cells of one grid (@ref mosaic_layout); a mosaic too
+/// large for one texture is paged over several, which its view shows as one.
+/// Marks drawn over a tile's region (@ref RigMosaic::tile_region,
+/// @ref overlay.hpp) land on the texels they name.
 
 #include <cstddef>
 #include <cstdint>
@@ -26,6 +26,7 @@
 
 #include "volumetric_kit/calib/viz/export.hpp"
 #include "volumetric_kit/core/base/result.hpp"
+#include "volumetric_kit/core/vulkan/buffer.hpp"
 #include "volumetric_kit/core/vulkan/vulkan.hpp"
 #include "volumetric_kit/gfx/camera/image_view_2d.hpp"
 #include "volumetric_kit/gfx/core/render_target.hpp"
@@ -48,8 +49,7 @@ inline constexpr std::uint32_t kMosaicGutter = 16;
 ///
 /// @code
 /// MosaicLimits limits;
-/// limits.max_texels = std::uint64_t{1} << 24;  // pages of at most 16 Mi
-/// texels
+/// limits.max_texels = std::uint64_t{1} << 24;  // 16 Mi texels a page
 /// @endcode
 struct MosaicLimits {
   /// The largest page, in texels: by default 16384 x 16384, the common
@@ -165,13 +165,14 @@ VC_VIZ_API core::Result<gfx::pipelines::ImageWrite> tile_write(
 /// @brief How pictures written together become display colour: the Y'CbCr
 ///        matrix, range and chroma siting they share.
 ///
-/// gfx converts a page whole, with one coding, so the pictures written into a
-/// mosaic at once must share it.
+/// gfx converts a page whole, with one coding, so the pictures written into
+/// one page at once must share it.
 /// @param pictures  The pictures; a null entry is none.
 /// @return Their conversion; `Unsupported` for a chroma location gfx cannot
 ///         site (any but `Left` and `Center`); `InvalidArgument` for no
-///         picture, or two whose matrix, range or siting differ; or
-///         `OutOfMemory`.
+///         picture, matrix weights that are not a Y'CbCr matrix's
+///         (`kr > 0`, `kb > 0`, `kr + kb < 1`), or two pictures whose matrix,
+///         range or siting differ; or `OutOfMemory`.
 ///
 /// @code
 /// VKC_ASSIGN(const gfx::pipelines::ImageConversion conversion,
@@ -180,6 +181,19 @@ VC_VIZ_API core::Result<gfx::pipelines::ImageWrite> tile_write(
 VC_VIZ_API core::Result<gfx::pipelines::ImageConversion> tile_conversion(
     const std::vector<const recon::sensor::YuvImage*>& pictures);
 
+/// @brief A camera's new picture that @ref RigMosaic::record left out, and
+///        why.
+///
+/// @code
+/// for (const TileRefusal& refusal : mosaic->refused()) {
+///   show_error(refusal.camera, refusal.status.message());
+/// }
+/// @endcode
+struct TileRefusal {
+  std::size_t camera = 0;  ///< The camera: its tile's index.
+  core::Status status;     ///< Why its picture was left out.
+};
+
 /// @brief The rig's mosaic: one NV12 texture per page, written in tiles from
 ///        each camera's decoded picture and converted on the GPU, and one view
 ///        of it all.
@@ -187,8 +201,8 @@ VC_VIZ_API core::Result<gfx::pipelines::ImageConversion> tile_conversion(
 /// Records and draws go into the caller's command buffers on the renderer's
 /// graphics queue: @ref record before the frame's rendering scope, @ref draw
 /// inside it. A camera with no new picture keeps its last; texels no picture
-/// covers, the gutter among them, are black. The view keeps its pan and zoom
-/// as its viewport changes. Not thread-safe.
+/// covers -- the gutter, and any empty cell -- are black, paged or not. The
+/// view keeps its pan and zoom as its viewport changes. Not thread-safe.
 ///
 /// @warning The device the allocator allocates on must outlive the mosaic, and
 ///          the GPU must be done with every frame that recorded or drew it
@@ -200,12 +214,16 @@ VC_VIZ_API core::Result<gfx::pipelines::ImageConversion> tile_conversion(
 ///            RigMosaic::create(device, allocator, swapchain.layout(), sizes));
 /// mosaic->view().set_viewport({0.0f, 0.0f}, framebuffer);  // and on resize
 /// // Each frame with a new set, before the rendering scope; the set is held
-/// // in gfx's RetireQueue until the frame retires:
-/// std::vector<const recon::sensor::YuvImage*> pictures(set.frames.size());
+/// // in gfx's RetireQueue until the frame retires. `pictures` is the caller's
+/// // own vector, reused from frame to frame:
+/// pictures.assign(set.frames.size(), nullptr);
 /// for (std::size_t i = 0; i < pictures.size(); ++i) {
-///   if (set.frames[i]) pictures[i] = &set.frames[i]->color;
+///   if (set.frames[i] && set.frames[i]->has_color()) {
+///     pictures[i] = &set.frames[i]->color;
+///   }
 /// }
 /// VKC_TRY(mosaic->record(cmd, pictures));
+/// // ... and each of mosaic->refused() shown on its camera's panel.
 /// target.begin(cmd, begin_info);
 /// mosaic->draw(cmd, extent);
 /// // ... each camera's marks, then ImGui:
@@ -250,33 +268,42 @@ class VC_VIZ_API RigMosaic {
   /// @brief Record the copy of each new picture into its tile, then one
   ///        convert of each page written.
   ///
-  /// A set with no new picture records nothing. A page whose other tiles hold
-  /// another coding than the set's is blanked first, so they show black rather
-  /// than mis-converted.
+  /// A set with no new picture records nothing. Each page is recorded whole
+  /// or not at all. One camera's fault leaves the others live: a picture
+  /// @ref tile_write or @ref tile_conversion refuses is left out, and so are
+  /// a page's pictures when they mix codings or gfx refuses their write;
+  /// @ref refused names each, and its tile keeps what it showed. A page whose
+  /// other tiles hold another coding than its new pictures' is blanked first,
+  /// so they show black rather than mis-converted.
   /// @param cmd       A command buffer in the recording state, outside a
   ///                  rendering scope, for the renderer's graphics queue.
   /// @param pictures  Each camera's new picture, in the rig's order; a null
   ///                  entry is none, and keeps its tile's last. Each must
   ///                  outlive the record's execution (@ref tile_write).
-  /// @return OK once recorded; `InvalidArgument` for an entry per camera
-  ///         missing or extra; what @ref tile_write or @ref tile_conversion
-  ///         refuses, naming the camera, with nothing recorded; or gfx's
-  ///         `record_write` and `record_convert` refusals, after which the
-  ///         pages before the one refused stay recorded.
+  /// @return OK once recorded, whatever it left out; `InvalidArgument` for an
+  ///         entry per camera missing or extra, with nothing recorded; or
+  ///         `OutOfMemory`, after which the mosaic may have forgotten its
+  ///         pictures, as @ref discard does, so it is valid whether or not
+  ///         @p cmd runs.
   core::Status record(
       VkCommandBuffer cmd,
       const std::vector<const recon::sensor::YuvImage*>& pictures);
+
+  /// @return The pictures the last @ref record left out, by camera; empty
+  ///         after one that returned an error.
+  const std::vector<TileRefusal>& refused() const noexcept { return refused_; }
 
   /// @brief Forget every tile's picture, after a command buffer that recorded
   ///        to the mosaic may not have run.
   ///
   /// Each page then shows nothing until a @ref record writes to it, which first
   /// clears it black. Call it when `windowing::FrameLoop::end_frame` fails and
-  /// the swapchain is not stale, as for gfx's `ImageTexture::discard`.
+  /// the swapchain is not stale, as for gfx's `ImageTexture::discard`, or when
+  /// a command buffer @ref record recorded into is dropped.
   void discard() noexcept;
 
-  /// @brief Record the mosaic's draw: each page with a picture, where the view
-  ///        puts it.
+  /// @brief Record the mosaic's draw: each page with a picture where the view
+  ///        puts it, over a paged mosaic's black backdrop.
   /// @param cmd      A command buffer in the recording state, inside a
   ///                 rendering scope of a target of the layout @ref create
   ///                 took.
@@ -319,19 +346,36 @@ class VC_VIZ_API RigMosaic {
  private:
   RigMosaic() = default;
 
+  core::Status record_pages(
+      VkCommandBuffer cmd,
+      const std::vector<const recon::sensor::YuvImage*>& pictures,
+      bool& started);
+  // Leave out the pictures of page `page`'s writes, for `status`.
+  void refuse_page(std::size_t page, const core::Status& status);
+  // Forget page `page`'s picture and its tiles', as discard does.
+  void forget_page(std::size_t page) noexcept;
+
   MosaicLayout layout_;
   gfx::pipelines::ImagePipeline pipeline_;
   std::vector<gfx::pipelines::ImageTexture> textures_;  // one per page
+  // A paged mosaic's backdrop: one black texel, drawn under the pages across
+  // the mosaic, so the gutters between pages and any empty block are black;
+  // written from black_, a byte of 0.
+  gfx::pipelines::ImageTexture backdrop_;
+  core::Buffer black_;
   // The coding each page's planes hold, since its last discard.
   std::vector<std::optional<gfx::pipelines::ImageConversion>> codings_;
   std::vector<std::optional<std::uint64_t>> since_;  // per tile
+  std::vector<TileRefusal> refused_;                 // by the last record
   gfx::camera::ImageView2D view_;
   // Reused by record: its writes grouped by page, from page_first_[p], and
-  // the tile of each.
+  // the tile of each; each page's pictures, by tile, and their conversion.
   std::vector<std::size_t> page_first_;
   std::vector<std::size_t> page_count_;
   std::vector<gfx::pipelines::ImageWrite> writes_;
   std::vector<std::size_t> write_tile_;
+  std::vector<const recon::sensor::YuvImage*> page_pictures_;
+  std::vector<gfx::pipelines::ImageConversion> page_conversion_;
   std::vector<gfx::pipelines::ImageDraw> draws_;  // reused by draw
 };
 

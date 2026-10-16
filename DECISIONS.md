@@ -121,16 +121,21 @@ The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
   over their queue family's ownership (and gfx maps I420).
 - **One mosaic, any number of cameras.** Each camera's picture is a tile of
   one NV12 picture: gfx copies each new picture into its tile, the others
-  keep theirs, and the picture is converted once per set, so the rig takes
-  one conversion, one mip chain and one draw whatever its size, and one view
-  pans and zooms it all. calib picks the tiles: cells of the largest
-  picture's size in a grid as square as it can be, at least 16 texels apart,
-  with origins and extent on multiples of 16, so the mosaic's mips to level 4
-  keep the tiles apart (gfx's `ImageWrite` gives the rule). A mosaic too
-  large for the device's textures or a page's texel budget is paged
-  over several textures in blocks of whole cells, each drawn at its place in
-  the one view, so paging changes nothing a caller sees. A set's pictures
-  share one coding, as gfx converts a page whole.
+  keep theirs, and each page with a new picture is converted once per set,
+  so the rig takes one conversion, one mip chain and one draw per page,
+  whatever its camera count, and one view pans and zooms it all. calib picks
+  the tiles: cells of the largest picture's size in a grid as square as it
+  can be, at least 16 texels apart, with origins and extent on multiples of
+  16, so the mosaic's mips to level 4 keep the tiles apart (gfx's
+  `ImageWrite` gives the rule). A mosaic too large for the device's textures
+  or a page's texel budget is paged over several textures in blocks of whole
+  cells, each drawn at its place in the one view over a black backdrop, so
+  the tiles, their marks and the black gutters are where one page would put
+  them. A page's pictures share one coding, as gfx converts a page whole.
+- **One camera's fault leaves the others live.** A picture the mosaic cannot
+  take, or a page whose pictures mix codings or whose write gfx refuses, is
+  left out and named while the rest are recorded, so a rig of many cameras
+  does not freeze for one.
 - **Marks in the detector's pixels.** Corners keep OpenCV's integer pixel
   centres, and gfx's `ImageOverlay` is the one home of the half-pixel and
   framebuffer-scale mapping onto a tile's region of the mosaic, of the clip

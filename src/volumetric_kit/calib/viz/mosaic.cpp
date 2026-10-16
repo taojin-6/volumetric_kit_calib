@@ -11,6 +11,7 @@
 
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/core/base/check.hpp"
+#include "volumetric_kit/core/vulkan/allocator.hpp"
 
 namespace volumetric_kit::calib::viz {
 namespace {
@@ -38,6 +39,20 @@ std::uint64_t ceil_sqrt(std::uint64_t n) noexcept {
   return c;
 }
 
+// Cuts `rect` short at `end`, its right and bottom edges rounded to whole
+// pixels, as the rasterizer covers pixel centres; a NaN cuts it to nothing.
+void cut_at(VkRect2D& rect, glm::vec2 end) noexcept {
+  const auto cut = [](std::int32_t from, std::uint32_t& size, float at) {
+    const double lo = from;
+    const double hi = lo + size;
+    const double edge = std::round(static_cast<double>(at));
+    const double kept = edge >= hi ? hi : (edge > lo ? edge : lo);
+    size = static_cast<std::uint32_t>(kept - lo);
+  };
+  cut(rect.offset.x, rect.extent.width, end.x);
+  cut(rect.offset.y, rect.extent.height, end.y);
+}
+
 bool same_coding(const pipelines::ImageConversion& a,
                  const pipelines::ImageConversion& b) noexcept {
   return a.kr == b.kr && a.kb == b.kb && a.full_range == b.full_range &&
@@ -59,6 +74,13 @@ core::Result<pipelines::ImageConversion> conversion_of(
           "chroma location " +
           std::to_string(static_cast<int>(picture.chroma_location)) +
           " is neither Left nor Center, the sitings gfx draws");
+  }
+  // As gfx's convert takes them, so a page written is never left unconverted.
+  if (!(picture.kr > 0.0f && picture.kb > 0.0f &&
+        picture.kr + picture.kb < 1.0f)) {
+    return core::Status::invalid_argument(
+        "matrix weights kr " + std::to_string(picture.kr) + " and kb " +
+        std::to_string(picture.kb) + " are not a Y'CbCr matrix's");
   }
   conversion.kr = picture.kr;
   conversion.kb = picture.kb;
@@ -238,7 +260,7 @@ core::Result<pipelines::ImageConversion> tile_conversion(
             return core::Status::invalid_argument(
                 "tile_conversion: picture " + std::to_string(i) +
                 "'s matrix, range or siting is not picture " +
-                std::to_string(first) + "'s; a mosaic converts with one");
+                std::to_string(first) + "'s; a page converts with one");
           }
         }
         if (!shared) {
@@ -279,8 +301,24 @@ core::Result<std::unique_ptr<RigMosaic>> RigMosaic::create(
                                                      allocator, desc));
           mosaic->textures_.push_back(std::move(texture));
         }
+        if (placed.pages.size() > 1) {
+          pipelines::ImageTextureDesc desc;
+          desc.extent = {1, 1};
+          desc.mapping = pipelines::ImageMapping::Grey;
+          desc.format = VK_FORMAT_R8_UNORM;
+          VKC_ASSIGN(mosaic->backdrop_,
+                     pipelines::ImageTexture::create(mosaic->pipeline_,
+                                                     allocator, desc));
+          core::BufferDesc black;
+          black.size = 1;
+          black.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+          black.memory = core::MemoryUsage::Staging;
+          VKC_ASSIGN(mosaic->black_, allocator.create_buffer(black));
+          *static_cast<std::uint8_t*>(mosaic->black_.mapped()) = 0;
+        }
         mosaic->codings_.resize(placed.pages.size());
         mosaic->since_.resize(placed.tiles.size());
+        mosaic->refused_.reserve(placed.tiles.size());
         mosaic->page_first_.resize(placed.pages.size());
         mosaic->page_count_.assign(placed.pages.size(), 0);
         for (const MosaicTile& tile : placed.tiles) {
@@ -293,7 +331,10 @@ core::Result<std::unique_ptr<RigMosaic>> RigMosaic::create(
         }
         mosaic->writes_.resize(placed.tiles.size());
         mosaic->write_tile_.resize(placed.tiles.size());
-        mosaic->draws_.resize(placed.pages.size());
+        mosaic->page_pictures_.reserve(placed.tiles.size());
+        mosaic->page_conversion_.resize(placed.pages.size());
+        mosaic->draws_.resize(placed.pages.size() +
+                              (mosaic->backdrop_.valid() ? 1 : 0));
         // An empty viewport until the caller sets one: nothing is drawn
         // before.
         mosaic->view_ = gfx::camera::ImageView2D(
@@ -307,75 +348,138 @@ core::Result<std::unique_ptr<RigMosaic>> RigMosaic::create(
 core::Status RigMosaic::record(
     VkCommandBuffer cmd, const std::vector<const sensor::YuvImage*>& pictures) {
   return compute::guarded("RigMosaic::record", [&]() -> core::Status {
-    const std::size_t tiles = layout_.tiles.size();
-    if (pictures.size() != tiles) {
-      return core::Status::invalid_argument(
-          "RigMosaic::record: " + std::to_string(pictures.size()) +
-          " pictures for " + std::to_string(tiles) + " tiles");
+    bool started = false;
+    try {
+      core::Status recorded = record_pages(cmd, pictures, started);
+      if (!recorded.ok()) refused_.clear();
+      return recorded;
+    } catch (...) {
+      // What it recorded may never run: forget it all.
+      if (started) discard();
+      refused_.clear();
+      throw;
     }
-    // Check every picture, and group the writes by page, before recording.
-    std::fill(page_count_.begin(), page_count_.end(), 0);
-    std::size_t present = 0;
-    for (std::size_t i = 0; i < tiles; ++i) {
-      if (pictures[i] == nullptr) continue;
-      const MosaicTile& tile = layout_.tiles[i];
-      core::Result<pipelines::ImageWrite> write =
-          tile_write(*pictures[i], tile.extent, tile.at);
-      if (!write.ok()) {
-        return std::move(write).status().with_context(
-            "RigMosaic::record: camera " + std::to_string(i));
-      }
-      const std::size_t slot = page_first_[tile.page] + page_count_[tile.page];
-      ++page_count_[tile.page];
-      writes_[slot] = write.value();
-      write_tile_[slot] = i;
-      ++present;
-    }
-    std::optional<pipelines::ImageConversion> conversion;
-    if (present > 0) {
-      core::Result<pipelines::ImageConversion> shared =
-          tile_conversion(pictures);
-      if (!shared.ok()) {
-        return std::move(shared).status().with_context("RigMosaic::record");
-      }
-      conversion = shared.value();
-    }
-    // The set ages every picture; the ones written below start again.
-    for (std::optional<std::uint64_t>& since : since_) {
-      if (since) ++*since;
-    }
-    for (std::size_t p = 0; p < textures_.size() && conversion; ++p) {
-      if (page_count_[p] == 0) continue;
-      if (codings_[p] && !same_coding(*codings_[p], *conversion)) {
-        // Its other tiles hold another coding, which this convert would show
-        // wrong: blank them instead.
-        textures_[p].discard();
-        codings_[p].reset();
-        for (std::size_t i = 0; i < tiles; ++i) {
-          if (layout_.tiles[i].page == p) since_[i].reset();
-        }
-      }
-      core::Status recorded = pipeline_.record_write(
-          cmd, textures_[p], writes_.data() + page_first_[p],
-          static_cast<std::uint32_t>(page_count_[p]));
-      if (recorded.ok()) {
-        codings_[p] = conversion;  // what its planes now hold
-        recorded = pipeline_.record_convert(cmd, textures_[p], *conversion);
-      }
-      if (!recorded.ok()) {
-        return std::move(recorded).with_context("RigMosaic::record: page " +
-                                                std::to_string(p));
-      }
-      for (std::size_t slot = page_first_[p];
-           slot < page_first_[p] + page_count_[p]; ++slot) {
-        since_[write_tile_[slot]] = 0;
-      }
-    }
-    return core::Status();
   });
 }
 
+core::Status RigMosaic::record_pages(
+    VkCommandBuffer cmd, const std::vector<const sensor::YuvImage*>& pictures,
+    bool& started) {
+  const std::size_t tiles = layout_.tiles.size();
+  if (pictures.size() != tiles) {
+    return core::Status::invalid_argument(
+        "RigMosaic::record: " + std::to_string(pictures.size()) +
+        " pictures for " + std::to_string(tiles) + " tiles");
+  }
+  refused_.clear();
+  // Check each picture, and group the writes of those taken by page, before
+  // recording anything.
+  std::fill(page_count_.begin(), page_count_.end(), 0);
+  for (std::size_t i = 0; i < tiles; ++i) {
+    if (pictures[i] == nullptr) continue;
+    const MosaicTile& tile = layout_.tiles[i];
+    core::Result<pipelines::ImageWrite> write =
+        tile_write(*pictures[i], tile.extent, tile.at);
+    if (!write.ok()) {
+      refused_.push_back({i, std::move(write).status()});
+      continue;
+    }
+    core::Result<pipelines::ImageConversion> coding =
+        conversion_of(*pictures[i]);
+    if (!coding.ok()) {
+      refused_.push_back(
+          {i, std::move(coding).status().with_context("tile_conversion")});
+      continue;
+    }
+    const std::size_t slot = page_first_[tile.page] + page_count_[tile.page];
+    ++page_count_[tile.page];
+    writes_[slot] = write.value();
+    write_tile_[slot] = i;
+  }
+  // A page's pictures share one coding, as gfx converts a page whole.
+  bool any = false;
+  for (std::size_t p = 0; p < textures_.size(); ++p) {
+    if (page_count_[p] == 0) continue;
+    page_pictures_.assign(tiles, nullptr);
+    for (std::size_t slot = page_first_[p];
+         slot < page_first_[p] + page_count_[p]; ++slot) {
+      page_pictures_[write_tile_[slot]] = pictures[write_tile_[slot]];
+    }
+    const core::Result<pipelines::ImageConversion> conversion =
+        tile_conversion(page_pictures_);
+    if (!conversion.ok()) {
+      refuse_page(p, conversion.status());
+      continue;
+    }
+    page_conversion_[p] = conversion.value();
+    any = true;
+  }
+
+  if (any) {
+    started = true;
+    if (backdrop_.valid() && !backdrop_.has_picture()) {
+      pipelines::ImageWrite black;
+      black.planes[0].buffer = &black_;
+      black.extent = {1, 1};
+      VKC_CHECK(pipeline_.record_write(cmd, backdrop_, &black, 1).ok(),
+                "RigMosaic::record: the backdrop's write");
+      VKC_CHECK(pipeline_.record_convert(cmd, backdrop_, {}).ok(),
+                "RigMosaic::record: the backdrop's convert");
+    }
+  }
+  for (std::size_t p = 0; p < textures_.size(); ++p) {
+    if (page_count_[p] == 0) continue;
+    const pipelines::ImageConversion& conversion = page_conversion_[p];
+    if (codings_[p] && !same_coding(*codings_[p], conversion)) {
+      // Its other tiles hold another coding, which this convert would show
+      // wrong: blank them instead.
+      forget_page(p);
+    }
+    core::Status written = pipeline_.record_write(
+        cmd, textures_[p], writes_.data() + page_first_[p],
+        static_cast<std::uint32_t>(page_count_[p]));
+    if (!written.ok()) {
+      refuse_page(p, std::move(written).with_context(
+                         "RigMosaic::record: page " + std::to_string(p)));
+      continue;
+    }
+    codings_[p] = conversion;  // what its planes now hold
+    // A page written is converted: tile_conversion took only weights the
+    // convert takes.
+    VKC_CHECK(pipeline_.record_convert(cmd, textures_[p], conversion).ok(),
+              "RigMosaic::record: a page's convert");
+  }
+  // The set ages every picture; the ones written start again.
+  for (std::optional<std::uint64_t>& since : since_) {
+    if (since) ++*since;
+  }
+  for (std::size_t p = 0; p < textures_.size(); ++p) {
+    for (std::size_t slot = page_first_[p];
+         slot < page_first_[p] + page_count_[p]; ++slot) {
+      since_[write_tile_[slot]] = 0;
+    }
+  }
+  return core::Status();
+}
+
+void RigMosaic::refuse_page(std::size_t page, const core::Status& status) {
+  for (std::size_t slot = page_first_[page];
+       slot < page_first_[page] + page_count_[page]; ++slot) {
+    refused_.push_back({write_tile_[slot], status});
+  }
+  page_count_[page] = 0;
+}
+
+void RigMosaic::forget_page(std::size_t page) noexcept {
+  textures_[page].discard();
+  codings_[page].reset();
+  for (std::size_t i = 0; i < layout_.tiles.size(); ++i) {
+    if (layout_.tiles[i].page == page) since_[i].reset();
+  }
+}
+
 void RigMosaic::discard() noexcept {
+  backdrop_.discard();
   for (pipelines::ImageTexture& texture : textures_) texture.discard();
   for (std::optional<pipelines::ImageConversion>& coding : codings_) {
     coding.reset();
@@ -386,16 +490,27 @@ void RigMosaic::discard() noexcept {
 void RigMosaic::draw(VkCommandBuffer cmd, VkExtent2D extent,
                      pipelines::ImageFilter magnify) noexcept {
   const float scale = view_.scale();
+  std::size_t count = 0;
+  if (backdrop_.valid()) {
+    // One black texel as large as the mosaic's longer side, from its top-left
+    // corner, cut at its right and bottom edges.
+    pipelines::ImageDraw& backdrop = draws_[count++];
+    backdrop = pipelines::image_draw(backdrop_, view_);
+    const glm::vec2 size(static_cast<float>(layout_.extent.width),
+                         static_cast<float>(layout_.extent.height));
+    backdrop.scale = scale * std::max(size.x, size.y);
+    cut_at(backdrop.viewport, view_.image_to_target(size));
+  }
   for (std::size_t p = 0; p < textures_.size(); ++p) {
-    pipelines::ImageDraw& draw = draws_[p];
+    pipelines::ImageDraw& draw = draws_[count++];
     draw = pipelines::image_draw(textures_[p], view_, magnify);
     const VkOffset2D origin = layout_.pages[p].origin;
     draw.origin +=
         glm::vec2(static_cast<float>(origin.x), static_cast<float>(origin.y)) *
         scale;
   }
-  pipeline_.submit(
-      cmd, {extent, draws_.data(), static_cast<std::uint32_t>(draws_.size())});
+  pipeline_.submit(cmd,
+                   {extent, draws_.data(), static_cast<std::uint32_t>(count)});
 }
 
 gfx::ui::OverlayRegion RigMosaic::tile_region(std::size_t index) const {
