@@ -126,6 +126,44 @@ of them did.
   [DECISIONS.md](https://github.com/taojin-6/volumetric_kit_core/blob/main/DECISIONS.md#a-brew-upgrade-needs-no-cache-clearing).
 - **Protecting `main`** with the `required` check is the owner's choice.
 
+## 2026-10-16 — calib_rig's live view and capture
+
+The `app` tier runs the rig (`app/calib_rig.hpp`, `live_worker.hpp`,
+`capture_worker.hpp`); `apps/calib_rig/main.cpp` only loads the scenario.
+
+- **Three threads, one owner each.** The live worker (T1) alone touches the
+  rig's `SensorArray`, which is not thread-safe: it polls each set, reads every
+  camera's luma back in one submit, finds the board (hybrid) and checks each
+  view, drives the capture rule, and publishes a snapshot, newest wins. The
+  capture worker (T3) searches each capture's luma again at full resolution,
+  the solver's input, and queues it on the session writer. The window (T0)
+  turns keys and buttons into requests and never waits on a camera, a
+  detector or the disk.
+- **Frames go back quickly.** A capture is copied out of its set (luma, JPEG,
+  depth) so the set returns to the driver at once; the window holds a
+  snapshot's set in gfx's `RetireQueue` until the frame that copied its
+  pictures into the mosaic retires.
+- **One device, two families.** The cameras decode onto the compute side of
+  the one `VkDevice` gfx shares (`gfx_glfw`'s `make_shared_device` with recon's
+  requirements), their pictures readable from both families, so T1 reads luma
+  back on compute while T0 copies the same images on graphics.
+- **Settings are the core's.** The scenario is `config::Application::CalibRig`
+  (core 0.11.0): the sync file, the modes, the session root and the window.
+  Detection and capture thresholds stay calib's defaults. The modes requested
+  are the ones every camera is held to when the rig opens, for any number of
+  cameras. The depth mode's name and range come from the Femto Mega's own
+  table for its size, not from fusion settings the scenario does not use.
+- **Nothing is written outside a session.** The session root must exist before
+  the window opens, and ImGui keeps no ini file.
+- **Keys before ImGui.** calib_rig's key callback is installed before ImGui's
+  GLFW backend, which chains to it. Keys are ignored while ImGui takes text,
+  and a held key captures once.
+- **How it builds.** The tier is built with `viz` when gfx's `gfx_glfw` (an
+  installed GLFW) and recon's Orbbec driver (`VR_WITH_ORBBEC`, with
+  `VR_WITH_FFMPEG`) exist, and turns the core's config tier on. It is
+  build-tree only, as `viz` is. A session records the siblings' commits as
+  this build fetched them, read when it is configured.
+
 ## 2026-10-16 — Depth checks are calib's kernels
 
 The depth checks' per-pixel work -- each view's board plane, and each

@@ -29,6 +29,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The `app` tier, `volumetric_kit::calib_app`, and `calib_rig`, live view and
+  capture (DECISIONS.md, 2026-10-16), built with `viz` given GLFW and recon's
+  Orbbec driver, build-tree only. `calib_rig --config` loads a CalibRig
+  scenario (`check_scenario`, `run_calib_rig`): every camera of the rig's sync
+  file opened at the scenario's modes (`rig_preset`, `depth_mode`,
+  `orbbec_options`) and held to them (`check_preset`); `LiveWorker`, the one
+  owner of the `SensorArray`, publishes a `LiveSnapshot` per set (luma read
+  back, hybrid detection, view checks, the capture rule) and copies a taken
+  capture out of its set as a `CaptureRequest`; `CaptureWorker` detects it at
+  full resolution and writes the session (`session_camera`, `app_software`);
+  `record_snapshot`, `tile_overlays` and `camera_lives` draw a snapshot
+  through the viz tier; `key_request` maps the keys and a clicker.
 - The `depth` tier, `volumetric_kit::calib_depth`, built with `VC_WITH_RIG`
   (DECISIONS.md, 2026-10-16, "Depth checks are calib's kernels"):
   `DepthChecks::fit_planes` fits each view's board plane on the GPU to its
@@ -132,6 +144,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `capture`, `depth` and `viz`. On Linux, `tools/install-opencv.sh` builds
   OpenCV 5 from its source; CI's Ubuntu legs and sanitizer job now build and
   test every OpenCV tier on it.
+- The core is pinned at core PR #37's head (0.11.0, `Application::CalibRig`),
+  which merges first; builds with `viz` turn on its config tier.
 - `initialise` places the board of a capture whose views are all ambiguous,
   from those views, so the adjustment takes them.
 - recon is pinned at `bdbe26e` (recon main, with its #228, and its #245,

@@ -42,9 +42,9 @@ on:
       rig:
         description: >-
           Build the rig tiers (VC_WITH_RIG): recon's sensor, video and Orbbec
-          tiers against calib's core pin, and gfx for the viz tier, whose GPU
-          tests need a device (MoltenVK) and run under the validation layer.
-          macOS only.
+          tiers against calib's core pin, gfx for the viz tier, and calib_rig
+          over gfx's GLFW glue. The viz and app tiers' GPU tests need a device
+          (MoltenVK) and run under the validation layer. macOS only.
         required: false
         type: boolean
         default: false
@@ -221,11 +221,16 @@ jobs:
       # runner the levels come from its .env (the core's
       # tools/runners/README.md), or from a leg's container env.
       # They are passed explicitly: a bare `--parallel` runs make with no job
-      # limit, ignoring CMAKE_BUILD_PARALLEL_LEVEL.
+      # limit, ignoring CMAKE_BUILD_PARALLEL_LEVEL. calib_rig needs GLFW and
+      # the Orbbec tier; a rig build without it would skip the app's tests
+      # silently.
       - name: Build
         run: |
           cmake --build build \
             --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
+          if [ "${{ inputs.rig }}" = "true" ]; then
+            test -x build/apps/calib_rig
+          fi
 
       - name: Test
         env:

@@ -150,6 +150,9 @@ git -C "$calib_root" diff --check
   core's Vulkan fixtures, which skip without a device; run them under the
   validation layer with `VKC_TEST_VALIDATION=1` (on macOS, with
   `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib` so the layer loads).
+- The `app` tier and `calib_rig` also need an installed GLFW and
+  `-DVR_WITH_ORBBEC=ON -DVR_WITH_FFMPEG=ON`, as CI's rig job builds them. No
+  test opens a camera: the app's tests drive fake sensors.
 
 ## Keeping guidance current
 

@@ -76,6 +76,11 @@ if(VC_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
+# calib_rig, the live rig calibration application, built with its tier.
+if(TARGET calib_app)
+  add_subdirectory(apps)
+endif()
+
 # Guard: examples/ is optional and may be absent in a slimmed checkout.
 if(VC_BUILD_EXAMPLES AND EXISTS
                          "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")

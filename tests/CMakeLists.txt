@@ -143,6 +143,25 @@ if(VC_WITH_RIG)
   target_sources(vc_viz_oom_test PRIVATE support/allocation_failure.cpp)
 endif()
 
+if(TARGET calib_app)
+  # app: the preset and the keys from host data; the live worker over fake
+  # cameras whose synthetic board pictures sit in device images, and the mosaic
+  # drawn from its snapshots, through the core's Vulkan test fixtures (they skip
+  # without a device); the capture worker's sessions on disk, read back with
+  # recon's readers and nlohmann.
+  vc_add_test(app_preset volumetric_kit::calib_app)
+  # GLFW's key codes, through gfx_glfw, whose GLFW is gfx's own find.
+  vc_add_test(app_keys volumetric_kit::calib_app volumetric_kit::gfx_glfw)
+  vc_add_test(app_live volumetric_kit::calib_app vc_synthetic_rig
+              volumetric_kit::core_test_support)
+  vc_add_test(app_live_view volumetric_kit::calib_app vc_synthetic_rig
+              volumetric_kit::core_test_support)
+  vc_add_test(app_capture volumetric_kit::calib_app vc_synthetic_rig
+              volumetric_kit::recon_io)
+  target_include_directories(vc_app_capture_test SYSTEM
+                             PRIVATE "${VC_JSON_INCLUDE_DIR}")
+endif()
+
 # The core calib requires (third_party/CMakeLists.txt): calib's configure
 # against a stand-in core of each version (core_requirement/) refuses one older
 # than VC_CORE_MIN_VERSION, 0.6.1 -- before 0.1.0 the core has no

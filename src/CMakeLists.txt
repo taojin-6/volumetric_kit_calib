@@ -16,8 +16,24 @@ if(VC_WITH_RIG)
   add_subdirectory(volumetric_kit/calib/capture)
   add_subdirectory(volumetric_kit/calib/depth)
   add_subdirectory(volumetric_kit/calib/viz)
+  # The app tier, calib_rig's, also needs gfx's GLFW glue (an installed GLFW)
+  # and recon's Orbbec driver (VR_WITH_ORBBEC).
+  set(_vc_app_needs volumetric_kit::gfx_glfw
+                    volumetric_kit::recon_sensor_orbbec)
+  set(_vc_build_app ON)
+  foreach(_vc_need IN LISTS _vc_app_needs)
+    if(NOT TARGET ${_vc_need})
+      set(_vc_build_app OFF)
+    endif()
+  endforeach()
+  if(_vc_build_app)
+    add_subdirectory(volumetric_kit/calib/app)
+  else()
+    message(STATUS "calib_app and calib_rig: skipped (they need gfx_glfw, "
+                   "from an installed GLFW, and recon's VR_WITH_ORBBEC)")
+  endif()
 endif()
-# TODO: add_subdirectory() for color / app as those tiers land (see DESIGN.md).
+# TODO: add_subdirectory() for color as that tier lands (see DESIGN.md).
 
 # --- calib: umbrella alias ---------------------------------------------------
 # Consumers link `volumetric_kit::calib` and get whatever tiers are built.
@@ -25,11 +41,15 @@ add_library(calib INTERFACE)
 add_library(volumetric_kit::calib ALIAS calib)
 target_link_libraries(calib INTERFACE calib_core calib_compute calib_detect
                                       calib_solve calib_quality)
-# calib_viz is build-tree only (viz/CMakeLists.txt), so it joins the umbrella
-# for in-tree consumers without entering the installed export set.
+# calib_viz and calib_app are build-tree only (their CMakeLists.txt), so they
+# join the umbrella for in-tree consumers without entering the installed export
+# set.
 if(VC_WITH_RIG)
   target_link_libraries(calib INTERFACE calib_capture calib_depth
                                         $<BUILD_INTERFACE:calib_viz>)
+endif()
+if(TARGET calib_app)
+  target_link_libraries(calib INTERFACE $<BUILD_INTERFACE:calib_app>)
 endif()
 
 # --- Install / export --------------------------------------------------------
@@ -46,8 +66,9 @@ if(VC_INSTALL)
       list(APPEND _vc_unbuilt_headers PATTERN "${_vc_tier}" EXCLUDE)
     endforeach()
   endif()
-  # viz is never installed (viz/CMakeLists.txt).
+  # viz and app are never installed (their CMakeLists.txt).
   list(APPEND _vc_unbuilt_headers PATTERN "viz" EXCLUDE)
+  list(APPEND _vc_unbuilt_headers PATTERN "app" EXCLUDE)
   install(
     DIRECTORY "${PROJECT_SOURCE_DIR}/include/"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
