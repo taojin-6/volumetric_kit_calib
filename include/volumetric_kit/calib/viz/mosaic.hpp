@@ -273,8 +273,10 @@ class VC_VIZ_API RigMosaic {
   /// @ref tile_write or @ref tile_conversion refuses is left out, and so are
   /// a page's pictures when they mix codings or gfx refuses their write;
   /// @ref refused names each, and its tile keeps what it showed. A page whose
-  /// other tiles hold another coding than its new pictures' is blanked first,
-  /// so they show black rather than mis-converted.
+  /// other tiles hold another coding than its new pictures' is blanked only
+  /// after gfx accepts their writes, so they show black rather than
+  /// mis-converted. Refused writes keep the page's pictures and their ages
+  /// advance as for a set with no new picture.
   /// @param cmd       A command buffer in the recording state, outside a
   ///                  rendering scope, for the renderer's graphics queue.
   /// @param pictures  Each camera's new picture, in the rig's order; a null

@@ -103,15 +103,13 @@ endif()
 # -Werror stay off in a subproject; its ui tier is build-tree only, so calib_viz
 # is too (src/CMakeLists.txt).
 #
-# The pin is gfx PR #137's head, which holds #136: the region writes and the
-# marks over a region. Both merge first.
-#
-# TODO: re-pin gfx main once gfx PRs #136 and #137 merge.
+# The pin is gfx main after PRs #136 and #137: region writes, marks over a
+# region, and the fractional-scale scissor repair (59e2449).
 if(_vc_build_viz)
   FetchContent_Declare(
     volumetric_kit_gfx
     GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_gfx.git
-    GIT_TAG 3edc692f1e75479319e74efc2491cc3b20e27fd7)
+    GIT_TAG ba7f7059e480ff24ef6907e0535bc90e102f806f)
   FetchContent_MakeAvailable(volumetric_kit_gfx)
 endif()
 

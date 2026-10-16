@@ -430,11 +430,6 @@ core::Status RigMosaic::record_pages(
   for (std::size_t p = 0; p < textures_.size(); ++p) {
     if (page_count_[p] == 0) continue;
     const pipelines::ImageConversion& conversion = page_conversion_[p];
-    if (codings_[p] && !same_coding(*codings_[p], conversion)) {
-      // Its other tiles hold another coding, which this convert would show
-      // wrong: blank them instead.
-      forget_page(p);
-    }
     core::Status written = pipeline_.record_write(
         cmd, textures_[p], writes_.data() + page_first_[p],
         static_cast<std::uint32_t>(page_count_[p]));
@@ -442,6 +437,18 @@ core::Status RigMosaic::record_pages(
       refuse_page(p, std::move(written).with_context(
                          "RigMosaic::record: page " + std::to_string(p)));
       continue;
+    }
+    if (codings_[p] && !same_coding(*codings_[p], conversion)) {
+      // gfx checks every write before recording any. Only after it accepts
+      // this set may we forget the old coding's tiles. Re-record the checked
+      // writes after discarding so the uncovered tiles are cleared black.
+      forget_page(p);
+      VKC_CHECK(
+          pipeline_
+              .record_write(cmd, textures_[p], writes_.data() + page_first_[p],
+                            static_cast<std::uint32_t>(page_count_[p]))
+              .ok(),
+          "RigMosaic::record: a checked replacement write");
     }
     codings_[p] = conversion;  // what its planes now hold
     // A page written is converted: tile_conversion took only weights the

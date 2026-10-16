@@ -282,7 +282,8 @@ class VizRenderTest : public core::test::VulkanDeviceTest {
     image.set_layout(VK_IMAGE_LAYOUT_GENERAL);
   }
 
-  std::optional<gfx::ui::ImGuiOverlay> make_overlay() {
+  std::optional<gfx::ui::ImGuiOverlay> make_overlay(
+      float framebuffer_scale = kFramebufferScale) {
     gfx::ui::ImGuiOverlayConfig config;
     config.layout = color_layout();
     core::Result<gfx::ui::ImGuiOverlay> overlay =
@@ -292,9 +293,9 @@ class VizRenderTest : public core::test::VulkanDeviceTest {
     ImGui::SetCurrentContext(overlay.value().context());
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
-    io.DisplaySize = ImVec2(kExtent.width / kFramebufferScale,
-                            kExtent.height / kFramebufferScale);
-    io.DisplayFramebufferScale = ImVec2(kFramebufferScale, kFramebufferScale);
+    io.DisplaySize = ImVec2(kExtent.width / framebuffer_scale,
+                            kExtent.height / framebuffer_scale);
+    io.DisplayFramebufferScale = ImVec2(framebuffer_scale, framebuffer_scale);
     return std::move(overlay).value();
   }
 
@@ -766,6 +767,79 @@ TEST_F(VizRenderTest, LeavesOutAPageGfxRefuses) {
   }
 }
 
+// A new coding must not erase retained pictures until gfx accepts every
+// write on its page, including cameras with no new picture. Retrying the old
+// coding must also keep them; a valid coding change still blanks old tiles.
+TEST_F(VizRenderTest, KeepsPicturesWhenGfxRefusesANewCoding) {
+  for (const bool paged : {false, true}) {
+    SCOPED_TRACE(paged);
+    MosaicLimits limits;
+    if (paged) limits.max_extent = {48, 16};
+    std::unique_ptr<RigMosaic> mosaic =
+        make_mosaic(std::vector<ImageSize>(3, ImageSize{16, 12}), limits);
+    ASSERT_NE(mosaic, nullptr);
+    ASSERT_EQ(mosaic->layout().pages.size(), paged ? 2u : 1u);
+    ASSERT_EQ(mosaic->layout().tiles[1].page, 0u);
+    fit(*mosaic);
+    std::vector<Picture> pictures;
+    pictures.push_back(make_picture(16, 12, {3.0f, 2.0f}, 64));
+    pictures.push_back(make_picture(16, 12, {9.0f, 7.0f}, 128));
+    pictures.push_back(make_picture(16, 12, {5.0f, 4.0f}, 160));
+    const Pixels first = render(*mosaic, all(pictures));
+    ASSERT_FALSE(first.bytes.empty());
+
+    Picture changed = make_picture(16, 12, {12.0f, 9.0f}, 160);
+    changed.yuv.kr = 0.2126f;
+    changed.yuv.kb = 0.0722f;
+    Picture wrong = changed;
+    wrong.yuv.image[0] = wrong.chroma;  // R8G8 luma: only gfx refuses it.
+    const Pixels refused = render(*mosaic, {&wrong, nullptr, nullptr});
+    ASSERT_EQ(mosaic->refused().size(), 1u);
+    EXPECT_EQ(mosaic->refused()[0].camera, 0u);
+    EXPECT_EQ(mosaic->refused()[0].status.domain(), Code::InvalidArgument);
+    EXPECT_NE(mosaic->refused()[0].status.message().find("wrong format"),
+              std::string::npos);
+    EXPECT_EQ(refused.bytes, first.bytes);
+    for (std::size_t i = 0; i < pictures.size(); ++i) {
+      EXPECT_EQ(mosaic->sets_since_picture(i), 1u) << i;
+    }
+
+    // A valid first write followed by an invalid one refuses the whole page.
+    const Pixels batch = render(*mosaic, {&changed, &wrong, nullptr});
+    ASSERT_EQ(mosaic->refused().size(), 2u);
+    for (std::size_t i = 0; i < 2; ++i) {
+      EXPECT_EQ(mosaic->refused()[i].camera, i);
+      EXPECT_EQ(mosaic->refused()[i].status.domain(), Code::InvalidArgument);
+    }
+    EXPECT_EQ(batch.bytes, first.bytes);
+    for (std::size_t i = 0; i < pictures.size(); ++i) {
+      EXPECT_EQ(mosaic->sets_since_picture(i), 2u) << i;
+    }
+
+    const Pixels old_coding = render(*mosaic, {&pictures[0], nullptr, nullptr});
+    EXPECT_TRUE(mosaic->refused().empty());
+    EXPECT_EQ(old_coding.bytes, first.bytes);
+    EXPECT_EQ(mosaic->sets_since_picture(0), 0u);
+    EXPECT_EQ(mosaic->sets_since_picture(1), 3u);
+    EXPECT_EQ(mosaic->sets_since_picture(2), 3u);
+
+    const Pixels switched = render(*mosaic, {&changed, nullptr, nullptr});
+    ASSERT_FALSE(switched.bytes.empty());
+    EXPECT_TRUE(mosaic->refused().empty());
+    EXPECT_GT(count(switched, visible(*mosaic, 0), lit), 0);
+    EXPECT_EQ(count(switched, visible(*mosaic, 1), lit), 0);
+    EXPECT_EQ(mosaic->sets_since_picture(0), 0u);
+    EXPECT_EQ(mosaic->sets_since_picture(1), std::nullopt);
+    if (paged) {
+      EXPECT_GT(count(switched, visible(*mosaic, 2), lit), 0);
+      EXPECT_EQ(mosaic->sets_since_picture(2), 4u);
+    } else {
+      EXPECT_EQ(count(switched, visible(*mosaic, 2), lit), 0);
+      EXPECT_EQ(mosaic->sets_since_picture(2), std::nullopt);
+    }
+  }
+}
+
 // A record whose command buffer never runs, then discard: the mosaic shows
 // nothing, and the next record -- of camera 1 alone -- clears the page
 // first, under validation, so camera 0's tile is black until its next
@@ -971,6 +1045,33 @@ TEST_F(VizRenderTest, MarksTheCoverageCellAndTheMarkerWhereTheyAre) {
   }
   EXPECT_EQ(count(marked, visible(*mosaic, 0), blue), 0);
   EXPECT_EQ(count(marked, visible(*mosaic, 0), yellow), 0);
+}
+
+// A panned tile reaches beyond the framebuffer. Fractional display scales
+// must keep every covered pixel at the far edge and none outside the tile.
+TEST_F(VizRenderTest, KeepsMarksAtTheFramebufferEdgeAtFractionalScales) {
+  std::unique_ptr<RigMosaic> mosaic = make_mosaic({{256, 128}});
+  ASSERT_NE(mosaic, nullptr);
+  TileMarks marks;
+  marks.grid_columns = 1;
+  marks.grid_rows = 1;
+  marks.grid_fills = {IM_COL32(0, 0, 255, 255)};
+  for (const float scale : {1.0f, 1.1f, 1.75f, 2.0f}) {
+    SCOPED_TRACE(scale);
+    std::optional<gfx::ui::ImGuiOverlay> overlay = make_overlay(scale);
+    ASSERT_TRUE(overlay.has_value());
+    fit(*mosaic);
+    const float origin = scale == 1.75f ? 227.0f : 147.0f;
+    mosaic->view().pan({origin, 0.0f});
+    overlay->new_frame();
+    draw_tile_marks(mosaic->view(), mosaic->tile_region(0), marks);
+    const Pixels marked = render(*mosaic, {nullptr}, &*overlay);
+    ASSERT_FALSE(marked.bytes.empty());
+    const Rect inside{{origin, 0.0f}, {kTarget.x - origin, kTarget.y}};
+    const int expected = static_cast<int>(inside.size.x * inside.size.y);
+    EXPECT_EQ(count(marked, inside, blue), expected);
+    EXPECT_EQ(count(marked, kWhole, blue), expected);
+  }
 }
 
 // The title stays inside its tile's visible part, whatever the viewport and

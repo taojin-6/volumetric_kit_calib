@@ -8,6 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `RigMosaic::record` keeps a page's pictures and ages when gfx refuses a
+  replacement in a different coding, including cameras with no new picture.
+- Tile marks keep the last framebuffer column at fractional display scales
+  through gfx's scissor-rounding repair.
 - `draw_tile_marks` keeps the title's text and background inside all four
   tile edges when the image pans or zooms, including on high-DPI displays.
 - `solve::bundle_adjust` counts a shared capture only when each camera keeps
@@ -52,8 +56,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `BoardEditor` and `draw_board_editor` (its fields through `board_fields`
   and `apply_fields`) edit the board, checked as the detector's `Board`
   takes it, until the first capture locks it. `VC_WITH_RIG` with
-  `VC_WITH_OPENCV` fetches `volumetric_kit_gfx`, pinned at `3edc692` (the
-  head of its #137, over #136).
+  `VC_WITH_OPENCV` fetches `volumetric_kit_gfx`, pinned at `ba7f705` (main
+  after #136 and #137, including the overlay scissor repair).
 - `marker_count`, the markers a board carries, in `calib/core/target.hpp`.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds

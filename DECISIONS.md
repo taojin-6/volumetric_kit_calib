@@ -135,7 +135,12 @@ The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
 - **One camera's fault leaves the others live.** A picture the mosaic cannot
   take, or a page whose pictures mix codings or whose write gfx refuses, is
   left out and named while the rest are recorded, so a rig of many cameras
-  does not freeze for one.
+  does not freeze for one. A coding change forgets the page's old pictures
+  only after gfx accepts every write. Since gfx validates inside
+  `record_write`, that first write is followed by a discard and a second
+  write on a coding change alone, clearing uncovered tiles before converting
+  the page. A refusal keeps the previous pictures and advances their ages
+  as a set with no new picture does.
 - **Marks in the detector's pixels.** Corners keep OpenCV's integer pixel
   centres, and gfx's `ImageOverlay` is the one home of the half-pixel and
   framebuffer-scale mapping onto a tile's region of the mosaic, of the clip
