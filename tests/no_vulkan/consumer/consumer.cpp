@@ -8,9 +8,9 @@
 // (VC_CONSUMER_COMPUTE) it includes compute's, detect's and solve's headers
 // too, builds the board and the camera in OpenCV's types, seeks the board in a
 // blank image, builds a rig's tree and a view's ambiguity, refuses to adjust
-// a rig of no cameras, to measure the transfer of one and to format its
-// results, and arms a capture rule, so it links calib_compute, calib_detect,
-// calib_solve, calib_quality and OpenCV.
+// a rig of no cameras, to measure the transfer of one, to summarize its depth
+// checks and to format its results, and arms a capture rule, so it links
+// calib_compute, calib_detect, calib_solve, calib_quality and OpenCV.
 
 #include "volumetric_kit/calib/core/capture_meta.hpp"
 #include "volumetric_kit/calib/core/detection.hpp"
@@ -32,6 +32,7 @@
 #include "volumetric_kit/calib/detect/charuco.hpp"
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
+#include "volumetric_kit/calib/quality/depth_checks.hpp"
 #include "volumetric_kit/calib/quality/live_checks.hpp"
 #include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
@@ -74,6 +75,8 @@ int main() {
   if (vc::quality::cross_camera_transfer({}, *board, {}, {})
               .status()
               .domain() != none ||
+      vc::quality::summarize_depth_checks(0, {}, {}).status().domain() !=
+          none ||
       vc::quality::format_results({}, {}, {}).status().domain() != none) {
     return 1;
   }

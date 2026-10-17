@@ -25,6 +25,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The depth checks' host geometry and verdicts (DECISIONS.md, 2026-10-16,
+  "Depth checks"): `quality::board_region`, the depth pixels a view's plane
+  fit takes, and `in_board_region`, its rule; `board_depth_check`, a view's
+  corner rays met with its fitted `DepthPlane`, giving each adjacent pair's
+  distance over the square, and the plane's offset and angle from the solved
+  board; `summarize_depth_checks`, each camera's and the board's ratios
+  pooled over the captures, every ordered pair's `PairAgreement`, pooled and
+  per capture, and their `DepthVerdict`s. `format_results` writes the
+  summary as `report.json`'s `depth`.
 - `quality::calibration_metrics`, what a solved rig is worth (DECISIONS.md,
   2026-10-16): the reprojection error at the first rig and at the solution
   (overall, without oblique views, per camera, capture and view, the legacy

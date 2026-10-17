@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstddef>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,7 @@
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
+#include "volumetric_kit/calib/quality/depth_checks.hpp"
 #include "volumetric_kit/calib/quality/live_checks.hpp"
 #include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
@@ -26,6 +28,7 @@
 namespace volumetric_kit::calib::quality {
 namespace {
 
+namespace camera = recon::camera;
 using Code = core::Status::Code;
 using test::expect_oom_anywhere;
 
@@ -299,6 +302,78 @@ TEST(QualityOom, CalibrationMetrics) {
       });
 }
 
+// One view's depth check of the solved rig's first capture, on its board's
+// own plane, and a summary of it with a pair in that capture.
+struct DepthChecked {
+  const Solved& s;
+  BoardRegion region;
+  DepthPlane plane;
+  BoardDepthCheck check;
+  DepthSummary summary;
+  std::vector<PairAgreement> pairs;
+
+  explicit DepthChecked(const Solved& solved) : s(solved) {
+    const camera::Mat4d board_to_color =
+        camera::matrix_from_rodrigues(s.solution.world_to_camera[1]) *
+        camera::matrix_from_rodrigues(s.solution.boards[0].board_to_world);
+    camera::Mat4d depth_to_color(1.0);
+    depth_to_color[3] = glm::dvec4(0.032, 0.0, 0.004, 1.0);
+    region = board_region(s.board, board_to_color, depth_to_color).value();
+    plane.valid = true;
+    plane.point = camera::Vec3d(0.3, 0.2, 0.001);
+    plane.normal = camera::Vec3d(0.0, 0.01, 1.0);
+    plane.members = 100;
+    plane.inliers = 90;
+    check =
+        board_depth_check(s.cameras, s.board, view(), region, plane).value();
+    PairAgreement pair;
+    pair.from = 1;
+    pair.to = 0;
+    pair.capture = check.capture;
+    pair.overlap = 2000;
+    pair.in_window = 1990;
+    pairs = {pair};
+    summary = summarize_depth_checks(s.cameras.size(), {check}, pairs).value();
+  }
+
+  // Camera 1's view of the first capture adjusted.
+  const Observation& view() const {
+    for (const Observation& v : s.views) {
+      if (v.camera_id == s.cameras[1].id &&
+          v.frame_id == s.solution.boards[0].capture) {
+        return v;
+      }
+    }
+    throw std::runtime_error("no view of the first capture by camera 1");
+  }
+};
+
+TEST(QualityOom, DepthChecks) {
+  const Solved s;
+  const DepthChecked d(s);
+  ASSERT_FALSE(d.check.ratios.empty());
+  camera::Mat4d skewed(1.0);
+  skewed[0][1] = 0.5;
+  expect_oom_anywhere(
+      [&] { return board_region(s.board, skewed, camera::Mat4d(1.0)); });
+  expect_oom_anywhere([&] {
+    return board_depth_check(s.cameras, s.board, d.view(), d.region, d.plane);
+  });
+  Observation stranger = d.view();
+  stranger.camera_id = "nobody";
+  expect_oom_anywhere([&] {
+    return board_depth_check(s.cameras, s.board, stranger, d.region, d.plane);
+  });
+  // The arguments are made before allocation fails.
+  const std::vector<BoardDepthCheck> one = {d.check};
+  const std::vector<BoardDepthCheck> twice = {d.check, d.check};
+  const std::vector<PairAgreement> none;
+  expect_oom_anywhere(
+      [&] { return summarize_depth_checks(s.cameras.size(), one, d.pairs); });
+  expect_oom_anywhere(
+      [&] { return summarize_depth_checks(s.cameras.size(), twice, none); });
+}
+
 TEST(QualityOom, FormatResults) {
   const Solved s;
   expect_oom_anywhere(
@@ -307,6 +382,15 @@ TEST(QualityOom, FormatResults) {
   twice[1].id = twice[0].id;
   expect_oom_anywhere(
       [&] { return format_results(twice, s.solution, s.metrics); });
+  const DepthChecked d(s);
+  expect_oom_anywhere([&] {
+    return format_results(s.cameras, s.solution, s.metrics, &d.summary);
+  });
+  DepthSummary misfit = d.summary;
+  misfit.cameras.pop_back();
+  expect_oom_anywhere([&] {
+    return format_results(s.cameras, s.solution, s.metrics, &misfit);
+  });
 }
 
 }  // namespace

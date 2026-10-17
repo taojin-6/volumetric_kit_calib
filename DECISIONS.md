@@ -73,6 +73,32 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-16 — Depth checks: the host's geometry over the device's results
+
+calib measures the depth; recon only prepares it, and gfx draws it
+(`quality/depth_checks.hpp` has the definitions).
+
+- **Device and host.** Per-pixel work on depth runs on the device, in calib's
+  kernels, and returns a few numbers per view and per pair. What derives from
+  detection and the solve stays on the host with the solver: the board
+  region, one ray per corner, the ray-plane meetings and the verdicts.
+- **A region by rays**, not by where a depth point lies, so a pixel with no
+  depth is classified as one with depth is, and out-of-range returns are
+  counted among the members. The device follows `in_board_region`.
+- **Two kinds of check.** The board's scale does not depend on the solved
+  board, so it checks the depth against the printed board. The plane's offset
+  and angle do depend on it, so they check `depth_to_color` and the depth's
+  units.
+- **Verdicts** rest on means and medians, pooled over every capture checked
+  (a capture's own pairs on that capture's), never on the p90, which
+  resampling inflates. The bounds are first values, to be revisited from a
+  real session (H5). The scale's 0.2 % catches a board printed 0.3 % large,
+  as the 2026-09-29 board was.
+- **One `DepthCheckOptions`** goes to every step, the region's inset
+  included, so the settings the report records are the ones used.
+- **`report.json`** gains `depth`, which is `null` when the depth was not
+  checked. Its version stays 1, since nothing reads the report yet.
+
 ## 2026-10-16 — The solved rig's metrics and its results files
 
 The `quality` tier measures a solved rig and formats its results directory's

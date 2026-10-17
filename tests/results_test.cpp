@@ -183,9 +183,10 @@ TEST(Results, TheReportHasItsSchema) {
       (std::vector<std::string>{
           "format", "version", "settings", "solver", "tree", "reprojection",
           "rejections", "transfer", "leave_one_out", "covariance",
-          "sensitivity", "principal_point_ab", "geometry"}));
+          "sensitivity", "principal_point_ab", "geometry", "depth"}));
   EXPECT_EQ(doc["format"], "volumetric_kit_calib.report");
   EXPECT_EQ(doc["version"], 1);
+  EXPECT_TRUE(doc["depth"].is_null());  // not checked
 
   // The settings the metrics were measured with.
   const json& settings = doc["settings"];
@@ -455,6 +456,183 @@ TEST(Results, TheReportHasItsSchema) {
       EXPECT_EQ(j["m"].get<double>(), m.geometry.baselines_m[from][to]);
     }
   }
+}
+
+// Depth checks of the solved rig's 4 cameras, with options not the defaults
+// and values that differ wherever two members could be swapped: views of two
+// captures, one plane not valid; pairs pooled and of one capture.
+DepthSummary depth_checks() {
+  DepthCheckOptions options;
+  options.inset_m = 0.025;
+  options.min_overlap = 900;
+  options.max_scale_error = 0.003;
+  options.max_offset_mm = 8.5;
+  options.max_angle_deg = 1.25;
+  options.max_signed_median_mm = 4.5;
+  options.max_median_abs_mm = 9.5;
+  std::vector<BoardDepthCheck> views(3);
+  views[0].camera = 2;
+  views[0].capture = 5;
+  views[0].plane = {
+      true, {0.3, 0.2, 0.001}, {0.0, 0.01, 1.0}, 0.00125, 9100, 210, 8700};
+  views[0].ratios = {1.0021, 1.0019, 1.0024};
+  views[0].offset_mm = 2.75;
+  views[0].angle_deg = 0.375;
+  views[1].camera = 0;
+  views[1].capture = 5;
+  views[1].plane.rms_m = 0.5;  // not valid: means nothing
+  views[1].plane.members = 30;
+  views[1].plane.out_of_range = 25;
+  views[1].plane.inliers = 4;
+  views[2].camera = 1;
+  views[2].capture = 3;
+  views[2].plane = {
+      true, {0.3, 0.2, -0.002}, {0.02, 0.0, -1.0}, 0.0021, 7300, 64, 7001};
+  views[2].ratios = {0.9985};
+  views[2].offset_mm = -11.5;
+  views[2].angle_deg = 1.125;
+  std::vector<PairAgreement> pairs(2);
+  pairs[0].from = 3;
+  pairs[0].to = 1;
+  pairs[0].overlap = 41000;
+  pairs[0].in_window = 40500;
+  pairs[0].signed_median_mm = -0.75;
+  pairs[0].median_abs_mm = 1.625;
+  pairs[0].p90_abs_mm = 4.25;
+  pairs[1] = pairs[0];
+  pairs[1].capture = 5;
+  pairs[1].overlap = 880;
+  pairs[1].in_window = 870;
+  return value_of(summarize_depth_checks(4, views, pairs, options));
+}
+
+void expect_pairs(const json& j, const std::vector<PairCheck>& pairs,
+                  const std::vector<solve::RigCamera>& cams) {
+  ASSERT_EQ(j.size(), pairs.size());
+  for (std::size_t i = 0; i < pairs.size(); ++i) {
+    const PairAgreement& p = pairs[i].agreement;
+    const json& got = j[i];
+    EXPECT_EQ(got.size(), 8u);
+    EXPECT_EQ(got["from"], cams[p.from].id);
+    EXPECT_EQ(got["to"], cams[p.to].id);
+    EXPECT_EQ(got["overlap"], p.overlap);
+    EXPECT_EQ(got["in_window"], p.in_window);
+    expect_number(got["signed_median_mm"], p.signed_median_mm);
+    expect_number(got["median_abs_mm"], p.median_abs_mm);
+    expect_number(got["p90_abs_mm"], p.p90_abs_mm);
+    EXPECT_EQ(got["verdict"], to_string(pairs[i].verdict));
+  }
+}
+
+void expect_ratio(const json& j, const RatioStats& r) {
+  EXPECT_EQ(j.size(), 3u);
+  EXPECT_EQ(j["count"], r.count);
+  expect_number(j["mean"], r.mean);
+  expect_number(j["sd"], r.sd);
+}
+
+// The depth section: every member as the summary holds it, cameras by id;
+// an invalid plane's RMS is null.
+TEST(Results, TheReportHasItsDepthSection) {
+  const Solved& s = solved();
+  const std::vector<solve::RigCamera>& cams = s.scene.cameras;
+  const DepthSummary d = depth_checks();
+  const ResultFiles files =
+      value_of(format_results(cams, s.solution, s.metrics, &d));
+  const json doc = json::parse(files.report);
+  const nlohmann::ordered_json ordered =
+      nlohmann::ordered_json::parse(files.report)["depth"];
+  const json& depth = doc["depth"];
+  EXPECT_EQ(keys_of(ordered),
+            (std::vector<std::string>{"settings", "ratio", "scale", "cameras",
+                                      "views", "pairs", "captures"}));
+  EXPECT_EQ(depth["settings"],
+            json::parse(R"({"inset_m": 0.025, "min_overlap": 900,
+                            "max_scale_error": 0.003, "max_offset_mm": 8.5,
+                            "max_angle_deg": 1.25,
+                            "max_signed_median_mm": 4.5,
+                            "max_median_abs_mm": 9.5})"));
+  expect_ratio(depth["ratio"], d.ratio);
+  EXPECT_EQ(depth["ratio"]["count"], 4u);
+  EXPECT_EQ(depth["scale"], to_string(d.scale));
+  ASSERT_EQ(depth["cameras"].size(), cams.size());
+  for (std::size_t c = 0; c < cams.size(); ++c) {
+    const CameraDepth& cam = d.cameras[c];
+    const json& j = depth["cameras"][cams[c].id];
+    EXPECT_EQ(keys_of(ordered["cameras"][cams[c].id]),
+              (std::vector<std::string>{"views", "ratio", "scale", "offset_mm",
+                                        "angle_deg", "plane"}));
+    EXPECT_EQ(j["views"], cam.views);
+    expect_ratio(j["ratio"], cam.ratio);
+    EXPECT_EQ(j["scale"], to_string(cam.scale));
+    expect_number(j["offset_mm"], cam.offset_mm);
+    expect_number(j["angle_deg"], cam.angle_deg);
+    EXPECT_EQ(j["plane"], to_string(cam.plane));
+  }
+  EXPECT_EQ(depth["cameras"][cams[1].id]["plane"], "off");
+  EXPECT_EQ(depth["cameras"][cams[2].id]["scale"], "ok");
+  EXPECT_EQ(depth["cameras"][cams[0].id]["plane"], "insufficient");
+  ASSERT_EQ(depth["views"].size(), d.views.size());
+  for (std::size_t v = 0; v < d.views.size(); ++v) {
+    const BoardDepthCheck& view = d.views[v];
+    const json& j = depth["views"][v];
+    EXPECT_EQ(keys_of(ordered["views"][v]),
+              (std::vector<std::string>{"camera", "capture", "valid", "members",
+                                        "out_of_range", "inliers", "rms_mm",
+                                        "ratios", "offset_mm", "angle_deg"}));
+    EXPECT_EQ(j["camera"], cams[view.camera].id);
+    EXPECT_EQ(j["capture"], view.capture);
+    EXPECT_EQ(j["valid"], view.plane.valid);
+    EXPECT_EQ(j["members"], view.plane.members);
+    EXPECT_EQ(j["out_of_range"], view.plane.out_of_range);
+    EXPECT_EQ(j["inliers"], view.plane.inliers);
+    if (view.plane.valid) {
+      EXPECT_EQ(j["rms_mm"].get<double>(), 1000.0 * view.plane.rms_m);
+    } else {
+      EXPECT_TRUE(j["rms_mm"].is_null());
+    }
+    EXPECT_EQ(j["ratios"].get<std::vector<double>>(), view.ratios);
+    expect_number(j["offset_mm"], view.offset_mm);
+    expect_number(j["angle_deg"], view.angle_deg);
+  }
+  EXPECT_EQ(depth["views"][0]["capture"], 3);
+  EXPECT_FALSE(depth["views"][1]["valid"].get<bool>());
+  expect_pairs(depth["pairs"], d.pairs, cams);
+  ASSERT_EQ(depth["pairs"].size(), 12u);
+  ASSERT_EQ(depth["captures"].size(), 1u);
+  EXPECT_EQ(keys_of(ordered["captures"][0]),
+            (std::vector<std::string>{"capture", "pairs"}));
+  EXPECT_EQ(depth["captures"][0]["capture"], 5);
+  expect_pairs(depth["captures"][0]["pairs"], d.captures[0].pairs, cams);
+  // Camera 3 to camera 1, pooled: ok; in capture 5, too few samples.
+  EXPECT_EQ(depth["pairs"][10]["verdict"], "ok");
+  EXPECT_EQ(depth["captures"][0]["pairs"][10]["verdict"], "insufficient");
+  EXPECT_EQ(depth["captures"][0]["pairs"][10]["overlap"], 880);
+}
+
+TEST(Results, RefusesDepthChecksThatDoNotFit) {
+  const Solved& s = solved();
+  const auto refused = [&](const DepthSummary& d) {
+    core::Result<ResultFiles> files = ResultFiles{};
+    EXPECT_NO_THROW(
+        files = format_results(s.scene.cameras, s.solution, s.metrics, &d));
+    EXPECT_EQ(files.status().domain(), Code::InvalidArgument);
+    EXPECT_EQ(files.status().message(),
+              "format_results: the depth checks do not fit the rig's 4 "
+              "cameras");
+  };
+  DepthSummary d = depth_checks();
+  d.cameras.pop_back();
+  refused(d);
+  d = depth_checks();
+  d.views[2].camera = 4;
+  refused(d);
+  d = depth_checks();
+  d.pairs[3].agreement.to = 4;
+  refused(d);
+  d = depth_checks();
+  d.captures[0].pairs[0].agreement.from = 7;
+  refused(d);
 }
 
 // A number not finite is null; a refused re-solve says why.

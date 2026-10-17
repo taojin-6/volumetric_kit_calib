@@ -17,9 +17,9 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > `VC_WITH_OPENCV`, do the `compute` tier's OpenCV bridge, the `detect` tier's
 > board detection, the `solve` tier's rig solve and the `quality` tier's live
 > checks and solved-rig metrics; with `VC_WITH_RIG`, the `capture` tier's
-> session writer; and, with both, the `viz` tier's live view. The depth checks
-> and the color and app tiers are not yet implemented; the legacy
-> `camera_calibration` Python
+> session writer; and, with both, the `viz` tier's live view. The depth
+> checks' device kernels and the color and app tiers are not yet implemented;
+> the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain the
 > reference oracle.
 
@@ -82,6 +82,10 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
   results directory's files -- recon's calibration file, `report.json` and
   `residuals.csv` -- which the application writes
   ([DECISIONS.md](DECISIONS.md#2026-10-16--the-solved-rigs-metrics-and-its-results-files)).
+  Over the device's depth results, for any number of cameras: the board's
+  scale and plane from each view's depth, each ordered pair's depth
+  agreement, and their verdicts
+  ([DECISIONS.md](DECISIONS.md#2026-10-16--depth-checks-the-hosts-geometry-over-the-devices-results)).
 - **Viz:** the live view, on `volumetric_kit_gfx`. Each camera's decoded
   picture is copied on the device into its tile of one mosaic, for any number
   of cameras, panned and zoomed as one view, with the corners, markers and

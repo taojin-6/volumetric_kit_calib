@@ -85,6 +85,9 @@ if(VC_WITH_OPENCV)
   # and recon's reader.
   vc_add_test(calibration_metrics volumetric_kit::calib_quality
               vc_synthetic_rig opencv_geometry)
+  # quality: the depth checks' geometry against planes and corners made here,
+  # and their verdicts, on rigs of 1, 3, 4 and 5 cameras.
+  vc_add_test(depth_checks volumetric_kit::calib_quality vc_synthetic_rig)
   vc_add_test(results volumetric_kit::calib_quality vc_synthetic_rig)
   target_include_directories(vc_results_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
