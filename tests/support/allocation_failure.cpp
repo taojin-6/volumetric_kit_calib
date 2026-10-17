@@ -17,7 +17,8 @@ thread_local AllocationFailure allocation_failure;
 namespace {
 
 // Whether a frame of the calling thread's stack is in the Vulkan loader
-// (libvulkan*), a layer (*VkLayer*) or MoltenVK. Neither call allocates.
+// (libvulkan*), a layer (*VkLayer*) or MoltenVK. Neither call reaches
+// operator new.
 bool under_vulkan() noexcept {
   void* frames[128];
   const int depth = backtrace(frames, 128);
