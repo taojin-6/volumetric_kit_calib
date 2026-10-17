@@ -924,6 +924,16 @@ TEST_F(AgreementTest, RefusesWhatItCannotTake) {
       "even number of bins");
   expect_refused(checks_->histograms(std::size_t{1} << 20).status(),
                  "histograms", "more pairs than one binding holds");
+  // Two bins a pair, 8 bytes, but accumulate's block for each, 144 bytes
+  // (agreement_blocks.hpp's PairBlock), bounds them: refused at the first
+  // count whose blocks one binding cannot hold.
+  DepthCheckOptions two_bins;
+  two_bins.window_mm = 0.1;
+  const VkDeviceSize range = core::max_storage_buffer_range(device());
+  std::size_t crowd = 2;
+  while (VkDeviceSize{crowd} * (crowd - 1) * 144 <= range) ++crowd;
+  expect_refused(checks_->histograms(crowd, two_bins).status(), "histograms",
+                 "more pairs than one binding holds");
 
   // accumulate
   const std::unique_ptr<AgreementHistograms> histograms =

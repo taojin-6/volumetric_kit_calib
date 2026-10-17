@@ -304,12 +304,15 @@ core::Result<std::unique_ptr<AgreementHistograms>> DepthChecks::histograms(
             std::lround(options.window_mm / options.bin_mm));
         const VkDeviceSize pair_bytes =
             VkDeviceSize{2} * half * sizeof(std::uint32_t);
-        // Every pair's bins in one binding, and a stats invocation each in
-        // one dispatch; checked as cameras - 1 <= most / cameras, which
-        // cannot overflow.
-        const VkDeviceSize most =
-            std::min(max_range_ / pair_bytes,
-                     VkDeviceSize{max_groups_} * detail::kStatsLocalSize);
+        // Every pair's bins, and its block for accumulate, in one binding --
+        // the block is larger than its statistics and its overlap, the other
+        // bindings a pair has -- and a stats invocation each in one
+        // dispatch; checked as cameras - 1 <= most / cameras, which cannot
+        // overflow.
+        static_assert(sizeof(PairBlock) >= sizeof(StatsBlock));
+        const VkDeviceSize most = std::min(
+            max_range_ / std::max<VkDeviceSize>(pair_bytes, sizeof(PairBlock)),
+            VkDeviceSize{max_groups_} * detail::kStatsLocalSize);
         if (cameras - 1 > most / cameras) {
           return core::Status::invalid_argument(
               std::string(kHistograms) + ": " + std::to_string(cameras) +
