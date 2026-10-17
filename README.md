@@ -19,8 +19,7 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > checks and solved-rig metrics; with `VC_WITH_RIG`, the `capture` tier's
 > session writer; and, with both, the `viz` tier's live view and the `depth`
 > tier's board-plane fit. The depth agreement's kernels and the color and app
-> tiers are not yet implemented;
-> the legacy `camera_calibration` Python
+> tiers are not yet implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain the
 > reference oracle.
 
@@ -32,9 +31,10 @@ constraints and open GPU-backend choice without publishing the local design.
 
 `core` → `compute` → {`detect`, `solve`, `color`} → `quality` →
 {`depth`, `viz`} → `app` (+ `capture` off `core`). A tier may depend only on
-tiers to its left. The
-headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no**
-`volumetric_kit_gfx` dependency; only the `viz`/`app` tiers pull in the renderer.
+tiers to its left. The headless "brain"
+(`core`+`compute`+`detect`+`solve`+`quality`) builds with **no**
+`volumetric_kit_gfx` dependency; only the `viz`/`app` tiers pull in the
+renderer.
 
 - **Shared core:** every tier builds on
   [`volumetric_kit_core`](https://github.com/taojin-6/volumetric_kit_core), the
@@ -124,8 +124,8 @@ default) builds `capture`, over all of recon, which needs the Vulkan SDK and
 a GLSL compiler: the core's vulkan tier
 [prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
 With both, it builds `depth` and `viz` too; `viz` fetches `volumetric_kit_gfx`
-(pinned by commit). To build against a local core, recon or gfx checkout instead of
-the pinned one, pass
+(pinned by commit). To build against a local core, recon or gfx checkout
+instead of the pinned one, pass
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>`,
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>` or
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_GFX=<path>`.

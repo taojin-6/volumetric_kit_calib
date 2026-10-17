@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Tao Jin
+
 #version 450
 
 // One round of one region's board-plane fit: the region's pixels counted, its

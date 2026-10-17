@@ -96,14 +96,15 @@ The depth checks' per-pixel work runs in calib's own `depth` tier
   within `seed_mm` of it, then within `max(min_gate_mm, sigma_gate rms)` of
   that plane, each round a least-squares plane by a cyclic Jacobi solve, both
   in one submit. The moments are float, so they are taken in the board's
-  frame about a point among the inliers, and summed in a fixed order -- a
+  frame about a point near the inliers (the rectangle's centre on the solved
+  board, then round 0's centroid), and summed in a fixed order -- a
   shared-memory tree into each workgroup's slot, then a fixed walk of the
   slots, with no float atomics -- so the same depth gives the same plane to
   the bit.
 - **Too little is a result, not an error.** Too few inliers, or inliers on
   one line, give a plane that is not valid, with its counts, for the verdicts
-  to call insufficient. The options and regions are refused by the checks
-  `board_region` and `board_depth_check` run, now public.
+  to call insufficient. The options and regions are refused by the public
+  checks `board_region` and `board_depth_check` run.
 
 ## 2026-10-16 — Depth checks: the host's geometry over the device's results
 

@@ -66,11 +66,13 @@ struct DepthImage {
   double min_depth_m = 0.0;
   /// And farther than this; finite and above @ref min_depth_m.
   double max_depth_m = 0.0;
-  /// The depth camera in the solved rig's world; rigid.
+  /// The depth camera in the solved rig's world; rigid. `fit_planes` checks
+  /// it but does not read it.
   recon::camera::Mat4d depth_to_world{1.0};
   /// The depth camera's frame to its colour camera's (recon's
   /// `SensorInfo::depth_to_color`), which `quality::board_region` takes;
-  /// rigid.
+  /// rigid. `fit_planes` checks it but does not read it: the region's
+  /// `depth_to_board` already holds it.
   recon::camera::Mat4d depth_to_color{1.0};
 };
 
@@ -92,11 +94,14 @@ struct PlaneRegion {
 };
 
 // TODO: Outliers on one side within the second round's gate -- fingers 10 to
-// 25 mm in front of a fifth of the board -- inflate the first round's RMS, so
-// the second keeps them and the plane moves by their share of their mean
-// offset (3.5 mm there). Revisit the second gate's scale, e.g. one robust to
-// them from a histogram of the first round's residuals, with a real session
-// (H5).
+// 25 mm in front of one edge's fifth of the board -- inflate the first
+// round's RMS, so the second keeps them all: the plane moves by their share of
+// their mean offset (3.5 mm there) and turns about 1.4 degrees, past the
+// default max_angle_deg, so a hand on one edge in every capture marks a good
+// camera Off. (On both sides they cancel.) Revisit the second gate's scale,
+// e.g. one robust to them from a histogram of the first round's residuals,
+// before the verdicts rely on the planes; the test
+// OutliersOnOneSideMoveThePlaneByTheirShare pins today's bias.
 /// @brief The depth checks' kernels on a device shared with recon: each
 ///        view's board plane fitted to its camera's depth, read in place.
 ///
@@ -160,6 +165,7 @@ class VC_DEPTH_API DepthChecks {
   /// A member is a pixel whose ray belongs to the region
   /// (`quality::in_board_region`), with depth or without; one whose depth is
   /// missing, not a number or outside the camera's range is out of range.
+  /// The depth camera's pose is the region's `depth_to_board`.
   /// A plane is valid with at least `options.min_inliers` inliers that do
   /// not lie on one line. When the first round's plane is not valid, the
   /// second does not run, and the plane gives the first's counts.
