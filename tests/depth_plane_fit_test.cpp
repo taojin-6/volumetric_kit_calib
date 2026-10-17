@@ -7,7 +7,8 @@
 // and 5 cameras of mixed sizes, with two regions on one depth, in one batch;
 // the region's rule pixel by pixel; members counted with depth or without; a
 // plane turned near the seed's limit, to 1e-4 degrees; a box on the plane;
-// 20 % outliers; two runs to the bit; too few inliers, or inliers on one line;
+// 20 % outliers either side, and outliers on one edge; settings other than
+// the defaults; two runs to the bit; too few inliers, or inliers on one line;
 // the requirements; and refusals. Skips where no device is present.
 //
 // The device works in float and the references in double, so a pixel whose
@@ -635,12 +636,14 @@ TEST_F(PlaneFitTest, MembershipIsTheHostsRuleForEveryPixel) {
 
 // A pixel is a member by its ray, whatever its depth: holes, NaN and depth
 // either side of the range leave the members as they are and are counted
-// out of range, the range's ends inside it; and where nothing rounds, the
-// plane through the board itself comes out exact.
+// out of range, the range's ends inside it, and holes still are with a range
+// from 0; and where nothing rounds, the plane through the board itself comes
+// out exact.
 TEST_F(PlaneFitTest, CountsEveryMemberWithDepthOrWithout) {
   const View whole = dyadic_view(1.0f);
   View holed = whole;
   std::size_t holes = 0;
+  std::size_t missing = 0;  // of the holes, those 0 or NaN
   for (std::size_t i = 0; i < holed.depth.size(); ++i) {
     float& z = holed.depth[i];
     if (i % 7 == 0) {
@@ -654,7 +657,10 @@ TEST_F(PlaneFitTest, CountsEveryMemberWithDepthOrWithout) {
     }
     const std::uint32_t u = static_cast<std::uint32_t>(i % kDyadicWidth);
     const std::uint32_t v = static_cast<std::uint32_t>(i / kDyadicWidth);
-    if (z != 1.0f && u >= 100 && u <= 400 && v >= 300 && v <= 550) ++holes;
+    if (z != 1.0f && u >= 100 && u <= 400 && v >= 300 && v <= 550) {
+      ++holes;
+      if (!(z > 0.0f)) ++missing;
+    }
   }
   std::vector<core::Buffer> buffers;
   std::vector<PlaneRegion> regions = regions_of({whole, holed}, buffers);
@@ -667,11 +673,15 @@ TEST_F(PlaneFitTest, CountsEveryMemberWithDepthOrWithout) {
   farthest.image.max_depth_m = 1.0;
   PlaneRegion past = regions[0];
   past.image.min_depth_m = std::nextafter(1.0f, 2.0f);
-  regions.insert(regions.end(), {nearest, farthest, past});
+  // From 0, past the far depth: the holes alone are out of range.
+  PlaneRegion open = regions[1];
+  open.image.min_depth_m = 0.0;
+  open.image.max_depth_m = 10.0;
+  regions.insert(regions.end(), {nearest, farthest, past, open});
 
   const std::vector<DepthPlane> planes =
       value_of(checks_->fit_planes(regions, {}));
-  ASSERT_EQ(planes.size(), 5u);
+  ASSERT_EQ(planes.size(), 6u);
   const Vec2d centre = 0.5 * (whole.region.min + whole.region.max);
   for (const std::size_t r : {0u, 2u, 3u}) {
     SCOPED_TRACE("region " + std::to_string(r));
@@ -693,6 +703,13 @@ TEST_F(PlaneFitTest, CountsEveryMemberWithDepthOrWithout) {
   EXPECT_EQ(planes[4].out_of_range, kDyadicMembers);
   EXPECT_EQ(planes[4].inliers, 0u);
   EXPECT_FALSE(planes[4].valid);
+  // The near and far depths are in range there, but past the seed.
+  EXPECT_EQ(planes[5].members, kDyadicMembers);
+  EXPECT_GT(missing, 10000u);
+  EXPECT_LT(missing, holes);
+  EXPECT_EQ(planes[5].out_of_range, missing);
+  EXPECT_EQ(planes[5].inliers, kDyadicMembers - holes);
+  EXPECT_TRUE(planes[5].valid);
 }
 
 // The solve converges: a plane turned 3.5 degrees about the board's diagonal,
@@ -714,28 +731,36 @@ TEST_F(PlaneFitTest, ConvergesOnAPlaneTurnedNearTheSeedsLimit) {
   expect_like(planes[0], want, 0.001, 1e-4);
 }
 
-// A box 15 mm high standing on the plane, about 4 % of the region: the first
-// round takes its top and is pulled off the plane, and the second, gated at
-// three times the first's RMS, leaves it out. A box 60 mm high beside it is
-// past the first round's seed.
-TEST_F(PlaneFitTest, TheSecondRoundRemovesABoxOnThePlane) {
-  const DepthCheckOptions options;
-  const Plane truth = plane_off(0.0, {0.2, 1.0, 0.0}, 0.5);
+// The plane of box_view.
+Plane box_plane() { return plane_off(0.0, {0.2, 1.0, 0.0}, 0.5); }
+
+// box_plane with a box 15 mm high standing on it, about 4 % of the region,
+// and one 60 mm high beside it.
+View box_view() {
+  const Plane truth = box_plane();
   const Vec3d lo(0.30, 0.15, -0.015);
   const Vec3d hi(0.42, 0.25, 0.0);
   const Vec3d tall_lo(0.08, 0.06, -0.06);
   const Vec3d tall_hi(0.16, 0.14, 0.0);
-  const View view =
-      view_of(nfov(), {0.02, -0.03, 1.6}, 10.0, 0.0,
-              [&](const Vec3d& o, const Vec3d& d) {
-                double nearest = hit_plane(truth, o, d);
-                for (const double box :
-                     {hit_box(lo, hi, o, d), hit_box(tall_lo, tall_hi, o, d)}) {
-                  if (box > 0.0 && (nearest == 0.0 || box < nearest))
-                    nearest = box;
-                }
-                return nearest;
-              });
+  return view_of(nfov(), {0.02, -0.03, 1.6}, 10.0, 0.0,
+                 [&](const Vec3d& o, const Vec3d& d) {
+                   double nearest = hit_plane(truth, o, d);
+                   for (const double box : {hit_box(lo, hi, o, d),
+                                            hit_box(tall_lo, tall_hi, o, d)}) {
+                     if (box > 0.0 && (nearest == 0.0 || box < nearest))
+                       nearest = box;
+                   }
+                   return nearest;
+                 });
+}
+
+// The box 15 mm high: the first round takes its top and is pulled off the
+// plane, and the second, gated at three times the first's RMS, leaves it out.
+// The box 60 mm high is past the first round's seed.
+TEST_F(PlaneFitTest, TheSecondRoundRemovesABoxOnThePlane) {
+  const DepthCheckOptions options;
+  const Plane truth = box_plane();
+  const View view = box_view();
   std::vector<core::Buffer> buffers;
   const std::vector<DepthPlane> planes =
       value_of(checks_->fit_planes(regions_of({view}, buffers), options));
@@ -751,24 +776,37 @@ TEST_F(PlaneFitTest, TheSecondRoundRemovesABoxOnThePlane) {
   EXPECT_LE(compute::angle_deg(planes[0].normal, truth.normal), 0.01);
 }
 
-// A plane whose depth is 20 % outliers, 10 to 25 mm off it on either side.
+// Where a view's outliers lie, each 10 to 25 mm off its plane: none; a fifth
+// of the pixels, spread evenly, alternately either side; or every pixel whose
+// ray meets the board in the region's first fifth along its x, toward the
+// camera, as fingers on the board's edge.
+enum class Outliers { None, BothSides, OneEdge };
+
 View outlier_view(const Pinhole& p, const Vec3d& centre, double tilt,
-                  double roll, const Plane& truth, bool outliers) {
+                  double roll, const Plane& truth, Outliers outliers) {
   View view = view_of(
       p, centre, tilt, roll,
       [&](const Vec3d& o, const Vec3d& d) { return hit_plane(truth, o, d); });
-  if (!outliers) return view;
+  if (outliers == Outliers::None) return view;
+  const Vec3d origin(view.region.depth_to_board[3]);
   const Mat3d turn(view.region.depth_to_board);
+  const double edge =
+      view.region.min.x + 0.2 * (view.region.max.x - view.region.min.x);
   for (std::uint32_t v = 0; v < p.size.height; ++v) {
     for (std::uint32_t u = 0; u < p.size.width; ++u) {
-      if ((u + 2 * v) % 5 != 0) continue;
+      const Vec3d d = turn * ray_of(p, u, v);
+      double sign = -1.0;  // toward the camera
+      if (outliers == Outliers::BothSides) {
+        if ((u + 2 * v) % 5 != 0) continue;
+        sign = ((u / 5 + v) % 2 == 0) ? 1.0 : -1.0;
+      } else if (!(origin.x - origin.z / d.z * d.x < edge)) {
+        continue;
+      }
       const std::size_t i = std::size_t{v} * p.size.width + u;
       const std::uint32_t hash =
           static_cast<std::uint32_t>(i) * 2654435761u;  // Knuth's
       const double off_m = (10.0 + 15.0 * (hash >> 8) / 16777216.0) / 1000.0;
-      const double sign = ((u / 5 + v) % 2 == 0) ? 1.0 : -1.0;
       // Along the ray, to `off_m` from the plane.
-      const Vec3d d = turn * ray_of(p, u, v);
       view.depth[i] = static_cast<float>(
           view.depth[i] + sign * off_m / glm::dot(truth.normal, d));
     }
@@ -776,23 +814,29 @@ View outlier_view(const Pinhole& p, const Vec3d& centre, double tilt,
   return view;
 }
 
+// The outlier tests' plane, and their view of it.
+Plane outlier_plane() { return plane_off(4.0, {0.3, 1.0, 0.0}, 0.8); }
+View outlier_view(Outliers outliers) {
+  return outlier_view(nfov(), {-0.03, 0.02, 1.8}, -15.0, 90.0, outlier_plane(),
+                      outliers);
+}
+
 // 20 % outliers 10 to 25 mm off the plane, on either side, move the fit less
-// than 0.2 mm from the fit of the same depth without them. (On one side they
-// move it by their share of their mean offset: depth_checks.hpp's TODO.)
+// than 0.2 mm from the fit of the same depth without them. That bound holds by
+// symmetry, the first round's plane alone within it; what the second round
+// does is held to the reference, which it moves by more than expect_like
+// allows.
 TEST_F(PlaneFitTest, TwentyPercentOutliersMoveThePlaneLittle) {
   const DepthCheckOptions options;
-  const Plane truth = plane_off(4.0, {0.3, 1.0, 0.0}, 0.8);
-  const View clean =
-      outlier_view(nfov(), {-0.03, 0.02, 1.8}, -15.0, 90.0, truth, false);
-  const View noisy =
-      outlier_view(nfov(), {-0.03, 0.02, 1.8}, -15.0, 90.0, truth, true);
+  const View clean = outlier_view(Outliers::None);
+  const View noisy = outlier_view(Outliers::BothSides);
   std::vector<core::Buffer> buffers;
   const std::vector<DepthPlane> planes = value_of(
       checks_->fit_planes(regions_of({clean, noisy}, buffers), options));
   ASSERT_TRUE(planes[0].valid);
   ASSERT_TRUE(planes[1].valid);
-  EXPECT_NEAR(offset_at(planes[1], board_centre()),
-              offset_at(planes[0], board_centre()), 0.2);
+  const Vec2d centre = board_centre();
+  EXPECT_NEAR(offset_at(planes[1], centre), offset_at(planes[0], centre), 0.2);
   const Reference want = reference_fit(noisy, options);
   EXPECT_LT(want.outline_band, want.plane.members / 100);
   EXPECT_LT(want.gate_band, 20u);
@@ -800,7 +844,81 @@ TEST_F(PlaneFitTest, TwentyPercentOutliersMoveThePlaneLittle) {
       want.plane.members - want.plane.out_of_range - want.plane.inliers;
   EXPECT_GT(outliers, 0u);
   EXPECT_GT(want.first.inliers, want.plane.inliers);
+  EXPECT_TRUE(std::abs(offset_at(want.first, centre) -
+                       offset_at(want.plane, centre)) > 0.05 ||
+              compute::angle_deg(want.first.normal, want.plane.normal) > 0.01);
   expect_like(planes[1], want, 0.05, 0.01);
+}
+
+// The known limit, depth_checks.hpp's TODO: outliers 10 to 25 mm in front of
+// the region's first fifth, as fingers on the board's edge, raise the first
+// round's RMS so far that the second keeps them all, and the plane moves by
+// their share of their mean offset, about 3.5 mm, and turns past the default
+// max_angle_deg. Pinned, so a second gate robust to them changes this test on
+// purpose.
+TEST_F(PlaneFitTest, OutliersOnOneSideMoveThePlaneByTheirShare) {
+  const DepthCheckOptions options;
+  const View clean = outlier_view(Outliers::None);
+  const View fingers = outlier_view(Outliers::OneEdge);
+  std::vector<core::Buffer> buffers;
+  const std::vector<DepthPlane> planes = value_of(
+      checks_->fit_planes(regions_of({clean, fingers}, buffers), options));
+  ASSERT_TRUE(planes[0].valid);
+  const Reference want = reference_fit(fingers, options);
+  EXPECT_LT(want.outline_band, want.plane.members / 100);
+  EXPECT_LT(want.gate_band, 20u);
+  ASSERT_TRUE(want.first.valid);
+  // Every point in range, the outliers among them, in both rounds.
+  EXPECT_EQ(want.first.inliers, want.plane.members - want.plane.out_of_range);
+  EXPECT_EQ(want.plane.inliers, want.first.inliers);
+  expect_like(planes[1], want, 0.05, 0.01);
+  const Vec2d centre = board_centre();
+  const double moved =
+      offset_at(planes[1], centre) - offset_at(planes[0], centre);
+  EXPECT_GT(moved, -4.0);
+  EXPECT_LT(moved, -3.0);
+  EXPECT_GT(compute::angle_deg(planes[1].normal, planes[0].normal),
+            options.max_angle_deg);
+}
+
+// The fit takes its settings from the options it is given, as the reference
+// does: a seed of 12 mm takes fewer outliers into the first round; the second
+// round's gate is min_gate_mm, 20, where sigma_gate, 1.5, times the first
+// round's RMS is below it, and that product where min_gate_mm, 2, is. On the
+// outliers either side, each moves the inliers hundreds off the defaults'.
+TEST_F(PlaneFitTest, TakesItsSettingsFromTheOptions) {
+  const std::vector<View> views = {outlier_view(Outliers::OneEdge),
+                                   outlier_view(Outliers::BothSides)};
+  std::vector<core::Buffer> buffers;
+  const std::vector<PlaneRegion> regions = regions_of(views, buffers);
+  DepthCheckOptions seed;
+  seed.seed_mm = 12.0;
+  DepthCheckOptions floor;
+  floor.min_gate_mm = 20.0;
+  floor.sigma_gate = 1.5;
+  DepthCheckOptions scale = floor;
+  scale.min_gate_mm = 2.0;
+  const Reference usual = reference_fit(views[1], {});
+  ASSERT_TRUE(usual.first.valid);
+  const double rms_mm = 1000.0 * usual.first.rms_m;
+  EXPECT_LT(1.5 * rms_mm, floor.min_gate_mm);
+  EXPECT_GT(3.0 * rms_mm, floor.min_gate_mm);
+  EXPECT_GT(1.5 * rms_mm, scale.min_gate_mm);
+  for (const DepthCheckOptions& options : {seed, floor, scale}) {
+    SCOPED_TRACE("seed " + std::to_string(options.seed_mm) + " mm, gate " +
+                 std::to_string(options.min_gate_mm) + " mm, sigma " +
+                 std::to_string(options.sigma_gate));
+    const std::vector<DepthPlane> planes =
+        value_of(checks_->fit_planes(regions, options));
+    for (std::size_t r = 0; r < views.size(); ++r) {
+      const Reference want = reference_fit(views[r], options);
+      ASSERT_TRUE(want.plane.valid);
+      expect_like(planes[r], want, 0.05, 0.01);
+      if (r == 1) {
+        EXPECT_GT(apart(want.plane.inliers, usual.plane.inliers), 500u);
+      }
+    }
+  }
 }
 
 // The same depth twice, 640 x 576 with 4 regions, gives the same planes to
@@ -812,7 +930,7 @@ TEST_F(PlaneFitTest, TwoRunsAgreeToTheBit) {
     views.push_back(outlier_view(nfov(), {0.03 * t - 0.05, 0.02, 1.5 + 0.3 * t},
                                  20.0 - 12.0 * t, c % 2 == 0 ? 0.0 : 90.0,
                                  plane_off(3.0 - t, {1.0, t, 0.0}, 0.3 * t),
-                                 true));
+                                 Outliers::BothSides));
   }
   std::vector<core::Buffer> buffers;
   const std::vector<PlaneRegion> regions = regions_of(views, buffers);

@@ -893,7 +893,7 @@ TEST(SummarizeDepthChecks, RefusesWhatDoesNotFit) {
 
 // The checks every step runs, on their own: the defaults pass, and a refusal
 // names what it refuses, unprefixed, for its caller to prefix.
-TEST(DepthChecks, CheckTheOptionsAndTheRegionOnTheirOwn) {
+TEST(DepthCheckInputs, AreCheckedOnTheirOwn) {
   const DepthCheckOptions defaults;
   EXPECT_TRUE(check_depth_options(defaults).ok());
   EXPECT_EQ(defaults.seed_mm, 30.0);
