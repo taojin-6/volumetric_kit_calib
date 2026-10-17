@@ -47,8 +47,8 @@ inline constexpr std::size_t kMinOverlap = 1000;
 inline constexpr std::size_t kMinPlaneInliers = 100;
 
 /// The most bins a pair's histogram of depth differences has
-/// (@ref DepthCheckOptions::window_mm): as many as one workgroup's shared
-/// memory holds on any device.
+/// (@ref DepthCheckOptions::window_mm); DECISIONS.md, "Depth checks are
+/// calib's kernels", says why.
 inline constexpr std::size_t kMaxAgreementBins = 4096;
 
 // TODO: The verdict bounds, the fit's gates and the agreement's window and

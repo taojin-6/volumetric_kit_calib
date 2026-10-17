@@ -6,8 +6,8 @@
 # the depth recon's frame preparation leaves on the device, and each ordered
 # pair of cameras' depth compared, read in place, on the core's vulkan tier
 # (DECISIONS.md, "Depth checks are calib's kernels"). Built with VC_WITH_RIG and
-# VC_WITH_OPENCV, beside viz: it takes the quality tier's region and plane, and
-# names no recon sensor type and nothing of gfx.
+# VC_WITH_OPENCV, beside viz: it takes the quality tier's region, plane, options
+# and pair agreement, and names no recon sensor type and nothing of gfx.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
@@ -43,8 +43,8 @@ target_include_directories(
   calib_depth PUBLIC "$<BUILD_INTERFACE:${_vc_generated_inc}>"
                      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
-# The public header names quality's region, plane and options, and the core's
-# device, allocator and buffers.
+# The public header names quality's region, plane, options and pair agreement,
+# and the core's device, allocator and buffers.
 target_link_libraries(calib_depth PUBLIC calib_quality
                                          volumetric_kit::core_vulkan)
 

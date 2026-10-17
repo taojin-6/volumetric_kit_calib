@@ -116,8 +116,7 @@ ordered pair of cameras' depth agreement -- runs in calib's own `depth` tier
   accumulate on the device, pooled or one capture's, to the bit. The window
   is an even number of bins, so 0 is a bin edge and the magnitudes are the
   histogram folded. A serial walk of each pair's bins gives its quantiles,
-  interpolated within the bin. A pair holds at most 2^32 - 1 samples, and a
-  capture that could pass that is refused.
+  interpolated within the bin.
 
 ## 2026-10-16 — Depth checks: the host's geometry over the device's results
 

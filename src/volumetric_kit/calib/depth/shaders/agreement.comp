@@ -27,8 +27,8 @@
 #include "volumetric_kit/recon/core/shaders/pinhole.glsl"
 
 #define VC_AGREEMENT_LOCAL_SIZE 256
-// The most bins a histogram has: 16 KiB of shared memory, the least
-// maxComputeSharedMemorySize Vulkan allows, and all this kernel takes.
+// The most bins a histogram has (quality::kMaxAgreementBins): the shared
+// memory this kernel takes.
 #define VC_AGREEMENT_MAX_BINS 4096
 
 layout(local_size_x = VC_AGREEMENT_LOCAL_SIZE) in;
