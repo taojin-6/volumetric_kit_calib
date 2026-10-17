@@ -26,6 +26,7 @@ namespace {
 namespace camera = recon::camera;
 
 constexpr double kInfinity = std::numeric_limits<double>::infinity();
+constexpr double kHalfSqrt2 = 0.70710678118654752440;
 
 // OpenCV's 3-vector, whatever its shape and depth, in double; NaN unless it
 // holds three values.
@@ -53,10 +54,24 @@ cv::Point3d quarter_turned(const cv::Point3d& p) noexcept {
 
 // A pose of the quarter-turned board as one of the board: T' Q, Q the turn,
 // which moves T''s columns exactly.
-camera::Mat4d unturned(camera::Mat4d board_to_camera) noexcept {
+camera::Mat4d quarter_unturned(camera::Mat4d board_to_camera) noexcept {
   const glm::dvec4 x = board_to_camera[0];
   board_to_camera[0] = board_to_camera[1];
   board_to_camera[1] = -x;
+  return board_to_camera;
+}
+
+// The board turned an eighth turn about its normal.
+cv::Point3d eighth_turned(const cv::Point3d& p) noexcept {
+  return {kHalfSqrt2 * (p.x - p.y), kHalfSqrt2 * (p.x + p.y), p.z};
+}
+
+// A pose of the eighth-turned board as one of the board: T' E, E the turn.
+camera::Mat4d eighth_unturned(camera::Mat4d board_to_camera) noexcept {
+  const glm::dvec4 x = board_to_camera[0];
+  const glm::dvec4 y = board_to_camera[1];
+  board_to_camera[0] = kHalfSqrt2 * (x + y);
+  board_to_camera[1] = kHalfSqrt2 * (y - x);
   return board_to_camera;
 }
 
@@ -100,11 +115,19 @@ core::Result<ViewPose> view_pose(const compute::CvCamera& camera,
     // gets converged rays and no lens. The fits below use the pixels.
     VKC_ASSIGN(const std::vector<cv::Point2d> rays,
                compute::undistort_points(camera, image));
-    // IPPE's two solutions for `points`, the board's corners in one frame, as
-    // poses of the board. Each fit is infinite for a solution not finite, a
-    // corner behind the camera, or a projection that overflowed.
-    const auto solve = [&](const std::vector<cv::Point3d>& points,
-                           bool quarter_turn) -> core::Result<Solutions> {
+    // IPPE's two solutions for the board's corners turned about its normal
+    // by `turn` (none if null), as poses of the board (`unturn`). Each fit is
+    // infinite for a solution not finite, a corner behind the camera, or a
+    // projection that overflowed.
+    using Turn = cv::Point3d (*)(const cv::Point3d&) noexcept;
+    using Unturn = camera::Mat4d (*)(camera::Mat4d) noexcept;
+    const auto solve = [&](Turn turn,
+                           Unturn unturn) -> core::Result<Solutions> {
+      std::vector<cv::Point3d> points;
+      points.reserve(object.size());
+      for (const cv::Point3d& x : object) {
+        points.push_back(turn != nullptr ? turn(x) : x);
+      }
       std::vector<cv::Mat> rvecs;
       std::vector<cv::Mat> tvecs;
       cv::solvePnPGeneric(points, rays, cv::Matx33d::eye(), cv::noArray(),
@@ -124,8 +147,8 @@ core::Result<ViewPose> view_pose(const compute::CvCamera& camera,
         const compute::CvPose pose{read_vec3(rvecs[i]), read_vec3(tvecs[i])};
         PoseCandidate& candidate = solutions[i];
         candidate.board_to_camera = compute::matrix_from_cv_pose(pose);
-        if (quarter_turn) {
-          candidate.board_to_camera = unturned(candidate.board_to_camera);
+        if (unturn != nullptr) {
+          candidate.board_to_camera = unturn(candidate.board_to_camera);
         }
         candidate.rms_px = kInfinity;
         if (!finite(pose.rvec) || !finite(pose.tvec)) continue;
@@ -145,11 +168,8 @@ core::Result<ViewPose> view_pose(const compute::CvCamera& camera,
     // away from it. Each solution, paired across the frames by translation
     // (exact in both; one not finite keeps IPPE's order), keeps the frame
     // that fits it better.
-    std::vector<cv::Point3d> turned;
-    turned.reserve(object.size());
-    for (const cv::Point3d& x : object) turned.push_back(quarter_turned(x));
-    VKC_ASSIGN(const Solutions plain, solve(object, false));
-    VKC_ASSIGN(Solutions other, solve(turned, true));
+    VKC_ASSIGN(const Solutions plain, solve(nullptr, nullptr));
+    VKC_ASSIGN(Solutions other, solve(quarter_turned, quarter_unturned));
     if (apart(plain[0], other[1]) + apart(plain[1], other[0]) <
         apart(plain[0], other[0]) + apart(plain[1], other[1])) {
       std::swap(other[0], other[1]);
@@ -160,12 +180,24 @@ core::Result<ViewPose> view_pose(const compute::CvCamera& camera,
           other[i].rms_px < plain[i].rms_px ? other[i] : plain[i];
       if (std::isfinite(better.rms_px)) candidates.push_back(better);
     }
+    // Works around OpenCV 5.0.0's IPPE::PoseSolver::computeRotations
+    // (geometry/src/ippe.cpp), which takes the square root of 1 - |c|^2 for
+    // each of the rotation's first two columns c: zero for a board whose x or
+    // y axis is square to the line of sight to it, as when tilted exactly
+    // about that axis, it rounds below zero on some builds (GCC's on Linux)
+    // and leaves no pose. The quarter turn swaps the axes, so it fails too;
+    // turned an eighth turn, neither axis is a column.
+    if (candidates.empty()) {
+      VKC_ASSIGN(const Solutions eighth, solve(eighth_turned, eighth_unturned));
+      for (const PoseCandidate& candidate : eighth) {
+        if (std::isfinite(candidate.rms_px)) candidates.push_back(candidate);
+      }
+    }
     // TODO: a board exactly face-on and centred on the optical axis can still
-    // get no pose: IPPE's PoseSolver::computeRotations (OpenCV 5.0.0,
-    // geometry/src/ippe.cpp) takes the square root of a 1 - |column|^2 that
-    // rounds below zero, in both frames -- 422 of 3600 in-plane angles 0.1
-    // degrees apart, 2 m in front of view_pose_test's pinhole; none once
-    // tilted 1e-4 rad.
+    // get no pose: both its axes are square to the line of sight, in every
+    // frame, and the square roots above round below zero -- 422 of 3600
+    // in-plane angles 0.1 degrees apart, 2 m in front of view_pose_test's
+    // pinhole, with Homebrew's OpenCV on macOS; none once tilted 1e-4 rad.
     if (candidates.empty()) {
       return core::Status::numerical(
           "view_pose: IPPE gave no finite pose with every corner in front of "

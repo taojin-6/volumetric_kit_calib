@@ -8,6 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `solve::view_pose` poses a board tilted exactly about its own x or y axis,
+  which OpenCV 5.0.0's IPPE leaves with no pose on GCC's builds, in the
+  board's frame and the quarter-turned one alike: it then solves the board
+  turned an eighth turn.
 - `RigMosaic::record` keeps a page's pictures and ages when gfx refuses a
   replacement in a different coding, including cameras with no new picture.
 - Tile marks keep the last framebuffer column at fractional display scales
