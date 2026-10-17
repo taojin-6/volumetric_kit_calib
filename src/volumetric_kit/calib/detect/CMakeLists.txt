@@ -2,8 +2,7 @@
 # Copyright (c) 2026 Tao Jin
 
 # --- calib_detect: Tier 2 ----------------------------------------------------
-# The ChArUco board in a luma image, through OpenCV's detector. Built with
-# VC_WITH_OPENCV.
+# The ChArUco board in a luma image, through OpenCV's detector.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 

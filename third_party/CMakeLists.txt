@@ -8,9 +8,9 @@
 # vocabulary) -- all of recon with VC_WITH_RIG -- volumetric_kit_gfx for the viz
 # tier, nlohmann/json for the quality and capture tiers' files, and googletest
 # when the test suite is built. recon takes GLM, and with VC_WITH_RIG the Vulkan
-# SDK, from the system. OpenCV, with VC_WITH_OPENCV, is a prerequisite the root
-# CMakeLists finds. GPU work comes from volumetric_kit_core's vulkan tier, not a
-# Vulkan dependency of calib's.
+# SDK, from the system. OpenCV is a prerequisite the root CMakeLists finds. GPU
+# work comes from volumetric_kit_core's vulkan tier, not a Vulkan dependency of
+# calib's.
 
 include(FetchContent)
 
@@ -46,7 +46,7 @@ if(VC_WITH_RIG)
 endif()
 # The depth and viz tiers' GPU tests derive from the core's Vulkan test
 # fixtures.
-if((_vc_build_depth OR _vc_build_viz) AND VC_BUILD_TESTS)
+if(VC_WITH_RIG AND VC_BUILD_TESTS)
   set(VKC_BUILD_TEST_SUPPORT ON)
 endif()
 FetchContent_Declare(
@@ -109,7 +109,7 @@ endif()
 #
 # The pin is gfx main after PRs #136 and #137: region writes, marks over a
 # region, and the fractional-scale scissor repair (59e2449).
-if(_vc_build_viz)
+if(VC_WITH_RIG)
   FetchContent_Declare(
     volumetric_kit_gfx
     GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_gfx.git
@@ -122,21 +122,19 @@ endif()
 # files, with it, as a PRIVATE SYSTEM include, never part of an installed
 # interface. Declared under recon's name and pin, after recon, so the one copy
 # recon fetched is the one used.
-if(VC_WITH_OPENCV OR VC_WITH_RIG)
-  if(POLICY CMP0135)
-    cmake_policy(SET CMP0135 NEW) # extracted files get the extraction time
-  endif()
-  FetchContent_Declare(
-    nlohmann_json
-    URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
-    URL_HASH
-      SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
-    SOURCE_SUBDIR do-not-add-json-cmake)
-  FetchContent_MakeAvailable(nlohmann_json)
-  set(VC_JSON_INCLUDE_DIR
-      "${nlohmann_json_SOURCE_DIR}/include"
-      PARENT_SCOPE)
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW) # extracted files get the extraction time
 endif()
+FetchContent_Declare(
+  nlohmann_json
+  URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+  URL_HASH
+    SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
+  SOURCE_SUBDIR do-not-add-json-cmake)
+FetchContent_MakeAvailable(nlohmann_json)
+set(VC_JSON_INCLUDE_DIR
+    "${nlohmann_json_SOURCE_DIR}/include"
+    PARENT_SCOPE)
 
 if(VC_BUILD_TESTS)
   # googletest is only needed when building the test suite.

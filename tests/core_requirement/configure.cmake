@@ -10,7 +10,7 @@
 # calib's floor, of it; then recon, refusing one that brings another core; and
 # recon's must re-find the core at that MAJOR.MINOR. RECON_SOURCE and
 # JSON_SOURCE are the sources the calling build fetched; GENERATOR,
-# CXX_COMPILER, MAKE_PROGRAM and GLM_DIR repeat its settings
+# CXX_COMPILER, MAKE_PROGRAM, GLM_DIR and OPENCV_DIR repeat its settings
 # (tests/CMakeLists.txt).
 foreach(
   _var
@@ -39,6 +39,7 @@ execute_process(
     "${CMAKE_COMMAND}" -S "${CALIB_SOURCE}" -B "${BINARY_DIR}" -G "${GENERATOR}"
     "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}"
     "-DCMAKE_MAKE_PROGRAM=${MAKE_PROGRAM}" "-Dglm_DIR=${GLM_DIR}"
+    "-DOpenCV_DIR=${OPENCV_DIR}"
     "-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=${CMAKE_CURRENT_LIST_DIR}/fake_core"
     "-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=${RECON_SOURCE}"
     "-DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=${JSON_SOURCE}"

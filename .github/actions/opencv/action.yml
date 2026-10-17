@@ -1,0 +1,96 @@
+name: OpenCV 5 (Linux)
+description: >-
+  OpenCV 5 built from source by tools/install-opencv.sh and cached, then
+  OpenCV_DIR set for the rest of the job, so a configure finds it. The cache
+  keys on the OpenCV version, the OS release and architecture, the compiler and
+  the script, so a new OpenCV release or a changed script builds it once and
+  every other run restores it (DECISIONS.md, 2026-10-17). Run after checkout,
+  with git, CMake and a C++ compiler installed.
+
+inputs:
+  version:
+    description: An OpenCV release tag (5.0.0), or `latest` for the newest 5.x release.
+    required: false
+    default: latest
+
+outputs:
+  version:
+    description: The OpenCV release installed.
+    value: ${{ steps.key.outputs.version }}
+  dir:
+    description: The directory holding OpenCVConfig.cmake, also exported as OpenCV_DIR.
+    value: ${{ steps.dir.outputs.dir }}
+
+runs:
+  using: composite
+  steps:
+    # The compiler is the default one, which builds OpenCV whatever compiler
+    # calib's own build then takes: OpenCV's C++ ABI is the system's libstdc++
+    # either way. The key leaves out the image's weekly version: the install
+    # links only the C and C++ runtimes, which an Ubuntu release keeps stable,
+    # and the compiler's version line is in the key.
+    - name: OpenCV version and cache key
+      id: key
+      shell: bash
+      env:
+        OPENCV_VERSION: ${{ inputs.version }}
+      run: |
+        script="${GITHUB_WORKSPACE}/tools/install-opencv.sh"
+        version="${OPENCV_VERSION}"
+        if [ "${version}" = latest ]; then
+          version=$("${script}" --latest)
+        fi
+        hash() { sha256sum | cut -c1-12; }
+        # shellcheck disable=SC1091  # the image's, read at run time
+        os=$(. /etc/os-release && echo "${ID}${VERSION_ID}")
+        cc=$(c++ --version | head -1 | hash)
+        sh=$(hash < "${script}")
+        {
+          echo "version=${version}"
+          echo "prefix=${HOME}/.cache/opencv/${version}"
+          echo "key=opencv-${version}-${os}-$(uname -m)-cc${cc}-sh${sh}"
+        } >> "${GITHUB_OUTPUT}"
+        echo "OpenCV ${version}, $(c++ --version | head -1)"
+
+    - name: Restore OpenCV
+      id: restore
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.key.outputs.prefix }}
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Build OpenCV
+      if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        OPENCV_VERSION: ${{ steps.key.outputs.version }}
+        OPENCV_PREFIX: ${{ steps.key.outputs.prefix }}
+      run: |
+        start=${SECONDS}
+        "${GITHUB_WORKSPACE}/tools/install-opencv.sh" "${OPENCV_VERSION}" \
+          "${OPENCV_PREFIX}"
+        echo "::notice::OpenCV ${OPENCV_VERSION} built in $((SECONDS - start)) s"
+
+    # Saved as soon as it is built, so a job that fails later keeps it.
+    - name: Save OpenCV
+      if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ steps.key.outputs.prefix }}
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Point CMake at OpenCV
+      id: dir
+      shell: bash
+      env:
+        OPENCV_PREFIX: ${{ steps.key.outputs.prefix }}
+      run: |
+        config=$(find "${OPENCV_PREFIX}" -name OpenCVConfig.cmake -print -quit)
+        [ -n "${config}" ] || {
+          echo "::error::no OpenCVConfig.cmake under ${OPENCV_PREFIX}"
+          exit 1
+        }
+        dir=$(dirname "${config}")
+        echo "dir=${dir}" >> "${GITHUB_OUTPUT}"
+        echo "OpenCV_DIR=${dir}" >> "${GITHUB_ENV}"
+        echo "OpenCV_DIR=${dir}"

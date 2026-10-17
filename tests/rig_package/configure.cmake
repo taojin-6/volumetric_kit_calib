@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Tao Jin
 
-# The capture tier from an installed package: installs the calling build,
+# The rig tiers from an installed package: installs the calling build,
 # BUILD_DIR, in its CONFIG, to BINARY_DIR/prefix, checks it carries the capture
-# tier, the depth tier when WITH_DEPTH, and not the viz tier, then configures,
-# builds and runs the consumer (consumer/) against that prefix alone. GENERATOR,
-# CXX_COMPILER, MAKE_PROGRAM, GLM_DIR and FLAGS, its sanitizers' compile and
-# link flags, repeat the calling build's settings (tests/CMakeLists.txt).
+# and depth tiers and not the viz tier, then configures, builds and runs the
+# consumer (consumer/) against that prefix and OPENCV_DIR. GENERATOR,
+# CXX_COMPILER, MAKE_PROGRAM, GLM_DIR, OPENCV_DIR and FLAGS, its sanitizers'
+# compile and link flags, repeat the calling build's settings
+# (tests/CMakeLists.txt).
 foreach(_var BUILD_DIR CONFIG BINARY_DIR GENERATOR)
   if(NOT DEFINED ${_var})
     message(FATAL_ERROR "configure.cmake: ${_var} is not set")
@@ -35,18 +36,10 @@ _vc_cmake(
   "${CONFIG}"
   --prefix
   "${_prefix}")
-foreach(_header session_writer.hpp export.hpp)
-  if(NOT EXISTS "${_prefix}/include/volumetric_kit/calib/capture/${_header}")
-    message(FATAL_ERROR "the install lacks capture/${_header}")
-  endif()
-endforeach()
-# The depth tier's headers ship exactly when it is built.
-foreach(_header depth_checks.hpp export.hpp)
-  set(_path "${_prefix}/include/volumetric_kit/calib/depth/${_header}")
-  if(WITH_DEPTH AND NOT EXISTS "${_path}")
-    message(FATAL_ERROR "the install lacks depth/${_header}")
-  elseif(NOT WITH_DEPTH AND EXISTS "${_path}")
-    message(FATAL_ERROR "the install carries depth/${_header}, never built")
+foreach(_header capture/session_writer.hpp capture/export.hpp
+                depth/depth_checks.hpp depth/export.hpp)
+  if(NOT EXISTS "${_prefix}/include/volumetric_kit/calib/${_header}")
+    message(FATAL_ERROR "the install lacks ${_header}")
   endif()
 endforeach()
 # The viz tier is build-tree only, as gfx's ui tier is.
@@ -68,11 +61,11 @@ _vc_cmake(
   "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}"
   "-DCMAKE_MAKE_PROGRAM=${MAKE_PROGRAM}"
   "-Dglm_DIR=${GLM_DIR}"
+  "-DOpenCV_DIR=${OPENCV_DIR}"
   "-DCMAKE_BUILD_TYPE=${CONFIG}"
   "-DCMAKE_CXX_FLAGS=${FLAGS}"
   "-DCMAKE_EXE_LINKER_FLAGS=${FLAGS}"
-  "-DCMAKE_PREFIX_PATH=${_prefix}"
-  "-DWITH_DEPTH=${WITH_DEPTH}")
+  "-DCMAKE_PREFIX_PATH=${_prefix}")
 _vc_cmake("Building against the installed calib" --build
           "${BINARY_DIR}/consumer" --config "${CONFIG}")
 

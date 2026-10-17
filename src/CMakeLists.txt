@@ -8,19 +8,13 @@
 include(GNUInstallDirs)
 
 add_subdirectory(volumetric_kit/calib/core)
-if(VC_WITH_OPENCV)
-  add_subdirectory(volumetric_kit/calib/compute)
-  add_subdirectory(volumetric_kit/calib/detect)
-  add_subdirectory(volumetric_kit/calib/solve)
-  add_subdirectory(volumetric_kit/calib/quality)
-endif()
+add_subdirectory(volumetric_kit/calib/compute)
+add_subdirectory(volumetric_kit/calib/detect)
+add_subdirectory(volumetric_kit/calib/solve)
+add_subdirectory(volumetric_kit/calib/quality)
 if(VC_WITH_RIG)
   add_subdirectory(volumetric_kit/calib/capture)
-endif()
-if(_vc_build_depth)
   add_subdirectory(volumetric_kit/calib/depth)
-endif()
-if(_vc_build_viz)
   add_subdirectory(volumetric_kit/calib/viz)
 endif()
 # TODO: add_subdirectory() for color / app as those tiers land (see DESIGN.md).
@@ -29,21 +23,13 @@ endif()
 # Consumers link `volumetric_kit::calib` and get whatever tiers are built.
 add_library(calib INTERFACE)
 add_library(volumetric_kit::calib ALIAS calib)
-target_link_libraries(calib INTERFACE calib_core)
-if(VC_WITH_OPENCV)
-  target_link_libraries(calib INTERFACE calib_compute calib_detect calib_solve
-                                        calib_quality)
-endif()
-if(VC_WITH_RIG)
-  target_link_libraries(calib INTERFACE calib_capture)
-endif()
-if(_vc_build_depth)
-  target_link_libraries(calib INTERFACE calib_depth)
-endif()
+target_link_libraries(calib INTERFACE calib_core calib_compute calib_detect
+                                      calib_solve calib_quality)
 # calib_viz is build-tree only (viz/CMakeLists.txt), so it joins the umbrella
 # for in-tree consumers without entering the installed export set.
-if(_vc_build_viz)
-  target_link_libraries(calib INTERFACE $<BUILD_INTERFACE:calib_viz>)
+if(VC_WITH_RIG)
+  target_link_libraries(calib INTERFACE calib_capture calib_depth
+                                        $<BUILD_INTERFACE:calib_viz>)
 endif()
 
 # --- Install / export --------------------------------------------------------
@@ -55,16 +41,10 @@ if(VC_INSTALL)
 
   # A tier's headers ship only when the tier is built.
   set(_vc_unbuilt_headers)
-  if(NOT VC_WITH_OPENCV)
-    foreach(_vc_tier compute detect solve quality)
+  if(NOT VC_WITH_RIG)
+    foreach(_vc_tier capture depth)
       list(APPEND _vc_unbuilt_headers PATTERN "${_vc_tier}" EXCLUDE)
     endforeach()
-  endif()
-  if(NOT VC_WITH_RIG)
-    list(APPEND _vc_unbuilt_headers PATTERN "capture" EXCLUDE)
-  endif()
-  if(NOT _vc_build_depth)
-    list(APPEND _vc_unbuilt_headers PATTERN "depth" EXCLUDE)
   endif()
   # viz is never installed (viz/CMakeLists.txt).
   list(APPEND _vc_unbuilt_headers PATTERN "viz" EXCLUDE)

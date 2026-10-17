@@ -26,10 +26,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - The `depth` tier, `volumetric_kit::calib_depth`, built with `VC_WITH_RIG`
-  and `VC_WITH_OPENCV` (DECISIONS.md, 2026-10-16, "Depth checks are calib's
-  kernels"): `DepthChecks::fit_planes` fits each view's board plane on the
-  GPU to its camera's depth, read in place (`DepthImage`, `PlaneRegion`), in
-  two gated rounds in one submit, for any number of cameras;
+  (DECISIONS.md, 2026-10-16, "Depth checks are calib's kernels"):
+  `DepthChecks::fit_planes` fits each view's board plane on the GPU to its
+  camera's depth, read in place (`DepthImage`, `PlaneRegion`), in two gated
+  rounds in one submit, for any number of cameras;
   `DepthChecks::device_requirements` is the core's compute baseline.
   `DepthCheckOptions` gains the fit's `seed_mm`, `min_gate_mm`, `sigma_gate`
   and `min_inliers`, which `report.json` records; `check_depth_options` and
@@ -64,8 +64,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `to_string` of `solve::Dropped`, `solve::ViewFate` and `compute::ViewUse`,
   the names the report gives them.
 - `compute::quantile`, numpy's linear percentile.
-- The `viz` tier, `volumetric_kit::calib_viz`, built with `VC_WITH_RIG` and
-  `VC_WITH_OPENCV`, build-tree only (DECISIONS.md, 2026-10-16): `RigMosaic`
+- The `viz` tier, `volumetric_kit::calib_viz`, built with `VC_WITH_RIG`,
+  build-tree only (DECISIONS.md, 2026-10-16): `RigMosaic`
   copies each camera's decoded NV12 picture on the device into its tile of
   one mosaic, for any number of cameras of mixed sizes, paged over several
   textures when one cannot hold it (`mosaic_layout`), each page converted
@@ -80,9 +80,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   quality tier's options;
   `BoardEditor` and `draw_board_editor` (its fields through `board_fields`
   and `apply_fields`) edit the board, checked as the detector's `Board`
-  takes it, until the first capture locks it. `VC_WITH_RIG` with
-  `VC_WITH_OPENCV` fetches `volumetric_kit_gfx`, pinned at `ba7f705` (main
-  after #136 and #137, including the overlay scissor repair).
+  takes it, until the first capture locks it. `VC_WITH_RIG` fetches
+  `volumetric_kit_gfx`, pinned at `ba7f705` (main after #136 and #137,
+  including the overlay scissor repair).
 - `marker_count`, the markers a board carries, in `calib/core/target.hpp`.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds
@@ -91,17 +91,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   left out, each camera's covariance and its sensitivity to the intrinsics
   (DECISIONS.md, 2026-10-14). `solve::view_residuals` gives one view's
   residuals and their derivatives.
-- The `quality` tier, `volumetric_kit::calib_quality`, built with
-  `VC_WITH_OPENCV`: the live checks and the capture rule (DECISIONS.md,
-  2026-10-14). `check_view` fills a view's `ViewCheck` (verdict, distance,
-  tilt, fit, 3 x 3 cell) from its own pose and says whether it is frontal;
-  `corner_shift` measures how far corners moved between two sets of
-  detections, and `live_vs_full_flagged` judges a capture's live corners by
-  it; `CaptureRule` takes the first complete, still set after a press, or
-  fails naming why; `SessionChecks` sums up the captures kept: views and
-  8 x 6 coverage per camera, the captures shared through views the solve
-  uses, a graded tree preview, when Calibrate may run, and the duplicate,
-  floor-only and mostly-frontal warnings.
+- The `quality` tier, `volumetric_kit::calib_quality`: the live checks and the
+  capture rule (DECISIONS.md, 2026-10-14). `check_view` fills a view's
+  `ViewCheck` (verdict, distance, tilt, fit, 3 x 3 cell) from its own pose and
+  says whether it is frontal; `corner_shift` measures how far corners moved
+  between two sets of detections, and `live_vs_full_flagged` judges a
+  capture's live corners by it; `CaptureRule` takes the first complete, still
+  set after a press, or fails naming why; `SessionChecks` sums up the captures
+  kept: views and 8 x 6 coverage per camera, the captures shared through views
+  the solve uses, a graded tree preview, when Calibrate may run, and the
+  duplicate, floor-only and mostly-frontal warnings.
 - `compute::median`, `angle_deg`, `rotation_angle_deg`, `Board::centre`,
   `centre_in`, `face_normal` and `project`, which the solve and the checks
   share.
@@ -123,6 +122,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- OpenCV 5 is required, and `VC_WITH_OPENCV` is gone (DECISIONS.md,
+  2026-10-17): `compute`, `detect`, `solve` and `quality` always build, the
+  installed package always re-finds OpenCV, and `VC_WITH_RIG` alone builds
+  `capture`, `depth` and `viz`. On Linux, `tools/install-opencv.sh` builds
+  OpenCV 5 from its source; CI's Ubuntu legs and sanitizer job now build and
+  test every OpenCV tier on it.
 - `initialise` places the board of a capture whose views are all ambiguous,
   from those views, so the adjustment takes them.
 - recon is pinned at `bdbe26e` (recon main, with its #228, and its #245,
@@ -205,33 +210,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- The `detect` tier, `volumetric_kit::calib_detect`, built with
-  `VC_WITH_OPENCV` (DECISIONS.md, 2026-10-12): `detect_charuco` finds a
-  ChArUco `Board` in an 8-bit luma image (`LumaView`, onto which recon's
-  `PictureView` maps), at full resolution (`Mode::Full`) or by the live
-  view's hybrid (`Mode::Hybrid`). The installed package re-finds OpenCV's
-  imgproc too.
-- The `compute` tier, `volumetric_kit::calib_compute`, built with
-  `VC_WITH_OPENCV` (OFF by default; needs an installed OpenCV 5, 5.0 or a
-  later 5.x): OpenCV behind recon's and calib's types (DECISIONS.md,
-  2026-10-12). `cv_camera` gives a `CameraModel` as OpenCV's camera matrix and
-  eight coefficients, and `undistort_points` its pixels' rays, undistorted to
-  convergence; `cv_matrix`, `matrix_from_cv`, `cv_pose` and
-  `matrix_from_cv_pose` convert rigid transforms; `Board` builds a ChArUco
+- The `detect` tier, `volumetric_kit::calib_detect` (DECISIONS.md,
+  2026-10-12): `detect_charuco` finds a ChArUco `Board` in an 8-bit luma image
+  (`LumaView`, onto which recon's `PictureView` maps), at full resolution
+  (`Mode::Full`) or by the live view's hybrid (`Mode::Hybrid`). The installed
+  package re-finds OpenCV's imgproc too.
+- The `compute` tier, `volumetric_kit::calib_compute` (needs an installed
+  OpenCV 5, 5.0 or a later 5.x): OpenCV behind recon's and calib's types
+  (DECISIONS.md, 2026-10-12). `cv_camera` gives a `CameraModel` as OpenCV's
+  camera matrix and eight coefficients, and `undistort_points` its pixels'
+  rays, undistorted to convergence; `cv_matrix`, `matrix_from_cv`, `cv_pose`
+  and `matrix_from_cv_pose` convert rigid transforms; `Board` builds a ChArUco
   `Target` as OpenCV's board with its corners by id; `usable_for_pose` says
   whether a view of it fixes a pose (`ViewUse`, phrased by `describe`), and
   refuses one whose corners, or all but one, lie on a line; `guarded` and
-  `current_exception_status` return what OpenCV throws as a `Status`. With it,
-  the installed package re-finds OpenCV.
-- The `solve` tier, `volumetric_kit::calib_solve`, built with
-  `VC_WITH_OPENCV`: the first rig. `view_pose` gives a view's IPPE poses, the
-  better first, with their RMS and `ambiguity()`, and `tilt_deg` the board's
-  turn from the camera; `covisibility` and `spanning_tree` give the captures
-  each pair of cameras shares and the tree of the links that share the most,
-  its ties broken by camera id; `initialise` places every camera (`T_cw`, the
-  reference's colour camera the world) and every capture's board (`T_wb`),
-  recording each view's fate (`ViewRecord`) and each link's inliers and
-  weakness (`PlacedLink`).
+  `current_exception_status` return what OpenCV throws as a `Status`. The
+  installed package re-finds OpenCV.
+- The `solve` tier, `volumetric_kit::calib_solve`: the first rig. `view_pose`
+  gives a view's IPPE poses, the better first, with their RMS and
+  `ambiguity()`, and `tilt_deg` the board's turn from the camera;
+  `covisibility` and `spanning_tree` give the captures each pair of cameras
+  shares and the tree of the links that share the most, its ties broken by
+  camera id; `initialise` places every camera (`T_cw`, the reference's colour
+  camera the world) and every capture's board (`T_wb`), recording each view's
+  fate (`ViewRecord`) and each link's inliers and weakness (`PlacedLink`).
 - Build-system foundation: top-level CMake (C++17), tiered component layout, the
   `volumetric_kit::calib_core` library target + `volumetric_kit::calib` umbrella
   alias, and first-class install/export so the library is consumable via both

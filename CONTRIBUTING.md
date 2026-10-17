@@ -22,7 +22,8 @@ and is **not** tracked, so each clone must run this once.
 
 ## Build and test
 
-Out-of-source CMake build (needs GLM — see the README prerequisites):
+Out-of-source CMake build (needs GLM and OpenCV 5 — see the README
+prerequisites):
 
 ```sh
 calib_root="$(git rev-parse --show-toplevel)"

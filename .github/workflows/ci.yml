@@ -26,11 +26,12 @@ jobs:
       # Every leg runs on a GitHub-hosted runner, free for a public repository
       # (DECISIONS.md, 2026-10-16): no calib job needs the family's own hosts,
       # as none draws on an NVIDIA GPU, and the hosted macOS image's GPU runs
-      # MoltenVK. Ubuntu builds the brain with no OpenCV (Ubuntu's is 4) and no
-      # Vulkan; macOS installs Homebrew's OpenCV 5, and the rig leg its Vulkan
-      # SDK, FFmpeg and GLFW, each run from a clean image. The rig leg is
-      # static: shared libraries there would build core, recon and gfx shared
-      # too, which none of them is.
+      # MoltenVK. Every leg builds every OpenCV tier: Ubuntu on OpenCV 5 built
+      # from source and cached (.github/actions/opencv), with no Vulkan; macOS
+      # on Homebrew's OpenCV 5, and the rig leg on its Vulkan SDK, FFmpeg and
+      # GLFW, each run from a clean image. The rig leg is static: shared
+      # libraries there would build core, recon and gfx shared too, which none
+      # of them is.
       #
       # A leg moves to a self-hosted runner by passing _build.yml's `runner`
       # (and, on Linux, `container`) inputs, as recon's GPU legs do.
@@ -42,17 +43,14 @@ jobs:
             build_types: '["Release"]'
           - os: macos-26
             build_types: '["Debug"]'
-            opencv: true
             shared: true
           - os: macos-26
             build_types: '["Release"]'
-            opencv: true
             rig: true
     uses: ./.github/workflows/_build.yml
     with:
       os: ${{ matrix.os }}
       build_types: ${{ matrix.build_types }}
-      opencv: ${{ matrix.opencv || false }}
       shared: ${{ matrix.shared || false }}
       rig: ${{ matrix.rig || false }}
 

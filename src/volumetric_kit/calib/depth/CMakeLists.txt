@@ -5,9 +5,9 @@
 # The depth checks' device side: each view's board plane fitted on the GPU to
 # the depth recon's frame preparation leaves on the device, and each ordered
 # pair of cameras' depth compared, read in place, on the core's vulkan tier
-# (DECISIONS.md, "Depth checks are calib's kernels"). Built with VC_WITH_RIG and
-# VC_WITH_OPENCV, beside viz: it takes the quality tier's region, plane, options
-# and pair agreement, and names no recon sensor type and nothing of gfx.
+# (DECISIONS.md, "Depth checks are calib's kernels"). Built with VC_WITH_RIG,
+# beside viz: it takes the quality tier's region, plane, options and pair
+# agreement, and names no recon sensor type and nothing of gfx.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
