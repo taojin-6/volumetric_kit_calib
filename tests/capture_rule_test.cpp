@@ -33,7 +33,7 @@ CaptureRule rig_rule(const CaptureRuleOptions& options = {}) {
 // A complete set, every camera's view good, moved `motion_px`.
 LiveSet still_set(std::optional<double> motion_px = 0.1) {
   LiveSet set;
-  set.present.assign(4, true);
+  set.present = std::vector<bool>(4, true);
   set.checks.assign(4, ViewCheck{});
   for (ViewCheck& check : set.checks) check.verdict = ViewVerdict::Good;
   set.motion_px = motion_px;
