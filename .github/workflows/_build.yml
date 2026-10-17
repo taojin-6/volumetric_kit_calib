@@ -79,6 +79,8 @@ jobs:
       # for the Homebrew key below: on the rig leg that includes glfw, for
       # gfx's GLFW glue, and glslang and spirv-tools, whose tools the core's
       # shader rules find.
+      # TODO: take this check-or-install from a core action, as recon and gfx
+      # copy it too, once the core has one.
       - name: Install dependencies (macOS)
         id: formulae
         if: runner.os == 'macOS'
@@ -140,7 +142,7 @@ jobs:
       # The installed versions of the leg's formulae and of their dependencies,
       # so the first run after a brew upgrade builds the dependency tree afresh
       # (the core's tools/runners/README.md, "Upgrading Homebrew"). Linux has
-      # no Homebrew, so its keys carry an empty brew field.
+      # no Homebrew, so its keys carry `none`.
       # TODO: re-pin to calib's core pin (third_party/CMakeLists.txt) once
       # taojin-6/volumetric_kit_core#39 merges and that pin includes it.
       - name: Homebrew key
@@ -154,8 +156,8 @@ jobs:
       # recon's _build.yml keys it, which says why: FetchContent bakes the
       # absolute build path in, so the key carries a hash of the workspace
       # path, and the pins' files. Every key and restore-keys prefix carries
-      # the Homebrew key, so no tree built on other versions comes back;
-      # checkout cleans the rest of build/ each run.
+      # the Homebrew key (a pre-commit hook checks), so no tree built on other
+      # versions comes back; checkout cleans the rest of build/ each run.
       - name: Workspace fingerprint
         id: ws
         run: |
@@ -168,9 +170,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: build/_deps
-          key: deps-${{ inputs.os }}-${{ matrix.build_type }}-cv${{ inputs.opencv }}-so${{ inputs.shared }}-rig${{ inputs.rig }}-brew${{ steps.brew.outputs.key }}-ws${{ steps.ws.outputs.hash }}-${{ hashFiles('third_party/CMakeLists.txt', 'CMakeLists.txt') }}
+          key: deps-${{ inputs.os }}-${{ matrix.build_type }}-cv${{ inputs.opencv }}-so${{ inputs.shared }}-rig${{ inputs.rig }}-brew${{ steps.brew.outputs.key || 'none' }}-ws${{ steps.ws.outputs.hash }}-${{ hashFiles('third_party/CMakeLists.txt', 'CMakeLists.txt') }}
           restore-keys: |
-            deps-${{ inputs.os }}-${{ matrix.build_type }}-cv${{ inputs.opencv }}-so${{ inputs.shared }}-rig${{ inputs.rig }}-brew${{ steps.brew.outputs.key }}-ws${{ steps.ws.outputs.hash }}-
+            deps-${{ inputs.os }}-${{ matrix.build_type }}-cv${{ inputs.opencv }}-so${{ inputs.shared }}-rig${{ inputs.rig }}-brew${{ steps.brew.outputs.key || 'none' }}-ws${{ steps.ws.outputs.hash }}-
 
       - name: Configure
         # Retry to ride out transient FetchContent clone failures.

@@ -14,10 +14,11 @@ pre-commit install
 ```
 
 This wires the hooks in [`.pre-commit-config.yaml`](.pre-commit-config.yaml)
-(clang-format, cmake-format, trailing-whitespace, end-of-file-fixer) into
-`.git/hooks/`. They run on staged files at `git commit` and abort the commit if
-anything is reformatted, so style is fixed locally instead of in CI. The hook
-lives in `.git/` and is **not** tracked, so each clone must run this once.
+(clang-format, cmake-format, trailing-whitespace, end-of-file-fixer, and a
+check of CI's Homebrew key wiring) into `.git/hooks/`. They run on staged files
+at `git commit` and abort the commit if anything is reformatted or a check
+fails, so style is fixed locally instead of in CI. The hook lives in `.git/`
+and is **not** tracked, so each clone must run this once.
 
 ## Build and test
 

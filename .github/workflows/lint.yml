@@ -1,7 +1,7 @@
 name: lint
 
 # Styling + hygiene gate. Runs the same hooks as the local `pre-commit` install
-# (clang-format, cmake-format, trailing-whitespace, end-of-file-fixer).
+# (.pre-commit-config.yaml).
 # Linux-only: the formatters' output is deterministic across operating systems,
 # so one runner is enough. Invoked by ci.yml, which owns the push /
 # pull_request triggers and the concurrency group.
