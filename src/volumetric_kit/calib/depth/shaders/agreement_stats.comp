@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Tao Jin
+
+#version 450
+
+// Each ordered pair's histogram summarized, one invocation per pair walking
+// its bins in order: its samples in the window, their signed median, and the
+// median and 90th percentile of their magnitudes, from the histogram folded
+// at 0. The statistics are in bins: the host scales them by the bin width.
+//
+// The q-quantile of n binned samples lies in the first bin where the running
+// count, from the lowest bin, reaches q n, as far into that bin as the rest of
+// q n takes of its count: its samples spread evenly across it. The window's
+// bins number 2 half_bins, with 0 between bins half_bins - 1 and half_bins, so
+// folded bin j holds the magnitudes in [j, j + 1) bins: bins half_bins + j and
+// half_bins - 1 - j.
+
+#define VC_STATS_LOCAL_SIZE 64
+
+layout(local_size_x = VC_STATS_LOCAL_SIZE) in;
+
+// One pair's statistics, as the host reads them back; mirrored by
+// agreement_blocks.hpp. With no samples in the window, the three statistics
+// are 0.
+struct Stats {
+  uint overlap;         // the samples that met a pixel with depth
+  uint in_window;       // those in the window
+  float signed_median;  // bins from 0
+  float median_abs;     // bins
+  float p90_abs;        // bins
+  uint pad0;
+  uint pad1;
+  uint pad2;
+};
+
+layout(set = 0, binding = 0, std430) readonly buffer Bins { uint bins[]; };
+layout(set = 0, binding = 1, std430) readonly buffer Overlaps {
+  uint overlaps[];
+};
+layout(set = 0, binding = 2, std430) writeonly buffer Out { Stats stats[]; };
+
+layout(push_constant, std430) uniform Params {
+  uint pairs;      // the histograms
+  uint half_bins;  // each one's bins either side of 0
+} pc;
+
+// Bin `b` of the histogram whose bins start at `first`: as counted, or folded
+// at 0.
+uint bin_count(uint first, uint b, bool folded) {
+  if (folded) {
+    return bins[first + pc.half_bins + b] + bins[first + pc.half_bins - 1u - b];
+  }
+  return bins[first + b];
+}
+
+// The q-quantile of the `n` samples, n > 0, of the histogram at `first`, as
+// counted (2 half_bins bins) or folded (half_bins), in bins from bin
+// `origin`'s lower edge.
+float quantile(uint first, bool folded, uint n, float q, int origin) {
+  uint count = folded ? pc.half_bins : 2u * pc.half_bins;
+  float target = q * float(n);
+  uint below = 0u;
+  for (uint b = 0u; b < count; ++b) {
+    uint c = bin_count(first, b, folded);
+    uint through = below + c;
+    if (c != 0u && float(through) >= target) {
+      float into = clamp((target - float(below)) / float(c), 0.0, 1.0);
+      return float(int(b) - origin) + into;
+    }
+    below = through;
+  }
+  return float(int(count) - origin);  // not reached: n > 0
+}
+
+void main() {
+  uint pair = gl_GlobalInvocationID.x;
+  if (pair >= pc.pairs) {
+    return;
+  }
+  uint first = pair * 2u * pc.half_bins;
+  uint n = 0u;
+  for (uint b = 0u; b < 2u * pc.half_bins; ++b) {
+    n += bins[first + b];
+  }
+  Stats s;
+  s.overlap = overlaps[pair];
+  s.in_window = n;
+  s.signed_median = 0.0;
+  s.median_abs = 0.0;
+  s.p90_abs = 0.0;
+  s.pad0 = 0u;
+  s.pad1 = 0u;
+  s.pad2 = 0u;
+  if (n != 0u) {
+    s.signed_median = quantile(first, false, n, 0.5, int(pc.half_bins));
+    s.median_abs = quantile(first, true, n, 0.5, 0);
+    s.p90_abs = quantile(first, true, n, 0.9, 0);
+  }
+  stats[pair] = s;
+}

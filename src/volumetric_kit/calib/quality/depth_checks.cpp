@@ -167,10 +167,17 @@ core::Status check_depth_options(const DepthCheckOptions& options) {
       return core::Status::invalid_argument(
           "options.min_inliers must be at least 3");
     }
+    if (options.agreement_stride < 1) {
+      return core::Status::invalid_argument(
+          "options.agreement_stride must be at least 1");
+    }
     for (const auto& [name, bound] :
          {std::pair{"seed_mm", options.seed_mm},
           std::pair{"min_gate_mm", options.min_gate_mm},
           std::pair{"sigma_gate", options.sigma_gate},
+          std::pair{"window_mm", options.window_mm},
+          std::pair{"bin_mm", options.bin_mm},
+          std::pair{"edge_ratio", options.edge_ratio},
           std::pair{"max_scale_error", options.max_scale_error},
           std::pair{"max_offset_mm", options.max_offset_mm},
           std::pair{"max_angle_deg", options.max_angle_deg},
@@ -180,6 +187,17 @@ core::Status check_depth_options(const DepthCheckOptions& options) {
         return core::Status::invalid_argument(std::string("options.") + name +
                                               " must be positive and finite");
       }
+    }
+    // Bins either side of 0: whole, to rounding, so the window's edges and 0
+    // fall on bin edges. Written so a NaN (an infinite quotient) fails it.
+    const double half = options.window_mm / options.bin_mm;
+    const double whole = std::round(half);
+    if (!(std::abs(half - whole) <= 1e-9 * half && whole >= 1.0 &&
+          2.0 * whole <= static_cast<double>(kMaxAgreementBins))) {
+      return core::Status::invalid_argument(
+          "options.window_mm must be a whole number of options.bin_mm, an "
+          "even number of bins in all, at most " +
+          std::to_string(kMaxAgreementBins));
     }
     return {};
   });

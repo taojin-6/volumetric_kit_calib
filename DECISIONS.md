@@ -75,7 +75,8 @@ locked decision above.)
 
 ## 2026-10-16 — Depth checks are calib's kernels
 
-The depth checks' per-pixel work runs in calib's own `depth` tier
+The depth checks' per-pixel work -- each view's board plane, and each
+ordered pair of cameras' depth agreement -- runs in calib's own `depth` tier
 (`depth/depth_checks.hpp`), the device half of the entry below.
 
 - **A tier of calib's own.** `depth` sits beside `viz` (`quality` →
@@ -86,8 +87,8 @@ The depth checks' per-pixel work runs in calib's own `depth` tier
   baseline (std430 blocks, no float64, no subgroups), so it adds nothing to a
   rig's device.
 - **In place.** The kernels bind recon's prepared depth buffers where they
-  are, on recon's queue family; each region's block goes up and 48 bytes come
-  back.
+  are, on recon's queue family; each region's or pair's block goes up, and
+  48 bytes per region and 32 per pair come back.
 - **One pinhole, one region rule.** The kernels include recon's exported
   `pinhole.glsl` (recon pinned at or after its #245), and `board_region.glsl`
   is `in_board_region` on the device, which a test kernel holds to the host's
@@ -105,6 +106,18 @@ The depth checks' per-pixel work runs in calib's own `depth` tier
   one line, give a plane that is not valid, with its counts, for the verdicts
   to call insufficient. The options and regions are refused by the public
   checks `board_region` and `board_depth_check` run.
+- **Agreement in integer histograms.** A pair's samples move from one
+  camera's depth frame into the other's by a transform composed in double on
+  the host, and meet the nearest pixel by recon's pinhole. The edge gate
+  checks the pixel in both cameras, as flying pixels appear in either. The
+  differences are counted in shared memory, at most 4096 `u32` bins: 16 KiB,
+  the least Vulkan allows, so the requirements stay the baseline. They are
+  then added with integer `atomicAdd`, exact in any order, so captures
+  accumulate on the device, pooled or one capture's, to the bit. The window
+  is an even number of bins, so 0 is a bin edge and the magnitudes are the
+  histogram folded. A serial walk of each pair's bins gives its quantiles,
+  interpolated within the bin. A pair holds at most 2^32 - 1 samples, and a
+  capture that could pass that is refused.
 
 ## 2026-10-16 — Depth checks: the host's geometry over the device's results
 

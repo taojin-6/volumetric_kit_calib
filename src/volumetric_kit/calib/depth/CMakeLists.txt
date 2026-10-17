@@ -3,10 +3,11 @@
 
 # --- calib_depth: Tier 4 -----------------------------------------------------
 # The depth checks' device side: each view's board plane fitted on the GPU to
-# the depth recon's frame preparation leaves on the device, read in place, on
-# the core's vulkan tier (DECISIONS.md, "Depth checks are calib's kernels").
-# Built with VC_WITH_RIG and VC_WITH_OPENCV, beside viz: it takes the quality
-# tier's region and plane, and names no recon sensor type and nothing of gfx.
+# the depth recon's frame preparation leaves on the device, and each ordered
+# pair of cameras' depth compared, read in place, on the core's vulkan tier
+# (DECISIONS.md, "Depth checks are calib's kernels"). Built with VC_WITH_RIG and
+# VC_WITH_OPENCV, beside viz: it takes the quality tier's region and plane, and
+# names no recon sensor type and nothing of gfx.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
@@ -70,7 +71,9 @@ vkc_embed_shaders(
   ${_vc_glsl_roots}
   SHADERS
   "${CMAKE_CURRENT_SOURCE_DIR}/shaders/plane_moments.comp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/shaders/plane_solve.comp")
+  "${CMAKE_CURRENT_SOURCE_DIR}/shaders/plane_solve.comp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/shaders/agreement.comp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/shaders/agreement_stats.comp")
 
 vc_target_warnings(calib_depth)
 

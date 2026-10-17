@@ -106,11 +106,12 @@ if(VC_WITH_RIG)
 endif()
 
 if(_vc_build_depth)
-  # depth: the board-plane fit on a device, through the core's Vulkan test
-  # fixtures (they skip without one), against references in double made here;
-  # the board region's rule on the device, pixel by pixel, through a kernel of
-  # the test's own over the tier's GLSL (shaders/board_member_cases.comp); and
-  # host allocation failures, the Vulkan driver's spared.
+  # depth: the board-plane fit and the pair agreement on a device, through the
+  # core's Vulkan test fixtures (they skip without one), against references in
+  # double made here; the board region's rule on the device, pixel by pixel,
+  # through a kernel of the test's own over the tier's GLSL
+  # (shaders/board_member_cases.comp); and host allocation failures, the Vulkan
+  # driver's spared.
   vc_add_test(depth_plane_fit volumetric_kit::calib_depth
               volumetric_kit::core_test_support vc_synthetic_rig)
   get_target_property(_vc_glsl_roots calib_depth VC_SHADER_INCLUDE_DIRS)
@@ -122,6 +123,8 @@ if(_vc_build_depth)
     ${_vc_glsl_roots}
     SHADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/board_member_cases.comp")
+  vc_add_test(depth_agreement volumetric_kit::calib_depth
+              volumetric_kit::core_test_support vc_synthetic_rig)
   vc_add_test(depth_oom volumetric_kit::calib_depth
               volumetric_kit::core_test_support vc_test_support)
   target_sources(vc_depth_oom_test PRIVATE support/allocation_failure.cpp)
