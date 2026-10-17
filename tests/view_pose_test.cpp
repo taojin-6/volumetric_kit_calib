@@ -166,6 +166,44 @@ TEST(ViewPose, PosesABoardTurnedHalfATurn) {
   }
 }
 
+// A board tilted exactly about its own x or y axis, centred on the optical
+// axis, so that axis is square to the line of sight: IPPE's rotation takes the
+// square root of a zero there, which rounds below zero on some builds in the
+// board's frame and the quarter-turned one alike. The pose is the board's all
+// the same, to within that root of the rounding: 1.5e-8 rad and 3.4e-6 px at
+// most on GCC's builds.
+TEST(ViewPose, PosesABoardTiltedAboutItsOwnAxis) {
+  const compute::Board board = femto_board();
+  const camera::Vec3d middle(0.375, 0.225, 0.0);  // the 5 x 3 squares' middle
+  for (const camera::Vec3d& axis :
+       {camera::Vec3d(1.0, 0.0, 0.0), camera::Vec3d(0.0, 1.0, 0.0)}) {
+    for (const double distance : {1.5, 2.5, 4.6}) {
+      for (int tilt_deg = 5; tilt_deg <= 75; tilt_deg += 2) {
+        for (const double roll_deg : {0.0, 10.0}) {
+          const camera::Mat3d rotation =
+              camera::rotation_from_rodrigues(
+                  camera::Vec3d(0.0, 0.0, roll_deg * kPi / 180.0)) *
+              camera::rotation_from_rodrigues(axis * (tilt_deg * kPi / 180.0));
+          camera::Mat4d truth(rotation);
+          truth[3] = glm::dvec4(
+              camera::Vec3d(0.0, 0.0, distance) - rotation * middle, 1.0);
+          SCOPED_TRACE(testing::Message()
+                       << "axis (" << axis.x << ", " << axis.y << "), "
+                       << distance << " m, tilt " << tilt_deg << ", roll "
+                       << roll_deg);
+          const Observation view =
+              pinhole_view(board, truth, {0, 1, 2, 3, 4, 5, 6, 7});
+          const core::Result<ViewPose> pose = view_pose(pinhole(), board, view);
+          ASSERT_TRUE(pose.ok()) << pose.status().message();
+          EXPECT_LT(rotation_error(pose->best.board_to_camera, truth), 1e-7);
+          EXPECT_LT(translation_error(pose->best.board_to_camera, truth), 1e-7);
+          EXPECT_LT(pose->best.rms_px, 1e-4);
+        }
+      }
+    }
+  }
+}
+
 // Every subset of 4 to 8 corners of each exact view that usable_for_pose
 // accepts gives IPPE's two poses, the best the board's: the check refuses
 // every view IPPE cannot pose, all but one corner on a line included.

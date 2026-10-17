@@ -9,25 +9,23 @@
 #
 # 1. With VR_CAMERA_ONLY OFF, as an application that needs the rest of recon sets
 #    it, calib's configure keeps it, and so reaches for Vulkan and fails.
-# 2. calib configures from CALIB_SOURCE, with VC_WITH_OPENCV as WITH_OPENCV says
-#    (OpenCV found at OPENCV_DIR), builds and installs to BINARY_DIR/prefix:
-#    compute's, detect's, solve's and quality's headers with it, none without,
-#    and never capture's.
+# 2. calib configures from CALIB_SOURCE, with OpenCV found at OPENCV_DIR, builds
+#    and installs to BINARY_DIR/prefix: the brain's headers, and never capture's
+#    or depth's.
 # 3. The consumer (consumer/) finds that installed package, and with it the core
-#    and recon installed beside it, and OpenCV with compute, detect, solve and
-#    quality, and builds and runs against calib_core, and compute, detect, solve
-#    and quality when built. It finds them by CMAKE_PREFIX_PATH; again finding
-#    the core itself too, before calib and after it; and again by
-#    volumetric_kit_calib_DIR alone.
+#    and recon installed beside it, and OpenCV, and builds and runs against
+#    calib_core, calib_compute, calib_detect, calib_solve and calib_quality. It
+#    finds them by CMAKE_PREFIX_PATH; again finding the core itself too, before
+#    calib and after it; and again by volumetric_kit_calib_DIR alone.
 # 4. CMAKE_PREFIX_PATH, which takes precedence over calib's prefix, holds the
 #    same recon and core, relabelled to the core's next minor version: the
 #    consumer, given calib's directory, does not find calib, which names both
 #    cores; nor when it finds that core itself first.
 #
 # CORE_SOURCE, RECON_SOURCE and JSON_SOURCE are the sources the calling build
-# fetched, so this needs no network; GENERATOR, CXX_COMPILER, MAKE_PROGRAM and
-# GLM_DIR repeat the calling build's settings. Each build and the install are
-# Release, so a multi-config generator builds what it installs.
+# fetched, so this needs no network; GENERATOR, CXX_COMPILER, MAKE_PROGRAM,
+# GLM_DIR and OPENCV_DIR repeat the calling build's settings. Each build and the
+# install are Release, so a multi-config generator builds what it installs.
 foreach(_var CALIB_SOURCE BINARY_DIR CORE_SOURCE RECON_SOURCE JSON_SOURCE
              GENERATOR)
   if(NOT DEFINED ${_var})
@@ -78,16 +76,10 @@ set(_common
     "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}"
     "-DCMAKE_MAKE_PROGRAM=${MAKE_PROGRAM}"
     "-Dglm_DIR=${GLM_DIR}"
+    "-DOpenCV_DIR=${OPENCV_DIR}"
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_DISABLE_FIND_PACKAGE_Vulkan=ON)
 set(_prefix "${BINARY_DIR}/prefix")
-if(WITH_OPENCV)
-  set(_opencv -DVC_WITH_OPENCV=ON "-DOpenCV_DIR=${OPENCV_DIR}")
-  set(_consumer_opencv -DEXPECT_COMPUTE=ON "-DOpenCV_DIR=${OPENCV_DIR}")
-else()
-  set(_opencv -DVC_WITH_OPENCV=OFF)
-  set(_consumer_opencv -DEXPECT_COMPUTE=OFF)
-endif()
 
 file(REMOVE_RECURSE "${BINARY_DIR}")
 _vc_cmake_refuses(
@@ -117,23 +109,21 @@ _vc_cmake(
   "-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=${RECON_SOURCE}"
   "-DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=${JSON_SOURCE}"
   -DVC_BUILD_TESTS=OFF
-  -DVC_BUILD_EXAMPLES=OFF
-  ${_opencv})
+  -DVC_BUILD_EXAMPLES=OFF)
 _vc_cmake("Building calib" --build "${BINARY_DIR}/calib" --config Release)
 _vc_cmake("Installing calib" --install "${BINARY_DIR}/calib" --config Release)
 set(_calib_include "${_prefix}/include/volumetric_kit/calib")
 foreach(_header compute/board.hpp detect/charuco.hpp solve/initialise.hpp
                 quality/session_checks.hpp)
-  get_filename_component(_tier "${_header}" DIRECTORY)
-  if(WITH_OPENCV AND NOT EXISTS "${_calib_include}/${_header}")
-    message(FATAL_ERROR "calib with OpenCV installed no ${_header}")
-  elseif(NOT WITH_OPENCV AND EXISTS "${_calib_include}/${_tier}")
-    message(FATAL_ERROR "calib without OpenCV installed ${_tier}'s headers")
+  if(NOT EXISTS "${_calib_include}/${_header}")
+    message(FATAL_ERROR "calib installed no ${_header}")
   endif()
 endforeach()
-if(EXISTS "${_calib_include}/capture")
-  message(FATAL_ERROR "calib without the rig installed capture's headers")
-endif()
+foreach(_tier capture depth)
+  if(EXISTS "${_calib_include}/${_tier}")
+    message(FATAL_ERROR "calib without the rig installed ${_tier}'s headers")
+  endif()
+endforeach()
 
 _vc_cmake(
   "Configuring against the installed calib"
@@ -142,8 +132,7 @@ _vc_cmake(
   -B
   "${BINARY_DIR}/consumer"
   ${_common}
-  "-DCMAKE_PREFIX_PATH=${_prefix}"
-  ${_consumer_opencv})
+  "-DCMAKE_PREFIX_PATH=${_prefix}")
 _vc_cmake("Building against the installed calib" --build
           "${BINARY_DIR}/consumer" --config Release)
 
@@ -169,8 +158,7 @@ _vc_cmake(
   "${BINARY_DIR}/consumer_and_core"
   ${_common}
   "-DCMAKE_PREFIX_PATH=${_prefix}"
-  -DFIND_CORE=ON
-  ${_consumer_opencv})
+  -DFIND_CORE=ON)
 
 set(_calib_dir "${_prefix}/lib/cmake/volumetric_kit_calib")
 _vc_cmake(
@@ -180,8 +168,7 @@ _vc_cmake(
   -B
   "${BINARY_DIR}/consumer_by_dir"
   ${_common}
-  "-Dvolumetric_kit_calib_DIR=${_calib_dir}"
-  ${_consumer_opencv})
+  "-Dvolumetric_kit_calib_DIR=${_calib_dir}")
 
 # The other prefix: calib's, less calib, with the core relabelled.
 set(_other "${BINARY_DIR}/other_core")

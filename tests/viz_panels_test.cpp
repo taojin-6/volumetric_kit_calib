@@ -44,7 +44,9 @@ TEST(Tone, EachHasItsOwnColour) {
                         Tone::Bad};
   for (const Tone a : tones) {
     for (const Tone b : tones) {
-      if (a != b) EXPECT_NE(tone_color(a), tone_color(b));
+      if (a != b) {
+        EXPECT_NE(tone_color(a), tone_color(b));
+      }
     }
   }
   EXPECT_EQ(tone_color(static_cast<Tone>(99)), tone_color(Tone::Normal));

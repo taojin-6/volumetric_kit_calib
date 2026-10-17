@@ -336,7 +336,9 @@ TEST(Initialise, PartialAndCollinearViewsGiveNoNaN) {
     const ViewRecord& view = rig->views[i];
     for (const std::optional<double>& value :
          {view.pnp_rms_px, view.ambiguity, view.tilt_deg}) {
-      if (value) EXPECT_FALSE(std::isnan(*value)) << i;
+      if (value) {
+        EXPECT_FALSE(std::isnan(*value)) << i;
+      }
     }
     const auto known = expected.find(i);
     if (known != expected.end()) {
@@ -420,7 +422,9 @@ TEST(Initialise, KeepsAnAmbiguousViewButDoesNotInitialiseFromIt) {
   EXPECT_EQ(rig->views[i].ambiguity, first->views[i].ambiguity);
   EXPECT_EQ(rig->views[i].pnp_rms_px, first->views[i].pnp_rms_px);
   for (std::size_t j = 0; j < rig->views.size(); ++j) {
-    if (j != i) EXPECT_EQ(rig->views[j].fate, ViewFate::Used) << j;
+    if (j != i) {
+      EXPECT_EQ(rig->views[j].fate, ViewFate::Used) << j;
+    }
   }
 
   const core::Result<InitialRig> without_it = run(

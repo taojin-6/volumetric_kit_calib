@@ -5,7 +5,7 @@
 # The OpenCV bridge, calib's CPU maths backend: recon's camera model and rigid
 # transforms in OpenCV's types, the ChArUco board and whether a view of it fixes
 # a pose, the measures the solve and the checks share, and guarded(), which
-# returns what OpenCV throws as a Status. Built with VC_WITH_OPENCV.
+# returns what OpenCV throws as a Status.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 

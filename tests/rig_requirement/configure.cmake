@@ -5,7 +5,7 @@
 # and requires the configure to fail with output matching EXPECT_ERROR, blanks
 # and line breaks counting as one space. CALIB_SOURCE, CORE_SOURCE, RECON_SOURCE
 # and JSON_SOURCE are the sources the calling build used; GENERATOR,
-# CXX_COMPILER, MAKE_PROGRAM and GLM_DIR repeat its settings
+# CXX_COMPILER, MAKE_PROGRAM, GLM_DIR and OPENCV_DIR repeat its settings
 # (tests/CMakeLists.txt).
 foreach(
   _var
@@ -28,8 +28,8 @@ execute_process(
     "${CMAKE_COMMAND}" -S "${CMAKE_CURRENT_LIST_DIR}/application" -B
     "${BINARY_DIR}" -G "${GENERATOR}" "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}"
     "-DCMAKE_MAKE_PROGRAM=${MAKE_PROGRAM}" "-Dglm_DIR=${GLM_DIR}"
-    "-DCALIB_SOURCE=${CALIB_SOURCE}" "-DCORE_SOURCE=${CORE_SOURCE}"
-    "-DRECON_SOURCE=${RECON_SOURCE}"
+    "-DOpenCV_DIR=${OPENCV_DIR}" "-DCALIB_SOURCE=${CALIB_SOURCE}"
+    "-DCORE_SOURCE=${CORE_SOURCE}" "-DRECON_SOURCE=${RECON_SOURCE}"
     "-DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=${JSON_SOURCE}"
     "-DCORE_VULKAN=${CORE_VULKAN}"
   RESULT_VARIABLE _result

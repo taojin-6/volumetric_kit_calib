@@ -4,9 +4,9 @@
 # --- calib_viz: Tier 4 -------------------------------------------------------
 # The live view: every camera's decoded picture copied on the device into its
 # tile of one mosaic, the marks over each tile, the panels and the board editor,
-# on gfx's image pipeline, ImGui overlay and image view. Built with VC_WITH_RIG
-# and VC_WITH_OPENCV. Build-tree only, as gfx_ui is: neither is installed until
-# gfx co-installs the ImGui headers.
+# on gfx's image pipeline, ImGui overlay and image view. Built with VC_WITH_RIG.
+# Build-tree only, as gfx_ui is: neither is installed until gfx co-installs the
+# ImGui headers.
 include(GenerateExportHeader)
 
 set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")

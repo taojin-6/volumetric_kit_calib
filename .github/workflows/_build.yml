@@ -32,13 +32,6 @@ on:
           job each, e.g. '["Release"]'.
         required: true
         type: string
-      opencv:
-        description: >-
-          Build the OpenCV tiers (VC_WITH_OPENCV) on Homebrew's OpenCV 5
-          (DECISIONS.md, 2026-10-12). macOS only.
-        required: false
-        type: boolean
-        default: false
       shared:
         description: >-
           Build shared libraries (BUILD_SHARED_LIBS): a test that calls a
@@ -96,9 +89,16 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake build-essential libglm-dev
 
-      # On the self-hosted Mac a job installs nothing and fails naming any
-      # formula missing (DECISIONS.md, 2026-10-16); a hosted runner installs
-      # what its image lacks. pkgs names every formula the leg's build finds,
+      # Ubuntu's packages are OpenCV 4: OpenCV 5 is built from source, once
+      # per release, and cached (DECISIONS.md, 2026-10-17).
+      - name: OpenCV 5 (Linux)
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/opencv
+
+      # A hosted runner installs what its image lacks. On the family's
+      # self-hosted Mac, whose Homebrew recon and gfx share, a job installs
+      # nothing and fails naming any formula missing (the core's runner
+      # README). pkgs names every formula the leg's build finds,
       # for the Homebrew key below: on the rig leg that includes glfw, for
       # gfx's GLFW glue, and glslang and spirv-tools, whose tools the core's
       # shader rules find.
@@ -113,10 +113,7 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: '1'
           HOMEBREW_NO_INSTALL_CLEANUP: '1'
         run: |
-          pkgs="cmake glm"
-          if [ "${{ inputs.opencv }}" = "true" ]; then
-            pkgs="$pkgs opencv"
-          fi
+          pkgs="cmake glm opencv"
           if [ "${{ inputs.rig }}" = "true" ]; then
             pkgs="$pkgs molten-vk vulkan-headers vulkan-loader"
             pkgs="$pkgs vulkan-validationlayers shaderc glslang spirv-tools"
@@ -193,15 +190,14 @@ jobs:
         uses: actions/cache@v6
         with:
           path: build/_deps
-          key: deps-${{ inputs.os }}-${{ matrix.build_type }}-cv${{ inputs.opencv }}-so${{ inputs.shared }}-rig${{ inputs.rig }}-brew${{ steps.brew.outputs.key || 'none' }}-ws${{ steps.ws.outputs.hash }}-${{ hashFiles('third_party/CMakeLists.txt', 'CMakeLists.txt') }}
+          key: deps-${{ inputs.os }}-${{ matrix.build_type }}-so${{ inputs.shared }}-rig${{ inputs.rig }}-brew${{ steps.brew.outputs.key || 'none' }}-ws${{ steps.ws.outputs.hash }}-${{ hashFiles('third_party/CMakeLists.txt', 'CMakeLists.txt') }}
           restore-keys: |
-            deps-${{ inputs.os }}-${{ matrix.build_type }}-cv${{ inputs.opencv }}-so${{ inputs.shared }}-rig${{ inputs.rig }}-brew${{ steps.brew.outputs.key || 'none' }}-ws${{ steps.ws.outputs.hash }}-
+            deps-${{ inputs.os }}-${{ matrix.build_type }}-so${{ inputs.shared }}-rig${{ inputs.rig }}-brew${{ steps.brew.outputs.key || 'none' }}-ws${{ steps.ws.outputs.hash }}-
 
       - name: Configure
         # Retry to ride out transient FetchContent clone failures.
         run: |
           flags=(-DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-                 -DVC_WITH_OPENCV=${{ inputs.opencv && 'ON' || 'OFF' }}
                  -DBUILD_SHARED_LIBS=${{ inputs.shared && 'ON' || 'OFF' }}
                  -DVC_WITH_RIG=${{ inputs.rig && 'ON' || 'OFF' }})
           if [ "${{ inputs.rig }}" = "true" ]; then
@@ -221,9 +217,9 @@ jobs:
             exit 1
           }
 
-      # The levels come from the runner's .env on the Mac (the core's
-      # tools/runners/README.md) and from the container env ci.yml sets on the
-      # Ubuntu legs; a hosted runner sets none and uses its cores.
+      # A hosted runner sets no level and uses its cores. On a self-hosted
+      # runner the levels come from its .env (the core's
+      # tools/runners/README.md), or from a leg's container env.
       # They are passed explicitly: a bare `--parallel` runs make with no job
       # limit, ignoring CMAKE_BUILD_PARALLEL_LEVEL.
       - name: Build

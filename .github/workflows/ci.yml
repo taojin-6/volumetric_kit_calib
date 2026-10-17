@@ -23,52 +23,34 @@ jobs:
     name: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      # Every leg runs on calib's self-hosted runners: calib is private and the
-      # account's hosted minutes are used up, so a hosted job does not start
-      # (DECISIONS.md, 2026-10-16). Ubuntu on the Linux GPU hosts (label
-      # `vk-linux-gpu`), each leg in an OS-matched container, as recon's are,
-      # with no OpenCV (Ubuntu's is 4), no Vulkan and no GPU passed through:
-      # the brain needs none. macOS natively on calib's Mac (label `mac`), on
-      # Homebrew's OpenCV 5. The rig leg is static: shared libraries there
-      # would build core, recon and gfx shared too, which none of them is.
+      # Every leg runs on a GitHub-hosted runner, free for a public repository
+      # (DECISIONS.md, 2026-10-16): no calib job needs the family's own hosts,
+      # as none draws on an NVIDIA GPU, and the hosted macOS image's GPU runs
+      # MoltenVK. Every leg builds every OpenCV tier: Ubuntu on OpenCV 5 built
+      # from source and cached (.github/actions/opencv), with no Vulkan; macOS
+      # on Homebrew's OpenCV 5, and the rig leg on its Vulkan SDK, FFmpeg and
+      # GLFW, each run from a clean image. The rig leg is static: shared
+      # libraries there would build core, recon and gfx shared too, which none
+      # of them is.
       #
-      # The Ubuntu legs' build and test levels are set in the container env,
-      # as recon's are: a runner's .env reaches jobs run directly on it (the
-      # Mac) but not a job container. 4 is a 24-core host over calib's 6
-      # runners there.
-      #
-      # While both Linux hosts, or the Mac, are offline, their jobs queue and
-      # `required` waits. Once hosted minutes return, one line moves a job
-      # back to a GitHub-hosted runner, billed again: `runner: ''` on a leg
-      # here, or `runs-on: ubuntu-24.04` in lint.yml, in sanitizers.yml or on
-      # `required`. A Linux job keeps its container there.
+      # A leg moves to a self-hosted runner by passing _build.yml's `runner`
+      # (and, on Linux, `container`) inputs, as recon's GPU legs do.
       matrix:
         include:
           - os: ubuntu-24.04
-            runner: vk-linux-gpu
-            container: '{"image":"ubuntu:24.04","env":{"CMAKE_BUILD_PARALLEL_LEVEL":"4","CTEST_PARALLEL_LEVEL":"4"}}'
             build_types: '["Release"]'
           - os: ubuntu-26.04
-            runner: vk-linux-gpu
-            container: '{"image":"ubuntu:26.04","env":{"CMAKE_BUILD_PARALLEL_LEVEL":"4","CTEST_PARALLEL_LEVEL":"4"}}'
             build_types: '["Release"]'
           - os: macos-26
-            runner: mac
             build_types: '["Debug"]'
-            opencv: true
             shared: true
           - os: macos-26
-            runner: mac
             build_types: '["Release"]'
-            opencv: true
             rig: true
     uses: ./.github/workflows/_build.yml
     with:
       os: ${{ matrix.os }}
-      runner: ${{ matrix.runner || '' }}
-      container: ${{ matrix.container || '' }}
       build_types: ${{ matrix.build_types }}
-      opencv: ${{ matrix.opencv || false }}
       shared: ${{ matrix.shared || false }}
       rig: ${{ matrix.rig || false }}
 
@@ -83,16 +65,9 @@ jobs:
     # every build leg, lint and sanitizers succeeded, and FAILS (never skips)
     # on any other outcome: a skipped required check never reports and would
     # block every merge.
-    #
-    # It runs on whichever of calib's self-hosted runners, Linux or Mac, is
-    # free (the matrix says why, and how to move it back to a hosted runner).
-    # As it needs every other job, it cannot report while both Linux hosts (the
-    # Ubuntu legs, lint and sanitizers) or the Mac are offline: their jobs
-    # queue until GitHub fails a job queued for 24 hours, and the gate then
-    # reports that failure.
     needs: [build, lint, sanitizers]
     if: always()
-    runs-on: self-hosted
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Assert every required job succeeded

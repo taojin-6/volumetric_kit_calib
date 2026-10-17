@@ -913,8 +913,12 @@ TEST(BundleAdjust, MinimisesTheHuberCostAtHuberPx) {
       beyond += s > delta ? 1 : 0;
     }
     EXPECT_NEAR(solution.final_energy, energy, 1e-9 * energy) << delta;
-    if (delta == 0.25) EXPECT_GT(beyond, solution.residuals.size() / 4);
-    if (delta == 1e6) EXPECT_EQ(beyond, 0u);
+    if (delta == 0.25) {
+      EXPECT_GT(beyond, solution.residuals.size() / 4);
+    }
+    if (delta == 1e6) {
+      EXPECT_EQ(beyond, 0u);
+    }
 
     EXPECT_LT(newton_step(scene, solution, delta), 1e-6) << delta;
   }
