@@ -5,11 +5,12 @@
 // made here: rigs of 1, 3, 4 and 5 cameras of mixed sizes posed about a plane
 // with a box on it, every ordered pair within a bin of 0 and as the reference
 // has it; a camera posed 3 mm off; the window and the edge gate over a box
-// with flying pixels round it, counted exactly; histograms accumulated in
-// either order and as one capture, to the bit; the percentiles of known
-// histograms, and of counts past float's 24 bits; empty slots; the stride; a
-// capture that could overflow a count; and refusals. Skips where no device
-// is present.
+// with flying pixels round it, counted exactly; the edge gate's scale with
+// depth; each camera's own range; histograms accumulated in either order and
+// as one capture, to the bit; the percentiles of known histograms, and of
+// counts past float's 24 bits; empty slots; the stride; a pair with nothing
+// in its window; a capture that could overflow a count; and refusals. Skips
+// where no device is present.
 //
 // Most tests pose every camera alike (same_pose): each sample then meets its
 // own pixel, and its difference is the two images' difference there, exact in
@@ -366,13 +367,18 @@ void expect_same(const PairAgreement& a, const PairAgreement& b) {
   EXPECT_EQ(a.p90_abs_mm, b.p90_abs_mm);
 }
 
-// A pair with no samples.
-void expect_unmeasured(const PairAgreement& pair) {
-  EXPECT_EQ(pair.overlap, 0u);
+// A pair with nothing in its window, so no statistics.
+void expect_no_statistics(const PairAgreement& pair) {
   EXPECT_EQ(pair.in_window, 0u);
   EXPECT_TRUE(std::isnan(pair.signed_median_mm));
   EXPECT_TRUE(std::isnan(pair.median_abs_mm));
   EXPECT_TRUE(std::isnan(pair.p90_abs_mm));
+}
+
+// A pair with no samples.
+void expect_unmeasured(const PairAgreement& pair) {
+  EXPECT_EQ(pair.overlap, 0u);
+  expect_no_statistics(pair);
 }
 
 // Smooth depth about 2 m, within 2 cm of it, so no step reaches the edge
@@ -549,6 +555,94 @@ TEST_F(AgreementTest, TheWindowExcludesABoxAndTheEdgeGateItsFlyingPixels) {
   wide_window.window_mm = 200.0;
   expect_counts(wide_window, kInterior - 84 - 76 - 88,
                 kInterior - 84 - 76 - 88);
+}
+
+// The edge gate is a fraction of the pixel's depth: at the default 3 %, a
+// 10 cm step 5 m out is no edge, and every pixel counts; a 4 cm step 1 m out
+// is one, and the two columns beside it are dropped in both directions.
+TEST_F(AgreementTest, TheEdgeGateScalesWithDepth) {
+  struct Case {
+    float near;
+    float far;
+    std::size_t overlap;
+  };
+  const DepthCheckOptions options;
+  for (const Case& c : {Case{5.0f, 5.1f, kInterior},
+                        Case{1.0f, 1.04f, kInterior - 2 * (kHeight - 1)}}) {
+    SCOPED_TRACE(c.near);
+    std::vector<float> step(std::size_t{kWidth} * kHeight, c.near);
+    for (std::uint32_t v = 0; v < kHeight; ++v) {
+      for (std::uint32_t u = kWidth / 2; u < kWidth; ++u) {
+        step[std::size_t{v} * kWidth + u] = c.far;
+      }
+    }
+    const std::vector<Camera> cameras = {same_pose(step), same_pose(step)};
+    for (const PairAgreement& got : agree(cameras, options)) {
+      SCOPED_TRACE("from " + std::to_string(got.from));
+      EXPECT_EQ(got.overlap, c.overlap);
+      EXPECT_EQ(got.in_window, c.overlap);
+      EXPECT_EQ(
+          reference_pair(cameras[got.from], cameras[got.to], options).overlap,
+          c.overlap);
+    }
+  }
+}
+
+// Each camera's own range decides which of its depths were measured, where a
+// sample starts, where it lands, and among the neighbours an edge is judged
+// by. Camera 0 measures [0.25, 2.01] m and camera 1 [1.99, 6] m, posed alike
+// over a plane at 2 m. Each holds depths no camera measures -- not a number,
+// infinite, negative, below 0.25 m, above 6 m -- and depths only the other
+// measures (2.02 m in camera 0, 1.98 m in camera 1, twice, so a pixel judged
+// by the wrong camera's range cannot cancel one counted by the right one's),
+// which drop their pixel in both directions; depths 2 cm off inside its own
+// range (1.98 m in camera 0, 2.02 m in camera 1), which count; and a step
+// only the other camera measures (2.6 m in camera 0, 1 m in camera 1), which
+// gates no neighbour. (Posed alike, each pixel is a sample one way and the
+// pixel met the other, so the two directions count alike.)
+TEST_F(AgreementTest, EachCamerasRangeIsItsOwn) {
+  constexpr float kInf = std::numeric_limits<float>::infinity();
+  std::vector<float> depth[2];
+  depth[0].assign(std::size_t{kWidth} * kHeight, 2.0f);
+  depth[1] = depth[0];
+  // Each at a pixel of its own on a grid 4 apart, so none shares a neighbour.
+  std::size_t next = 0;
+  const auto put = [&](std::size_t c, float z) {
+    const std::size_t u = 4 + 4 * (next % 14);
+    const std::size_t v = 4 + 4 * (next / 14);
+    ++next;
+    depth[c][v * kWidth + u] = z;
+  };
+  for (const float z : {std::numeric_limits<float>::quiet_NaN(), kInf, -kInf,
+                        -2.0f, 0.2f, 7.0f}) {
+    put(0, z);
+    put(1, z);
+  }
+  put(0, 2.02f);
+  put(0, 2.02f);
+  put(1, 1.98f);
+  put(1, 1.98f);
+  put(0, 1.98f);
+  put(1, 2.02f);
+  put(0, 2.6f);
+  put(1, 1.0f);
+  std::vector<Camera> cameras = {same_pose(depth[0]), same_pose(depth[1])};
+  cameras[0].max_depth = 2.01;
+  cameras[1].min_depth = 1.99;
+  // Each camera's 6 unmeasured, its 2 only the other measures, and its step.
+  constexpr std::size_t kOverlap = kInterior - 2 * 9;
+  const DepthCheckOptions options;
+  const std::vector<PairAgreement> pairs = agree(cameras, options);
+  ASSERT_EQ(pairs.size(), 2u);
+  for (const PairAgreement& got : pairs) {
+    SCOPED_TRACE("from " + std::to_string(got.from));
+    EXPECT_EQ(got.overlap, kOverlap);
+    const Reference want =
+        reference_pair(cameras[got.from], cameras[got.to], options);
+    EXPECT_EQ(want.overlap, kOverlap);
+    EXPECT_EQ(want.in_window, kOverlap);
+    expect_stats(got, want.bins, options);
+  }
 }
 
 // Integer counts add alike in any order: two captures of three cameras,
@@ -847,11 +941,27 @@ TEST_F(AgreementTest, TakesEveryStrideThPixel) {
   }
 }
 
+// A pair whose every sample lies past the window has an overlap, but no
+// statistics: camera 1's depth lies 15 cm behind camera 0's everywhere.
+TEST_F(AgreementTest, APairWithNothingInItsWindowHasNoStatistics) {
+  const std::vector<Camera> cameras = {
+      same_pose(std::vector<float>(std::size_t{kWidth} * kHeight, 2.0f)),
+      same_pose(std::vector<float>(std::size_t{kWidth} * kHeight, 2.15f))};
+  const std::vector<PairAgreement> pairs = agree(cameras);
+  ASSERT_EQ(pairs.size(), 2u);
+  for (const PairAgreement& got : pairs) {
+    SCOPED_TRACE("from " + std::to_string(got.from));
+    EXPECT_EQ(got.overlap, kInterior);
+    expect_no_statistics(got);
+  }
+}
+
 // A capture that could carry a pair's counts past 2^32 - 1 is refused, and
 // leaves the histograms and their bound as they were: two 8192 x 8192
 // cameras with no depth add 2^26 samples a pair a capture, so the 64th
-// capture is refused, and a capture of 2^20 more is not. Skips where one
-// binding cannot hold such a depth.
+// capture is refused; one of 8191 x 8193, 2^26 - 1 samples, brings each pair
+// to 2^32 - 1 exactly and is taken; and one sample more is refused. Skips
+// where one binding cannot hold such a depth.
 TEST_F(AgreementTest, RefusesACaptureThatCouldPassACountsLimit) {
   constexpr std::uint32_t kSide = 8192;
   const VkDeviceSize bytes = VkDeviceSize{kSide} * kSide * sizeof(float);
@@ -875,13 +985,19 @@ TEST_F(AgreementTest, RefusesACaptureThatCouldPassACountsLimit) {
   for (int capture = 0; capture < 63; ++capture) {
     check(checks_->accumulate(*histograms, {image, image}));
   }
+  const std::string past =
+      "the pair from camera 0 to camera 1 could pass 2^32 - 1";
   expect_refused(checks_->accumulate(*histograms, {image, image}), "accumulate",
-                 "the pair from camera 0 to camera 1 could pass 2^32 - 1");
-  const core::Buffer small = upload(std::vector<float>(1024 * 1024, 0.0f));
-  Camera less = same_pose({});
-  less.pinhole.size = {1024, 1024};
+                 past);
+  Camera rest = same_pose({});
+  rest.pinhole.size = {kSide - 1, kSide + 1};
   check(checks_->accumulate(*histograms,
-                            {image_of(less, small), image_of(less, small)}));
+                            {image_of(rest, empty), image_of(rest, empty)}));
+  Camera one = same_pose({});
+  one.pinhole.size = {1, 1};
+  expect_refused(checks_->accumulate(
+                     *histograms, {image_of(one, empty), image_of(one, empty)}),
+                 "accumulate", past);
   for (const PairAgreement& pair : value_of(checks_->summarize(*histograms))) {
     expect_unmeasured(pair);
   }
