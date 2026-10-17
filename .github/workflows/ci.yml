@@ -37,11 +37,11 @@ jobs:
       # Mac) but not a job container. 4 is a 24-core host over calib's 6
       # runners there.
       #
-      # While a host is offline its jobs queue and `required` waits. Once
-      # hosted minutes return, one line moves a job back to a GitHub-hosted
-      # runner, billed again: `runner: ''` on a leg here, or `runs-on:
-      # ubuntu-24.04` in lint.yml, in sanitizers.yml or on `required`. A Linux
-      # job keeps its container there.
+      # While both Linux hosts, or the Mac, are offline, their jobs queue and
+      # `required` waits. Once hosted minutes return, one line moves a job
+      # back to a GitHub-hosted runner, billed again: `runner: ''` on a leg
+      # here, or `runs-on: ubuntu-24.04` in lint.yml, in sanitizers.yml or on
+      # `required`. A Linux job keeps its container there.
       matrix:
         include:
           - os: ubuntu-24.04
@@ -86,7 +86,7 @@ jobs:
     #
     # It runs on whichever of calib's self-hosted runners, Linux or Mac, is
     # free (the matrix says why, and how to move it back to a hosted runner).
-    # As it needs every other job, it cannot report while the Linux hosts (the
+    # As it needs every other job, it cannot report while both Linux hosts (the
     # Ubuntu legs, lint and sanitizers) or the Mac are offline: their jobs
     # queue until GitHub fails a job queued for 24 hours, and the gate then
     # reports that failure.
