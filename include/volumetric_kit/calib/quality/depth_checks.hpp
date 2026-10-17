@@ -46,14 +46,18 @@ inline constexpr std::size_t kMinOverlap = 1000;
 /// (@ref DepthCheckOptions::min_inliers).
 inline constexpr std::size_t kMinPlaneInliers = 100;
 
-// TODO: The verdict bounds and the fit's gates are first values, to be set
-// from a real session (H5). CA8c adds its kernels' settings here, to
-// check_depth_options and to report.json's depth.settings (results.cpp's
-// depth_section).
+/// The most bins a pair's histogram of depth differences has
+/// (@ref DepthCheckOptions::window_mm); DECISIONS.md, "Depth checks are
+/// calib's kernels", says why.
+inline constexpr std::size_t kMaxAgreementBins = 4096;
+
+// TODO: The verdict bounds, the fit's gates and the agreement's window and
+// edge gate are first values, to be set from a real session (H5).
 /// @brief The depth checks' settings, one object for every step: the region
-///        each plane fit takes, the fit's gates, the verdicts' bounds, and
-///        what the report records. Give the same to @ref board_region, to
-///        the depth tier's kernels and to @ref summarize_depth_checks.
+///        each plane fit takes, the fit's gates, how the pairs' depth is
+///        compared, the verdicts' bounds, and what the report records. Give
+///        the same to @ref board_region, to the depth tier's kernels and to
+///        @ref summarize_depth_checks.
 ///
 /// @code
 /// DepthCheckOptions options;
@@ -74,6 +78,19 @@ struct DepthCheckOptions {
   /// The fewest inliers a plane is fitted from (@ref DepthPlane::valid); at
   /// least 3.
   std::size_t min_inliers = kMinPlaneInliers;
+  /// A pair's differences in [-window_mm, window_mm) are binned
+  /// (@ref PairAgreement::in_window), at @ref bin_mm: an even number of
+  /// bins, `2 window_mm / bin_mm`, at most @ref kMaxAgreementBins
+  /// (millimetres).
+  double window_mm = 100.0;
+  double bin_mm = 0.1;  ///< See @ref window_mm.
+  /// A pair's sample is dropped when its pixel in either camera has a
+  /// 4-neighbour with depth in range differing from its own by more than
+  /// this fraction of it: a flying pixel at a depth step.
+  double edge_ratio = 0.03;
+  /// A pair takes every this-th pixel of each row and column of the moved
+  /// camera's depth, from the first; at least 1.
+  std::uint32_t agreement_stride = 1;
   /// The fewest samples a pair is judged on (@ref PairCheck::verdict); at
   /// least 1.
   std::size_t min_overlap = kMinOverlap;
@@ -92,8 +109,10 @@ struct DepthCheckOptions {
 };
 
 /// @brief Whether @p options are in range: the inset finite and not
-///        negative, `min_overlap` at least 1, `min_inliers` at least 3, and
-///        every other setting positive and finite.
+///        negative, `min_overlap` and `agreement_stride` at least 1,
+///        `min_inliers` at least 3, every other setting positive and finite,
+///        and the window a whole number of bins, at most
+///        @ref kMaxAgreementBins in all.
 ///
 /// What every step that takes the options refuses, as its own refusal.
 /// @param options  The settings.

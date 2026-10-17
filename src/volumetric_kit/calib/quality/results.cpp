@@ -279,6 +279,10 @@ void depth_section(Writer& w, const DepthSummary& d,
   w.key("min_gate_mm").value(o.min_gate_mm);
   w.key("sigma_gate").value(o.sigma_gate);
   w.key("min_inliers").value(o.min_inliers);
+  w.key("window_mm").value(o.window_mm);
+  w.key("bin_mm").value(o.bin_mm);
+  w.key("edge_ratio").value(o.edge_ratio);
+  w.key("agreement_stride").value(std::size_t{o.agreement_stride});
   w.key("min_overlap").value(o.min_overlap);
   w.key("max_scale_error").value(o.max_scale_error);
   w.key("max_offset_mm").value(o.max_offset_mm);

@@ -16,7 +16,6 @@
 #include <initializer_list>
 #include <limits>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,6 +23,8 @@
 #include <gtest/gtest.h>
 #include <glm/glm.hpp>
 
+#include "depth_scene.hpp"
+#include "result_checks.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 
@@ -35,29 +36,12 @@ using camera::Mat3d;
 using camera::Mat4d;
 using camera::Vec2d;
 using camera::Vec3d;
+using test::expect_refused;
+using test::rotation;
+using test::value_of;
 using Code = core::Status::Code;
 
-constexpr double kPi = 3.14159265358979323846;
 const double kNaN = std::numeric_limits<double>::quiet_NaN();
-
-template <class T>
-T value_of(core::Result<T> result) {
-  if (!result.ok()) throw std::runtime_error(result.status().message());
-  return *std::move(result);
-}
-
-// `status` is an InvalidArgument starting `prefix` and saying `says`.
-void expect_refused(const core::Status& status, const std::string& prefix,
-                    const std::string& says) {
-  EXPECT_EQ(status.domain(), Code::InvalidArgument) << says;
-  EXPECT_EQ(status.message().rfind(prefix + ": ", 0), 0u) << status.message();
-  EXPECT_NE(status.message().find(says), std::string::npos) << status.message();
-}
-
-Mat3d rotation(const Vec3d& axis, double deg) {
-  return camera::rotation_from_rodrigues(glm::normalize(axis) * deg * kPi /
-                                         180.0);
-}
 
 Vec3d apply(const Mat4d& m, const Vec3d& p) {
   return Vec3d(m * glm::dvec4(p, 1.0));
@@ -873,6 +857,32 @@ TEST(SummarizeDepthChecks, RefusesWhatDoesNotFit) {
     option([&](DepthCheckOptions& o) { o.seed_mm = bad; }, "seed_mm");
     option([&](DepthCheckOptions& o) { o.min_gate_mm = bad; }, "min_gate_mm");
     option([&](DepthCheckOptions& o) { o.sigma_gate = bad; }, "sigma_gate");
+    option([&](DepthCheckOptions& o) { o.window_mm = bad; }, "window_mm");
+    option([&](DepthCheckOptions& o) { o.bin_mm = bad; }, "bin_mm");
+    option([&](DepthCheckOptions& o) { o.edge_ratio = bad; }, "edge_ratio");
+  }
+  option([](DepthCheckOptions& o) { o.agreement_stride = 0; },
+         "agreement_stride");
+  // The window must be a whole number of bins, an even number in all, at
+  // most kMaxAgreementBins of them: 4098 bins, 3 (an odd count), 2.4, and
+  // less than one either side are refused; 4096 and 2 are not.
+  for (const auto& [window, bin] :
+       {std::pair{204.9, 0.1}, std::pair{0.15, 0.1}, std::pair{0.12, 0.1},
+        std::pair{0.05, 0.1}, std::pair{1e-300, 1.0},
+        std::pair{1e300, 1e-300}}) {
+    option(
+        [&, window = window, bin = bin](DepthCheckOptions& o) {
+          o.window_mm = window;
+          o.bin_mm = bin;
+        },
+        "window_mm must be a whole number of options.bin_mm");
+  }
+  for (const auto& [window, bin] :
+       {std::pair{204.8, 0.1}, std::pair{0.1, 0.1}, std::pair{25.0, 0.5}}) {
+    DepthCheckOptions o;
+    o.window_mm = window;
+    o.bin_mm = bin;
+    EXPECT_TRUE(check_depth_options(o).ok()) << window << " / " << bin;
   }
   option([](DepthCheckOptions& o) { o.min_inliers = 2; }, "min_inliers");
   DepthCheckOptions three_inliers;
@@ -900,6 +910,12 @@ TEST(DepthCheckInputs, AreCheckedOnTheirOwn) {
   EXPECT_EQ(defaults.min_gate_mm, 5.0);
   EXPECT_EQ(defaults.sigma_gate, 3.0);
   EXPECT_EQ(defaults.min_inliers, kMinPlaneInliers);
+  // 2000 bins of 0.1 mm over +-100 mm.
+  EXPECT_EQ(defaults.window_mm, 100.0);
+  EXPECT_EQ(defaults.bin_mm, 0.1);
+  EXPECT_EQ(defaults.edge_ratio, 0.03);
+  EXPECT_EQ(defaults.agreement_stride, 1u);
+  EXPECT_EQ(kMaxAgreementBins, 4096u);
   DepthCheckOptions seed;
   seed.seed_mm = 0.0;
   const core::Status refused = check_depth_options(seed);

@@ -18,8 +18,8 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > board detection, the `solve` tier's rig solve and the `quality` tier's live
 > checks and solved-rig metrics; with `VC_WITH_RIG`, the `capture` tier's
 > session writer; and, with both, the `viz` tier's live view and the `depth`
-> tier's board-plane fit. The depth agreement's kernels and the color and app
-> tiers are not yet implemented; the legacy `camera_calibration` Python
+> tier's board-plane fit and pairwise depth agreement. The color and app tiers
+> are not yet implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain the
 > reference oracle.
 
@@ -88,10 +88,12 @@ renderer.
   scale and plane from each view's depth, each ordered pair's depth
   agreement, and their verdicts
   ([DECISIONS.md](DECISIONS.md#2026-10-16--depth-checks-the-hosts-geometry-over-the-devices-results)).
-- **Depth:** the depth checks' device side, on the core's vulkan tier: each
-  view's board plane fitted on the GPU to its camera's depth where recon's
-  frame preparation left it, in two gated rounds in one submit, for any number
-  of cameras, with 48 bytes per view read back
+- **Depth:** the depth checks' device side, on the core's vulkan tier, over
+  each camera's depth where recon's frame preparation left it, for any number
+  of cameras: each view's board plane fitted on the GPU in two gated rounds in
+  one submit, with 48 bytes per view read back; and each ordered pair's depth
+  differences binned on the GPU over every capture, with 32 bytes per pair
+  read back
   ([DECISIONS.md](DECISIONS.md#2026-10-16--depth-checks-are-calibs-kernels)).
 - **Viz:** the live view, on `volumetric_kit_gfx`. Each camera's decoded
   picture is copied on the device into its tile of one mosaic, for any number

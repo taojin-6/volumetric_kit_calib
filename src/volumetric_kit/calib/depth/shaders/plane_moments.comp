@@ -17,6 +17,7 @@
 // frame, where the points lie within the region's size of it.
 
 #extension GL_GOOGLE_include_directive : require
+#include "volumetric_kit/calib/depth/shaders/depth_range.glsl"
 #include "volumetric_kit/calib/depth/shaders/plane_common.glsl"
 
 layout(local_size_x = VC_PLANE_LOCAL_SIZE) in;
@@ -66,7 +67,7 @@ void main() {
     }
     counts[0] += 1u;
     float z = depth[i];
-    if (!(z > 0.0 && z >= r.range.x && z <= r.range.y)) {
+    if (!vc_in_range(z, r.range)) {
       counts[1] += 1u;  // none, not a number, or out of range
       continue;
     }

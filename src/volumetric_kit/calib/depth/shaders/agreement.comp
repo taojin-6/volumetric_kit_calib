@@ -1,0 +1,149 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Tao Jin
+
+#version 450
+
+// One ordered pair's depth agreement over one capture: each sample of the
+// moved camera's depth (`from`) moved into the other's depth camera (`to`),
+// compared with the depth `to` measured at the pixel nearest where it
+// projects, and its difference counted into the pair's histogram.
+//
+// A sample is a pixel at every stride-th column and row of `from`, with depth
+// in its range. It counts in the overlap when it projects into `to`'s image,
+// the pixel it meets has depth in range, and neither pixel is at an edge: a
+// 4-neighbour in its image with depth in range differs from its own depth by
+// more than edge_ratio of it, as flying pixels at a depth step do. Its
+// difference, its depth in `to`'s frame minus `to`'s, falls in bin
+// floor(difference / bin) + half_bins, and is counted when that bin is one of
+// the 2 half_bins: the window, [-half_bins bin, half_bins bin).
+//
+// Each workgroup counts into a histogram in shared memory, then adds each
+// bin it filled to the pair's in the Bins buffer with an integer atomicAdd,
+// and each thread its overlap likewise: integers, so the sums come out the
+// same in any order, over workgroups, dispatches and captures alike.
+
+#extension GL_GOOGLE_include_directive : require
+#include "volumetric_kit/calib/depth/shaders/depth_range.glsl"
+#include "volumetric_kit/recon/core/shaders/pinhole.glsl"
+
+#define VC_AGREEMENT_LOCAL_SIZE 256
+// The most bins a histogram has (quality::kMaxAgreementBins): the shared
+// memory this kernel takes.
+#define VC_AGREEMENT_MAX_BINS 4096
+
+layout(local_size_x = VC_AGREEMENT_LOCAL_SIZE) in;
+
+// One ordered pair's cameras, as the host writes them; mirrored by
+// agreement_blocks.hpp.
+struct Pair {
+  mat4 to_from;     // from's depth frame to to's, composed in double
+  vec4 k_from;      // from's pinhole: fx, fy, cx, cy (pixels)
+  vec4 k_to;        // to's
+  uvec2 size_from;  // from's depth image's width and height
+  uvec2 size_to;    // to's
+  vec2 range_from;  // from's depth range: min and max (metres)
+  vec2 range_to;    // to's
+  uint histogram;   // the pair's histogram: its bins, and its overlap slot
+  uint columns;     // samples in a row of from: ceil(width / stride)
+  uint samples;     // columns times the rows sampled
+  uint groups;      // this dispatch's workgroups
+};
+
+// Row-major depth in metres, 0 for none.
+layout(set = 0, binding = 0, std430) readonly buffer From {
+  float from_depth[];
+};
+layout(set = 0, binding = 1, std430) readonly buffer To { float to_depth[]; };
+layout(set = 0, binding = 2, std430) readonly buffer Pairs { Pair pairs[]; };
+// Each histogram's 2 half_bins counts in turn, from the lowest difference.
+layout(set = 0, binding = 3, std430) buffer Bins { uint bins[]; };
+layout(set = 0, binding = 4, std430) buffer Overlaps { uint overlaps[]; };
+
+layout(push_constant, std430) uniform Params {
+  uint pair;         // this dispatch's pair, in Pairs
+  uint half_bins;    // the window's bins either side of 0
+  uint stride;       // the columns and rows from samples, 1 for all
+  float bin;         // the bin width (metres)
+  float edge_ratio;  // the edge gate, a fraction of the pixel's depth
+} pc;
+
+shared uint vc_bins[VC_AGREEMENT_MAX_BINS];
+
+// The depth at index `i` of to's image, or from's.
+float depth_at(bool to, uint i) {
+  if (to) {
+    return to_depth[i];
+  }
+  return from_depth[i];
+}
+
+// Whether a neighbour's depth `n` was measured and differs from `z` by more
+// than `limit`.
+bool steps(float n, float z, vec2 range, float limit) {
+  return vc_in_range(n, range) && abs(n - z) > limit;
+}
+
+// Whether pixel `p` of to's image, or from's, of size `size` and range
+// `range`, whose depth `z` was measured, is at an edge. The tests
+// short-circuit, so no neighbour outside the image is read.
+bool at_edge(bool to, uvec2 p, uvec2 size, float z, vec2 range) {
+  float limit = pc.edge_ratio * z;
+  uint i = p.y * size.x + p.x;
+  return (p.x > 0u && steps(depth_at(to, i - 1u), z, range, limit)) ||
+         (p.x + 1u < size.x && steps(depth_at(to, i + 1u), z, range, limit)) ||
+         (p.y > 0u && steps(depth_at(to, i - size.x), z, range, limit)) ||
+         (p.y + 1u < size.y && steps(depth_at(to, i + size.x), z, range, limit));
+}
+
+void main() {
+  Pair p = pairs[pc.pair];
+  uint lid = gl_LocalInvocationID.x;
+  uint count = 2u * pc.half_bins;
+  for (uint b = lid; b < count; b += VC_AGREEMENT_LOCAL_SIZE) {
+    vc_bins[b] = 0u;
+  }
+  barrier();
+
+  float half_bins = float(pc.half_bins);
+  uint overlap = 0u;
+  for (uint i = gl_WorkGroupID.x * VC_AGREEMENT_LOCAL_SIZE + lid;
+       i < p.samples; i += p.groups * VC_AGREEMENT_LOCAL_SIZE) {
+    uvec2 s = uvec2(i % p.columns, i / p.columns) * pc.stride;
+    float z = from_depth[s.y * p.size_from.x + s.x];
+    if (!vc_in_range(z, p.range_from) ||
+        at_edge(false, s, p.size_from, z, p.range_from)) {
+      continue;
+    }
+    vec3 q = (p.to_from *
+              vec4(vr_unproject_pinhole(vec2(s), z, p.k_from), 1.0)).xyz;
+    vec2 px;
+    if (!vr_project_pinhole(q, p.k_to, p.size_to, px)) {
+      continue;
+    }
+    uvec2 t = vr_nearest_pixel(px, p.size_to);
+    float measured = to_depth[t.y * p.size_to.x + t.x];
+    if (!vc_in_range(measured, p.range_to) ||
+        at_edge(true, t, p.size_to, measured, p.range_to)) {
+      continue;
+    }
+    overlap += 1u;
+    float at = floor((q.z - measured) / pc.bin);
+    // Written so a NaN fails it.
+    if (!(at >= -half_bins && at < half_bins)) {
+      continue;
+    }
+    atomicAdd(vc_bins[uint(at + half_bins)], 1u);
+  }
+  barrier();
+
+  uint first = p.histogram * count;
+  for (uint b = lid; b < count; b += VC_AGREEMENT_LOCAL_SIZE) {
+    uint counted = vc_bins[b];
+    if (counted != 0u) {
+      atomicAdd(bins[first + b], counted);
+    }
+  }
+  if (overlap != 0u) {
+    atomicAdd(overlaps[p.histogram], overlap);
+  }
+}

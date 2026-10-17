@@ -15,7 +15,6 @@
 #include <limits>
 #include <optional>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,6 +22,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include "result_checks.hpp"
 #include "synthetic_scene.hpp"
 #include "volumetric_kit/recon/camera/array_calibration.hpp"
 
@@ -30,14 +30,9 @@ namespace volumetric_kit::calib::quality {
 namespace {
 
 namespace camera = recon::camera;
+using test::value_of;
 using Code = core::Status::Code;
 using json = nlohmann::json;
-
-template <class T>
-T value_of(core::Result<T> result) {
-  if (!result.ok()) throw std::runtime_error(result.status().message());
-  return *std::move(result);
-}
 
 // One solved scene, with outliers so that something is left out by the
 // adjustment and by initialise, measured with options not the defaults.
@@ -468,6 +463,10 @@ DepthSummary depth_checks() {
   options.min_gate_mm = 4.5;
   options.sigma_gate = 2.5;
   options.min_inliers = 250;
+  options.window_mm = 50.0;
+  options.bin_mm = 0.25;
+  options.edge_ratio = 0.04;
+  options.agreement_stride = 2;
   options.min_overlap = 900;
   options.max_scale_error = 0.003;
   options.max_offset_mm = 8.5;
@@ -553,7 +552,9 @@ TEST(Results, TheReportHasItsDepthSection) {
   EXPECT_EQ(depth["settings"],
             json::parse(R"({"inset_m": 0.025, "seed_mm": 25.0,
                             "min_gate_mm": 4.5, "sigma_gate": 2.5,
-                            "min_inliers": 250, "min_overlap": 900,
+                            "min_inliers": 250, "window_mm": 50.0,
+                            "bin_mm": 0.25, "edge_ratio": 0.04,
+                            "agreement_stride": 2, "min_overlap": 900,
                             "max_scale_error": 0.003, "max_offset_mm": 8.5,
                             "max_angle_deg": 1.25,
                             "max_signed_median_mm": 4.5,

@@ -34,6 +34,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `DepthCheckOptions` gains the fit's `seed_mm`, `min_gate_mm`, `sigma_gate`
   and `min_inliers`, which `report.json` records; `check_depth_options` and
   `check_board_region` are the checks each depth step runs.
+- The depth agreement on the GPU (DECISIONS.md, 2026-10-16, "Depth checks are
+  calib's kernels"): `DepthChecks::histograms` makes `AgreementHistograms` of
+  every ordered pair of any number of cameras; `accumulate` bins one
+  capture's depth differences into them, edge-gated, skipping empty slots;
+  `summarize` gives each pair's `PairAgreement`. `DepthCheckOptions` gains
+  `window_mm`, `bin_mm`, `edge_ratio` and `agreement_stride`, which
+  `check_depth_options` checks and `report.json` records.
 - The depth checks' host geometry and verdicts (DECISIONS.md, 2026-10-16,
   "Depth checks"): `quality::board_region`, the depth pixels a view's plane
   fit takes, and `in_board_region`, its rule; `board_depth_check`, a view's

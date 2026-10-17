@@ -25,10 +25,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <limits>
-#include <memory>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,10 +35,11 @@
 #include <opencv2/core.hpp>
 
 #include "board_member_cases_comp.spv.hpp"
+#include "depth_fixture.hpp"
+#include "depth_scene.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
-#include "volumetric_kit/core/testing/vulkan_fixture.hpp"
 #include "volumetric_kit/core/vulkan/allocator.hpp"
 #include "volumetric_kit/core/vulkan/command_batch.hpp"
 #include "volumetric_kit/core/vulkan/compute_kernel.hpp"
@@ -59,39 +57,28 @@ using camera::Vec3d;
 using quality::BoardRegion;
 using quality::DepthCheckOptions;
 using quality::DepthPlane;
-using Code = core::Status::Code;
+using test::binned;
+using test::check;
+using test::expect_refused;
+using test::hit_box;
+using test::hit_plane;
+using test::kMaxDepth;
+using test::kMinDepth;
+using test::measured;
+using test::nfov;
+using test::Pinhole;
+using test::Plane;
+using test::ray_of;
+using test::render;
+using test::rotation;
+using test::Surface;
+using test::value_of;
+using test::wide;
 
-constexpr double kPi = 3.14159265358979323846;
 constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
 // How near the inset outline, or a gate, float and double may decide apart
 // (metres): ten times the float arithmetic's error a few metres out.
 constexpr double kBand = 1e-5;
-// The prepared depth's range in these tests (metres).
-constexpr double kMinDepth = 0.25;
-constexpr double kMaxDepth = 6.0;
-
-template <class T>
-T value_of(core::Result<T> result) {
-  if (!result.ok()) throw std::runtime_error(result.status().message());
-  return *std::move(result);
-}
-
-void check(const core::Status& status) {
-  if (!status.ok()) throw std::runtime_error(status.message());
-}
-
-// `status` is an InvalidArgument starting `prefix` and saying `says`.
-void expect_refused(const core::Status& status, const std::string& prefix,
-                    const std::string& says) {
-  EXPECT_EQ(status.domain(), Code::InvalidArgument) << says;
-  EXPECT_EQ(status.message().rfind(prefix + ": ", 0), 0u) << status.message();
-  EXPECT_NE(status.message().find(says), std::string::npos) << status.message();
-}
-
-Mat3d rotation(const Vec3d& axis, double deg) {
-  return camera::rotation_from_rodrigues(glm::normalize(axis) * deg * kPi /
-                                         180.0);
-}
 
 // A depth camera 3 cm beside its colour camera, turned 5.5 degrees down.
 Mat4d depth_to_color() {
@@ -99,32 +86,6 @@ Mat4d depth_to_color() {
   m[3] = glm::dvec4(0.0318, -0.0019, 0.0042, 1.0);
   return m;
 }
-
-// A prepared depth's pinhole.
-struct Pinhole {
-  camera::ImageSize size;
-  camera::PinholeIntrinsics k;
-};
-
-// A Femto's narrow depth (test::depth_like_lens's pinhole), binned 2 x 2, and
-// a wide one.
-Pinhole nfov() {
-  const camera::CameraModel lens = test::depth_like_lens();
-  return {lens.size, lens.intrinsics};
-}
-Pinhole binned() { return {{320, 288}, {252.1, 252.2, 160.3, 165.1}}; }
-Pinhole wide() { return {{512, 512}, {252.4, 252.5, 255.6, 256.2}}; }
-
-// Pixel (u, v)'s ray at depth 1.
-Vec3d ray_of(const Pinhole& p, std::uint32_t u, std::uint32_t v) {
-  return {(u - p.k.cx) / p.k.fx, (v - p.k.cy) / p.k.fy, 1.0};
-}
-
-// A plane in the board's frame.
-struct Plane {
-  Vec3d point;
-  Vec3d normal;
-};
 
 // The solved board's plane moved `offset_mm` into the board and turned
 // `turn_deg` about `axis` at the chessboard's centre.
@@ -150,31 +111,6 @@ Vec2d board_centre() {
   return {c.x, c.y};
 }
 
-// Where a ray from `origin` along `direction` (board frame; the depth
-// camera's z grows by 1 per unit along it) meets a surface: its depth, or 0.
-using Surface = std::function<double(const Vec3d&, const Vec3d&)>;
-
-double hit_plane(const Plane& plane, const Vec3d& origin,
-                 const Vec3d& direction) {
-  const double s = glm::dot(plane.normal, plane.point - origin) /
-                   glm::dot(plane.normal, direction);
-  return s > 0.0 && std::isfinite(s) ? s : 0.0;
-}
-
-// A box's nearest face, by slabs; 0 when the ray misses it.
-double hit_box(const Vec3d& lo, const Vec3d& hi, const Vec3d& origin,
-               const Vec3d& direction) {
-  double near = 0.0;
-  double far = std::numeric_limits<double>::infinity();
-  for (int i = 0; i < 3; ++i) {
-    const double a = (lo[i] - origin[i]) / direction[i];
-    const double b = (hi[i] - origin[i]) / direction[i];
-    near = std::max(near, std::min(a, b));
-    far = std::min(far, std::max(a, b));
-  }
-  return near > 0.0 && near <= far ? near : 0.0;
-}
-
 // A board's view: the region its fit takes, its camera's depth, and the
 // board in the colour camera.
 struct View {
@@ -183,20 +119,6 @@ struct View {
   std::vector<float> depth;
   Mat4d board_to_color{1.0};
 };
-
-std::vector<float> render(const Pinhole& p, const Mat4d& depth_to_board,
-                          const Surface& surface) {
-  const Vec3d origin(depth_to_board[3]);
-  const Mat3d turn(depth_to_board);
-  std::vector<float> depth(std::size_t{p.size.width} * p.size.height);
-  for (std::uint32_t v = 0; v < p.size.height; ++v) {
-    for (std::uint32_t u = 0; u < p.size.width; ++u) {
-      depth[std::size_t{v} * p.size.width + u] =
-          static_cast<float>(surface(origin, turn * ray_of(p, u, v)));
-    }
-  }
-  return depth;
-}
 
 // The rig's board with its centre at `centre` in a colour camera, turned
 // `tilt_deg` and rolled `roll_deg` (test::board_facing_camera), seen by a
@@ -313,7 +235,7 @@ Reference reference_fit(const View& view, const DepthCheckOptions& options) {
       if (!quality::in_board_region(region, ray)) continue;
       ++members;
       const double z = view.depth[std::size_t{v} * p.size.width + u];
-      if (!(z > 0.0 && z >= kMinDepth && z <= kMaxDepth)) {
+      if (!measured(z)) {
         ++out_of_range;
         continue;
       }
@@ -385,34 +307,8 @@ static_assert(sizeof(MemberCase) == 104 && offsetof(MemberCase, k) == 64 &&
                   offsetof(MemberCase, size) == 96,
               "mirrors Case in shaders/board_member_cases.comp");
 
-class PlaneFitTest : public core::test::VulkanDeviceTest {
+class PlaneFitTest : public test::DepthChecksTest {
  protected:
-  // The batch's barriers are the core's; synchronization validation checks
-  // what the kernels bind against them, wherever the layer is installed.
-  core::test::Validation validation() const override {
-    return core::test::Validation::Sync;
-  }
-
-  void SetUp() override {
-    VulkanDeviceTest::SetUp();
-    if (base_setup_incomplete()) return;
-    core::Result<std::unique_ptr<DepthChecks>> checks =
-        DepthChecks::create(device(), allocator());
-    ASSERT_TRUE(checks.ok()) << checks.status().message();
-    checks_ = *std::move(checks);
-  }
-
-  // `depth` on the device, as recon's frame preparation leaves a frame's.
-  core::Buffer upload(const std::vector<float>& depth) {
-    const VkDeviceSize bytes = depth.size() * sizeof(float);
-    core::Buffer buffer =
-        value_of(core::device_storage_buffer(allocator(), bytes));
-    core::CommandBatch batch(device(), allocator());
-    check(batch.upload(buffer, 0, depth.data(), bytes));
-    check(batch.submit());
-    return buffer;
-  }
-
   // `view`'s fit, its depth in `buffer`.
   static PlaneRegion region_of(const View& view, const core::Buffer& buffer) {
     PlaneRegion region;
@@ -475,8 +371,6 @@ class PlaneFitTest : public core::test::VulkanDeviceTest {
     check(batch.submit());
     return members;
   }
-
-  std::unique_ptr<DepthChecks> checks_;
 };
 
 TEST(DepthChecksRequirements, AreTheCoresComputeBaselineAlone) {
