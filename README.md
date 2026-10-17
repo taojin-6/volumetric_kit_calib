@@ -179,11 +179,9 @@ Run calib_rig on a rig (the session root must exist):
  "output": {"path": "sessions"}}
 ```
 
-The modes default to 3840x2160 MJPEG colour and 640x576 depth at 25 fps
-(`source.color_width`, ..., `fps`); `window` sets the size and validation.
-Paths are relative to the scenario. The core's
+The core's
 [CONFIG.md](https://github.com/taojin-6/volumetric_kit_core/blob/main/CONFIG.md)
-has every field.
+has every field, the modes and the window among them.
 
 ## Use it in your project
 
@@ -198,16 +196,17 @@ FetchContent_MakeAvailable(volumetric_kit_calib)
 target_link_libraries(your_app PRIVATE volumetric_kit::calib_core)
 ```
 
-`VC_BUILD_TESTS`, `VC_BUILD_EXAMPLES`, `VC_INSTALL`, and `VC_WARNINGS_AS_ERRORS`
-default ON only when `volumetric_kit_calib` is the top-level project, so a
-FetchContent build of it never fails on a warning your compiler adds.
-`volumetric_kit::calib_compute`, `volumetric_kit::calib_detect`,
+`VC_BUILD_TESTS`, `VC_BUILD_EXAMPLES`, `VC_BUILD_APPS`, `VC_INSTALL`, and
+`VC_WARNINGS_AS_ERRORS` default ON only when `volumetric_kit_calib` is the
+top-level project, so a FetchContent build of it never fails on a warning your
+compiler adds. `volumetric_kit::calib_compute`, `volumetric_kit::calib_detect`,
 `volumetric_kit::calib_solve` and `volumetric_kit::calib_quality` are always
 built. Set `VC_WITH_RIG` ON before calib is made available to link
 `volumetric_kit::calib_capture`, `volumetric_kit::calib_depth`,
-`volumetric_kit::calib_viz` and, with GLFW and recon's Orbbec driver,
-`volumetric_kit::calib_app`; `calib_viz` and `calib_app` are build-tree only:
-an installed calib lacks them, as an installed gfx lacks its ui tier.
+`volumetric_kit::calib_viz` and, with `VC_BUILD_APPS`, GLFW and recon's Orbbec
+driver, `volumetric_kit::calib_app`; `calib_viz` and `calib_app` are
+build-tree only: an installed calib lacks them, as an installed gfx lacks its
+ui tier.
 `VC_SANITIZE` is a semicolon list, empty (off) by default —
 e.g. `-DVC_SANITIZE="address;undefined"`. An installed calib carries the core
 and recon (its camera tier, or all of it with `VC_WITH_RIG`) beside it, and
@@ -217,9 +216,10 @@ it; if it finds another core first, calib is not found, and the message names
 both.
 
 calib needs `volumetric_kit_core` 0.6.1 or newer, with its vulkan tier for
-`VC_WITH_RIG`, and 0.11.0, with its config tier, for `calib_app`. An application that declares the core before calib, to share it
-with `recon` or `gfx`, pins at least that: on an older core, calib's configure
-fails at `vkc_require_core`, and an installed calib is not found. Without
+`VC_WITH_RIG`, and 0.11.0, with its config tier, for `calib_app`. An
+application that declares the core before calib, to share it with `recon` or
+`gfx`, pins at least that: on an older core, calib's configure fails at
+`vkc_require_core`, and an installed calib is not found. Without
 `VC_WITH_RIG`, calib makes recon available camera-only, so an application that
 uses recon beyond its camera tier makes recon available, with its options,
 before calib; with it, an application that makes recon available first makes

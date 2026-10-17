@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-// The board: the rig's, and what check_target accepts and refuses.
+// The board: the rig's, what check_target accepts and refuses, and when two
+// boards are the same.
 
 #include "volumetric_kit/calib/core/target.hpp"
 
+#include <cstddef>
 #include <limits>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -323,6 +326,37 @@ TEST(Target, OnlyChArUcoTakesTheLegacyPattern) {
   grid.legacy_pattern = true;
   EXPECT_TRUE(RefusedNaming(check_target(grid), "legacy_pattern"));
   EXPECT_TRUE(check_target(legacy_femto_board()).ok());
+}
+
+// Two boards are equal only when every field is: each field changed alone
+// makes them differ.
+TEST(Target, EqualOnlyWhenEveryFieldIs) {
+  const Target board = legacy_femto_board();
+  EXPECT_TRUE(board == legacy_femto_board());
+  EXPECT_FALSE(board != legacy_femto_board());
+  std::vector<Target> changed(10, board);
+  changed[0].kind = TargetKind::AprilGrid;
+  changed[1].rows = 3;
+  changed[2].cols = 5;
+  changed[3].square_size_m = 0.1505;
+  changed[4].marker_size_m = 0.11;
+  changed[5].dictionary = MarkerDictionary::ArUco4x4_250;
+  changed[6].first_marker_id = 10;
+  changed[7].legacy_pattern = false;
+  changed[8].square_size_tolerance_m = 0.0;
+  changed[9].planarity_bow_m = 0.0005;
+  for (std::size_t i = 0; i < changed.size(); ++i) {
+    EXPECT_FALSE(changed[i] == board) << i;
+    EXPECT_TRUE(changed[i] != board) << i;
+  }
+  // A tolerance known differs from one known at another value.
+  Target a = board;
+  Target b = board;
+  a.planarity_bow_m = 0.0;
+  b.planarity_bow_m = 0.001;
+  EXPECT_TRUE(a != b);
+  b.planarity_bow_m = 0.0;
+  EXPECT_TRUE(a == b);
 }
 
 }  // namespace

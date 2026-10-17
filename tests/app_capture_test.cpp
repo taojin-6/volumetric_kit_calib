@@ -5,17 +5,20 @@
 // again at full resolution in its luma, checked, compared with its live
 // corners and written as a session under the scenario's root; drops, a full
 // queue, requests that do not fit the rig, a missing root and the drain at
-// shutdown. Synthetic board renders, a few cameras, no device. Then what a
-// session records of each camera and of the software.
+// shutdown; the session's depth unit, the frames'. Synthetic board renders, a
+// few cameras, no device. Then what a session records of each camera and of
+// the software.
 
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <optional>
 #include <regex>
@@ -191,6 +194,7 @@ CaptureRequest request(std::size_t cameras, double live_shift_px, int tag = 0,
     }
     part.jpeg = jpeg_of(i, tag);
     part.depth = depth_of(i);
+    part.metres_per_unit = 0.001f;
     part.timestamp_ns = out.meta.trigger_ns + i;
     part.sequence = out.meta.sequence;
     out.cameras.push_back(std::move(part));
@@ -471,6 +475,49 @@ TEST(AppCapture, WritesWhatItHoldsWhenDestroyed) {
   EXPECT_TRUE(session["captures"][1]["dropped"].get<bool>());
 }
 
+// The session's depth unit is its first capture's frames'; a capture in
+// another is refused, and so is one whose cameras disagree.
+TEST(AppCapture, TakesTheDepthUnitFromTheFrames) {
+  ScratchDir root;
+  std::unique_ptr<CaptureWorker> worker = make(setup(root.path(), 2));
+  ASSERT_NE(worker, nullptr);
+  CaptureRequest first = request(2, 0.0, 1);
+  for (CameraFrameCopy& part : first.cameras) part.metres_per_unit = 0.0005f;
+  ASSERT_TRUE(submit(*worker, std::move(first)));
+  ASSERT_TRUE(submit(*worker, request(2, 0.0, 2)));  // 0.001
+  worker->flush();
+  // The refusal is said at once, the save once written: either may be first.
+  const std::vector<CaptureEvent> events = worker->take_events();
+  ASSERT_EQ(events.size(), 2u);
+  const auto of_kind = [&](CaptureEvent::Kind kind) {
+    return std::find_if(events.begin(), events.end(),
+                        [&](const CaptureEvent& e) { return e.kind == kind; });
+  };
+  ASSERT_NE(of_kind(CaptureEvent::Kind::Saved), events.end());
+  const auto failed = of_kind(CaptureEvent::Kind::Failed);
+  ASSERT_NE(failed, events.end());
+  EXPECT_EQ(failed->status.message(),
+            "capture: its depth unit is not the session's");
+  const json session =
+      json::parse(read(fs::path(worker->directory()) / "session.json"));
+  EXPECT_EQ(session["streams"]["depth"]["metres_per_unit"].get<double>(),
+            0.0005);
+  EXPECT_EQ(session["captures"].size(), 1u);
+
+  CaptureRequest mixed = request(2, 0.0, 3);
+  mixed.cameras[1].metres_per_unit = 0.0005f;
+  core::Result<bool> queued = worker->submit(std::move(mixed));
+  ASSERT_FALSE(queued.ok());
+  EXPECT_EQ(queued.status().message(),
+            "capture: camera SYN1's depth unit is not camera SYN0's");
+  CaptureRequest none = request(2, 0.0, 4);
+  none.cameras[0].metres_per_unit = 0.0f;
+  queued = worker->submit(std::move(none));
+  ASSERT_FALSE(queued.ok());
+  EXPECT_EQ(queued.status().message(),
+            "capture: camera SYN0 has no depth unit");
+}
+
 TEST(AppCapture, RecordsEachCameraAndItsDepthDelay) {
   sensor::SensorInfo info = rig_camera(1).info;
   const test::FakeSensor fake(info);
@@ -495,13 +542,19 @@ TEST(AppCapture, RecordsEachCameraAndItsDepthDelay) {
   EXPECT_EQ(camera->depth_delay_us, 0);
 }
 
+// Each checkout's commit as the build read it, "-dirty" with uncommitted
+// changes; calib's is the one app_capture.software_commit expects
+// (VC_EXPECT_CALIB_COMMIT), read from git when the tests run.
 TEST(AppCapture, RecordsTheSoftwareItWasBuiltFrom) {
   const capture::Software software = app_software();
   EXPECT_EQ(software.opencv, CV_VERSION);
-  const std::regex commit("([0-9a-f]{40})?");
+  const std::regex commit("([0-9a-f]{40}(-dirty)?)?");
   for (const std::string* sha :
        {&software.calib, &software.core, &software.recon, &software.gfx}) {
     EXPECT_TRUE(std::regex_match(*sha, commit)) << *sha;
+  }
+  if (const char* expected = std::getenv("VC_EXPECT_CALIB_COMMIT")) {
+    EXPECT_EQ(software.calib, expected);
   }
   EXPECT_TRUE(
       std::regex_match(software.orbbec_sdk, std::regex(R"(\d+\.\d+\.\d+)")))

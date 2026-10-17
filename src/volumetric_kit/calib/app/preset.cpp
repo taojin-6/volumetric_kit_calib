@@ -25,6 +25,7 @@ bool same_size(const camera::ImageSize& a, const camera::ImageSize& b) {
 }
 
 // The Femto Mega's depth modes, as its maker names and ranges them.
+// TODO: take the modes from recon's Orbbec driver once it names them.
 struct NamedDepthMode {
   camera::ImageSize size;
   const char* name;
@@ -47,7 +48,6 @@ core::Result<capture::DepthMode> depth_mode(camera::ImageSize depth) {
           if (!same_size(mode.size, depth)) continue;
           capture::DepthMode out;
           out.name = mode.name;
-          out.metres_per_unit = 0.001f;
           out.min_m = mode.min_m;
           out.max_m = mode.max_m;
           return out;
@@ -61,15 +61,11 @@ core::Result<capture::DepthMode> depth_mode(camera::ImageSize depth) {
 
 core::Result<RigPreset> rig_preset(const core::config::Source& source) {
   return compute::guarded("rig_preset", [&]() -> core::Result<RigPreset> {
-    if (source.color_codec != core::config::ColorCodec::Mjpeg) {
-      return core::Status::invalid_argument(
-          "source.color_codec: calib_rig streams MJPEG, since a capture saves "
-          "each camera's JPEG");
-    }
     RigPreset preset;
     preset.color = {source.color_width, source.color_height};
     preset.depth = {source.depth_width, source.depth_height};
     preset.fps = source.fps;
+    preset.color_codec = source.color_codec;
     VKC_ASSIGN(preset.depth_mode, depth_mode(preset.depth));
     return preset;
   });
@@ -122,7 +118,9 @@ sensor::OrbbecSensor::Options orbbec_options(
   options.depth_width = preset.depth.width;
   options.depth_height = preset.depth.height;
   options.fps = preset.fps;
-  options.color_codec = sensor::OrbbecColorCodec::Mjpeg;
+  options.color_codec = preset.color_codec == core::config::ColorCodec::Hevc
+                            ? sensor::OrbbecColorCodec::Hevc
+                            : sensor::OrbbecColorCodec::Mjpeg;
   options.min_depth = preset.depth_mode.min_m;
   options.max_depth = preset.depth_mode.max_m;
   options.device = &device;

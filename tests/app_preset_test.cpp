@@ -2,11 +2,13 @@
 // Copyright (c) 2026 Tao Jin
 
 // calib_rig's preset: the Femto Mega's depth modes, the preset a scenario asks
-// for, what calib_rig refuses of a scenario before it opens anything, and the
-// check that every camera of a rig of any size opened at the preset, naming
-// the first that did not. Host-only.
+// for, what calib_rig refuses of a scenario before it opens anything (its
+// session root and sync file), and the check that every camera of a rig of any
+// size opened at the preset, naming the first that did not. Host-only.
 
 #include "volumetric_kit/calib/app/preset.hpp"
+
+#include <unistd.h>
 
 #include <cstdint>
 #include <filesystem>
@@ -16,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include "volumetric_kit/calib/app/calib_rig.hpp"
+#include "volumetric_kit/core/base/file_io.hpp"
 
 namespace volumetric_kit::calib::app {
 namespace {
@@ -31,7 +34,18 @@ camera::CameraModel model(std::uint32_t width, std::uint32_t height) {
   return m;
 }
 
-// A camera that opened at the default preset.
+// The Femto rig's modes: 4K MJPEG colour, NFOV unbinned depth, 25 fps.
+RigPreset femto_preset() {
+  RigPreset preset;
+  preset.color = {3840, 2160};
+  preset.depth = {640, 576};
+  preset.fps = 25;
+  preset.color_codec = core::config::ColorCodec::Mjpeg;
+  preset.depth_mode = depth_mode(preset.depth).value();
+  return preset;
+}
+
+// A camera that opened at femto_preset().
 sensor::SensorInfo at_preset(const std::string& id) {
   sensor::SensorInfo info;
   info.id = id;
@@ -73,7 +87,6 @@ TEST(AppPreset, NamesEachFemtoDepthModeAndItsRange) {
     EXPECT_EQ(mode->name, m.name);
     EXPECT_EQ(mode->min_m, m.min_m) << m.name;
     EXPECT_EQ(mode->max_m, m.max_m) << m.name;
-    EXPECT_EQ(mode->metres_per_unit, 0.001f) << m.name;
   }
   refused(depth_mode({640, 480}).status(), Code::InvalidArgument,
           "640x480 is not a depth mode");
@@ -96,6 +109,7 @@ TEST(AppPreset, TakesTheScenariosModes) {
   EXPECT_EQ(preset->depth.width, 640u);
   EXPECT_EQ(preset->depth.height, 576u);
   EXPECT_EQ(preset->fps, 25u);
+  EXPECT_EQ(preset->color_codec, core::config::ColorCodec::Mjpeg);
   EXPECT_EQ(preset->depth_mode.name, "nfov_unbinned");
 
   source.color_width = 1920;
@@ -103,46 +117,85 @@ TEST(AppPreset, TakesTheScenariosModes) {
   source.depth_width = 320;
   source.depth_height = 288;
   source.fps = 15;
+  // The coding is the core's to check: whatever the scenario says is taken.
+  source.color_codec = core::config::ColorCodec::Hevc;
   preset = rig_preset(source);
   ASSERT_TRUE(preset.ok()) << preset.status().message();
   EXPECT_EQ(preset->color.width, 1920u);
   EXPECT_EQ(preset->depth.height, 288u);
   EXPECT_EQ(preset->fps, 15u);
+  EXPECT_EQ(preset->color_codec, core::config::ColorCodec::Hevc);
   EXPECT_EQ(preset->depth_mode.name, "nfov_binned");
 }
 
-TEST(AppPreset, RefusesHevcAndADepthSizeWithNoMode) {
+TEST(AppPreset, RefusesADepthSizeWithNoMode) {
   core::config::Source source;
-  source.color_codec = core::config::ColorCodec::Hevc;
-  refused(rig_preset(source).status(), Code::InvalidArgument,
-          "source.color_codec: calib_rig streams MJPEG");
-  source.color_codec = core::config::ColorCodec::Mjpeg;
   source.depth_width = 800;
   source.depth_height = 600;
   refused(rig_preset(source).status(), Code::InvalidArgument,
           "source.depth_width/depth_height: 800x600");
 }
 
+// The session root and the sync file, before anything opens.
 TEST(AppPreset, ChecksTheScenarioBeforeOpeningAnything) {
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() /
+                       ("vc_app_preset_" + std::to_string(::getpid()));
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  ASSERT_TRUE(fs::create_directories(dir, ec)) << ec.message();
+  const auto write = [&](const std::string& name, const std::string& text) {
+    const std::string path = (dir / name).string();
+    EXPECT_TRUE(core::write_file(path, text, core::WriteMode::Replace).ok());
+    return path;
+  };
   core::config::Config config;
   config.source.color_codec = core::config::ColorCodec::Mjpeg;
-  config.output.path = (std::filesystem::temp_directory_path() /
-                        "vc_app_preset_no_such_directory")
-                           .string();
-  std::error_code ec;
-  std::filesystem::remove_all(config.output.path, ec);
+  config.source.color_width = 3840;
+  config.source.color_height = 2160;
+  config.source.depth_width = 640;
+  config.source.depth_height = 576;
+  config.source.fps = 25;
+  config.source.sync_config = write(
+      "rig.json",
+      R"({"devices": [{"sn": "CL2A141000N", "syncConfig": {)"
+      R"("syncMode": "OB_MULTI_DEVICE_SYNC_MODE_PRIMARY", "depthDelayUs": 0,)"
+      R"("colorDelayUs": 0, "trigger2ImageDelayUs": 0,)"
+      R"("triggerOutEnable": true, "triggerOutDelayUs": 0,)"
+      R"("framesPerTrigger": 1}}]})");
+  config.output.path = (dir / "no_such_directory").string();
   refused(
       check_scenario(config).status(), Code::NotFound,
       "output.path: " + config.output.path + " is not an existing directory");
-  config.output.path = std::filesystem::temp_directory_path().string();
-  EXPECT_TRUE(check_scenario(config).ok());
-  config.source.color_codec = core::config::ColorCodec::Hevc;
+
+  config.output.path = dir.string();
+  core::Result<RigScenario> scenario = check_scenario(config);
+  ASSERT_TRUE(scenario.ok()) << scenario.status().message();
+  EXPECT_EQ(scenario->preset.depth_mode.name, "nfov_unbinned");
+  ASSERT_EQ(scenario->sync.devices.size(), 1u);
+  EXPECT_EQ(scenario->sync.devices[0].serial, "CL2A141000N");
+
+  const std::string good = config.source.sync_config;
+  config.source.sync_config = (dir / "missing.json").string();
+  refused(check_scenario(config).status(), Code::NotFound,
+          "source.sync_config: ");
+  config.source.sync_config = write("bad.json", R"({"devices": [{"sn": 1}]})");
   refused(check_scenario(config).status(), Code::InvalidArgument,
-          "source.color_codec");
+          "source.sync_config: ");
+  config.source.sync_config = write("empty.json", R"({"devices": []})");
+  refused(check_scenario(config).status(), Code::InvalidArgument,
+          "source.sync_config: " + config.source.sync_config +
+              ": sync config: no \"devices\" array");
+  config.source.sync_config = good;
+  config.source.depth_width = 800;
+  config.source.depth_height = 600;
+  refused(check_scenario(config).status(), Code::InvalidArgument,
+          "800x600 is not a depth mode");
+  fs::remove_all(dir, ec);
 }
 
 TEST(AppPreset, AcceptsARigOfAnySizeAtThePreset) {
-  const RigPreset preset;
+  const RigPreset preset = femto_preset();
   for (const std::size_t cameras : {1u, 3u, 4u, 5u}) {
     const core::Status checked = check_preset(rig(cameras), preset);
     EXPECT_TRUE(checked.ok()) << cameras << ": " << checked.message();
@@ -150,7 +203,7 @@ TEST(AppPreset, AcceptsARigOfAnySizeAtThePreset) {
 }
 
 TEST(AppPreset, RefusesTheFirstCameraAtAnotherMode) {
-  const RigPreset preset;
+  const RigPreset preset = femto_preset();
   refused(check_preset({}, preset), Code::InvalidArgument, "no cameras");
 
   std::vector<sensor::SensorInfo> cameras = rig(3);
@@ -193,7 +246,7 @@ TEST(AppPreset, RefusesTheFirstCameraAtAnotherMode) {
 }
 
 TEST(AppPreset, HoldsEachCameraToAScenariosOtherModes) {
-  RigPreset preset;
+  RigPreset preset = femto_preset();
   preset.color = {1920, 1080};
   preset.depth = {320, 288};
   preset.fps = 15;

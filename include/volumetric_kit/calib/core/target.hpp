@@ -113,6 +113,22 @@ struct Target {
   std::optional<double> planarity_bow_m;
 };
 
+/// @brief Whether two boards are the same: every field of @ref Target equal.
+/// @param a  A board.
+/// @param b  Another.
+/// @return `true` when each field of @p a equals @p b's.
+///
+/// @code
+/// if (board != legacy_femto_board()) warn("not the rig's board");
+/// @endcode
+VC_CORE_API bool operator==(const Target& a, const Target& b) noexcept;
+
+/// @brief Whether two boards differ in any field.
+/// @param a  A board.
+/// @param b  Another.
+/// @return `!(a == b)`.
+VC_CORE_API bool operator!=(const Target& a, const Target& b) noexcept;
+
 /// @brief Whether @p target describes a board a detector can use.
 ///
 /// Every board needs a @ref TargetKind, at least one feature row and column, a

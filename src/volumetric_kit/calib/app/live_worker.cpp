@@ -192,6 +192,7 @@ struct LiveWorker::State {
           static_cast<std::size_t>(frame->depth_camera.size.width) *
           frame->depth_camera.size.height;
       part.depth.assign(frame->depth, frame->depth + samples);
+      part.metres_per_unit = frame->metres_per_unit;
       part.timestamp_ns = frame->timestamp_ns;
       part.sequence = frame->sequence;
       part.live = live.detections[i];
@@ -301,8 +302,23 @@ struct LiveWorker::State {
     }
   }
 
+  // Each camera that is gone (disconnected) since the last look, posted once.
+  // A set may miss a secondary, so the live view goes on without it.
+  void report_gone(const std::vector<std::string>& ids,
+                   std::vector<bool>& gone) {
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+      if (gone[i] || !array.sensor(i).exhausted()) continue;
+      gone[i] = true;
+      post(core::Status::io_error("camera " + ids[i] + " is gone" +
+                                  (i == array.primary()
+                                       ? ": it was the primary, so no set comes"
+                                       : ": the sets go on without it")));
+    }
+  }
+
   core::Status loop(const std::vector<std::string>& ids) {
     VKC_TRY(array.start());
+    std::vector<bool> gone(ids.size(), false);
     while (!stopping.load()) {
       VKC_TRY(apply_requests());
       core::StageMetrics stages;
@@ -311,6 +327,7 @@ struct LiveWorker::State {
         core::StageScope scope(stages, "poll");
         VKC_ASSIGN(set, array.poll_set());
       }
+      report_gone(ids, gone);
       if (set) {
         VKC_TRY(process(std::move(*set), std::move(stages), ids));
         continue;
@@ -319,9 +336,6 @@ struct LiveWorker::State {
         VKC_ASSIGN(const quality::CaptureDecision ticked,
                    rule->tick(Clock::now()));
         publish_decision(ticked);
-      }
-      if (array.exhausted()) {
-        return core::Status::io_error("the rig stopped: a camera is gone");
       }
       std::this_thread::sleep_for(options.idle);
     }
@@ -400,7 +414,7 @@ void LiveWorker::stop() noexcept {
 bool LiveWorker::running() const noexcept { return state_->running.load(); }
 
 bool LiveWorker::arm() {
-  if (state_->sink == nullptr) return false;
+  if (state_->sink == nullptr || !running()) return false;
   const std::lock_guard<std::mutex> lock(state_->mutex);
   if (!state_->press) state_->press = Clock::now();
   return true;

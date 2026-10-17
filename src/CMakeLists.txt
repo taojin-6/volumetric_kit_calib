@@ -16,8 +16,10 @@ if(VC_WITH_RIG)
   add_subdirectory(volumetric_kit/calib/capture)
   add_subdirectory(volumetric_kit/calib/depth)
   add_subdirectory(volumetric_kit/calib/viz)
-  # The app tier, calib_rig's, also needs gfx's GLFW glue (an installed GLFW)
-  # and recon's Orbbec driver (VR_WITH_ORBBEC).
+endif()
+# The app tier, calib_rig's (VC_BUILD_APPS), also needs gfx's GLFW glue (an
+# installed GLFW) and recon's Orbbec driver (VR_WITH_ORBBEC).
+if(VC_WITH_RIG AND VC_BUILD_APPS)
   set(_vc_app_needs volumetric_kit::gfx_glfw
                     volumetric_kit::recon_sensor_orbbec)
   set(_vc_build_app ON)

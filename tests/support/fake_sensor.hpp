@@ -38,6 +38,13 @@ class FakeSensor final : public recon::sensor::IRgbdSensor {
   }
   /// @brief Make the next drain throw, as a driver's bug would.
   void throw_on_drain() { throw_.store(true); }
+  /// @brief Report it gone from now on, as a disconnected camera.
+  void disconnect() { gone_.store(true); }
+  /// @return How many pushed frames no drain has taken yet.
+  std::size_t queued() {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return frames_.size();
+  }
   /// @return Whether it is started.
   bool started() const { return started_.load(); }
   /// @return How often it was stopped.
@@ -76,6 +83,7 @@ class FakeSensor final : public recon::sensor::IRgbdSensor {
     frames_.clear();
     return {};
   }
+  bool exhausted() const noexcept override { return gone_.load(); }
   recon::sensor::SensorStats stats() const noexcept override { return {}; }
 
  private:
@@ -84,6 +92,7 @@ class FakeSensor final : public recon::sensor::IRgbdSensor {
   std::vector<recon::sensor::RgbdFrame> frames_;
   std::atomic<bool> started_{false};
   std::atomic<bool> throw_{false};
+  std::atomic<bool> gone_{false};
   std::atomic<int> stops_{0};
 };
 

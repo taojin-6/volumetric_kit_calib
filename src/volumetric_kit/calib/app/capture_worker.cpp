@@ -4,6 +4,7 @@
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
@@ -78,7 +79,8 @@ struct CaptureWorker::State {
   std::unique_ptr<capture::SessionWriter> writer;
   std::optional<compute::Board> board;
   std::optional<quality::SessionChecks> checks;
-  std::deque<Written> written;  // on the writer, in the order submitted
+  float metres_per_unit = 0.0f;  // the session's depth unit, its first's
+  std::deque<Written> written;   // on the writer, in the order submitted
 
   // Shared.
   mutable std::mutex mutex;
@@ -137,6 +139,7 @@ struct CaptureWorker::State {
     info.board = request.board;
     info.square_measured = request.square_measured;
     info.depth_mode = setup.depth_mode;
+    info.depth_mode.metres_per_unit = request.cameras.front().metres_per_unit;
     info.cameras = setup.cameras;
     const std::string directory_name = info.directory;
     capture::SessionWriterOptions options;
@@ -145,6 +148,7 @@ struct CaptureWorker::State {
                capture::SessionWriter::create(std::move(info), options));
     board = std::move(made);
     checks = std::move(session);
+    metres_per_unit = request.cameras.front().metres_per_unit;
     const std::lock_guard<std::mutex> lock(mutex);
     directory = directory_name;
     return {};
@@ -158,6 +162,11 @@ struct CaptureWorker::State {
         fail_capture(request.meta, opened.with_context("session"));
         return;
       }
+    } else if (request.cameras.front().metres_per_unit != metres_per_unit) {
+      fail_capture(request.meta,
+                   core::Status::invalid_argument(
+                       "capture: its depth unit is not the session's"));
+      return;
     }
     const std::size_t n = request.cameras.size();
     std::vector<Detection> full(n);
@@ -438,6 +447,16 @@ core::Result<bool> CaptureWorker::submit(CaptureRequest request) {
         return core::Status::invalid_argument(
             "capture: camera " + cameras[i].info.id +
             "'s luma is not its colour image's size");
+      }
+      const float unit = part.metres_per_unit;
+      if (!(std::isfinite(unit) && unit > 0.0f)) {
+        return core::Status::invalid_argument(
+            "capture: camera " + cameras[i].info.id + " has no depth unit");
+      }
+      if (unit != request.cameras.front().metres_per_unit) {
+        return core::Status::invalid_argument(
+            "capture: camera " + cameras[i].info.id +
+            "'s depth unit is not camera " + cameras.front().info.id + "'s");
       }
     }
     {

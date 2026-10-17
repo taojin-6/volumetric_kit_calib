@@ -8,10 +8,10 @@
 ///        the check that each camera opened at them.
 ///
 /// The scenario (`core::config::Application::CalibRig`) names the colour and
-/// depth sizes and the rate; the core checks only that they are positive.
-/// Whether a camera has the mode is the driver's to say when it opens, and
-/// whether every camera opened at it is @ref check_preset's, before the app
-/// draws a frame. A rig of any number of cameras.
+/// depth sizes, the colour's coding and the rate, with their defaults and
+/// checks. Whether a camera has the mode is the driver's to say when it
+/// opens, and whether every camera opened at it is @ref check_preset's, before
+/// the app draws a frame. A rig of any number of cameras.
 
 #include <cstdint>
 #include <string>
@@ -33,16 +33,17 @@ class Device;
 namespace volumetric_kit::calib::app {
 
 /// @brief The modes every camera of the rig streams at: what calib_rig asks
-///        each camera for, and holds each to.
+///        each camera for, and holds each to, as the scenario gives them.
 ///
 /// @code
 /// VKC_ASSIGN(const RigPreset preset, rig_preset(config.source));
-/// // The defaults: 3840 x 2160 MJPEG colour, 640 x 576 depth, 25 fps.
 /// @endcode
 struct RigPreset {
-  recon::camera::ImageSize color{3840, 2160};  ///< The colour image's size.
-  recon::camera::ImageSize depth{640, 576};    ///< The depth image's size.
-  std::uint32_t fps = 25;                      ///< Frames a second, both.
+  recon::camera::ImageSize color;  ///< The colour image's size.
+  recon::camera::ImageSize depth;  ///< The depth image's size.
+  std::uint32_t fps = 0;           ///< Frames a second, both.
+  /// How the camera codes its colour (`source.color_codec`).
+  core::config::ColorCodec color_codec{};
   /// The depth mode those sizes are: its name and range (@ref depth_mode).
   capture::DepthMode depth_mode;
 };
@@ -50,13 +51,18 @@ struct RigPreset {
 /// @brief The depth mode a Femto Mega streams at @p depth: its name and the
 ///        range its maker states.
 ///
+/// The table is calib's until recon's Orbbec driver names its modes. The
+/// unit is not the mode's: the frames carry it, and the capture worker takes
+/// it from the first capture's (@ref CaptureWorker).
+///
 /// - 640 x 576: `nfov_unbinned`, 0.5-3.86 m;
 /// - 320 x 288: `nfov_binned`, 0.5-5.46 m;
 /// - 1024 x 1024: `wfov_unbinned`, 0.25-2.21 m;
 /// - 512 x 512: `wfov_binned`, 0.25-2.88 m.
 /// @param depth  The depth image's size.
-/// @return The mode, in millimetre units (`metres_per_unit` 0.001);
-///         `InvalidArgument` naming any other size; or `OutOfMemory`.
+/// @return The mode's name and range, its `metres_per_unit` left at its
+///         default; `InvalidArgument` naming any other size; or
+///         `OutOfMemory`.
 ///
 /// @code
 /// VKC_ASSIGN(const capture::DepthMode mode, depth_mode({640, 576}));
@@ -67,9 +73,8 @@ VC_APP_API core::Result<capture::DepthMode> depth_mode(
 /// @brief The preset a CalibRig scenario's source asks for.
 /// @param source  The scenario's source, as `core::config::load` resolved it
 ///                for `Application::CalibRig`.
-/// @return Its sizes, rate and depth mode; `InvalidArgument` for a colour
-///         codec other than MJPEG (a capture saves each camera's JPEG), or a
-///         depth size @ref depth_mode does not name; or `OutOfMemory`.
+/// @return Its sizes, colour coding, rate and depth mode; `InvalidArgument`
+///         for a depth size @ref depth_mode does not name; or `OutOfMemory`.
 ///
 /// @code
 /// VKC_ASSIGN(const auto config, core::config::load(
@@ -99,8 +104,8 @@ VC_APP_API core::Status check_preset(
     const RigPreset& preset);
 
 /// @brief What each Orbbec camera of the rig is opened with: @p preset's
-///        modes in MJPEG, decoded onto @p device and readable from each of
-///        @p families, its range @p preset's depth mode's.
+///        modes and colour coding, decoded onto @p device and readable from
+///        each of @p families, its range @p preset's depth mode's.
 /// @param preset     The modes.
 /// @param device     The compute library's device, which the cameras decode
 ///                   onto; it must outlive them and every frame.

@@ -152,17 +152,22 @@ The `app` tier runs the rig (`app/calib_rig.hpp`, `live_worker.hpp`,
   Detection and capture thresholds stay calib's defaults. The modes requested
   are the ones every camera is held to when the rig opens, for any number of
   cameras. The depth mode's name and range come from the Femto Mega's own
-  table for its size, not from fusion settings the scenario does not use.
-- **Nothing is written outside a session.** The session root must exist before
-  the window opens, and ImGui keeps no ini file.
+  table for its size, not from fusion settings the scenario does not use;
+  calib keeps that table (`app::depth_mode`) until recon's Orbbec driver names
+  its modes. The depth unit is the frames' own.
+- **Nothing is written outside a session.** The session root must exist, and
+  the sync file must read, before the window opens.
 - **Keys before ImGui.** calib_rig's key callback is installed before ImGui's
-  GLFW backend, which chains to it. Keys are ignored while ImGui takes text,
-  and a held key captures once.
-- **How it builds.** The tier is built with `viz` when gfx's `gfx_glfw` (an
-  installed GLFW) and recon's Orbbec driver (`VR_WITH_ORBBEC`, with
-  `VR_WITH_FFMPEG`) exist, and turns the core's config tier on. It is
-  build-tree only, as `viz` is. A session records the siblings' commits as
-  this build fetched them, read when it is configured.
+  GLFW backend, which chains to it. It queues each key, and the frame maps
+  them once ImGui has begun it, so keys are ignored while a field takes text,
+  even one clicked into the frame before; a held key captures once.
+- **How it builds.** calib_rig is an application's choice: `VC_BUILD_APPS`,
+  on by default only at the top level, as the examples are. The tier is then
+  built with `viz` when gfx's `gfx_glfw` (an installed GLFW) and recon's
+  Orbbec driver (`VR_WITH_ORBBEC`, with `VR_WITH_FFMPEG`) exist, and turns the
+  core's config tier on. It is build-tree only, as `viz` is. A session
+  records calib's and the siblings' commits as git gives them at each build,
+  `-dirty` with uncommitted changes.
 
 ## 2026-10-16 — Depth checks are calib's kernels
 

@@ -9,11 +9,16 @@
 ///
 /// The window's key callback is installed before ImGui's GLFW backend, which
 /// chains to it, so the keys are seen before ImGui; they are ignored while
-/// ImGui takes text, so typing in a field captures nothing.
+/// ImGui takes text, so typing in a field captures nothing. ImGui knows that
+/// only once its next frame has begun, so the callback queues each key
+/// (@ref KeyQueue) and the frame maps them then.
 
 #include <cstdint>
+#include <utility>
+#include <vector>
 
 #include "volumetric_kit/calib/app/export.hpp"
+#include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -37,13 +42,45 @@ enum class KeyRequest : std::uint8_t {
 /// @return The request.
 ///
 /// @code
-/// glfwSetKeyCallback(window, [](GLFWwindow* w, int key, int, int action,
-///                               int) {
-///   auto* input = static_cast<Input*>(glfwGetWindowUserPointer(w));
-///   input->post(key_request(key, action, input->want_text_input));
-/// });
+/// if (key_request(GLFW_KEY_SPACE, GLFW_PRESS, io.WantTextInput) ==
+///     KeyRequest::Capture) {
+///   live->arm();
+/// }
 /// @endcode
 VC_APP_API KeyRequest key_request(int key, int action,
                                   bool want_text_input) noexcept;
+
+/// @brief GLFW key events as they come, mapped to requests (@ref key_request)
+///        once the window's frame knows whether ImGui takes text.
+///
+/// ImGui says whether a field takes text only after its frame begins:
+/// `ImGuiIO::WantTextInput` then covers a field activated the frame before.
+/// Keys polled before the frame are queued, and mapped with that frame's
+/// flag, so a key typed just after a click into a field is ignored.
+///
+/// @code
+/// // GLFW's key callback, as glfwPollEvents calls it:
+/// (void)queue.push(key, action);
+/// // After the frame's ImGui::NewFrame():
+/// VKC_ASSIGN(const std::vector<KeyRequest> requests,
+///            queue.take(io.WantTextInput));
+/// @endcode
+class VC_APP_API KeyQueue {
+ public:
+  /// @brief Queue a key event.
+  /// @param key     The GLFW key (`GLFW_KEY_*`).
+  /// @param action  The GLFW action.
+  /// @return OK; or `OutOfMemory`, the event not queued.
+  core::Status push(int key, int action);
+
+  /// @brief Map every key queued since the last call, emptying the queue.
+  /// @param want_text_input  Whether ImGui takes text in this frame.
+  /// @return Each key's request that is not `None`, in the order pressed; or
+  ///         `OutOfMemory`, the queue emptied all the same.
+  core::Result<std::vector<KeyRequest>> take(bool want_text_input);
+
+ private:
+  std::vector<std::pair<int, int>> events_;  // key, action
+};
 
 }  // namespace volumetric_kit::calib::app

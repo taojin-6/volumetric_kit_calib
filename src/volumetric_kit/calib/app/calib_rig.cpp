@@ -29,6 +29,7 @@
 #include "volumetric_kit/calib/app/keys.hpp"
 #include "volumetric_kit/calib/app/live_view.hpp"
 #include "volumetric_kit/calib/app/live_worker.hpp"
+#include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/viz/board_editor.hpp"
 #include "volumetric_kit/calib/viz/mosaic.hpp"
 #include "volumetric_kit/calib/viz/overlay.hpp"
@@ -61,6 +62,8 @@ using Clock = std::chrono::steady_clock;
 // Ctrl+C closes the window rather than ending the process, so the workers stop,
 // the captures held are written and the cameras are released. The handler
 // restores the default, so a second Ctrl+C ends a run that hangs.
+// TODO: give close-on-interrupt one home (the core's base tier, or gfx_glfw)
+// and port recon's rig_viewer, whose handler this repeats.
 std::atomic<bool> g_interrupted{false};
 static_assert(std::atomic<bool>::is_always_lock_free,
               "the interrupt flag must be safe to set from a signal handler");
@@ -69,29 +72,52 @@ extern "C" void on_interrupt(int signal) {
   std::signal(signal, SIG_DFL);
 }
 
+// on_interrupt handles SIGINT and SIGTERM while it lives; the handlers it
+// replaced are put back on every way out.
+class InterruptHandlers {
+ public:
+  InterruptHandlers() noexcept {
+    g_interrupted.store(false);
+    previous_int_ = std::signal(SIGINT, on_interrupt);
+    previous_term_ = std::signal(SIGTERM, on_interrupt);
+  }
+  ~InterruptHandlers() {
+    if (previous_int_ != SIG_ERR) std::signal(SIGINT, previous_int_);
+    if (previous_term_ != SIG_ERR) std::signal(SIGTERM, previous_term_);
+  }
+  InterruptHandlers(const InterruptHandlers&) = delete;
+  InterruptHandlers& operator=(const InterruptHandlers&) = delete;
+
+ private:
+  void (*previous_int_)(int) = SIG_ERR;
+  void (*previous_term_)(int) = SIG_ERR;
+};
+
 // How long a capture's flash stays, and how many messages the window keeps.
 constexpr auto kFlash = std::chrono::milliseconds(250);
 constexpr std::size_t kMessages = 8;
 
 // What GLFW's callbacks hand the window's loop, all on the window's thread.
 struct Input {
-  bool want_text_input = false;  // ImGui's, as of the last frame
-  std::vector<KeyRequest> requests;
+  KeyQueue keys;  // mapped once the frame knows whether ImGui takes text
   double scroll = 0.0;
 };
 
 void on_key(GLFWwindow* window, int key, int /*scancode*/, int action,
             int /*mods*/) {
   auto* input = static_cast<Input*>(glfwGetWindowUserPointer(window));
-  if (input == nullptr) return;
-  const KeyRequest request = key_request(key, action, input->want_text_input);
-  if (request != KeyRequest::None) input->requests.push_back(request);
+  if (input != nullptr) (void)input->keys.push(key, action);  // OOM drops it
 }
 
 void on_scroll(GLFWwindow* window, double /*dx*/, double dy) {
   auto* input = static_cast<Input*>(glfwGetWindowUserPointer(window));
   if (input != nullptr) input->scroll += dy;
 }
+
+// TODO: InputBinding, GlfwRun and WindowDeleter, the shared-device bring-up in
+// run_window and its wheel-and-drag view input are generic GLFW glue; move them
+// to gfx_glfw in a gfx PR, then port gfx's examples, recon's viewers and
+// calib_rig onto it.
 
 // Points the window's callbacks at an Input for as long as it lives.
 class InputBinding {
@@ -142,14 +168,29 @@ struct Notices {
   }
 };
 
-bool same_board(const Target& a, const Target& b) {
-  return a.kind == b.kind && a.rows == b.rows && a.cols == b.cols &&
-         a.square_size_m == b.square_size_m &&
-         a.marker_size_m == b.marker_size_m && a.dictionary == b.dictionary &&
-         a.first_marker_id == b.first_marker_id &&
-         a.legacy_pattern == b.legacy_pattern &&
-         a.square_size_tolerance_m == b.square_size_tolerance_m &&
-         a.planarity_bow_m == b.planarity_bow_m;
+// A press of Capture: refused, and said, once the live view has stopped.
+void arm(LiveWorker& live, Notices& notices) {
+  if (!live.arm()) notices.note("capture: the live view has stopped");
+}
+
+void drop_last(CaptureWorker& captures, Notices& notices) {
+  const core::Status dropped = captures.drop_last();
+  if (!dropped.ok()) notices.note(dropped.message());
+}
+
+// The keys polled before this frame, mapped with its WantTextInput.
+void act_on_keys(KeyQueue& keys, bool want_text_input, LiveWorker& live,
+                 CaptureWorker& captures, Notices& notices) {
+  const core::Result<std::vector<KeyRequest>> requests =
+      keys.take(want_text_input);
+  if (!requests.ok()) {
+    notices.note(requests.status().message());
+    return;
+  }
+  for (const KeyRequest request : requests.value()) {
+    if (request == KeyRequest::Capture) arm(live, notices);
+    if (request == KeyRequest::DropLast) drop_last(captures, notices);
+  }
 }
 
 // Everything a frame's UI reads.
@@ -166,12 +207,9 @@ void capture_window(LiveWorker& live, CaptureWorker& captures, Notices& notices,
                     const FrameInputs& in) {
   ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
   ImGui::Begin("Capture");
-  if (ImGui::Button("Capture")) live.arm();
+  if (ImGui::Button("Capture")) arm(live, notices);
   ImGui::SameLine();
-  if (ImGui::Button("Drop last")) {
-    const core::Status dropped = captures.drop_last();
-    if (!dropped.ok()) notices.note(dropped.message());
-  }
+  if (ImGui::Button("Drop last")) drop_last(captures, notices);
   notices.capture.decision = live.decision();
   const core::Result<std::vector<viz::PanelLine>> lines =
       viz::capture_panel(notices.capture);
@@ -315,7 +353,8 @@ class Teardown {
 };
 
 core::Status run_window(GLFWwindow* window, const core::config::Config& config,
-                        const RigPreset& preset) {
+                        const RigScenario& scenario) {
+  const RigPreset& preset = scenario.preset;
   // --- One VkDevice: gfx draws on its graphics side, recon decodes and reads
   // back on its compute side.
   gfx::app::WindowedAppConfig app_config;
@@ -343,6 +382,8 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       core::Allocator::create(shared->instance().handle(), recon_device));
 
   // --- The rig, at the preset.
+  // TODO: open the rig from scenario.sync once recon's open_orbbec_sensors
+  // takes a parsed sync configuration, so the file is read once.
   VKC_ASSIGN(auto sensors,
              sensor::open_orbbec_sensors(
                  config.source.sync_config,
@@ -352,8 +393,6 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   std::vector<sensor::SensorInfo> infos;
   for (const auto& camera : sensors) infos.push_back(camera->info());
   VKC_TRY(check_preset(infos, preset));
-  VKC_ASSIGN(const sensor::OrbbecRigSyncConfig sync,
-             sensor::read_orbbec_sync_config(config.source.sync_config));
   VKC_ASSIGN(sensor::SensorArray array,
              sensor::SensorArray::open(std::move(sensors), {}));
 
@@ -366,10 +405,12 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   std::vector<recon::camera::ImageSize> sizes;
   for (std::size_t i = 0; i < array.size(); ++i) {
     VKC_ASSIGN(capture::SessionCamera camera,
-               session_camera(array.sensor(i), sync));
+               session_camera(array.sensor(i), scenario.sync));
     sizes.push_back(camera.info.color->size);
     setup.cameras.push_back(std::move(camera));
   }
+  // TODO: cap cv::setNumThreads once H4 measures the contention between
+  // OpenCV, the SDK and the decode threads.
   VKC_ASSIGN(std::unique_ptr<CaptureWorker> captures,
              CaptureWorker::create(std::move(setup)));
   VKC_ASSIGN(viz::BoardEditor editor,
@@ -401,7 +442,6 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
              gfx::ui::ImGuiOverlay::create(app.device(), app.instance_handle(),
                                            overlay_config));
   ImGui::SetCurrentContext(overlay.context());
-  ImGui::GetIO().IniFilename = nullptr;  // nothing written outside a session
   VKC_ASSIGN(std::unique_ptr<glfw::ImGuiGlfw> platform,
              glfw::ImGuiGlfw::create(window, overlay.context()));
 
@@ -412,15 +452,6 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   std::optional<glm::vec2> dragged_from;
   while (glfwWindowShouldClose(window) == GLFW_FALSE && !g_interrupted.load()) {
     glfwPollEvents();
-    for (const KeyRequest request : input.requests) {
-      if (request == KeyRequest::Capture) {
-        live->arm();
-      } else if (request == KeyRequest::DropLast) {
-        const core::Status dropped = captures->drop_last();
-        if (!dropped.ok()) notices.note(dropped.message());
-      }
-    }
-    input.requests.clear();
     if (std::shared_ptr<const LiveSnapshot> s = live->take_snapshot()) {
       latest = std::move(s);
       fresh = true;
@@ -469,6 +500,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     platform->new_frame();
     overlay.new_frame();
     const ImGuiIO& io = ImGui::GetIO();
+    act_on_keys(input.keys, io.WantTextInput, *live, *captures, notices);
     const glm::vec2 cursor = glfw::cursor_in_framebuffer(window);
     if (!io.WantCaptureMouse) {
       if (input.scroll != 0.0) {
@@ -493,7 +525,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     const bool measured_before = editor.square_measured();
     const core::Status edited = viz::draw_board_editor(editor);
     if (!edited.ok()) notices.note(edited.message());
-    if (!same_board(editor.board(), before) ||
+    if (editor.board() != before ||
         editor.square_measured() != measured_before) {
       const core::Status taken =
           live->set_board(editor.board(), editor.square_measured());
@@ -512,7 +544,6 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       ImGui::End();
     }
     flash(notices);
-    input.want_text_input = io.WantTextInput;
 
     gfx::RenderTargetBeginInfo begin;
     frame.target->begin(frame.cmd, begin);
@@ -530,36 +561,42 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
 
 }  // namespace
 
-core::Result<RigPreset> check_scenario(const core::config::Config& config) {
-  VKC_ASSIGN(RigPreset preset, rig_preset(config.source));
-  std::error_code ec;
-  if (!std::filesystem::is_directory(config.output.path, ec)) {
-    return core::Status::not_found("output.path: " + config.output.path +
-                                   " is not an existing directory");
-  }
-  return preset;
+core::Result<RigScenario> check_scenario(const core::config::Config& config) {
+  return compute::guarded("check_scenario", [&]() -> core::Result<RigScenario> {
+    RigScenario scenario;
+    VKC_ASSIGN(scenario.preset, rig_preset(config.source));
+    std::error_code ec;
+    if (!std::filesystem::is_directory(config.output.path, ec)) {
+      return core::Status::not_found("output.path: " + config.output.path +
+                                     " is not an existing directory");
+    }
+    // recon refuses a file that lists no camera.
+    core::Result<sensor::OrbbecRigSyncConfig> sync =
+        sensor::read_orbbec_sync_config(config.source.sync_config);
+    if (!sync.ok()) return sync.status().with_context("source.sync_config");
+    scenario.sync = std::move(sync).value();
+    return scenario;
+  });
 }
 
 core::Status run_calib_rig(const core::config::Config& config) {
-  VKC_ASSIGN(const RigPreset preset, check_scenario(config));
-  g_interrupted.store(false);
-  std::signal(SIGINT, on_interrupt);
-  std::signal(SIGTERM, on_interrupt);
-  const GlfwRun glfw_run;
-  if (!glfw_run.ok()) {
-    return core::Status::unsupported("calib_rig: GLFW will not initialize");
-  }
-  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-  const std::unique_ptr<GLFWwindow, WindowDeleter> window(
-      glfwCreateWindow(config.window.width, config.window.height, "calib_rig",
-                       nullptr, nullptr));
-  if (window == nullptr) {
-    return core::Status::unsupported("calib_rig: GLFW will not open a window");
-  }
-  const core::Status ran = run_window(window.get(), config, preset);
-  std::signal(SIGINT, SIG_DFL);
-  std::signal(SIGTERM, SIG_DFL);
-  return ran;
+  return compute::guarded("calib_rig", [&]() -> core::Status {
+    VKC_ASSIGN(const RigScenario scenario, check_scenario(config));
+    const InterruptHandlers interrupts;
+    const GlfwRun glfw_run;
+    if (!glfw_run.ok()) {
+      return core::Status::unsupported("calib_rig: GLFW will not initialize");
+    }
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    const std::unique_ptr<GLFWwindow, WindowDeleter> window(
+        glfwCreateWindow(config.window.width, config.window.height, "calib_rig",
+                         nullptr, nullptr));
+    if (window == nullptr) {
+      return core::Status::unsupported(
+          "calib_rig: GLFW will not open a window");
+    }
+    return run_window(window.get(), config, scenario);
+  });
 }
 
 }  // namespace volumetric_kit::calib::app

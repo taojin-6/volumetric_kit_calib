@@ -82,10 +82,13 @@ struct CaptureSetup {
   /// The existing directory each session's own directory
   /// (`YYYY-MM-DD_HHMMSS`, `capture::session_stamp`) is created in.
   std::string root;
-  capture::Software software;     ///< What the session was captured with.
-  std::string sync_path;          ///< The rig's sync configuration file.
-  std::size_t reference = 0;      ///< The reference camera, the rig's primary.
-  capture::DepthMode depth_mode;  ///< The rig's depth mode.
+  capture::Software software;  ///< What the session was captured with.
+  std::string sync_path;       ///< The rig's sync configuration file.
+  std::size_t reference = 0;   ///< The reference camera, the rig's primary.
+  /// The rig's depth mode: its name and range. Its unit is the first
+  /// capture's frames' (`CameraFrameCopy::metres_per_unit`), and a later
+  /// capture in another unit fails.
+  capture::DepthMode depth_mode;
   /// The cameras, in rig order, as every capture gives them: each with a
   /// colour model, which the full detection's check takes.
   std::vector<capture::SessionCamera> cameras;
@@ -160,10 +163,11 @@ class VC_APP_API CaptureWorker final : public CaptureSink {
 
   /// @brief Queue a capture.
   /// @param request  The capture, one part per camera, each with its luma
-  ///                 (`width * height` bytes).
+  ///                 (`width * height` bytes) and the one depth unit.
   /// @return `true` once queued; `false`, with nothing queued, when
   ///         @ref full; `InvalidArgument` for a request with a part per
-  ///         camera missing or extra, or a part's luma not its size; or
+  ///         camera missing or extra, a part's luma not its size, or a part
+  ///         without a depth unit or in another unit than the first part; or
   ///         `OutOfMemory`.
   core::Result<bool> submit(CaptureRequest request) override;
 

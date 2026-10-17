@@ -63,6 +63,8 @@ struct CameraFrameCopy {
   /// The depth, a sample per depth pixel, row-major, in the sensor's units
   /// (`RgbdFrame::depth`).
   std::vector<std::uint16_t> depth;
+  /// What one depth unit is (metres): `RgbdFrame::metres_per_unit`.
+  float metres_per_unit = 0.0f;
   std::uint64_t timestamp_ns = 0;  ///< `RgbdFrame::timestamp_ns`.
   std::uint64_t sequence = 0;      ///< `RgbdFrame::sequence`.
   Detection live;  ///< The live (hybrid) detection, for the live-vs-full flag.
@@ -190,7 +192,8 @@ struct LiveOptions {
 /// array on its own thread; a failure there, a sensor's failure while
 /// polling, or anything its thread throws ends it, posting why
 /// (@ref take_errors). A set it cannot read back, or a camera it cannot
-/// detect in, is reported and skipped, and the live view goes on.
+/// detect in, is reported and skipped, and the live view goes on; so does a
+/// camera that is gone (disconnected), reported once.
 ///
 /// @warning The device and allocator the readback uses, and the capture sink,
 ///          must outlive the worker. Release every snapshot before destroying
@@ -251,7 +254,7 @@ class VC_APP_API LiveWorker {
 
   /// @brief Arm a capture: a press, at this moment.
   /// @return `true` once the worker will arm its rule; `false` with no
-  ///         capture sink.
+  ///         capture sink, or once the thread has ended (@ref running).
   bool arm();
 
   /// @brief Search for another board from the next set on, until the first
@@ -280,7 +283,8 @@ class VC_APP_API LiveWorker {
   quality::CaptureDecision decision() const;
 
   /// @brief Take what went wrong since the last call: sets that could not be
-  ///        read back, captures the sink refused, and why the thread ended.
+  ///        read back, captures the sink refused, cameras gone, and why the
+  ///        thread ended.
   /// @return The failures, oldest first.
   std::vector<core::Status> take_errors();
 

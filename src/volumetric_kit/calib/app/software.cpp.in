@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-// Generated from software.cpp.in at configure time
-// (src/volumetric_kit/calib/app/CMakeLists.txt).
+// Generated from software.cpp.in at every build
+// (src/volumetric_kit/calib/app/software.cmake).
 
 #include <opencv2/core/version.hpp>
 
