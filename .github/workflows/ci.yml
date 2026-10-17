@@ -1,0 +1,110 @@
+name: ci
+
+# Umbrella CI. Every build leg, lint and sanitizers fan out from here, and the
+# single `required` job at the bottom succeeds only if all of them did. Branch
+# protection, where main has it, requires just that one check ("ci /
+# required"), so the required list stays stable as legs are added or renamed.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to a PR supersedes its running CI. A push to main never cancels a
+# running main run, but GitHub keeps one pending run per group, so of several
+# quick merges only the newest waiting one runs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Only the owner triggers this repository's workflows, so no job carries a fork
+# guard (the core's DECISIONS.md, "Only the owner triggers CI").
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # Every leg runs on calib's self-hosted runners: calib is private and the
+      # account's hosted minutes are used up, so a hosted job does not start
+      # (DECISIONS.md, 2026-10-16). Ubuntu on the Linux GPU hosts (label
+      # `vk-linux-gpu`), each leg in an OS-matched container, as recon's are,
+      # with no OpenCV (Ubuntu's is 4), no Vulkan and no GPU passed through:
+      # the brain needs none. macOS natively on calib's Mac (label `mac`), on
+      # Homebrew's OpenCV 5. The rig leg is static: shared libraries there
+      # would build core, recon and gfx shared too, which none of them is.
+      #
+      # The Ubuntu legs' build and test levels are set in the container env,
+      # as recon's are: a runner's .env reaches jobs run directly on it (the
+      # Mac) but not a job container. 4 is a 24-core host over calib's 6
+      # runners there.
+      #
+      # While both Linux hosts, or the Mac, are offline, their jobs queue and
+      # `required` waits. Once hosted minutes return, one line moves a job
+      # back to a GitHub-hosted runner, billed again: `runner: ''` on a leg
+      # here, or `runs-on: ubuntu-24.04` in lint.yml, in sanitizers.yml or on
+      # `required`. A Linux job keeps its container there.
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            runner: vk-linux-gpu
+            container: '{"image":"ubuntu:24.04","env":{"CMAKE_BUILD_PARALLEL_LEVEL":"4","CTEST_PARALLEL_LEVEL":"4"}}'
+            build_types: '["Release"]'
+          - os: ubuntu-26.04
+            runner: vk-linux-gpu
+            container: '{"image":"ubuntu:26.04","env":{"CMAKE_BUILD_PARALLEL_LEVEL":"4","CTEST_PARALLEL_LEVEL":"4"}}'
+            build_types: '["Release"]'
+          - os: macos-26
+            runner: mac
+            build_types: '["Debug"]'
+            opencv: true
+            shared: true
+          - os: macos-26
+            runner: mac
+            build_types: '["Release"]'
+            opencv: true
+            rig: true
+    uses: ./.github/workflows/_build.yml
+    with:
+      os: ${{ matrix.os }}
+      runner: ${{ matrix.runner || '' }}
+      container: ${{ matrix.container || '' }}
+      build_types: ${{ matrix.build_types }}
+      opencv: ${{ matrix.opencv || false }}
+      shared: ${{ matrix.shared || false }}
+      rig: ${{ matrix.rig || false }}
+
+  lint:
+    uses: ./.github/workflows/lint.yml
+
+  sanitizers:
+    uses: ./.github/workflows/sanitizers.yml
+
+  required:
+    # The one status check branch protection requires. It passes only when
+    # every build leg, lint and sanitizers succeeded, and FAILS (never skips)
+    # on any other outcome: a skipped required check never reports and would
+    # block every merge.
+    #
+    # It runs on whichever of calib's self-hosted runners, Linux or Mac, is
+    # free (the matrix says why, and how to move it back to a hosted runner).
+    # As it needs every other job, it cannot report while both Linux hosts (the
+    # Ubuntu legs, lint and sanitizers) or the Mac are offline: their jobs
+    # queue until GitHub fails a job queued for 24 hours, and the gate then
+    # reports that failure.
+    needs: [build, lint, sanitizers]
+    if: always()
+    runs-on: self-hosted
+    timeout-minutes: 5
+    steps:
+      - name: Assert every required job succeeded
+        run: |
+          echo "build=${{ needs.build.result }}" \
+               "lint=${{ needs.lint.result }}" \
+               "sanitizers=${{ needs.sanitizers.result }}"
+          if [ "${{ needs.build.result }}" = success ] \
+             && [ "${{ needs.lint.result }}" = success ] \
+             && [ "${{ needs.sanitizers.result }}" = success ]; then
+            echo "All required CI jobs passed."
+          else
+            echo "::error::one or more required CI jobs did not succeed (see results above)"
+            exit 1
+          fi

@@ -73,6 +73,47 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-16 — CI on the family's layout, on calib's own runners
+
+calib's CI takes its siblings' layout: `ci.yml` calls `_build.yml`,
+`lint.yml` and `sanitizers.yml`, and its `required` job passes only when all
+of them did.
+
+- **Every job runs on calib's self-hosted runners**, on the hosts that run
+  recon's and gfx's, registered by the core's
+  [runner tooling](https://github.com/taojin-6/volumetric_kit_core/blob/main/tools/runners/README.md).
+  The macOS legs run on the Mac (label `mac`), at the build and test levels
+  that tooling sets; the Ubuntu legs, lint and sanitizers on the Linux GPU
+  hosts (label `vk-linux-gpu`), each in a bare Ubuntu container that installs
+  what the job uses, with the build jobs' levels in its env, as recon's Linux
+  legs are; and `required` on whichever is free. Why: calib is private, so
+  GitHub bills every hosted minute, macOS at ten times the Linux rate, and
+  with the account's minutes used up (2026-10-17) no hosted job of calib's
+  starts. The cost: while both Linux hosts, or the Mac, are offline, their
+  jobs queue and `required` cannot report. `ci.yml` says how to move a job
+  back to a hosted runner once minutes return. recon's and gfx's jobs can
+  read calib's checkouts and its runners' credentials on a host they share:
+  on the Mac every runner runs as one user, and on the Linux hosts each job
+  container is given the Docker socket, which is root-equivalent. Calib's
+  privacy rests on their owner-only policies (the core's
+  [DECISIONS.md](https://github.com/taojin-6/volumetric_kit_core/blob/main/DECISIONS.md#2026-10-16--calibs-runners-and-each-repositorys-own-share-of-a-host)).
+- **Two Mac legs, both on OpenCV:** Debug with shared libraries, and Release
+  with the rig tiers, whose GPU tests run on the Mac's GPU under the
+  validation layer. Ubuntu 24.04 and 26.04 build Release; Linux Debug is the
+  sanitizer job's.
+- **The Mac's Homebrew is shared**, so a job there installs nothing and fails
+  naming any formula missing; the owner installs it by hand, such as OpenCV.
+  Installing a formula can upgrade its dependencies, which recon's and gfx's
+  CI build against, and the two Mac legs installing at once would collide on
+  Homebrew's locks.
+- **A brew upgrade needs no cache clearing:** the owner upgrades the Mac's
+  Homebrew by hand while CI is idle. Each Mac leg's dependency cache keys on
+  the installed versions of the formulae its build finds, by the core's
+  `homebrew-key` action, so the next run rebuilds the tree once. Why: the
+  core's
+  [DECISIONS.md](https://github.com/taojin-6/volumetric_kit_core/blob/main/DECISIONS.md#a-brew-upgrade-needs-no-cache-clearing).
+- **Protecting `main`** with the `required` check is the owner's choice.
+
 ## 2026-10-16 — Depth checks are calib's kernels
 
 The depth checks' per-pixel work -- each view's board plane, and each

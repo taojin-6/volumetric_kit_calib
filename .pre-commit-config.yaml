@@ -23,6 +23,24 @@ repos:
       - id: cmake-format
         additional_dependencies: [cmakelang, pyyaml]
 
+  # _build.yml's Homebrew key wiring (the core's tools/runners/README.md,
+  # "Upgrading Homebrew"), which no build checks: a deps cache key or
+  # restore-keys prefix without the key would restore a tree built on other
+  # versions after a brew upgrade.
+  - repo: local
+    hooks:
+      - id: deps-cache-keys-carry-homebrew-key
+        name: every deps cache key and restore prefix carries the Homebrew key
+        language: pygrep
+        entry: '^\s*(key: )?deps-(?!.*-brew\$\{\{ steps\.brew\.outputs\.key \|\| ''none'' \}\}-)'
+        files: ^\.github/workflows/_build\.yml$
+      - id: homebrew-key-takes-formulae-list
+        name: the Homebrew key hashes the formulae step's list
+        language: pygrep
+        entry: '^\s+formulae: \$\{\{ steps\.formulae\.outputs\.formulae \}\}$'
+        args: [--negate]
+        files: ^\.github/workflows/_build\.yml$
+
 # pre-commit.ci (https://pre-commit.ci) runs these same hooks on every PR and
 # pushes the auto-fixes back to the branch, so formatting lands even when a
 # contributor has not run `pre-commit install` locally. The repo's required
