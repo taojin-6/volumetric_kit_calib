@@ -1,0 +1,143 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Tao Jin
+
+#version 450
+
+// One round's planes, one workgroup per region: the region's workgroup slots
+// summed in a fixed order -- thread t takes slots t, t + 256, ... in turn,
+// then the tree in vc_sum_workgroup -- and one invocation solving the plane.
+//
+// The plane is the inliers' least-squares plane: through their centroid,
+// normal to the direction their covariance spreads least, which a cyclic
+// Jacobi solve of the 3 x 3 covariance finds; their RMS distance from it is
+// the square root of that spread. It is valid with at least min_inliers
+// inliers whose spread is least in one direction alone: the middle spread
+// exceeds the least by more than VC_PLANE_FLAT of the greatest, clear of the
+// float solve's rounding, so inliers on one line fit no plane. Its gate, the
+// next round's half-width, is max(min_gate, sigma_gate * rms).
+//
+// Round 1 leaves round 0's record when round 0 fitted no plane, so its counts
+// are what that round found.
+
+#extension GL_GOOGLE_include_directive : require
+#include "volumetric_kit/calib/depth/shaders/plane_common.glsl"
+
+layout(local_size_x = VC_PLANE_LOCAL_SIZE) in;
+
+layout(set = 0, binding = 0, std430) readonly buffer Regions {
+  Region regions[];
+};
+layout(set = 0, binding = 1, std430) readonly buffer Partials {
+  Partial partials[];
+};
+layout(set = 0, binding = 2, std430) buffer Fits { Fit fits[]; };
+
+layout(push_constant, std430) uniform Params {
+  uint round;        // 0 or 1
+  uint min_inliers;  // at least 3
+  float min_gate;    // metres
+  float sigma_gate;
+} pc;
+
+// Sweeps of vc_jacobi3: a 3 x 3 converges in a few; the rest are no-ops.
+#define VC_JACOBI_SWEEPS 8
+// How far the middle spread must exceed the least, in the greatest.
+#define VC_PLANE_FLAT 1e-5
+
+// Cyclic Jacobi on the symmetric `a`: plane rotations, over (0, 1), (0, 2)
+// and (1, 2) in turn, each zeroing its off-diagonal pair. On return, `a` is
+// diagonal, holding the eigenvalues, and column i of `v` is the eigenvector
+// of a[i][i].
+void vc_jacobi3(inout mat3 a, out mat3 v) {
+  v = mat3(1.0);
+  for (int sweep = 0; sweep < VC_JACOBI_SWEEPS; ++sweep) {
+    for (int pair = 0; pair < 3; ++pair) {
+      int p = pair == 2 ? 1 : 0;
+      int q = pair == 0 ? 1 : 2;
+      float apq = a[q][p];
+      if (apq == 0.0) {
+        continue;
+      }
+      // tan of the rotation, the smaller root of t^2 + 2 theta t - 1 = 0;
+      // 1 when theta is 0, and 0 when theta^2 overflows.
+      float theta = (a[q][q] - a[p][p]) / (2.0 * apq);
+      float t = (theta >= 0.0 ? 1.0 : -1.0) /
+                (abs(theta) + sqrt(theta * theta + 1.0));
+      float c = 1.0 / sqrt(t * t + 1.0);
+      float s = t * c;
+      mat3 j = mat3(1.0);
+      j[p][p] = c;
+      j[q][q] = c;
+      j[q][p] = s;
+      j[p][q] = -s;
+      a = transpose(j) * a * j;
+      a[q][p] = 0.0;
+      a[p][q] = 0.0;
+      v = v * j;
+    }
+  }
+}
+
+void main() {
+  uint region = gl_WorkGroupID.x;
+  uint lid = gl_LocalInvocationID.x;
+  Region r = regions[region];
+  uint counts[3] = uint[3](0u, 0u, 0u);
+  float m[9] = float[9](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  for (uint slot = lid; slot < r.groups; slot += VC_PLANE_LOCAL_SIZE) {
+    Partial p = partials[r.first_partial + slot];
+    for (uint j = 0u; j < 3u; ++j) {
+      counts[j] += p.counts[j];
+    }
+    for (uint j = 0u; j < 9u; ++j) {
+      m[j] += p.moments[j];
+    }
+  }
+  vc_sum_workgroup(lid, counts, m);
+  if (lid != 0u) {
+    return;
+  }
+
+  Fit previous = fits[region];
+  if (pc.round != 0u && previous.valid == 0u) {
+    return;
+  }
+  Fit fit;
+  fit.point = vec3(0.0);
+  fit.rms = 0.0;
+  fit.normal = vec3(0.0);
+  fit.valid = 0u;
+  fit.members = counts[0];
+  fit.out_of_range = counts[1];
+  fit.inliers = counts[2];
+  fit.gate = 0.0;
+  if (counts[2] >= pc.min_inliers) {
+    float n = float(counts[2]);
+    vec3 mean = vec3(m[0], m[1], m[2]) / n;
+    mat3 a = mat3(m[3], m[4], m[5], m[4], m[6], m[7], m[5], m[7], m[8]) / n -
+             outerProduct(mean, mean);
+    mat3 v;
+    vc_jacobi3(a, v);
+    vec3 e = vec3(a[0][0], a[1][1], a[2][2]);
+    // The least spread, then the greatest of the other two, leaves the
+    // middle one; ties go to the lower index.
+    uint lo = 0u;
+    if (e[1] < e[lo]) lo = 1u;
+    if (e[2] < e[lo]) lo = 2u;
+    uint hi = lo == 0u ? 1u : 0u;
+    for (uint i = 0u; i < 3u; ++i) {
+      if (i != lo && e[i] > e[hi]) hi = i;
+    }
+    uint mid = 3u - lo - hi;
+    // Written so a NaN fails it.
+    if (e[mid] - e[lo] > VC_PLANE_FLAT * e[hi]) {
+      vec3 normal = normalize(v[lo]);
+      fit.normal = normal.z < 0.0 ? -normal : normal;
+      fit.rms = sqrt(max(e[lo], 0.0));
+      fit.point = vc_reference(pc.round, r, previous) + mean;
+      fit.gate = max(pc.min_gate, pc.sigma_gate * fit.rms);
+      fit.valid = 1u;
+    }
+  }
+  fits[region] = fit;
+}

@@ -17,9 +17,9 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > `VC_WITH_OPENCV`, do the `compute` tier's OpenCV bridge, the `detect` tier's
 > board detection, the `solve` tier's rig solve and the `quality` tier's live
 > checks and solved-rig metrics; with `VC_WITH_RIG`, the `capture` tier's
-> session writer; and, with both, the `viz` tier's live view. The depth
-> checks' device kernels and the color and app tiers are not yet implemented;
-> the legacy `camera_calibration` Python
+> session writer; and, with both, the `viz` tier's live view and the `depth`
+> tier's board-plane fit. The depth agreement's kernels and the color and app
+> tiers are not yet implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain the
 > reference oracle.
 
@@ -29,10 +29,12 @@ constraints and open GPU-backend choice without publishing the local design.
 
 ## Architecture (tiered)
 
-`core` → `compute` → {`detect`, `solve`, `color`} → `quality` → `viz` → `app`
-(+ `capture` off `core`). A tier may depend only on tiers to its left. The
-headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no**
-`volumetric_kit_gfx` dependency; only the `viz`/`app` tiers pull in the renderer.
+`core` → `compute` → {`detect`, `solve`, `color`} → `quality` →
+{`depth`, `viz`} → `app` (+ `capture` off `core`). A tier may depend only on
+tiers to its left. The headless "brain"
+(`core`+`compute`+`detect`+`solve`+`quality`) builds with **no**
+`volumetric_kit_gfx` dependency; only the `viz`/`app` tiers pull in the
+renderer.
 
 - **Shared core:** every tier builds on
   [`volumetric_kit_core`](https://github.com/taojin-6/volumetric_kit_core), the
@@ -86,6 +88,11 @@ headless "brain" (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no*
   scale and plane from each view's depth, each ordered pair's depth
   agreement, and their verdicts
   ([DECISIONS.md](DECISIONS.md#2026-10-16--depth-checks-the-hosts-geometry-over-the-devices-results)).
+- **Depth:** the depth checks' device side, on the core's vulkan tier: each
+  view's board plane fitted on the GPU to its camera's depth where recon's
+  frame preparation left it, in two gated rounds in one submit, for any number
+  of cameras, with 48 bytes per view read back
+  ([DECISIONS.md](DECISIONS.md#2026-10-16--depth-checks-are-calibs-kernels)).
 - **Viz:** the live view, on `volumetric_kit_gfx`. Each camera's decoded
   picture is copied on the device into its tile of one mosaic, for any number
   of cameras, panned and zoomed as one view, with the corners, markers and
@@ -116,9 +123,9 @@ whose packages are OpenCV 4, one you build yourself. `VC_WITH_RIG` (OFF by
 default) builds `capture`, over all of recon, which needs the Vulkan SDK and
 a GLSL compiler: the core's vulkan tier
 [prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
-With both, it builds `viz` too, which fetches `volumetric_kit_gfx` (pinned by
-commit). To build against a local core, recon or gfx checkout instead of
-the pinned one, pass
+With both, it builds `depth` and `viz` too; `viz` fetches `volumetric_kit_gfx`
+(pinned by commit). To build against a local core, recon or gfx checkout
+instead of the pinned one, pass
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>`,
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>` or
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_GFX=<path>`.

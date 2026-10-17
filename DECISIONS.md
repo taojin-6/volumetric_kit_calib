@@ -73,6 +73,39 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-16 — Depth checks are calib's kernels
+
+The depth checks' per-pixel work runs in calib's own `depth` tier
+(`depth/depth_checks.hpp`), the device half of the entry below.
+
+- **A tier of calib's own.** `depth` sits beside `viz` (`quality` →
+  {`depth`, `viz`}), built with `VC_WITH_RIG` and `VC_WITH_OPENCV`, and links
+  `calib_quality` and `core_vulkan` alone: `DepthImage` is what it reads of
+  recon's `DeviceFrame`, which the application maps, so it names no sensor
+  type and nothing of gfx. Its device requirements are the core's compute
+  baseline (std430 blocks, no float64, no subgroups), so it adds nothing to a
+  rig's device.
+- **In place.** The kernels bind recon's prepared depth buffers where they
+  are, on recon's queue family; each region's block goes up and 48 bytes come
+  back.
+- **One pinhole, one region rule.** The kernels include recon's exported
+  `pinhole.glsl` (recon pinned at or after its #245), and `board_region.glsl`
+  is `in_board_region` on the device, which a test kernel holds to the host's
+  pixel by pixel.
+- **A deterministic fit, not RANSAC**, seeded by the solved board: the points
+  within `seed_mm` of it, then within `max(min_gate_mm, sigma_gate rms)` of
+  that plane, each round a least-squares plane by a cyclic Jacobi solve, both
+  in one submit. The moments are float, so they are taken in the board's
+  frame about a point near the inliers (the rectangle's centre on the solved
+  board, then round 0's centroid), and summed in a fixed order -- a
+  shared-memory tree into each workgroup's slot, then a fixed walk of the
+  slots, with no float atomics -- so the same depth gives the same plane to
+  the bit.
+- **Too little is a result, not an error.** Too few inliers, or inliers on
+  one line, give a plane that is not valid, with its counts, for the verdicts
+  to call insufficient. The options and regions are refused by the public
+  checks `board_region` and `board_depth_check` run.
+
 ## 2026-10-16 — Depth checks: the host's geometry over the device's results
 
 calib measures the depth; recon only prepares it, and gfx draws it

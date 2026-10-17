@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Tao Jin
+
+#version 450
+
+// The board region's rule on the device (calib_depth's board_region.glsl),
+// each pixel's answer written out, for depth_plane_fit_test to hold to
+// quality::in_board_region pixel by pixel.
+
+#extension GL_GOOGLE_include_directive : require
+#include "volumetric_kit/calib/depth/shaders/board_region.glsl"
+
+layout(local_size_x = 64) in;
+
+layout(set = 0, binding = 0, std430) readonly buffer Case {
+  mat4 depth_to_board;
+  vec4 k;     // fx, fy, cx, cy
+  vec4 rect;  // min.x, min.y, max.x, max.y
+  uvec2 size;
+} c;
+// 1 for a member, 0 otherwise, row-major.
+layout(set = 0, binding = 1, std430) writeonly buffer Members {
+  uint members[];
+};
+
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  if (i >= c.size.x * c.size.y) {
+    return;
+  }
+  uvec2 pixel = uvec2(i % c.size.x, i / c.size.x);
+  members[i] = vc_board_member(pixel, c.k, c.depth_to_board, c.rect) ? 1u : 0u;
+}

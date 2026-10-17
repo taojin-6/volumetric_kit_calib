@@ -25,6 +25,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The `depth` tier, `volumetric_kit::calib_depth`, built with `VC_WITH_RIG`
+  and `VC_WITH_OPENCV` (DECISIONS.md, 2026-10-16, "Depth checks are calib's
+  kernels"): `DepthChecks::fit_planes` fits each view's board plane on the
+  GPU to its camera's depth, read in place (`DepthImage`, `PlaneRegion`), in
+  two gated rounds in one submit, for any number of cameras;
+  `DepthChecks::device_requirements` is the core's compute baseline.
+  `DepthCheckOptions` gains the fit's `seed_mm`, `min_gate_mm`, `sigma_gate`
+  and `min_inliers`, which `report.json` records; `check_depth_options` and
+  `check_board_region` are the checks each depth step runs.
 - The depth checks' host geometry and verdicts (DECISIONS.md, 2026-10-16,
   "Depth checks"): `quality::board_region`, the depth pixels a view's plane
   fit takes, and `in_board_region`, its rule; `board_depth_check`, a view's
@@ -109,7 +118,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `initialise` places the board of a capture whose views are all ambiguous,
   from those views, so the adjustment takes them.
-- recon's camera tier is pinned at `2f8d6ea` (recon main, with its #228).
+- recon is pinned at `bdbe26e` (recon main, with its #228, and its #245,
+  whose exported `pinhole.glsl` the depth tier's kernels include).
   `cv_pose` now converts through recon's `rodrigues_from_matrix`, accurate
   where `cv::Rodrigues` returns zero (below about 1e-5 rad).
 - calib requires `volumetric_kit_core` 0.6.1 or newer (was 0.1.0), with its

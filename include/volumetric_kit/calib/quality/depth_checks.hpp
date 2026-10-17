@@ -42,13 +42,18 @@ inline constexpr double kDepthInsetM = 0.02;
 /// (@ref DepthCheckOptions::min_overlap).
 inline constexpr std::size_t kMinOverlap = 1000;
 
-// TODO: The verdict bounds are first values, to be set from a real session
-// (H5). CA8b and CA8c add their kernels' settings here, to check_options and
-// to report.json's depth.settings (results.cpp's depth_section).
+/// The fewest inliers a plane is fitted from unless told otherwise
+/// (@ref DepthCheckOptions::min_inliers).
+inline constexpr std::size_t kMinPlaneInliers = 100;
+
+// TODO: The verdict bounds and the fit's gates are first values, to be set
+// from a real session (H5). CA8c adds its kernels' settings here, to
+// check_depth_options and to report.json's depth.settings (results.cpp's
+// depth_section).
 /// @brief The depth checks' settings, one object for every step: the region
-///        each plane fit takes, the verdicts' bounds, and what the report
-///        records. Give the same to @ref board_region and
-///        @ref summarize_depth_checks.
+///        each plane fit takes, the fit's gates, the verdicts' bounds, and
+///        what the report records. Give the same to @ref board_region, to
+///        the depth tier's kernels and to @ref summarize_depth_checks.
 ///
 /// @code
 /// DepthCheckOptions options;
@@ -58,6 +63,17 @@ struct DepthCheckOptions {
   /// How far inside the chessboard's outer edge the board region stays
   /// (metres, @ref board_region); finite and not negative.
   double inset_m = kDepthInsetM;
+  /// The plane fit's first round takes the region's depth points within
+  /// this of the solved board's plane (millimetres).
+  double seed_mm = 30.0;
+  /// Its second round takes those within `max(min_gate_mm, sigma_gate rms)`
+  /// of the first round's plane, `rms` being the first round's RMS distance
+  /// from it (millimetres).
+  double min_gate_mm = 5.0;
+  double sigma_gate = 3.0;  ///< See @ref min_gate_mm.
+  /// The fewest inliers a plane is fitted from (@ref DepthPlane::valid); at
+  /// least 3.
+  std::size_t min_inliers = kMinPlaneInliers;
   /// The fewest samples a pair is judged on (@ref PairCheck::verdict); at
   /// least 1.
   std::size_t min_overlap = kMinOverlap;
@@ -74,6 +90,22 @@ struct DepthCheckOptions {
   /// A pair's bound on its median magnitude (millimetres).
   double max_median_abs_mm = 10.0;
 };
+
+/// @brief Whether @p options are in range: the inset finite and not
+///        negative, `min_overlap` at least 1, `min_inliers` at least 3, and
+///        every other setting positive and finite.
+///
+/// What every step that takes the options refuses, as its own refusal.
+/// @param options  The settings.
+/// @return OK; or `InvalidArgument` naming the first setting out of range,
+///         e.g. `options.seed_mm must be positive and finite`; or
+///         `OutOfMemory`.
+///
+/// @code
+/// VKC_TRY(check_depth_options(options).with_context("fit_planes"));
+/// @endcode
+VC_QUALITY_API core::Status check_depth_options(
+    const DepthCheckOptions& options);
 
 /// @brief The depth pixels one view's plane fit takes: those whose ray meets
 ///        the solved board's plane inside its chessboard, inset.
@@ -116,6 +148,17 @@ VC_QUALITY_API core::Result<BoardRegion> board_region(
     const compute::Board& board, const recon::camera::Mat4d& board_to_color,
     const recon::camera::Mat4d& depth_to_color,
     const DepthCheckOptions& options = {});
+
+/// @brief Whether @p region is one a plane can be fitted in: both transforms
+///        rigid (recon's `check_rigid`), and its rectangle finite and not
+///        empty.
+/// @param region  The region.
+/// @return OK; or `InvalidArgument` naming what is wrong; or `OutOfMemory`.
+///
+/// @code
+/// VKC_TRY(check_board_region(region).with_context("fit_planes"));
+/// @endcode
+VC_QUALITY_API core::Status check_board_region(const BoardRegion& region);
 
 /// @brief Whether a depth camera's ray belongs to @p region: it meets the
 ///        board's plane in front of the camera, inside the inset rectangle

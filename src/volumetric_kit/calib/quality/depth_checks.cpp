@@ -57,25 +57,6 @@ std::optional<double> meet(const Vec3d& direction, const Vec3d& point,
   return s;
 }
 
-core::Status check_region(const BoardRegion& region) {
-  core::Status rigid = camera::check_rigid(region.board_to_color);
-  if (!rigid.ok()) {
-    return std::move(rigid).with_context("the region's board_to_color");
-  }
-  rigid = camera::check_rigid(region.depth_to_board);
-  if (!rigid.ok()) {
-    return std::move(rigid).with_context("the region's depth_to_board");
-  }
-  // Written so a NaN fails it; an infinity fails the size's finiteness.
-  if (!(region.min.x < region.max.x && region.min.y < region.max.y) ||
-      !std::isfinite(region.max.x - region.min.x) ||
-      !std::isfinite(region.max.y - region.min.y)) {
-    return core::Status::invalid_argument(
-        "the region's rectangle must be finite and not empty");
-  }
-  return {};
-}
-
 core::Status check_plane(const DepthPlane& plane) {
   if (plane.inliers > plane.members ||
       plane.out_of_range > plane.members - plane.inliers) {
@@ -134,29 +115,6 @@ DepthVerdict pair_verdict(const PairAgreement& pair,
              : DepthVerdict::Off;
 }
 
-core::Status check_options(const DepthCheckOptions& options) {
-  if (!(options.inset_m >= 0.0) || !std::isfinite(options.inset_m)) {
-    return core::Status::invalid_argument(
-        "options.inset_m must be finite and not negative");
-  }
-  if (options.min_overlap < 1) {
-    return core::Status::invalid_argument(
-        "options.min_overlap must be at least 1");
-  }
-  for (const auto& [name, bound] :
-       {std::pair{"max_scale_error", options.max_scale_error},
-        std::pair{"max_offset_mm", options.max_offset_mm},
-        std::pair{"max_angle_deg", options.max_angle_deg},
-        std::pair{"max_signed_median_mm", options.max_signed_median_mm},
-        std::pair{"max_median_abs_mm", options.max_median_abs_mm}}) {
-    if (!(bound > 0.0) || !std::isfinite(bound)) {
-      return core::Status::invalid_argument(std::string("options.") + name +
-                                            " must be positive and finite");
-    }
-  }
-  return {};
-}
-
 std::string pair_name(const PairAgreement& pair) {
   std::string name = "the pair from camera " + std::to_string(pair.from) +
                      " to camera " + std::to_string(pair.to);
@@ -195,6 +153,59 @@ std::vector<PairCheck> every_pair(
 
 }  // namespace
 
+core::Status check_depth_options(const DepthCheckOptions& options) {
+  return compute::guarded("check_depth_options", [&]() -> core::Status {
+    if (!(options.inset_m >= 0.0) || !std::isfinite(options.inset_m)) {
+      return core::Status::invalid_argument(
+          "options.inset_m must be finite and not negative");
+    }
+    if (options.min_overlap < 1) {
+      return core::Status::invalid_argument(
+          "options.min_overlap must be at least 1");
+    }
+    if (options.min_inliers < 3) {
+      return core::Status::invalid_argument(
+          "options.min_inliers must be at least 3");
+    }
+    for (const auto& [name, bound] :
+         {std::pair{"seed_mm", options.seed_mm},
+          std::pair{"min_gate_mm", options.min_gate_mm},
+          std::pair{"sigma_gate", options.sigma_gate},
+          std::pair{"max_scale_error", options.max_scale_error},
+          std::pair{"max_offset_mm", options.max_offset_mm},
+          std::pair{"max_angle_deg", options.max_angle_deg},
+          std::pair{"max_signed_median_mm", options.max_signed_median_mm},
+          std::pair{"max_median_abs_mm", options.max_median_abs_mm}}) {
+      if (!(bound > 0.0) || !std::isfinite(bound)) {
+        return core::Status::invalid_argument(std::string("options.") + name +
+                                              " must be positive and finite");
+      }
+    }
+    return {};
+  });
+}
+
+core::Status check_board_region(const BoardRegion& region) {
+  return compute::guarded("check_board_region", [&]() -> core::Status {
+    core::Status rigid = camera::check_rigid(region.board_to_color);
+    if (!rigid.ok()) {
+      return std::move(rigid).with_context("the region's board_to_color");
+    }
+    rigid = camera::check_rigid(region.depth_to_board);
+    if (!rigid.ok()) {
+      return std::move(rigid).with_context("the region's depth_to_board");
+    }
+    // Written so a NaN fails it; an infinity fails the size's finiteness.
+    if (!(region.min.x < region.max.x && region.min.y < region.max.y) ||
+        !std::isfinite(region.max.x - region.min.x) ||
+        !std::isfinite(region.max.y - region.min.y)) {
+      return core::Status::invalid_argument(
+          "the region's rectangle must be finite and not empty");
+    }
+    return {};
+  });
+}
+
 core::Result<BoardRegion> board_region(const compute::Board& board,
                                        const Mat4d& board_to_color,
                                        const Mat4d& depth_to_color,
@@ -211,7 +222,7 @@ core::Result<BoardRegion> board_region(const compute::Board& board,
       return std::move(rigid).with_context(std::string(kWhat) +
                                            ": depth_to_color");
     }
-    core::Status checked = check_options(options);
+    core::Status checked = check_depth_options(options);
     if (!checked.ok()) return std::move(checked).with_context(kWhat);
     // The chessboard spans twice its centre, from the board frame's origin:
     // an inset leaves some of it while short of the centre on either side.
@@ -260,7 +271,7 @@ core::Result<BoardDepthCheck> board_depth_check(
           ", which the rig does not have");
     }
     const auto c = static_cast<std::size_t>(named - rig->ids.begin());
-    core::Status checked = check_region(region);
+    core::Status checked = check_board_region(region);
     if (checked.ok()) checked = check_plane(plane);
     if (!checked.ok()) return std::move(checked).with_context(kWhat);
     const std::size_t corners = board.object_points().size();
@@ -349,7 +360,7 @@ core::Result<DepthSummary> summarize_depth_checks(
       return core::Status::invalid_argument(std::string(kWhat) + ": " + why);
     };
     if (cameras == 0) return refuse("the rig has no cameras");
-    core::Status checked = check_options(options);
+    core::Status checked = check_depth_options(options);
     if (!checked.ok()) return std::move(checked).with_context(kWhat);
 
     DepthSummary out;
