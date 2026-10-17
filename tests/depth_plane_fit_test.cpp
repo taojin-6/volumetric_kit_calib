@@ -26,8 +26,6 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <memory>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -37,11 +35,11 @@
 #include <opencv2/core.hpp>
 
 #include "board_member_cases_comp.spv.hpp"
+#include "depth_fixture.hpp"
 #include "depth_scene.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
-#include "volumetric_kit/core/testing/vulkan_fixture.hpp"
 #include "volumetric_kit/core/vulkan/allocator.hpp"
 #include "volumetric_kit/core/vulkan/command_batch.hpp"
 #include "volumetric_kit/core/vulkan/compute_kernel.hpp"
@@ -60,48 +58,27 @@ using quality::BoardRegion;
 using quality::DepthCheckOptions;
 using quality::DepthPlane;
 using test::binned;
+using test::check;
+using test::expect_refused;
 using test::hit_box;
 using test::hit_plane;
+using test::kMaxDepth;
+using test::kMinDepth;
+using test::measured;
 using test::nfov;
 using test::Pinhole;
 using test::Plane;
 using test::ray_of;
 using test::render;
+using test::rotation;
 using test::Surface;
+using test::value_of;
 using test::wide;
-using Code = core::Status::Code;
 
-constexpr double kPi = 3.14159265358979323846;
 constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
 // How near the inset outline, or a gate, float and double may decide apart
 // (metres): ten times the float arithmetic's error a few metres out.
 constexpr double kBand = 1e-5;
-// The prepared depth's range in these tests (metres).
-constexpr double kMinDepth = 0.25;
-constexpr double kMaxDepth = 6.0;
-
-template <class T>
-T value_of(core::Result<T> result) {
-  if (!result.ok()) throw std::runtime_error(result.status().message());
-  return *std::move(result);
-}
-
-void check(const core::Status& status) {
-  if (!status.ok()) throw std::runtime_error(status.message());
-}
-
-// `status` is an InvalidArgument starting `prefix` and saying `says`.
-void expect_refused(const core::Status& status, const std::string& prefix,
-                    const std::string& says) {
-  EXPECT_EQ(status.domain(), Code::InvalidArgument) << says;
-  EXPECT_EQ(status.message().rfind(prefix + ": ", 0), 0u) << status.message();
-  EXPECT_NE(status.message().find(says), std::string::npos) << status.message();
-}
-
-Mat3d rotation(const Vec3d& axis, double deg) {
-  return camera::rotation_from_rodrigues(glm::normalize(axis) * deg * kPi /
-                                         180.0);
-}
 
 // A depth camera 3 cm beside its colour camera, turned 5.5 degrees down.
 Mat4d depth_to_color() {
@@ -258,7 +235,7 @@ Reference reference_fit(const View& view, const DepthCheckOptions& options) {
       if (!quality::in_board_region(region, ray)) continue;
       ++members;
       const double z = view.depth[std::size_t{v} * p.size.width + u];
-      if (!(z > 0.0 && z >= kMinDepth && z <= kMaxDepth)) {
+      if (!measured(z)) {
         ++out_of_range;
         continue;
       }
@@ -330,34 +307,8 @@ static_assert(sizeof(MemberCase) == 104 && offsetof(MemberCase, k) == 64 &&
                   offsetof(MemberCase, size) == 96,
               "mirrors Case in shaders/board_member_cases.comp");
 
-class PlaneFitTest : public core::test::VulkanDeviceTest {
+class PlaneFitTest : public test::DepthChecksTest {
  protected:
-  // The batch's barriers are the core's; synchronization validation checks
-  // what the kernels bind against them, wherever the layer is installed.
-  core::test::Validation validation() const override {
-    return core::test::Validation::Sync;
-  }
-
-  void SetUp() override {
-    VulkanDeviceTest::SetUp();
-    if (base_setup_incomplete()) return;
-    core::Result<std::unique_ptr<DepthChecks>> checks =
-        DepthChecks::create(device(), allocator());
-    ASSERT_TRUE(checks.ok()) << checks.status().message();
-    checks_ = *std::move(checks);
-  }
-
-  // `depth` on the device, as recon's frame preparation leaves a frame's.
-  core::Buffer upload(const std::vector<float>& depth) {
-    const VkDeviceSize bytes = depth.size() * sizeof(float);
-    core::Buffer buffer =
-        value_of(core::device_storage_buffer(allocator(), bytes));
-    core::CommandBatch batch(device(), allocator());
-    check(batch.upload(buffer, 0, depth.data(), bytes));
-    check(batch.submit());
-    return buffer;
-  }
-
   // `view`'s fit, its depth in `buffer`.
   static PlaneRegion region_of(const View& view, const core::Buffer& buffer) {
     PlaneRegion region;
@@ -420,8 +371,6 @@ class PlaneFitTest : public core::test::VulkanDeviceTest {
     check(batch.submit());
     return members;
   }
-
-  std::unique_ptr<DepthChecks> checks_;
 };
 
 TEST(DepthChecksRequirements, AreTheCoresComputeBaselineAlone) {

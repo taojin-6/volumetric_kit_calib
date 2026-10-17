@@ -15,7 +15,6 @@
 #include <limits>
 #include <optional>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,6 +22,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include "result_checks.hpp"
 #include "synthetic_scene.hpp"
 #include "volumetric_kit/recon/camera/array_calibration.hpp"
 
@@ -30,14 +30,9 @@ namespace volumetric_kit::calib::quality {
 namespace {
 
 namespace camera = recon::camera;
+using test::value_of;
 using Code = core::Status::Code;
 using json = nlohmann::json;
-
-template <class T>
-T value_of(core::Result<T> result) {
-  if (!result.ok()) throw std::runtime_error(result.status().message());
-  return *std::move(result);
-}
 
 // One solved scene, with outliers so that something is left out by the
 // adjustment and by initialise, measured with options not the defaults.

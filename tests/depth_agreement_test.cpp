@@ -26,17 +26,17 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
 
+#include "depth_fixture.hpp"
 #include "depth_scene.hpp"
 #include "volumetric_kit/calib/depth/depth_checks.hpp"
-#include "volumetric_kit/core/testing/vulkan_fixture.hpp"
 #include "volumetric_kit/core/vulkan/allocator.hpp"
 #include "volumetric_kit/core/vulkan/command_batch.hpp"
 #include "volumetric_kit/core/vulkan/compute_util.hpp"
@@ -52,60 +52,46 @@ using camera::Vec3d;
 using quality::DepthCheckOptions;
 using quality::PairAgreement;
 using test::binned;
+using test::check;
+using test::expect_refused;
 using test::hit_box;
 using test::hit_plane;
+using test::kMaxDepth;
+using test::kMinDepth;
+using test::measured;
 using test::nfov;
 using test::Pinhole;
 using test::ray_of;
 using test::render;
+using test::rotation;
 using test::Surface;
+using test::value_of;
 using test::wide;
-using Code = core::Status::Code;
 
-constexpr double kPi = 3.14159265358979323846;
-// The prepared depth's range in these tests (metres).
-constexpr double kMinDepth = 0.25;
-constexpr double kMaxDepth = 6.0;
 // How near a threshold float and double may decide apart: in pixels (the
 // image's edge, a pixel's half), metres (the edge gate) and bins.
 constexpr double kPixelBand = 2e-4;
 constexpr double kDepthBand = 1e-5;
 constexpr double kBinBand = 0.02;
 
-template <class T>
-T value_of(core::Result<T> result) {
-  if (!result.ok()) throw std::runtime_error(result.status().message());
-  return *std::move(result);
-}
-
-void check(const core::Status& status) {
-  if (!status.ok()) throw std::runtime_error(status.message());
-}
-
-// `status` is an InvalidArgument starting `prefix` and saying `says`.
-void expect_refused(const core::Status& status, const std::string& prefix,
-                    const std::string& says) {
-  EXPECT_EQ(status.domain(), Code::InvalidArgument) << says;
-  EXPECT_EQ(status.message().rfind(prefix + ": ", 0), 0u) << status.message();
-  EXPECT_NE(status.message().find(says), std::string::npos) << status.message();
-}
-
 std::size_t apart(std::size_t a, std::size_t b) {
   return a > b ? a - b : b - a;
 }
 
-Mat3d rotation(const Vec3d& axis, double deg) {
-  return camera::rotation_from_rodrigues(glm::normalize(axis) * deg * kPi /
-                                         180.0);
-}
-
-// A camera of a rig: its depth's pinhole, its depth, and where its depth
-// camera is in the scene.
+// A camera of a rig: its depth's pinhole, its depth, where its depth camera
+// is in the scene, and its depth's range.
 struct Camera {
   Pinhole pinhole;
   std::vector<float> depth;
   Mat4d depth_to_world{1.0};
+  double min_depth = kMinDepth;
+  double max_depth = kMaxDepth;
 };
+
+// Whether `cam` measured depth `z`, by the kernels' rule.
+bool measured_by(const Camera& cam, double z) {
+  return measured(z, cam.min_depth, cam.max_depth);
+}
 
 // A depth camera at `eye` looking at `target`, its x axis square to the
 // scene's y (down), then turned `roll_deg` about its axis.
@@ -143,7 +129,8 @@ Camera rig_camera(std::size_t c, std::size_t count, const Surface& surface) {
   const Pinhole pinholes[] = {nfov(), binned(), nfov(), wide(), nfov()};
   const double rolls[] = {0.0, 90.0, 12.0, -20.0, 35.0};
   const double t = static_cast<double>(c);
-  const double a = 2.0 * kPi * t / static_cast<double>(count) + 0.4;
+  const double a =
+      2.0 * glm::pi<double>() * t / static_cast<double>(count) + 0.4;
   const Vec3d eye(0.45 + 0.4 * std::cos(a), -0.3 + 0.3 * std::sin(a),
                   -1.9 - 0.1 * t);
   const Vec3d target(0.03 * t - 0.05, 0.02 * t - 0.03, 0.0);
@@ -171,9 +158,6 @@ Camera same_pose(std::vector<float> depth, std::uint32_t height = kHeight) {
   return cam;
 }
 
-// The device's rule for a measured depth.
-bool measured(double z) { return z > 0.0 && z >= kMinDepth && z <= kMaxDepth; }
-
 // Whether pixel (u, v) of `cam`, of measured depth `z`, is at an edge by
 // `ratio`; sets `near` when a neighbour's step lies within kDepthBand of the
 // limit.
@@ -185,7 +169,7 @@ bool at_edge(const Camera& cam, std::uint32_t u, std::uint32_t v, double z,
   bool edge = false;
   const auto step = [&](std::uint32_t x, std::uint32_t y) {
     const double n = cam.depth[std::size_t{y} * w + x];
-    if (!measured(n)) return;
+    if (!measured_by(cam, n)) return;
     const double d = std::abs(n - z);
     if (std::abs(d - limit) < kDepthBand) near = true;
     if (d > limit) edge = true;
@@ -234,7 +218,8 @@ Reference reference_pair(const Camera& from, const Camera& to,
     for (std::uint32_t u = 0; u < p.size.width; u += options.agreement_stride) {
       bool near = false;
       const double z = from.depth[std::size_t{v} * p.size.width + u];
-      if (!measured(z) || at_edge(from, u, v, z, options.edge_ratio, near)) {
+      if (!measured_by(from, z) ||
+          at_edge(from, u, v, z, options.edge_ratio, near)) {
         out.band += near ? 1 : 0;
         continue;
       }
@@ -254,7 +239,7 @@ Reference reference_pair(const Camera& from, const Camera& to,
       const auto tv = std::min(static_cast<std::uint32_t>(std::floor(y + 0.5)),
                                t.size.height - 1);
       const double there = to.depth[std::size_t{tv} * t.size.width + tu];
-      if (!measured(there) ||
+      if (!measured_by(to, there) ||
           at_edge(to, tu, tv, there, options.edge_ratio, near)) {
         out.band += near ? 1 : 0;
         continue;
@@ -406,41 +391,15 @@ std::vector<float> smooth(std::size_t c, std::size_t k,
   return depth;
 }
 
-class AgreementTest : public core::test::VulkanDeviceTest {
+class AgreementTest : public test::DepthChecksTest {
  protected:
-  // The batch's barriers are the core's; synchronization validation checks
-  // what the kernels bind against them, wherever the layer is installed.
-  core::test::Validation validation() const override {
-    return core::test::Validation::Sync;
-  }
-
-  void SetUp() override {
-    VulkanDeviceTest::SetUp();
-    if (base_setup_incomplete()) return;
-    core::Result<std::unique_ptr<DepthChecks>> checks =
-        DepthChecks::create(device(), allocator());
-    ASSERT_TRUE(checks.ok()) << checks.status().message();
-    checks_ = *std::move(checks);
-  }
-
-  // `depth` on the device, as recon's frame preparation leaves a frame's.
-  core::Buffer upload(const std::vector<float>& depth) {
-    const VkDeviceSize bytes = depth.size() * sizeof(float);
-    core::Buffer buffer =
-        value_of(core::device_storage_buffer(allocator(), bytes));
-    core::CommandBatch batch(device(), allocator());
-    check(batch.upload(buffer, 0, depth.data(), bytes));
-    check(batch.submit());
-    return buffer;
-  }
-
   static DepthImage image_of(const Camera& cam, const core::Buffer& buffer) {
     DepthImage image;
     image.depth = &buffer;
     image.intrinsics = cam.pinhole.k;
     image.size = cam.pinhole.size;
-    image.min_depth_m = kMinDepth;
-    image.max_depth_m = kMaxDepth;
+    image.min_depth_m = cam.min_depth;
+    image.max_depth_m = cam.max_depth;
     image.depth_to_world = cam.depth_to_world;
     return image;
   }
@@ -474,8 +433,6 @@ class AgreementTest : public core::test::VulkanDeviceTest {
     check(checks_->accumulate(*histograms, images));
     return value_of(checks_->summarize(*histograms));
   }
-
-  std::unique_ptr<DepthChecks> checks_;
 };
 
 // Each camera posed as it is: every ordered pair of rigs of 1, 3, 4 and 5

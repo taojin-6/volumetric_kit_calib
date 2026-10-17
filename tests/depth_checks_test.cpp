@@ -16,7 +16,6 @@
 #include <initializer_list>
 #include <limits>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,6 +23,8 @@
 #include <gtest/gtest.h>
 #include <glm/glm.hpp>
 
+#include "depth_scene.hpp"
+#include "result_checks.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 
@@ -35,29 +36,12 @@ using camera::Mat3d;
 using camera::Mat4d;
 using camera::Vec2d;
 using camera::Vec3d;
+using test::expect_refused;
+using test::rotation;
+using test::value_of;
 using Code = core::Status::Code;
 
-constexpr double kPi = 3.14159265358979323846;
 const double kNaN = std::numeric_limits<double>::quiet_NaN();
-
-template <class T>
-T value_of(core::Result<T> result) {
-  if (!result.ok()) throw std::runtime_error(result.status().message());
-  return *std::move(result);
-}
-
-// `status` is an InvalidArgument starting `prefix` and saying `says`.
-void expect_refused(const core::Status& status, const std::string& prefix,
-                    const std::string& says) {
-  EXPECT_EQ(status.domain(), Code::InvalidArgument) << says;
-  EXPECT_EQ(status.message().rfind(prefix + ": ", 0), 0u) << status.message();
-  EXPECT_NE(status.message().find(says), std::string::npos) << status.message();
-}
-
-Mat3d rotation(const Vec3d& axis, double deg) {
-  return camera::rotation_from_rodrigues(glm::normalize(axis) * deg * kPi /
-                                         180.0);
-}
 
 Vec3d apply(const Mat4d& m, const Vec3d& p) {
   return Vec3d(m * glm::dvec4(p, 1.0));

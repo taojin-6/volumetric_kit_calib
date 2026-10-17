@@ -4,9 +4,10 @@
 #pragma once
 
 /// @file depth_scene.hpp
-/// @brief Depth images rendered in double for the depth tier's tests: a
-///        prepared depth's pinhole, the surfaces its rays meet, and the depth
-///        each pixel sees. Its users link vc_synthetic_rig.
+/// @brief Depth images rendered in double for the depth checks' tests: a
+///        prepared depth's pinhole, the surfaces its rays meet, the depth
+///        each pixel sees, and turns to pose them. Its users link
+///        vc_synthetic_rig.
 
 #include <algorithm>
 #include <cmath>
@@ -17,12 +18,27 @@
 #include <vector>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
 
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/recon/camera/camera_model.hpp"
 #include "volumetric_kit/recon/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::test {
+
+/// @brief A turn of @p deg degrees about @p axis.
+/// @param axis  The axis, of any length but 0.
+/// @param deg   The angle, right-handed about @p axis (degrees).
+/// @return The rotation.
+///
+/// @code
+/// const recon::camera::Mat3d down = rotation({1.0, 0.0, 0.0}, -5.5);
+/// @endcode
+inline recon::camera::Mat3d rotation(const recon::camera::Vec3d& axis,
+                                     double deg) {
+  return recon::camera::rotation_from_rodrigues(glm::normalize(axis) * deg *
+                                                glm::pi<double>() / 180.0);
+}
 
 /// @brief A prepared depth's pinhole, its pixel centres at integers.
 ///

@@ -28,6 +28,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <opencv2/geometry.hpp>
 
+#include "result_checks.hpp"
 #include "synthetic_scene.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/cv_pose.hpp"
@@ -45,6 +46,7 @@ using solve::RigSolution;
 using test::index_of;
 using test::make_scene;
 using test::Scene;
+using test::value_of;
 
 const double kInfinity = std::numeric_limits<double>::infinity();
 
@@ -64,12 +66,6 @@ RigSolution solved(const Scene& scene, const InitialRig& start,
       scene.cameras, scene.board, scene.views, start, options);
   if (!solution.ok()) throw std::runtime_error(solution.status().message());
   return *std::move(solution);
-}
-
-template <class T>
-T value_of(core::Result<T> result) {
-  if (!result.ok()) throw std::runtime_error(result.status().message());
-  return *std::move(result);
 }
 
 CalibrationMetrics measured(const Scene& scene, const InitialRig& start,
