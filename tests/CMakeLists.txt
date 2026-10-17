@@ -4,15 +4,19 @@
 include(GoogleTest)
 
 # vc_<name>_test from <name>_test.cpp, linking the given targets. A case that
-# hangs fails after 5 minutes rather than holding a CI job to its limit.
+# hangs fails after 5 minutes rather than holding a CI job to its limit. Under
+# the sanitizers, LeakSanitizer reads lsan.supp, which spares OpenCV's own leak
+# when an out-of-memory test fails an allocation inside it.
+set(_vc_test_properties TIMEOUT 300)
+if(VC_SANITIZE)
+  list(APPEND _vc_test_properties ENVIRONMENT
+       "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
+endif()
 function(vc_add_test name)
   add_executable(vc_${name}_test ${name}_test.cpp)
   target_link_libraries(vc_${name}_test PRIVATE ${ARGN} GTest::gtest_main)
   vc_target_warnings(vc_${name}_test)
-  gtest_discover_tests(
-    vc_${name}_test
-    PROPERTIES
-    TIMEOUT 300)
+  gtest_discover_tests(vc_${name}_test PROPERTIES ${_vc_test_properties})
 endfunction()
 
 # The tests' header-only helpers (support/); allocation_failure.cpp, which an

@@ -1,0 +1,8 @@
+# LeakSanitizer's suppressions for calib's tests, under VC_SANITIZE
+# (tests/CMakeLists.txt).
+#
+# OpenCV 5.0.0's StdMatAllocator::allocate (core/src/matrix.cpp) takes a Mat's
+# buffer from fastMalloc, then news its UMatData: when that new throws, as the
+# out-of-memory tests make it, the buffer leaks. A Mat calib leaked would
+# still show, as its UMatData.
+leak:cv::fastMalloc

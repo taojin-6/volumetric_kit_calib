@@ -22,11 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # llvm: llvm-symbolizer, so a report names its functions and
+      # tests/lsan.supp's names match.
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake clang libglm-dev libvulkan-dev glslang-tools spirv-tools
+            cmake clang llvm libglm-dev libvulkan-dev glslang-tools spirv-tools
 
       # The Ubuntu legs' cached OpenCV 5 (_build.yml), built with the image's
       # default compiler, not with the sanitizers.
