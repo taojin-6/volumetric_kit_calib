@@ -7,8 +7,9 @@
 // has it; a camera posed 3 mm off; the window and the edge gate over a box
 // with flying pixels round it, counted exactly; histograms accumulated in
 // either order and as one capture, to the bit; the percentiles of known
-// histograms; empty slots; the stride; a capture that could overflow a count;
-// and refusals. Skips where no device is present.
+// histograms, and of counts past float's 24 bits; empty slots; the stride; a
+// capture that could overflow a count; and refusals. Skips where no device
+// is present.
 //
 // Most tests pose every camera alike (same_pose): each sample then meets its
 // own pixel, and its difference is the two images' difference there, exact in
@@ -137,22 +138,23 @@ Camera rig_camera(std::size_t c, std::size_t count, const Surface& surface) {
   return posed(pinholes[c], looking_at(eye, target, rolls[c]), surface);
 }
 
-// A 64 x `height` depth camera at the scene's origin, its depth `depth` but
-// for row and column 0, which have none: a sample of either lies on the
+// A `width` x `height` depth camera at the scene's origin, its depth `depth`
+// but for row and column 0, which have none: a sample of either lies on the
 // image's edge, where the device's rounding -- its division need not be
 // correctly rounded -- may carry it off. Every other pixel lies well inside.
 constexpr std::uint32_t kWidth = 64;
 constexpr std::uint32_t kHeight = 48;
-// Its pixels with depth.
+// Its pixels with depth, at 64 x 48.
 constexpr std::size_t kInterior = std::size_t{kWidth - 1} * (kHeight - 1);
-Camera same_pose(std::vector<float> depth, std::uint32_t height = kHeight) {
+Camera same_pose(std::vector<float> depth, std::uint32_t height = kHeight,
+                 std::uint32_t width = kWidth) {
   Camera cam;
-  cam.pinhole = {{kWidth, height}, {64.0, 64.0, 32.0, 16.0}};
+  cam.pinhole = {{width, height}, {64.0, 64.0, 32.0, 16.0}};
   cam.depth = std::move(depth);
   if (cam.depth.empty()) return cam;
   for (std::uint32_t v = 0; v < height; ++v) {
-    for (std::uint32_t u = 0; u < kWidth; ++u) {
-      if (u == 0 || v == 0) cam.depth[std::size_t{v} * kWidth + u] = 0.0f;
+    for (std::uint32_t u = 0; u < width; ++u) {
+      if (u == 0 || v == 0) cam.depth[std::size_t{v} * width + u] = 0.0f;
     }
   }
   return cam;
@@ -694,6 +696,59 @@ TEST_F(AgreementTest, ItsPercentilesAreTheKnownHistogramsQuantiles) {
   EXPECT_NEAR(seventh.median_abs_mm, 0.75, 1e-6);
   EXPECT_NEAR(seventh.p90_abs_mm, 0.79, 1e-6);
   EXPECT_EQ(at(known[2]).signed_median_mm, 0.0);
+}
+
+// The quantiles' bins are found in integers, so counts past float's 24 bits
+// take the right one: 2^24 samples at 1.05 mm and 2^24 + 2 at 6.05 mm put
+// the two middle samples, and so the median, in the second bin, where a walk
+// in float -- (2^25 + 2) / 2 rounding to 2^24 -- stops at the first. Camera
+// 1's depth lies 1.05 mm behind camera 0's over half a 1025 x 1025 image and
+// 6.05 mm over the other half, accumulated 32 times, then 6.05 mm behind at
+// 2 pixels of one more capture.
+TEST_F(AgreementTest, ItsQuantilesTakeTheRightBinPastFloatsCounts) {
+  constexpr std::uint32_t kSide = 1025;
+  std::vector<float> near(std::size_t{kSide} * kSide, 5.0f);
+  std::vector<float> far(near.size());
+  for (std::uint32_t v = 0; v < kSide; ++v) {
+    for (std::uint32_t u = 0; u < kSide; ++u) {
+      far[std::size_t{v} * kSide + u] = v <= kSide / 2 ? 5.00105f : 5.00605f;
+    }
+  }
+  std::vector<float> two(std::size_t{kWidth} * kHeight, 0.0f);
+  two[10 * kWidth + 10] = 5.00605f;
+  two[20 * kWidth + 30] = 5.00605f;
+  std::vector<core::Buffer> buffers;
+  const std::vector<std::optional<DepthImage>> halves = images_of(
+      {same_pose(near, kSide, kSide), same_pose(far, kSide, kSide)}, buffers);
+  std::vector<core::Buffer> more_buffers;
+  const std::vector<std::optional<DepthImage>> more = images_of(
+      {same_pose(std::vector<float>(two.size(), 5.0f)), same_pose(two)},
+      more_buffers);
+  const DepthCheckOptions options;
+  const std::unique_ptr<AgreementHistograms> histograms =
+      value_of(checks_->histograms(2, options));
+  for (int capture = 0; capture < 32; ++capture) {
+    check(checks_->accumulate(*histograms, halves));
+  }
+  check(checks_->accumulate(*histograms, more));
+  const std::vector<PairAgreement> pairs =
+      value_of(checks_->summarize(*histograms));
+  ASSERT_EQ(pairs.size(), 2u);
+  constexpr std::size_t kEach = std::size_t{1} << 24;
+  const long half = half_bins(options);
+  for (const PairAgreement& got : pairs) {
+    SCOPED_TRACE("from " + std::to_string(got.from));
+    // From 1, the differences are +1.05 and +6.05 mm; from 0, their
+    // negatives, in bins -11 and -61.
+    const bool from_far = got.from == 1;
+    std::vector<std::size_t> bins(static_cast<std::size_t>(2 * half), 0);
+    bins[static_cast<std::size_t>(half + (from_far ? 10 : -11))] = kEach;
+    bins[static_cast<std::size_t>(half + (from_far ? 60 : -61))] = kEach + 2;
+    EXPECT_EQ(got.overlap, 2 * kEach + 2);
+    expect_stats(got, bins, options);
+    EXPECT_NEAR(got.signed_median_mm, from_far ? 6.0 : -6.0, 1e-4);
+    EXPECT_NEAR(got.median_abs_mm, 6.0, 1e-4);
+  }
 }
 
 // An empty slot takes no part: with slots 1 and 3 of 5 empty, the pairs of

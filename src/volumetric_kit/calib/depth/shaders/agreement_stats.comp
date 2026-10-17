@@ -10,10 +10,11 @@
 //
 // The q-quantile of n binned samples lies in the first bin where the running
 // count, from the lowest bin, reaches q n, as far into that bin as the rest of
-// q n takes of its count: its samples spread evenly across it. The window's
-// bins number 2 half_bins, with 0 between bins half_bins - 1 and half_bins, so
-// folded bin j holds the magnitudes in [j, j + 1) bins: bins half_bins + j and
-// half_bins - 1 - j.
+// q n takes of its count: its samples spread evenly across it. That bin is
+// found in integers, so it is exact for any count a pair holds; float takes
+// only the fraction within it. The window's bins number 2 half_bins, with 0
+// between bins half_bins - 1 and half_bins, so folded bin j holds the
+// magnitudes in [j, j + 1) bins: bins half_bins + j and half_bins - 1 - j.
 
 #define VC_STATS_LOCAL_SIZE 64
 
@@ -53,18 +54,27 @@ uint bin_count(uint first, uint b, bool folded) {
   return bins[first + b];
 }
 
-// The q-quantile of the `n` samples, n > 0, of the histogram at `first`, as
-// counted (2 half_bins bins) or folded (half_bins), in bins from bin
-// `origin`'s lower edge.
-float quantile(uint first, bool folded, uint n, float q, int origin) {
+// The q-quantile, q = num / den with 0 < num <= den, of the `n` samples,
+// n > 0, of the histogram at `first`, as counted (2 half_bins bins) or folded
+// (half_bins), in bins from bin `origin`'s lower edge.
+float quantile(uint first, bool folded, uint n, uint num, uint den,
+               int origin) {
+  // need = ceil(q n), the samples through the quantile's bin, and
+  // over = need - q n, in [0, 1). With n = a den + r, q n = num a + num r / den,
+  // and neither num a <= n nor num r < num den overflows.
+  uint r = n % den;
+  uint up = (num * r + den - 1u) / den;
+  uint need = num * (n / den) + up;
+  float over = float(up * den - num * r) / float(den);
   uint count = folded ? pc.half_bins : 2u * pc.half_bins;
-  float target = q * float(n);
   uint below = 0u;
   for (uint b = 0u; b < count; ++b) {
     uint c = bin_count(first, b, folded);
     uint through = below + c;
-    if (c != 0u && float(through) >= target) {
-      float into = clamp((target - float(below)) / float(c), 0.0, 1.0);
+    // below < need here (need >= 1), so the bin that reaches need holds
+    // samples.
+    if (through >= need) {
+      float into = clamp((float(need - below) - over) / float(c), 0.0, 1.0);
       return float(int(b) - origin) + into;
     }
     below = through;
@@ -92,9 +102,9 @@ void main() {
   s.pad1 = 0u;
   s.pad2 = 0u;
   if (n != 0u) {
-    s.signed_median = quantile(first, false, n, 0.5, int(pc.half_bins));
-    s.median_abs = quantile(first, true, n, 0.5, 0);
-    s.p90_abs = quantile(first, true, n, 0.9, 0);
+    s.signed_median = quantile(first, false, n, 1u, 2u, int(pc.half_bins));
+    s.median_abs = quantile(first, true, n, 1u, 2u, 0);
+    s.p90_abs = quantile(first, true, n, 9u, 10u, 0);
   }
   stats[pair] = s;
 }
