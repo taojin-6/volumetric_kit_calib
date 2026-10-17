@@ -5,41 +5,62 @@ name: sanitizers
 # not sufficient — this is what turns the move-only / lifetime tests into actual
 # leak / use-after-free / double-free detectors. It builds the rig tiers too
 # (VC_WITH_RIG), whose session writer runs a thread of its own; they take all
-# of recon, so the Vulkan SDK's headers, loader and shader compiler. Invoked by
-# ci.yml, which owns the push / pull_request triggers and the concurrency group.
+# of recon, so the Vulkan SDK's headers, loader and shader compiler, but no
+# GPU: none is passed through. Invoked by ci.yml, which owns the push /
+# pull_request triggers and the concurrency group.
 on:
   workflow_call:
 
 jobs:
   asan-ubsan-lsan:
-    runs-on: ubuntu-24.04
+    # calib's self-hosted Linux hosts, in a bare container with the levels in
+    # its env, as ci.yml's Ubuntu legs (it says why).
+    runs-on: vk-linux-gpu
+    container:
+      image: ubuntu:24.04
+      env:
+        CMAKE_BUILD_PARALLEL_LEVEL: '4'
+        CTEST_PARALLEL_LEVEL: '4'
     timeout-minutes: 45 # recon builds too, sanitized
+    defaults:
+      run:
+        shell: bash
     env:
       ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
     steps:
-      - uses: actions/checkout@v7
-
+      # git first, so actions/checkout clones rather than downloads. A bare
+      # image lacks make, and clang's sanitizer runtimes (libclang-rt-dev),
+      # which a hosted image has. We run as root, so no sudo.
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake clang libglm-dev libvulkan-dev glslang-tools spirv-tools
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git \
+            cmake make clang libclang-rt-dev libglm-dev libvulkan-dev \
+            glslang-tools spirv-tools
+
+      # No token left in .git/config, as in _build.yml: the workspace stays on
+      # a host other repositories' jobs share.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # Cache the FetchContent dependency tree, as _build.yml does. Here the
       # dependencies are compiled with the sanitizers too (VC_SANITIZE sets its
       # flags globally), so besides the pins the key carries everything that
       # changes their objects, as recon's sanitizer job keys it: the compiler,
-      # the runner image, this workflow and vc_sanitizers.cmake, and the
-      # workspace path, which FetchContent bakes in. No restore-keys: a stale
-      # match would link objects built for something else.
+      # the image (here the container's installed packages, in place of a
+      # hosted runner's image version), this workflow and vc_sanitizers.cmake,
+      # and the workspace path, which FetchContent bakes in. No restore-keys: a
+      # stale match would link objects built for something else.
       - name: Dependency cache key
         id: deps
         run: |
           hash() { sha256sum | cut -c1-12; }
           ws=$(printf '%s' "${GITHUB_WORKSPACE}" | hash)
           cc=$(clang --version | head -1 | hash)
-          echo "key=sanitizers-deps-ws${ws}-cc${cc}-img${ImageVersion:-none}" >> "${GITHUB_OUTPUT}"
+          img=$(dpkg-query -W | hash)
+          echo "key=sanitizers-deps-ws${ws}-cc${cc}-img${img}" >> "${GITHUB_OUTPUT}"
 
       - name: Cache third-party deps
         uses: actions/cache@v6
@@ -54,9 +75,21 @@ jobs:
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
             -DVC_SANITIZE="address;undefined" -DVC_WITH_RIG=ON
 
-      # The level, not a bare --parallel (_build.yml's Build step says why).
+      # The levels, not a bare --parallel (_build.yml's Build step says why).
       - name: Build
         run: cmake --build build --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
 
+      # As the workspace's owner, the runner's user, not the container's root:
+      # read-only directories do not stop root, so the session writer's
+      # write-failure tests would skip.
       - name: Test
-        run: ctest --test-dir build --output-on-failure --parallel "$(nproc)"
+        run: |
+          owner=$(stat -c %u:%g .)
+          [ "${owner%:*}" != 0 ] || {
+            echo "::error::the workspace is root's; the write-failure tests would skip"
+            exit 1
+          }
+          chown -R "${owner}" build
+          setpriv --reuid="${owner%:*}" --regid="${owner#*:}" --clear-groups \
+            ctest --test-dir build --output-on-failure \
+              --parallel "${CTEST_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"

@@ -73,24 +73,28 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
-## 2026-10-16 — CI on the family's layout, macOS on the Mac
+## 2026-10-16 — CI on the family's layout, on calib's own runners
 
 calib's CI takes its siblings' layout: `ci.yml` calls `_build.yml`,
 `lint.yml` and `sanitizers.yml`, and its `required` job passes only when all
 of them did.
 
-- **macOS runs on calib's self-hosted `mac` runners**, on the Mac that runs
+- **Every job runs on calib's self-hosted runners**, on the hosts that run
   recon's and gfx's, registered by the core's
   [runner tooling](https://github.com/taojin-6/volumetric_kit_core/blob/main/tools/runners/README.md),
-  which also sets each runner's build and test levels. Why: calib is
-  private, so GitHub bills every hosted macOS minute, at ten times the Linux
-  rate, and its four hosted macOS legs reinstalled OpenCV and ran the tests
-  one at a time on every push. Ubuntu, lint, sanitizers and `required` stay
-  hosted, at the Linux rate. `ci.yml` says how to move a Mac leg back to a
-  hosted runner. recon's and gfx's jobs can read calib's checkouts and its
-  runners' credentials there, so its privacy rests on their owner-only
-  policies (the core's
-  [DECISIONS.md](https://github.com/taojin-6/volumetric_kit_core/blob/main/DECISIONS.md#2026-10-16--calibs-mac-runners-and-each-repositorys-own-share-of-a-host)).
+  which also sets each runner's build and test levels: the macOS legs on the
+  Mac (label `mac`); the Ubuntu legs, lint and sanitizers on the Linux GPU
+  hosts (label `vk-linux-gpu`), each in a bare Ubuntu container that installs
+  what the job uses, as recon's Linux legs are; and `required` on whichever
+  is free. Why: calib is private, so GitHub bills every hosted minute, macOS
+  at ten times the Linux rate, and with the account's minutes used up
+  (2026-10-17) no hosted job of calib's starts. The cost: while a host is
+  offline its jobs queue and `required` cannot report. `ci.yml` says how to
+  move a job back to a hosted runner once minutes return. Each host's
+  runners all run as one user, so recon's and gfx's jobs can read calib's
+  checkouts and its runners' credentials there, and its privacy rests on
+  their owner-only policies (the core's
+  [DECISIONS.md](https://github.com/taojin-6/volumetric_kit_core/blob/main/DECISIONS.md#2026-10-16--calibs-runners-and-each-repositorys-own-share-of-a-host)).
 - **Two Mac legs, both on OpenCV:** Debug with shared libraries, and Release
   with the rig tiers, whose GPU tests run on the Mac's GPU under the
   validation layer. Ubuntu 24.04 and 26.04 build Release; Linux Debug is the

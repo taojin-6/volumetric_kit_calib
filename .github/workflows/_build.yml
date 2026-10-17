@@ -2,8 +2,9 @@ name: build (reusable)
 
 # Build and test for one leg. ci.yml calls this once per entry in its build
 # matrix, on a GitHub-hosted runner (pass just `os`) or a self-hosted one
-# (`runner`). Debug and Release are both exercised across the legs, so an
-# NDEBUG-only or optimizer-exposed break is caught.
+# (`runner`), in an OS-matched container on Linux (`container`), as recon's
+# _build.yml runs its legs. Debug and Release are both exercised across the
+# legs, so an NDEBUG-only or optimizer-exposed break is caught.
 on:
   workflow_call:
     inputs:
@@ -14,7 +15,14 @@ on:
       runner:
         description: >-
           runs-on label. Empty → use `os` as a GitHub-hosted image; set to a
-          self-hosted label (mac) to run the leg there.
+          self-hosted label (vk-linux-gpu, mac) to run the leg there.
+        required: false
+        type: string
+        default: ''
+      container:
+        description: >-
+          JSON for the job container, e.g. '{"image":"ubuntu:24.04"}', or ''
+          for none.
         required: false
         type: string
         default: ''
@@ -51,21 +59,36 @@ on:
 jobs:
   build:
     runs-on: ${{ inputs.runner != '' && inputs.runner || inputs.os }}
+    # Render the container JSON to a map only when one was requested; macOS
+    # passes '' and runs directly on the runner. `&&` short-circuits, so
+    # fromJSON is never handed the empty string.
+    container: ${{ inputs.container != '' && fromJSON(inputs.container) || null }}
     timeout-minutes: 30
     defaults:
       run:
+        # A container runs `run:` steps under `sh` (dash) by default.
         shell: bash
     strategy:
       fail-fast: false
       matrix:
         build_type: ${{ fromJSON(inputs.build_types) }}
     steps:
+      # Bare ubuntu:* images lack git (actions/checkout needs it) and sudo (the
+      # install steps use it); we run as root in the container, so install them
+      # before anything else. Skipped on a leg with no container.
+      - name: Bootstrap container
+        if: inputs.container != ''
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git sudo
+
       # A self-hosted runner keeps its workspace, which other repositories'
       # jobs on the host can read, so the token is not left in .git/config.
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
+      # build-essential: a bare ubuntu:* container has no compiler or make.
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -199,7 +222,8 @@ jobs:
           }
 
       # The levels come from the runner's .env on the Mac (the core's
-      # tools/runners/README.md); a hosted runner sets none and uses its cores.
+      # tools/runners/README.md) and from the container env ci.yml sets on the
+      # Ubuntu legs; a hosted runner sets none and uses its cores.
       # They are passed explicitly: a bare `--parallel` runs make with no job
       # limit, ignoring CMAKE_BUILD_PARALLEL_LEVEL.
       - name: Build

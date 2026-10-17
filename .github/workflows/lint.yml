@@ -10,22 +10,47 @@ on:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    # calib's self-hosted Linux hosts, in a bare container, as ci.yml's
+    # Ubuntu legs (it says why).
+    runs-on: vk-linux-gpu
+    container: ubuntu:24.04
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
     steps:
+      # git first, so actions/checkout clones rather than downloads, and
+      # pre-commit has a repository to read. Ubuntu 24.04's Python is 3.12,
+      # which the hosted job set up; pre-commit goes in a virtualenv, as the
+      # image's Python is externally managed. The hooks install everything
+      # else, the pinned clang-format among it.
+      - name: Install git, Python and pre-commit
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git \
+            python3 python3-venv
+          python3 -m venv /opt/pre-commit
+          # Pin the runner so a new upstream pre-commit release can't change
+          # the gate's behavior without a commit here.
+          /opt/pre-commit/bin/pip install pre-commit==4.6.2
+          echo /opt/pre-commit/bin >> "$GITHUB_PATH"
+      # No token left in .git/config, as in _build.yml: the workspace stays on
+      # a host other repositories' jobs share.
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          persist-credentials: false
       # Cache pre-commit's installed hook environments (incl. the pinned
-      # clang-format) keyed on the config so they're only rebuilt when it changes.
+      # clang-format) keyed on the config so they're only rebuilt when it
+      # changes, and on the image, whose Python they are built on.
       - uses: actions/cache@v6
         with:
           path: ~/.cache/pre-commit
-          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+          key: pre-commit-ubuntu-24.04-${{ hashFiles('.pre-commit-config.yaml') }}
           restore-keys: |
-            pre-commit-
-      # Pin the runner so a new upstream pre-commit release can't change the
-      # gate's behavior without a commit here.
-      - run: python -m pip install pre-commit==4.6.2
-      - run: pre-commit run --all-files --show-diff-on-failure
+            pre-commit-ubuntu-24.04-
+      # The workspace belongs to the runner's user, not the container's root,
+      # so git refuses it until it is marked safe; checkout marks it only for
+      # its own git calls.
+      - run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          pre-commit run --all-files --show-diff-on-failure
