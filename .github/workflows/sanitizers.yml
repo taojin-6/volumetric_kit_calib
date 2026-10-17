@@ -3,28 +3,37 @@ name: sanitizers
 # AddressSanitizer + UndefinedBehaviorSanitizer + LeakSanitizer, Linux-only
 # (LeakSanitizer isn't available on macOS). A green normal build is necessary but
 # not sufficient — this is what turns the move-only / lifetime tests into actual
-# leak / use-after-free / double-free detectors. It builds the rig tiers too
-# (VC_WITH_RIG), whose session writer runs a thread of its own; they take all
-# of recon, so the Vulkan SDK's headers, loader and shader compiler. Invoked by
-# ci.yml, which owns the push / pull_request triggers and the concurrency group.
+# leak / use-after-free / double-free detectors. It builds every tier: the
+# OpenCV tiers on OpenCV 5 from .github/actions/opencv, itself not sanitized,
+# and the rig tiers (VC_WITH_RIG), whose session writer runs a thread of its
+# own; they take all of recon and gfx, so the Vulkan SDK's headers, loader and
+# shader compiler. Invoked by ci.yml, which owns the push / pull_request
+# triggers and the concurrency group.
 on:
   workflow_call:
 
 jobs:
   asan-ubsan-lsan:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45 # recon builds too, sanitized
+    timeout-minutes: 60 # recon and gfx build too, sanitized; OpenCV on a miss
     env:
       ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
     steps:
       - uses: actions/checkout@v7
 
+      # llvm: llvm-symbolizer, so a report names its functions and
+      # tests/lsan.supp's names match.
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake clang libglm-dev libvulkan-dev glslang-tools spirv-tools
+            cmake clang llvm libglm-dev libvulkan-dev glslang-tools spirv-tools
+
+      # The Ubuntu legs' cached OpenCV 5 (_build.yml), built with the image's
+      # default compiler, not with the sanitizers.
+      - name: OpenCV 5
+        uses: ./.github/actions/opencv
 
       # Cache the FetchContent dependency tree, as _build.yml does. Here the
       # dependencies are compiled with the sanitizers too (VC_SANITIZE sets its

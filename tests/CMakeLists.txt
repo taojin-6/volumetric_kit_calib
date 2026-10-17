@@ -4,15 +4,19 @@
 include(GoogleTest)
 
 # vc_<name>_test from <name>_test.cpp, linking the given targets. A case that
-# hangs fails after 5 minutes rather than holding a CI job to its limit.
+# hangs fails after 5 minutes rather than holding a CI job to its limit. Under
+# the sanitizers, LeakSanitizer reads lsan.supp, which spares OpenCV's own leak
+# when an out-of-memory test fails an allocation inside it.
+set(_vc_test_properties TIMEOUT 300)
+if(VC_SANITIZE)
+  list(APPEND _vc_test_properties ENVIRONMENT
+       "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
+endif()
 function(vc_add_test name)
   add_executable(vc_${name}_test ${name}_test.cpp)
   target_link_libraries(vc_${name}_test PRIVATE ${ARGN} GTest::gtest_main)
   vc_target_warnings(vc_${name}_test)
-  gtest_discover_tests(
-    vc_${name}_test
-    PROPERTIES
-    TIMEOUT 300)
+  gtest_discover_tests(vc_${name}_test PROPERTIES ${_vc_test_properties})
 endfunction()
 
 # The tests' header-only helpers (support/); allocation_failure.cpp, which an
@@ -31,68 +35,67 @@ vc_add_test(target vc_test_support)
 # SensorProfile / LensProfile).
 vc_add_test(data_model volumetric_kit::calib_core)
 
-if(VC_WITH_OPENCV)
-  # The synthetic source every calib test draws on (support/): lenses, a rig, a
-  # plan of placements and an exact-inverse renderer, over compute's bridge.
-  add_library(vc_synthetic_rig STATIC EXCLUDE_FROM_ALL
-              support/synthetic_rig.cpp)
-  target_link_libraries(
-    vc_synthetic_rig
-    PUBLIC vc_test_support volumetric_kit::calib_compute
-    PRIVATE opencv_geometry opencv_imgproc)
-  vc_target_warnings(vc_synthetic_rig)
+# The OpenCV modules only the tests use: imgcodecs, to compress rendered views,
+# and calib, the bundle adjustment's oracle.
+find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS imgcodecs calib)
 
-  # compute: the OpenCV bridge, and the synthetic source itself.
-  vc_add_test(guarded volumetric_kit::calib_compute)
-  vc_add_test(cv_pose volumetric_kit::calib_compute opencv_geometry)
-  vc_add_test(board volumetric_kit::calib_compute vc_test_support)
-  vc_add_test(usable_for_pose volumetric_kit::calib_compute)
-  vc_add_test(measures volumetric_kit::calib_compute)
-  vc_add_test(cv_camera vc_synthetic_rig opencv_geometry)
-  vc_add_test(synthetic_rig vc_synthetic_rig opencv_geometry)
-  # Keep allocation replacement isolated from the other test executables.
-  vc_add_test(compute_oom volumetric_kit::calib_compute vc_test_support)
-  target_sources(vc_compute_oom_test PRIVATE support/allocation_failure.cpp)
+# The synthetic source every calib test draws on (support/): lenses, a rig, a
+# plan of placements and an exact-inverse renderer, over compute's bridge.
+add_library(vc_synthetic_rig STATIC EXCLUDE_FROM_ALL support/synthetic_rig.cpp)
+target_link_libraries(
+  vc_synthetic_rig
+  PUBLIC vc_test_support volumetric_kit::calib_compute
+  PRIVATE opencv_geometry opencv_imgproc)
+vc_target_warnings(vc_synthetic_rig)
 
-  # detect: the board in rendered camera images, JPEG-compressed too.
-  find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS imgcodecs)
-  vc_add_test(detect_charuco volumetric_kit::calib_detect vc_synthetic_rig
-              opencv_imgcodecs opencv_imgproc)
-  vc_add_test(detect_oom volumetric_kit::calib_detect vc_test_support)
-  target_sources(vc_detect_oom_test PRIVATE support/allocation_failure.cpp)
+# compute: the OpenCV bridge, and the synthetic source itself.
+vc_add_test(guarded volumetric_kit::calib_compute)
+vc_add_test(cv_pose volumetric_kit::calib_compute opencv_geometry)
+vc_add_test(board volumetric_kit::calib_compute vc_test_support)
+vc_add_test(usable_for_pose volumetric_kit::calib_compute)
+vc_add_test(measures volumetric_kit::calib_compute)
+vc_add_test(cv_camera vc_synthetic_rig opencv_geometry)
+vc_add_test(synthetic_rig vc_synthetic_rig opencv_geometry)
+# Keep allocation replacement isolated from the other test executables.
+vc_add_test(compute_oom volumetric_kit::calib_compute vc_test_support)
+target_sources(vc_compute_oom_test PRIVATE support/allocation_failure.cpp)
 
-  # solve: views, the spanning tree, the first rig and the bundle adjustment, on
-  # the synthetic rig; OpenCV's calibrateMultiview is the adjustment's oracle on
-  # full views.
-  find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS calib)
-  vc_add_test(view_pose volumetric_kit::calib_solve vc_synthetic_rig)
-  vc_add_test(spanning_tree volumetric_kit::calib_solve)
-  vc_add_test(initialise volumetric_kit::calib_solve vc_synthetic_rig)
-  vc_add_test(bundle_adjust volumetric_kit::calib_solve vc_synthetic_rig
-              opencv_calib opencv_geometry)
-  vc_add_test(solve_oom volumetric_kit::calib_solve vc_synthetic_rig)
-  target_sources(vc_solve_oom_test PRIVATE support/allocation_failure.cpp)
+# detect: the board in rendered camera images, JPEG-compressed too.
+vc_add_test(detect_charuco volumetric_kit::calib_detect vc_synthetic_rig
+            opencv_imgcodecs opencv_imgproc)
+vc_add_test(detect_oom volumetric_kit::calib_detect vc_test_support)
+target_sources(vc_detect_oom_test PRIVATE support/allocation_failure.cpp)
 
-  # quality: the live checks against known poses and rendered views, the capture
-  # rule's states, and the session's checks on the synthetic rig.
-  vc_add_test(live_checks volumetric_kit::calib_quality
-              volumetric_kit::calib_detect vc_synthetic_rig)
-  vc_add_test(capture_rule volumetric_kit::calib_quality)
-  vc_add_test(session_checks volumetric_kit::calib_quality vc_synthetic_rig)
-  vc_add_test(quality_oom volumetric_kit::calib_quality vc_synthetic_rig)
-  target_sources(vc_quality_oom_test PRIVATE support/allocation_failure.cpp)
-  # quality: the solved rig's metrics on the synthetic rig, the transfer against
-  # verify_rig.py's check in OpenCV; its results files read back with nlohmann
-  # and recon's reader.
-  vc_add_test(calibration_metrics volumetric_kit::calib_quality
-              vc_synthetic_rig opencv_geometry)
-  # quality: the depth checks' geometry against planes and corners made here,
-  # and their verdicts, on rigs of 1, 3, 4 and 5 cameras.
-  vc_add_test(depth_checks volumetric_kit::calib_quality vc_synthetic_rig)
-  vc_add_test(results volumetric_kit::calib_quality vc_synthetic_rig)
-  target_include_directories(vc_results_test SYSTEM
-                             PRIVATE "${VC_JSON_INCLUDE_DIR}")
-endif()
+# solve: views, the spanning tree, the first rig and the bundle adjustment, on
+# the synthetic rig; OpenCV's calibrateMultiview is the adjustment's oracle on
+# full views.
+vc_add_test(view_pose volumetric_kit::calib_solve vc_synthetic_rig)
+vc_add_test(spanning_tree volumetric_kit::calib_solve)
+vc_add_test(initialise volumetric_kit::calib_solve vc_synthetic_rig)
+vc_add_test(bundle_adjust volumetric_kit::calib_solve vc_synthetic_rig
+            opencv_calib opencv_geometry)
+vc_add_test(solve_oom volumetric_kit::calib_solve vc_synthetic_rig)
+target_sources(vc_solve_oom_test PRIVATE support/allocation_failure.cpp)
+
+# quality: the live checks against known poses and rendered views, the capture
+# rule's states, and the session's checks on the synthetic rig.
+vc_add_test(live_checks volumetric_kit::calib_quality
+            volumetric_kit::calib_detect vc_synthetic_rig)
+vc_add_test(capture_rule volumetric_kit::calib_quality)
+vc_add_test(session_checks volumetric_kit::calib_quality vc_synthetic_rig)
+vc_add_test(quality_oom volumetric_kit::calib_quality vc_synthetic_rig)
+target_sources(vc_quality_oom_test PRIVATE support/allocation_failure.cpp)
+# quality: the solved rig's metrics on the synthetic rig, the transfer against
+# verify_rig.py's check in OpenCV; its results files read back with nlohmann and
+# recon's reader.
+vc_add_test(calibration_metrics volumetric_kit::calib_quality vc_synthetic_rig
+            opencv_geometry)
+# quality: the depth checks' geometry against planes and corners made here, and
+# their verdicts, on rigs of 1, 3, 4 and 5 cameras.
+vc_add_test(depth_checks volumetric_kit::calib_quality vc_synthetic_rig)
+vc_add_test(results volumetric_kit::calib_quality vc_synthetic_rig)
+target_include_directories(vc_results_test SYSTEM
+                           PRIVATE "${VC_JSON_INCLUDE_DIR}")
 
 if(VC_WITH_RIG)
   # capture: sessions on disk, read back with recon's readers and nlohmann.
@@ -103,9 +106,7 @@ if(VC_WITH_RIG)
   vc_add_test(capture_oom volumetric_kit::calib_capture vc_test_support
               Threads::Threads)
   target_sources(vc_capture_oom_test PRIVATE support/allocation_failure.cpp)
-endif()
 
-if(_vc_build_depth)
   # depth: the board-plane fit and the pair agreement on a device, through the
   # core's Vulkan test fixtures (they skip without one), against references in
   # double made here; the board region's rule on the device, pixel by pixel,
@@ -128,9 +129,7 @@ if(_vc_build_depth)
   vc_add_test(depth_oom volumetric_kit::calib_depth
               volumetric_kit::core_test_support vc_test_support)
   target_sources(vc_depth_oom_test PRIVATE support/allocation_failure.cpp)
-endif()
 
-if(_vc_build_viz)
   # viz: the mosaic's layout, the marks, the panels and the board editor from
   # host data; the offscreen render of the mosaic and its marks on a device,
   # through the core's Vulkan test fixtures (they skip without one).
@@ -151,8 +150,9 @@ endif()
 # that core at its version and requiring VC_CORE_MIN_VERSION of it, then recon,
 # whose package config re-finds the core at its MAJOR.MINOR.
 #
-# Those configures, and the one below, take the fetched sources this build used
-# (FETCHCONTENT_SOURCE_DIR_<NAME>), so they need no network.
+# Those configures, and the ones below, take the fetched sources this build used
+# (FETCHCONTENT_SOURCE_DIR_<NAME>), so they need no network, and the OpenCV it
+# found.
 include(FetchContent)
 FetchContent_GetProperties(volumetric_kit_core)
 FetchContent_GetProperties(volumetric_kit_recon)
@@ -163,7 +163,8 @@ set(_vc_fetched_sources
     -DGENERATOR=${CMAKE_GENERATOR}
     -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
     -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
-    -DGLM_DIR=${glm_DIR})
+    -DGLM_DIR=${glm_DIR}
+    -DOPENCV_DIR=${OpenCV_DIR})
 function(vc_add_core_requirement_test name core_version expect)
   add_test(
     NAME core_requirement.${name}
@@ -207,44 +208,30 @@ if(VC_WITH_RIG)
     "VC_WITH_RIG needs all of volumetric_kit_recon, but it was made available camera-only"
   )
 
-  # The capture tier from this build's install (rig_package/): a consumer finds
+  # The rig tiers from this build's install (rig_package/): a consumer finds
   # calib, the core and all of recon at the prefix, and builds and runs against
-  # calib_capture, and calib_depth when it is built, with this build's
-  # sanitizers, which its libraries need; the build-tree-only viz tier is not
-  # installed.
+  # calib_capture and calib_depth, with this build's sanitizers, which its
+  # libraries need; the build-tree-only viz tier is not installed.
   list(JOIN _vc_sanitize_flags " " _vc_consumer_flags)
   add_test(
     NAME rig_package.consumer
     COMMAND
       ${CMAKE_COMMAND} -DBUILD_DIR=${PROJECT_BINARY_DIR} -DCONFIG=$<CONFIG>
-      -DWITH_DEPTH=${_vc_build_depth}
       -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/rig_package
       -DGENERATOR=${CMAKE_GENERATOR} -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} -DGLM_DIR=${glm_DIR}
-      "-DFLAGS=${_vc_consumer_flags}" -P
+      -DOPENCV_DIR=${OpenCV_DIR} "-DFLAGS=${_vc_consumer_flags}" -P
       ${CMAKE_CURRENT_SOURCE_DIR}/rig_package/configure.cmake)
 endif()
 
-# VC_WITH_OPENCV without an OpenCV 5 to find stops the configure, naming the
-# fixes (opencv_requirement/).
-add_test(
-  NAME opencv_requirement.missing
-  COMMAND
-    ${CMAKE_COMMAND} -DCALIB_SOURCE=${PROJECT_SOURCE_DIR}
-    -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/opencv_requirement
-    -DGENERATOR=${CMAKE_GENERATOR} -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} -P
-    ${CMAKE_CURRENT_SOURCE_DIR}/opencv_requirement/configure.cmake)
-
-# The brain needs no Vulkan (no_vulkan/): calib, with OpenCV as this build has
-# it, configures, builds and installs with find_package(Vulkan) disabled, and a
-# consumer builds against the installed package with it disabled too; the
-# installed package refuses a core of another minor version.
+# The brain needs no Vulkan (no_vulkan/): calib configures, builds and installs
+# with find_package(Vulkan) disabled, and a consumer builds against the
+# installed package with it disabled too; the installed package refuses a core
+# of another minor version.
 add_test(
   NAME no_vulkan.brain
   COMMAND
     ${CMAKE_COMMAND} -DCALIB_SOURCE=${PROJECT_SOURCE_DIR}
     -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/no_vulkan
-    -DCORE_SOURCE=${volumetric_kit_core_SOURCE_DIR} ${_vc_fetched_sources}
-    -DWITH_OPENCV=${VC_WITH_OPENCV} -DOPENCV_DIR=${OpenCV_DIR} -P
+    -DCORE_SOURCE=${volumetric_kit_core_SOURCE_DIR} ${_vc_fetched_sources} -P
     ${CMAKE_CURRENT_SOURCE_DIR}/no_vulkan/configure.cmake)

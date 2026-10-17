@@ -6,8 +6,7 @@
 # live checks of each view and set, the capture rule, the session's checks, the
 # solved rig's metrics, the depth checks' geometry and verdicts over the
 # device's results, and its results files' text. Pure and geometric, on core's
-# detection records and solve's poses, view rule, tree and adjustment. Built
-# with VC_WITH_OPENCV.
+# detection records and solve's poses, view rule, tree and adjustment.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 

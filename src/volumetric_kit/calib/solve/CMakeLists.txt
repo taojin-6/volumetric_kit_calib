@@ -4,7 +4,6 @@
 # --- calib_solve: Tier 2 -----------------------------------------------------
 # The rig solve on OpenCV: each view's own pose (IPPE), the cameras' spanning
 # tree, the first rig, and the bundle adjustment that refines it (LevMarq).
-# Built with VC_WITH_OPENCV.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 

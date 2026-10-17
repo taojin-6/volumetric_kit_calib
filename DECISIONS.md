@@ -73,6 +73,31 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-17 — OpenCV 5 is required
+
+calib has one dependency set on every platform: OpenCV 5 is a prerequisite of
+every build, as GLM is, and `VC_WITH_OPENCV` is gone. `compute`, `detect`,
+`solve` and `quality` always build, and the installed package always re-finds
+OpenCV. `VC_WITH_RIG` stays optional, for the Vulkan SDK, and alone builds
+`capture`, `depth` and `viz`.
+
+- **Why.** With the OpenCV tiers optional, the Ubuntu legs, whose packages are
+  OpenCV 4, built the core tier alone: calib's real code was built and tested
+  on macOS only, never with GCC and never under the sanitizers. Now every leg
+  builds and tests every OpenCV tier, and the sanitizer job runs them.
+- **How Linux gets it.** Installed and found, never fetched by calib's build,
+  as before: `tools/install-opencv.sh` builds a release from OpenCV's source
+  into a prefix, with only the modules calib and its tests use and its bundled
+  JPEG and PNG. `latest` takes the newest 5.x tag, so Linux follows OpenCV's
+  releases as Homebrew does on macOS. CI's `.github/actions/opencv` runs the
+  script and caches the install, keyed on the release, the OS release and
+  architecture, the compiler and the script, so a new release or a changed
+  script builds it once and every other run restores it. OpenCV itself is not
+  sanitized; calib's code is.
+- **What went:** the option, the configure's own message for a missing
+  OpenCV and its test (`opencv_requirement`), the OpenCV-free variants of the
+  no-Vulkan package test and its consumer, and CI's `opencv` input.
+
 ## 2026-10-16 — CI on the family's layout, on GitHub's runners
 
 calib's CI takes its siblings' layout: `ci.yml` calls `_build.yml`,
@@ -88,10 +113,12 @@ of them did.
   Linux `container:`), as recon's GPU legs run, on runners registered by the
   core's
   [runner tooling](https://github.com/taojin-6/volumetric_kit_core/blob/main/tools/runners/README.md).
-- **Two macOS legs, both on OpenCV:** Debug with shared libraries, and Release
-  with the rig tiers, whose GPU tests run on the image's GPU under the
-  validation layer. Ubuntu 24.04 and 26.04 build Release; Linux Debug is the
-  sanitizer job's. The macOS legs install Homebrew's formulae on each run.
+- **Two macOS legs:** Debug with shared libraries, and Release with the rig
+  tiers, whose GPU tests run on the image's GPU under the validation layer.
+  Ubuntu 24.04 and 26.04 build Release; Linux Debug is the sanitizer job's.
+  Every leg builds the OpenCV tiers (amended 2026-10-17): the macOS legs
+  install Homebrew's formulae on each run, and the Linux jobs restore their
+  cached OpenCV 5.
 - **A new Homebrew needs no cache clearing:** each macOS leg's dependency
   cache keys on the installed versions of the formulae its build finds, by the
   core's `homebrew-key` action, so an image with newer formulae rebuilds the
@@ -106,7 +133,7 @@ ordered pair of cameras' depth agreement -- runs in calib's own `depth` tier
 (`depth/depth_checks.hpp`), the device half of the entry below.
 
 - **A tier of calib's own.** `depth` sits beside `viz` (`quality` →
-  {`depth`, `viz`}), built with `VC_WITH_RIG` and `VC_WITH_OPENCV`, and links
+  {`depth`, `viz`}), built with `VC_WITH_RIG`, and links
   `calib_quality` and `core_vulkan` alone: `DepthImage` is what it reads of
   recon's `DeviceFrame`, which the application maps, so it names no sensor
   type and nothing of gfx. Its device requirements are the core's compute
@@ -248,8 +275,7 @@ The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
   judge as the checks and the capture rule do.
 - **The board locks at the first capture.** Every capture's detections, and
   the solve, rest on it.
-- **How it builds.** gfx is fetched, pinned by commit, when `VC_WITH_RIG` and
-  `VC_WITH_OPENCV` are both on, since `viz` draws the quality tier's checks.
+- **How it builds.** gfx is fetched, pinned by commit, with `VC_WITH_RIG`.
   gfx's libraries must build against calib's core pin, the one every sibling
   compiles against, as gfx's own core pin yields to it. `viz` also links
   recon's sensor array tier, whose frame sets, counters and decoded pictures
@@ -354,12 +380,9 @@ OpenCV 5's, called from the `compute` tier on. Callers hold recon's
 `CameraModel` and `Mat4d` and calib's `Target`; `compute` converts them
 (`cv_camera`, `cv_pose`, `Board`), so no second camera or board record exists.
 
-- **A prerequisite, and optional.** OpenCV is installed and found
-  (`find_package(OpenCV 5.0 CONFIG)`), never fetched, like recon's SDKs.
-  `VC_WITH_OPENCV` is OFF by default, so the core tier still builds anywhere.
-  5.0 is the floor: calib calls its geometry module. CI builds the OpenCV
-  tiers on macOS (Homebrew) only, until its Ubuntu legs have a cached OpenCV 5
-  build ([README](README.md#prerequisites)).
+- **A prerequisite** (required since 2026-10-17; see the dated entry). OpenCV
+  is installed and found (`find_package(OpenCV 5.0 CONFIG)`), never fetched,
+  like recon's SDKs. 5.0 is the floor: calib calls its geometry module.
 - **No exception crosses.** A public function that calls OpenCV runs its body
   through `compute::guarded`, which maps a `cv::Exception`'s code to a
   `Status` domain (`guarded.hpp`) and anything else through the core's

@@ -3,9 +3,9 @@
 
 # A stand-in for an application of calib's brain, built against an installed
 # calib (../configure.cmake): find_package must find calib with the core and
-# recon installed beside it, and OpenCV with compute, detect, solve and quality
-# (EXPECT_COMPUTE), and none of them may reach for Vulkan. With FIND_CORE, the
-# application finds the core itself too, before calib and again after it.
+# recon installed beside it, and OpenCV, and none of them may reach for Vulkan.
+# With FIND_CORE, the application finds the core itself too, before calib and
+# again after it.
 cmake_minimum_required(VERSION 3.21)
 project(vc_brain_consumer LANGUAGES CXX)
 
@@ -22,15 +22,10 @@ foreach(_target volumetric_kit::core_vulkan volumetric_kit::recon_core)
   endif()
 endforeach()
 foreach(_tier calib_compute calib_detect calib_solve calib_quality)
-  if(EXPECT_COMPUTE AND NOT TARGET volumetric_kit::${_tier})
+  if(NOT TARGET volumetric_kit::${_tier})
     message(FATAL_ERROR "calib's installed package lacks ${_tier}")
-  elseif(NOT EXPECT_COMPUTE AND TARGET volumetric_kit::${_tier})
-    message(FATAL_ERROR "calib's installed package brought ${_tier}")
   endif()
 endforeach()
 
 add_executable(vc_brain_consumer consumer.cpp)
 target_link_libraries(vc_brain_consumer PRIVATE volumetric_kit::calib)
-if(EXPECT_COMPUTE)
-  target_compile_definitions(vc_brain_consumer PRIVATE VC_CONSUMER_COMPUTE)
-endif()

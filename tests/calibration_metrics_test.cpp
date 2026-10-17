@@ -569,7 +569,7 @@ TEST(CrossCameraTransfer, RefusesWhatItCannotCheck) {
   stranger[1].camera_id = "nobody";
   refused(scene.cameras, stranger, poses, "nobody");
   std::vector<Observation> twice = scene.views;
-  twice.push_back(twice[0]);
+  twice.push_back(scene.views[0]);
   refused(scene.cameras, twice, poses, "two views");
 }
 
@@ -761,11 +761,13 @@ TEST(LeaveOneOut, ReturnsWhatProgressThrows) {
 }
 
 // The truth's principal points 2.5 px above the lenses given: the A/B test
-// prefers them shifted; and with the truth as given, it does not.
+// prefers them shifted; and with the truth as given, it does not. With 0.1 px
+// of noise, the transfer's median tells the sides apart whatever the draw; at
+// 0.3 px it misses on about one in eight.
 TEST(PrincipalPointAB, PrefersTheShiftWhenTheTruthHasIt) {
   for (const bool truth_shifted : {true, false}) {
     SCOPED_TRACE(truth_shifted);
-    Scene scene = make_scene(20);
+    Scene scene = make_scene(20, 0.1);
     if (truth_shifted) {
       for (solve::RigCamera& cam : scene.cameras) {
         cam.model.intrinsics.cx -= 2.5;

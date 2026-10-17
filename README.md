@@ -13,15 +13,14 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > **Status:** Early scaffolding. The `core` tier — the data model (the board
 > and its check, observations, detections, view and capture records, lens and
 > sensor profiles) over recon's camera model and the core's exception-free
-> `Status`/`Result` — builds and is tested (GoogleTest); so, with
-> `VC_WITH_OPENCV`, do the `compute` tier's OpenCV bridge, the `detect` tier's
-> board detection, the `solve` tier's rig solve and the `quality` tier's live
-> checks and solved-rig metrics; with `VC_WITH_RIG`, the `capture` tier's
-> session writer; and, with both, the `viz` tier's live view and the `depth`
-> tier's board-plane fit and pairwise depth agreement. The color and app tiers
-> are not yet implemented; the legacy `camera_calibration` Python
-> scripts (a separate checkout beside the `volumetric_kit/` folder) remain the
-> reference oracle.
+> `Status`/`Result` — builds and is tested (GoogleTest); so do the `compute`
+> tier's OpenCV bridge, the `detect` tier's board detection, the `solve`
+> tier's rig solve and the `quality` tier's live checks and solved-rig
+> metrics; and, with `VC_WITH_RIG`, the `capture` tier's session writer, the
+> `viz` tier's live view and the `depth` tier's board-plane fit and pairwise
+> depth agreement. The color and app tiers are not yet implemented; the
+> legacy `camera_calibration` Python scripts (a separate checkout beside the
+> `volumetric_kit/` folder) remain the reference oracle.
 
 [AGENTS.md](AGENTS.md) is the shared working guide for Codex and Claude Code;
 `CLAUDE.md` imports it. [DECISIONS.md](DECISIONS.md) records the locked
@@ -107,27 +106,28 @@ renderer.
 
 ## Prerequisites
 
-The `core` tier needs a C++17 compiler -- GCC or Clang; Windows and MSVC are
-not supported ([DECISIONS.md](DECISIONS.md#platforms)) -- CMake ≥ 3.21, and
-GLM. The first configure fetches `volumetric_kit_core` and
-`volumetric_kit_recon` (pinned by commit) and, for tests, googletest, so it
-needs network access:
+calib needs a C++17 compiler -- GCC or Clang; Windows and MSVC are not
+supported ([DECISIONS.md](DECISIONS.md#platforms)) -- CMake ≥ 3.21, GLM, and
+OpenCV 5 (5.0 or a later 5.x: its core, imgproc, objdetect and geometry
+modules, and, for the tests, imgcodecs and calib). The first configure
+fetches `volumetric_kit_core` and `volumetric_kit_recon` (pinned by commit)
+and, for tests, googletest, so it needs network access. Ubuntu's packages are
+OpenCV 4, so `tools/install-opencv.sh` builds OpenCV 5 from its source, the
+newest 5.x release or a given tag, with only those modules, as CI does:
 
 ```bash
-brew install cmake glm          # macOS
-# sudo apt-get install cmake libglm-dev   # Ubuntu
+brew install cmake glm opencv                              # macOS
+sudo apt-get install cmake build-essential git libglm-dev  # Ubuntu, then:
+tools/install-opencv.sh latest /usr/local
 ```
 
-`VC_WITH_OPENCV` (OFF by default) builds `compute` and the tiers on it, which
-need an installed OpenCV 5 (5.0 or a later 5.x; the tests also use its
-imgcodecs and calib modules): `brew install opencv` on macOS; on Ubuntu,
-whose packages are OpenCV 4, one you build yourself. `VC_WITH_RIG` (OFF by
-default) builds `capture`, over all of recon, which needs the Vulkan SDK and
-a GLSL compiler: the core's vulkan tier
+For another prefix, pass `-DOpenCV_DIR=<prefix>/lib/cmake/opencv5` to calib's
+configure. `VC_WITH_RIG` (OFF by default) builds `capture`, `depth` and
+`viz`, over all of recon, which needs the Vulkan SDK and a GLSL compiler: the
+core's vulkan tier
 [prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
-With both, it builds `depth` and `viz` too; `viz` fetches `volumetric_kit_gfx`
-(pinned by commit). To build against a local core, recon or gfx checkout
-instead of the pinned one, pass
+`viz` fetches `volumetric_kit_gfx` (pinned by commit). To build against a
+local core, recon or gfx checkout instead of the pinned one, pass
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>`,
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>` or
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_GFX=<path>`.
@@ -137,7 +137,7 @@ instead of the pinned one, pass
 ```bash
 calib_root="$(git rev-parse --show-toplevel)"
 cmake -S "$calib_root" -B "$calib_root/build" -DCMAKE_BUILD_TYPE=Release \
-  -DVC_WITH_OPENCV=ON -DVC_WITH_RIG=ON  # leave out what you lack
+  -DVC_WITH_RIG=ON  # leave out without the Vulkan SDK
 cmake --build "$calib_root/build" --parallel
 ctest --test-dir "$calib_root/build" --output-on-failure
 ```
@@ -169,20 +169,20 @@ target_link_libraries(your_app PRIVATE volumetric_kit::calib_core)
 
 `VC_BUILD_TESTS`, `VC_BUILD_EXAMPLES`, `VC_INSTALL`, and `VC_WARNINGS_AS_ERRORS`
 default ON only when `volumetric_kit_calib` is the top-level project, so a
-FetchContent build of it never fails on a warning your compiler adds. Set
-`VC_WITH_OPENCV` ON before calib is made available to link
+FetchContent build of it never fails on a warning your compiler adds.
 `volumetric_kit::calib_compute`, `volumetric_kit::calib_detect`,
-`volumetric_kit::calib_solve` and `volumetric_kit::calib_quality`,
-`VC_WITH_RIG` ON to link `volumetric_kit::calib_capture`, and both to link
+`volumetric_kit::calib_solve` and `volumetric_kit::calib_quality` are always
+built. Set `VC_WITH_RIG` ON before calib is made available to link
+`volumetric_kit::calib_capture`, `volumetric_kit::calib_depth` and
 `volumetric_kit::calib_viz`, which is build-tree only: an installed calib
 lacks it, as an installed gfx lacks its ui tier.
 `VC_SANITIZE` is a semicolon list, empty (off) by default —
 e.g. `-DVC_SANITIZE="address;undefined"`. An installed calib carries the core
 and recon (its camera tier, or all of it with `VC_WITH_RIG`) beside it, and
-`find_package(volumetric_kit_calib)` finds all three, and the installed OpenCV
-when calib was built with it. An application may find the core itself too,
-before calib or after it; if it finds another core first, calib is not found,
-and the message names both.
+`find_package(volumetric_kit_calib)` finds all three, and the installed
+OpenCV. An application may find the core itself too, before calib or after
+it; if it finds another core first, calib is not found, and the message names
+both.
 
 calib needs `volumetric_kit_core` 0.6.1 or newer, with its vulkan tier for
 `VC_WITH_RIG`. An application that declares the core before calib, to share it

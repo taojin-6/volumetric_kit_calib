@@ -61,13 +61,12 @@ void operator delete[](void* p, std::size_t) noexcept {
   ::operator delete[](p);
 }
 
-// Keep nothrow allocation paired with the same deallocator under sanitizers.
+// A nothrow allocation is neither counted nor failed: its caller copes with a
+// null pointer itself -- libstdc++'s stable_sort, refused its buffer, sorts in
+// place -- so failing one would test the standard library, not calib. Paired
+// with the same deallocator under sanitizers.
 void* operator new(std::size_t bytes, const std::nothrow_t&) noexcept {
-  try {
-    return ::operator new(bytes);
-  } catch (const std::bad_alloc&) {
-    return nullptr;
-  }
+  return std::malloc(bytes == 0 ? 1 : bytes);
 }
 void* operator new[](std::size_t bytes, const std::nothrow_t&) noexcept {
   return ::operator new(bytes, std::nothrow);

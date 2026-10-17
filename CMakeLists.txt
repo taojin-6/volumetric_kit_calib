@@ -36,27 +36,12 @@ option(VC_INSTALL "Generate install/export rules" ${VC_IS_TOP_LEVEL})
 # build.
 option(VC_WARNINGS_AS_ERRORS "Treat first-party compiler warnings as errors"
        ${VC_IS_TOP_LEVEL})
-# OFF by default: OpenCV is a prerequisite you install, and a build without it
-# still has the core tier.
-option(
-  VC_WITH_OPENCV
-  "Build the OpenCV tiers, from compute on (requires an installed OpenCV 5)"
-  OFF)
-# OFF by default too: the rig tiers, from capture on, take all of recon, which
-# needs the Vulkan SDK (DECISIONS.md, 2026-10-13).
+# OFF by default: the rig tiers -- capture, depth and viz -- take all of recon,
+# which needs the Vulkan SDK (DECISIONS.md, 2026-10-13), and viz fetches
+# volumetric_kit_gfx.
 option(VC_WITH_RIG
-       "Build the rig tiers, from capture on (fetches all of recon; Vulkan SDK)"
+       "Build the rig tiers, capture, depth and viz (all of recon; Vulkan SDK)"
        OFF)
-# The depth tier runs the quality tier's depth checks on the core's vulkan tier,
-# and the viz tier draws the checks with volumetric_kit_gfx, so both are built,
-# and gfx fetched, when both are on: derived, not options.
-if(VC_WITH_RIG AND VC_WITH_OPENCV)
-  set(_vc_build_depth ON)
-  set(_vc_build_viz ON)
-else()
-  set(_vc_build_depth OFF)
-  set(_vc_build_viz OFF)
-endif()
 
 # Semicolon list of sanitizers (e.g. "address;undefined"); empty = off. Applied
 # globally — see cmake/vc_sanitizers.cmake for why.
@@ -72,20 +57,12 @@ include(vc_sanitizers)
 # checked in the core that arrives (third_party/) and again by the installed
 # package config.
 set(VC_CORE_MIN_VERSION 0.6.1)
-# OpenCV 5, for the compute tier and those built on it (DECISIONS.md,
-# 2026-10-12): found here so its imported targets reach every tier.
-if(VC_WITH_OPENCV)
-  find_package(OpenCV 5.0 CONFIG COMPONENTS core imgproc objdetect geometry)
-  if(NOT OpenCV_FOUND)
-    message(
-      FATAL_ERROR
-        "VC_WITH_OPENCV is ON but OpenCV 5 (core, imgproc, objdetect, "
-        "geometry) was not found. Install it (brew install opencv on macOS) "
-        "and, if it is not on CMake's search path, point the build at it "
-        "with -DOpenCV_DIR=<dir holding OpenCVConfig.cmake>; or configure "
-        "with -DVC_WITH_OPENCV=OFF.")
-  endif()
-endif()
+# OpenCV 5, a prerequisite of the compute tier and those built on it
+# (DECISIONS.md, 2026-10-17): Homebrew's on macOS, tools/install-opencv.sh's on
+# Linux (README, "Prerequisites"). Found here so its imported targets reach
+# every tier.
+find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS core imgproc objdetect
+                                                   geometry)
 # The capture tier's writer thread; found here, as OpenCV is, so the imported
 # target reaches the tests that link the tier.
 if(VC_WITH_RIG)
