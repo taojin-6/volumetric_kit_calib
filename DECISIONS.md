@@ -100,6 +100,12 @@ of them did.
   Installing a formula can upgrade its dependencies, which recon's and gfx's
   CI build against, and the two Mac legs installing at once would collide on
   Homebrew's locks.
+- **A brew upgrade needs no cache clearing:** the owner upgrades the Mac's
+  Homebrew by hand while CI is idle. Each Mac leg's dependency cache keys on
+  the installed versions of the formulae its build finds, by the core's
+  `homebrew-key` action, so the next run rebuilds the tree once. Why: the
+  core's
+  [DECISIONS.md](https://github.com/taojin-6/volumetric_kit_core/blob/main/DECISIONS.md#a-brew-upgrade-needs-no-cache-clearing).
 - **Protecting `main`** with the `required` check is the owner's choice.
 
 ## 2026-10-16 — Depth checks are calib's kernels
