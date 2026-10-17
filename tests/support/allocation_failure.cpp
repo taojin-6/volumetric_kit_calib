@@ -3,16 +3,43 @@
 
 #include "allocation_failure.hpp"
 
+#include <dlfcn.h>
+#include <execinfo.h>
+
 #include <cstdlib>
+#include <cstring>
 #include <new>
 
 namespace volumetric_kit::calib::test {
 thread_local AllocationFailure allocation_failure;
 }  // namespace volumetric_kit::calib::test
 
+namespace {
+
+// Whether a frame of the calling thread's stack is in the Vulkan loader
+// (libvulkan*), a layer (*VkLayer*) or MoltenVK. Neither call allocates.
+bool under_vulkan() noexcept {
+  void* frames[128];
+  const int depth = backtrace(frames, 128);
+  for (int i = 0; i < depth; ++i) {
+    Dl_info info;
+    if (dladdr(frames[i], &info) == 0 || info.dli_fname == nullptr) continue;
+    const char* slash = std::strrchr(info.dli_fname, '/');
+    const char* name = slash == nullptr ? info.dli_fname : slash + 1;
+    if (std::strncmp(name, "libvulkan", 9) == 0 ||
+        std::strstr(name, "VkLayer") != nullptr ||
+        std::strstr(name, "MoltenVK") != nullptr) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
 void* operator new(std::size_t bytes) {
   auto& failure = volumetric_kit::calib::test::allocation_failure;
-  if (failure.armed) {
+  if (failure.armed && !(failure.spare_vulkan && under_vulkan())) {
     if (failure.remaining == 0) {
       failure.armed = false;  // The OutOfMemory message can allocate.
       failure.injected = true;

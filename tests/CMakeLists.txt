@@ -15,12 +15,13 @@ function(vc_add_test name)
     TIMEOUT 300)
 endfunction()
 
-# The tests' header-only helpers (support/).
+# The tests' header-only helpers (support/); allocation_failure.cpp, which an
+# out-of-memory test adds, walks the stack with dladdr.
 add_library(vc_test_support INTERFACE)
 target_include_directories(vc_test_support
                            INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/support")
 target_link_libraries(vc_test_support INTERFACE volumetric_kit::calib_core
-                                                GTest::gtest)
+                                                GTest::gtest ${CMAKE_DL_LIBS})
 
 # version smoke test.
 vc_add_test(version volumetric_kit::calib_core)
@@ -107,8 +108,9 @@ endif()
 if(_vc_build_depth)
   # depth: the board-plane fit on a device, through the core's Vulkan test
   # fixtures (they skip without one), against references in double made here;
-  # and the board region's rule on the device, pixel by pixel, through a kernel
-  # of the test's own over the tier's GLSL (shaders/board_member_cases.comp).
+  # the board region's rule on the device, pixel by pixel, through a kernel of
+  # the test's own over the tier's GLSL (shaders/board_member_cases.comp); and
+  # host allocation failures, the Vulkan driver's spared.
   vc_add_test(depth_plane_fit volumetric_kit::calib_depth
               volumetric_kit::core_test_support vc_synthetic_rig)
   get_target_property(_vc_glsl_roots calib_depth VC_SHADER_INCLUDE_DIRS)
@@ -120,6 +122,9 @@ if(_vc_build_depth)
     ${_vc_glsl_roots}
     SHADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/board_member_cases.comp")
+  vc_add_test(depth_oom volumetric_kit::calib_depth
+              volumetric_kit::core_test_support vc_test_support)
+  target_sources(vc_depth_oom_test PRIVATE support/allocation_failure.cpp)
 endif()
 
 if(_vc_build_viz)

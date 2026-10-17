@@ -20,6 +20,9 @@ struct AllocationFailure {
   std::size_t remaining = 0;
   bool armed = false;
   bool injected = false;
+  // Neither count nor fail an allocation made under a Vulkan loader's,
+  // layer's or driver's frame (SpareVulkan).
+  bool spare_vulkan = false;
 };
 
 extern thread_local AllocationFailure allocation_failure;
@@ -27,11 +30,25 @@ extern thread_local AllocationFailure allocation_failure;
 class FailAllocation {
  public:
   explicit FailAllocation(std::size_t after) noexcept {
-    allocation_failure = {after, true, false};
+    allocation_failure.remaining = after;
+    allocation_failure.armed = true;
+    allocation_failure.injected = false;
   }
   ~FailAllocation() { allocation_failure.armed = false; }
   FailAllocation(const FailAllocation&) = delete;
   FailAllocation& operator=(const FailAllocation&) = delete;
+};
+
+// While alive, sweeps leave the Vulkan loader, layers and driver alone: they
+// report host memory through VkResult, and a bad_alloc thrown through them
+// is undefined. Each allocation then walks the stack, so only device tests
+// take it.
+class SpareVulkan {
+ public:
+  SpareVulkan() noexcept { allocation_failure.spare_vulkan = true; }
+  ~SpareVulkan() { allocation_failure.spare_vulkan = false; }
+  SpareVulkan(const SpareVulkan&) = delete;
+  SpareVulkan& operator=(const SpareVulkan&) = delete;
 };
 
 // Sweep every allocation in a rejected call, including with_context and
