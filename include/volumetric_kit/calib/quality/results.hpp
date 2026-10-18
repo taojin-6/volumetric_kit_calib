@@ -43,9 +43,11 @@
 ///   `settings.bundle_adjust`'s `focal_fraction` and `principal_px`):
 ///   `focal`, `principal_x` and `principal_y`, each by the id moved,
 ///   `{rotation_deg, centre_mm: [x, y, z]}`;
-/// - `principal_point_ab` (its shift `settings.metrics.principal_shift_px`):
-///   `refused`, `corners`, `as_given` and `shifted` (`rms_px`,
-///   `legacy_rmse_px`, `transfer_median_px`, `transfer_p90_px`), `verdict`;
+/// - `principal_point_ab` (its shift `settings.metrics.principal_shift_px`,
+///   its verdict's margin `principal_margin_fraction` and
+///   `principal_margin_px`): `refused`, `corners`, `as_given` and `shifted`
+///   (`rms_px`, `legacy_rmse_px`, `transfer_median_px`, `transfer_p90_px`),
+///   `verdict` (@ref to_string(PrincipalPointVerdict)'s name);
 /// - `geometry`: `centres_m` by id, and `baselines_m`, each pair once
 ///   (`a`, `b`, `m`);
 /// - `depth` (@ref DepthSummary), `null` when the depth was not checked:

@@ -269,19 +269,20 @@ struct LeaveOneOut {
   std::vector<CameraStability> cameras;  ///< In the rig's order.
 };
 
-/// @brief Which principal points the A/B test favours.
+/// @brief Which principal points the A/B test favours: the side whose RMS is
+///        less by the margin (@ref principal_point_verdict).
 enum class PrincipalPointVerdict {
-  AsGiven,  ///< The lenses as given: both the RMS and the transfer are less.
-  Shifted,  ///< The principal points shifted: both are less.
-  /// Neither side wins both: one is less and the other not, or a tie, or a
-  /// figure not a number.
-  Mixed,
+  AsGiven,  ///< The lenses as given.
+  Shifted,  ///< The principal points shifted.
+  /// Neither side's RMS is less by the margin, or either is not a finite
+  /// number.
+  Inconclusive,
 };
 
 /// @brief The name the report gives @p verdict.
 /// @param verdict  A verdict.
-/// @return `"as_given"`, `"shifted"` or `"mixed"`; `"unknown"` for a value
-///         @ref PrincipalPointVerdict does not name.
+/// @return `"as_given"`, `"shifted"` or `"inconclusive"`; `"unknown"` for a
+///         value @ref PrincipalPointVerdict does not name.
 ///
 /// @code
 /// show(to_string(metrics.principal_point.verdict));
@@ -305,19 +306,46 @@ struct PrincipalPointArm {
   double transfer_p90_px = std::numeric_limits<double>::quiet_NaN();
 };
 
-/// @brief The side of the principal-point A/B test both its RMS and its
-///        transfer's median favour.
-/// @param as_given  The lenses as given.
-/// @param shifted   The principal points shifted.
-/// @return `Shifted` when both of @p shifted's are less than @p as_given's,
-///         `AsGiven` when both are greater, else `Mixed`.
+/// The A/B verdict's margin unless told otherwise, as a fraction of the
+/// larger side's RMS (@ref principal_point_verdict).
+inline constexpr double kPrincipalMarginFraction = 0.02;
+/// The A/B verdict's margin's cap unless told otherwise (pixels).
+inline constexpr double kPrincipalMarginPx = 0.05;
+
+/// @brief The side of the principal-point A/B test whose RMS is less by the
+///        margin: `min(margin_fraction * max(a, s), margin_px)`, for the RMS
+///        `a` as given and `s` shifted. The transfer is information, not
+///        taken.
+/// @param as_given         The lenses as given.
+/// @param shifted          The principal points shifted.
+/// @param margin_fraction  The margin's fraction of the larger RMS; in
+///                         (0, 1).
+/// @param margin_px        The margin's cap (pixels); positive and finite.
+/// @return `Shifted` when `a - s` is positive and at least the margin,
+///         `AsGiven` when `s - a` is, else `Inconclusive`, as it is when
+///         either RMS is not a finite number.
 ///
 /// @code
 /// ab.verdict = principal_point_verdict(ab.as_given, ab.shifted);
 /// @endcode
-VC_QUALITY_API PrincipalPointVerdict
-principal_point_verdict(const PrincipalPointArm& as_given,
-                        const PrincipalPointArm& shifted) noexcept;
+VC_QUALITY_API PrincipalPointVerdict principal_point_verdict(
+    const PrincipalPointArm& as_given, const PrincipalPointArm& shifted,
+    double margin_fraction = kPrincipalMarginFraction,
+    double margin_px = kPrincipalMarginPx) noexcept;
+
+/// @brief The principal-point A/B test's gap relative to the larger RMS:
+///        `(a - s) / max(a, s)`, for the RMS `a` as given and `s` shifted.
+/// @param as_given  The lenses as given.
+/// @param shifted   The principal points shifted.
+/// @return The gap, positive when the shifted side's RMS is less; NaN when
+///         either RMS is not a finite number, or both are 0.
+///
+/// @code
+/// show(100.0 * principal_point_gap(ab.as_given, ab.shifted), "%");
+/// @endcode
+VC_QUALITY_API double principal_point_gap(
+    const PrincipalPointArm& as_given,
+    const PrincipalPointArm& shifted) noexcept;
 
 /// @brief Whether every camera's principal point fits better shifted: the
 ///        rig re-solved with `cx` and `cy` @ref shift_px larger on every
@@ -336,15 +364,14 @@ struct PrincipalPointAB {
   double shift_px = 0.0;  ///< The shift tried, on `cx` and `cy` (pixels).
   /// Why the shifted rig could not be solved (@ref solve::bundle_adjust's
   /// message); empty when it was. When refused, @ref corners is 0, the arms
-  /// are not numbers and the verdict is `Mixed`.
+  /// are not numbers and the verdict is `Inconclusive`.
   std::string refused;
   /// The corners both sides' adjustments kept, which the RMS is over.
   std::size_t corners = 0;
   PrincipalPointArm as_given;  ///< The lenses as given: the solution.
   PrincipalPointArm shifted;   ///< The principal points shifted, re-solved.
-  /// Which side both the RMS and the transfer's median favour
-  /// (@ref principal_point_verdict).
-  PrincipalPointVerdict verdict = PrincipalPointVerdict::Mixed;
+  /// Which side's RMS is less by the margin (@ref principal_point_verdict).
+  PrincipalPointVerdict verdict = PrincipalPointVerdict::Inconclusive;
 };
 
 /// @brief Where the solved cameras are, in the world (the reference's colour
@@ -380,6 +407,11 @@ struct MetricsOptions {
   solve::BundleAdjustOptions bundle_adjust;
   /// The principal points' shift the A/B test tries (pixels); finite, not 0.
   double principal_shift_px = kPrincipalShiftPx;
+  /// The A/B verdict's margin as a fraction of the larger RMS
+  /// (@ref principal_point_verdict); in (0, 1).
+  double principal_margin_fraction = kPrincipalMarginFraction;
+  /// The A/B verdict's margin's cap (pixels); positive and finite.
+  double principal_margin_px = kPrincipalMarginPx;
   double histogram_bin_px = 0.1;  ///< The histograms' bin width; positive.
   int histogram_bins = 30;        ///< Their bins before the last; at least 1.
 };
@@ -485,16 +517,22 @@ VC_QUALITY_API core::Result<LeaveOneOut> leave_one_out(
 /// @param solution  The adjustment's solution.
 /// @param options   The adjustment's options, which the re-solve takes.
 /// @param shift_px  The shift (pixels); finite, not 0.
-/// @return The test; `InvalidArgument` for an option or a shift out of range
-///         (naming it), or when @p solution does not fit the others; or
-///         another error of the re-solve's, or the transfer's. Each message
-///         starts `principal_point_ab: `.
+/// @param margin_fraction  The verdict's margin's fraction of the larger RMS
+///                         (@ref principal_point_verdict); in (0, 1).
+/// @param margin_px        The verdict's margin's cap (pixels); positive and
+///                         finite.
+/// @return The test; `InvalidArgument` for an option, a shift or a margin out
+///         of range (naming it), or when @p solution does not fit the others;
+///         or another error of the re-solve's, or the transfer's. Each
+///         message starts `principal_point_ab: `.
 VC_QUALITY_API core::Result<PrincipalPointAB> principal_point_ab(
     const std::vector<solve::RigCamera>& cameras, const compute::Board& board,
     const std::vector<Observation>& views, const solve::InitialRig& start,
     const solve::RigSolution& solution,
     const solve::BundleAdjustOptions& options = {},
-    double shift_px = kPrincipalShiftPx);
+    double shift_px = kPrincipalShiftPx,
+    double margin_fraction = kPrincipalMarginFraction,
+    double margin_px = kPrincipalMarginPx);
 
 /// @brief Everything a solved rig is measured by.
 ///

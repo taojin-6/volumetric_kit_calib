@@ -81,9 +81,10 @@ renderer.
   After the solve, what the rig is worth: the reprojection error before and
   after, what was left out, the cross-camera transfer (the legacy
   `verify_rig.py`'s check), each camera's move with one capture left out, a
-  principal-point A/B test and the cameras' baselines; and the text of the
-  results directory's files -- recon's calibration file, `report.json` and
-  `residuals.csv` -- which the application writes
+  principal-point A/B test decided by the RMS with a margin, and the
+  cameras' baselines; and the text of the results directory's files --
+  recon's calibration file, `report.json` and `residuals.csv` -- which the
+  application writes
   ([DECISIONS.md](DECISIONS.md#2026-10-16--the-solved-rigs-metrics-and-its-results-files)).
   Over the device's depth results, for any number of cameras: the board's
   scale and plane from each view's depth, each ordered pair's depth

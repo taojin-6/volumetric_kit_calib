@@ -227,6 +227,8 @@ void settings(Writer& w, const std::vector<std::string>& ids,
   w.close_object();
   w.key("metrics").open_object();
   w.key("principal_shift_px").value(options.principal_shift_px);
+  w.key("principal_margin_fraction").value(options.principal_margin_fraction);
+  w.key("principal_margin_px").value(options.principal_margin_px);
   w.key("histogram_bin_px").value(options.histogram_bin_px);
   w.key("histogram_bins").value(options.histogram_bins);
   w.close_object();

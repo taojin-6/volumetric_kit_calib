@@ -3,6 +3,7 @@
 
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -517,12 +518,28 @@ core::Status check_shift(double shift_px, std::string_view name) {
   return {};
 }
 
+// Refuses an A/B margin out of range: a fraction not in (0, 1), named
+// `fraction_name`, or a cap not positive and finite, named `px_name`.
+core::Status check_margin(double fraction, double px,
+                          std::string_view fraction_name,
+                          std::string_view px_name) {
+  if (!(fraction > 0.0 && fraction < 1.0)) {
+    return core::Status::invalid_argument(std::string(fraction_name) +
+                                          " must be in (0, 1)");
+  }
+  if (!(px > 0.0) || !std::isfinite(px)) {
+    return core::Status::invalid_argument(std::string(px_name) +
+                                          " must be positive and finite");
+  }
+  return {};
+}
+
 core::Result<PrincipalPointAB> principal_point_of(
     const std::vector<solve::RigCamera>& cameras, const compute::Board& board,
     const std::vector<Observation>& views, const solve::InitialRig& start,
     const solve::RigSolution& solution,
     const solve::BundleAdjustOptions& options, double shift_px,
-    const Transfer& as_given) {
+    double margin_fraction, double margin_px, const Transfer& as_given) {
   std::vector<solve::RigCamera> shifted = cameras;
   for (solve::RigCamera& cam : shifted) {
     cam.model.intrinsics.cx += shift_px;
@@ -579,7 +596,8 @@ core::Result<PrincipalPointAB> principal_point_of(
   };
   out.as_given = arm(given_residuals, as_given);
   out.shifted = arm(shifted_residuals, *moved);
-  out.verdict = principal_point_verdict(out.as_given, out.shifted);
+  out.verdict = principal_point_verdict(out.as_given, out.shifted,
+                                        margin_fraction, margin_px);
   return out;
 }
 
@@ -605,6 +623,9 @@ core::Status check_options(const MetricsOptions& options) {
                                              "options.bundle_adjust."));
   VKC_TRY(
       check_shift(options.principal_shift_px, "options.principal_shift_px"));
+  VKC_TRY(check_margin(
+      options.principal_margin_fraction, options.principal_margin_px,
+      "options.principal_margin_fraction", "options.principal_margin_px"));
   if (!(options.histogram_bin_px > 0.0) ||
       !std::isfinite(options.histogram_bin_px)) {
     return core::Status::invalid_argument(
@@ -619,18 +640,31 @@ core::Status check_options(const MetricsOptions& options) {
 
 }  // namespace
 
-PrincipalPointVerdict principal_point_verdict(
-    const PrincipalPointArm& as_given,
-    const PrincipalPointArm& shifted) noexcept {
-  if (shifted.rms_px < as_given.rms_px &&
-      shifted.transfer_median_px < as_given.transfer_median_px) {
-    return PrincipalPointVerdict::Shifted;
+PrincipalPointVerdict principal_point_verdict(const PrincipalPointArm& as_given,
+                                              const PrincipalPointArm& shifted,
+                                              double margin_fraction,
+                                              double margin_px) noexcept {
+  const double a = as_given.rms_px;
+  const double s = shifted.rms_px;
+  if (!std::isfinite(a) || !std::isfinite(s)) {
+    return PrincipalPointVerdict::Inconclusive;
   }
-  if (as_given.rms_px < shifted.rms_px &&
-      as_given.transfer_median_px < shifted.transfer_median_px) {
-    return PrincipalPointVerdict::AsGiven;
+  const double margin = std::min(margin_fraction * std::max(a, s), margin_px);
+  // A tie is never decisive, even at both RMS 0, where the margin is 0.
+  if (a - s > 0.0 && a - s >= margin) return PrincipalPointVerdict::Shifted;
+  if (s - a > 0.0 && s - a >= margin) return PrincipalPointVerdict::AsGiven;
+  return PrincipalPointVerdict::Inconclusive;
+}
+
+double principal_point_gap(const PrincipalPointArm& as_given,
+                           const PrincipalPointArm& shifted) noexcept {
+  const double a = as_given.rms_px;
+  const double s = shifted.rms_px;
+  const double larger = std::max(a, s);
+  if (!std::isfinite(a) || !std::isfinite(s) || !(larger > 0.0)) {
+    return std::numeric_limits<double>::quiet_NaN();
   }
-  return PrincipalPointVerdict::Mixed;
+  return (a - s) / larger;
 }
 
 const char* to_string(PrincipalPointVerdict verdict) noexcept {
@@ -639,8 +673,8 @@ const char* to_string(PrincipalPointVerdict verdict) noexcept {
       return "as_given";
     case PrincipalPointVerdict::Shifted:
       return "shifted";
-    case PrincipalPointVerdict::Mixed:
-      return "mixed";
+    case PrincipalPointVerdict::Inconclusive:
+      return "inconclusive";
   }
   return "unknown";
 }
@@ -682,20 +716,25 @@ core::Result<PrincipalPointAB> principal_point_ab(
     const std::vector<solve::RigCamera>& cameras, const compute::Board& board,
     const std::vector<Observation>& views, const solve::InitialRig& start,
     const solve::RigSolution& solution,
-    const solve::BundleAdjustOptions& options, double shift_px) {
+    const solve::BundleAdjustOptions& options, double shift_px,
+    double margin_fraction, double margin_px) {
   constexpr const char* kWhat = "principal_point_ab";
   return compute::guarded(kWhat, [&]() -> core::Result<PrincipalPointAB> {
     VKC_TRY(solve::check_bundle_adjust_options(options,
                                                "principal_point_ab: options."));
     core::Status shift = check_shift(shift_px, "shift_px");
     if (!shift.ok()) return shift.with_context(kWhat);
+    core::Status margin = check_margin(margin_fraction, margin_px,
+                                       "margin_fraction", "margin_px");
+    if (!margin.ok()) return margin.with_context(kWhat);
     core::Result<Fit> fit = read_fit(cameras, views, start, solution);
     if (!fit.ok()) return fit.status().with_context(kWhat);
     core::Result<Transfer> as_given =
         transfer_of(fit->rig, board, views, solution.world_to_camera);
     if (!as_given.ok()) return as_given.status().with_context(kWhat);
-    core::Result<PrincipalPointAB> out = principal_point_of(
-        cameras, board, views, start, solution, options, shift_px, *as_given);
+    core::Result<PrincipalPointAB> out =
+        principal_point_of(cameras, board, views, start, solution, options,
+                           shift_px, margin_fraction, margin_px, *as_given);
     if (!out.ok()) return out.status().with_context(kWhat);
     return out;
   });
@@ -737,7 +776,8 @@ core::Result<CalibrationMetrics> calibration_metrics(
     metrics.leave_one_out = *std::move(loo);
     core::Result<PrincipalPointAB> ab = principal_point_of(
         cameras, board, views, start, solution, options.bundle_adjust,
-        options.principal_shift_px, metrics.transfer);
+        options.principal_shift_px, options.principal_margin_fraction,
+        options.principal_margin_px, metrics.transfer);
     if (!ab.ok()) return in("principal_point_ab", ab.status());
     metrics.principal_point = *std::move(ab);
     metrics.geometry = geometry_of(solution);

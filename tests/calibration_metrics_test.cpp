@@ -760,41 +760,80 @@ TEST(LeaveOneOut, ReturnsWhatProgressThrows) {
   EXPECT_EQ(loo.status().message(), "leave_one_out: stop");
 }
 
+// The A/B tests' plans and draws: make_scene's 60 placements at 0.3 px of
+// noise, the rig's own level, each seed both the plan's and the noise's.
+constexpr std::uint32_t kSeeds = 16;
+
+Scene ab_scene(std::uint32_t seed) { return make_scene(60, 0.3, seed, seed); }
+
+// `scene` with the truth's principal points `above_px` above the lenses the
+// solve is given, on `cx` and `cy`.
+Scene truth_above(Scene scene, double above_px) {
+  for (solve::RigCamera& cam : scene.cameras) {
+    cam.model.intrinsics.cx -= above_px;
+    cam.model.intrinsics.cy -= above_px;
+  }
+  return scene;
+}
+
+// The A/B test of `scene`, solved, at the margin given.
+PrincipalPointAB ab_of(const Scene& scene, double margin_fraction,
+                       double margin_px) {
+  const InitialRig start = first_rig(scene);
+  const RigSolution solution = solved(scene, start);
+  core::Result<PrincipalPointAB> ab = PrincipalPointAB{};
+  EXPECT_NO_THROW(ab = principal_point_ab(
+                      scene.cameras, scene.board, scene.views, start, solution,
+                      {}, kPrincipalShiftPx, margin_fraction, margin_px));
+  return value_of(std::move(ab));
+}
+
+PrincipalPointAB ab_of(const Scene& scene) {
+  return ab_of(scene, kPrincipalMarginFraction, kPrincipalMarginPx);
+}
+
 // The truth's principal points 2.5 px above the lenses given: the A/B test
-// prefers them shifted; and with the truth as given, it does not. With 0.1 px
-// of noise, the transfer's median tells the sides apart whatever the draw; at
-// 0.3 px it misses on about one in eight.
+// prefers them shifted; and with the truth as given, it does not. Over every
+// plan and draw, each verdict is decisive and right.
 TEST(PrincipalPointAB, PrefersTheShiftWhenTheTruthHasIt) {
   for (const bool truth_shifted : {true, false}) {
-    SCOPED_TRACE(truth_shifted);
-    Scene scene = make_scene(20, 0.1);
-    if (truth_shifted) {
-      for (solve::RigCamera& cam : scene.cameras) {
-        cam.model.intrinsics.cx -= 2.5;
-        cam.model.intrinsics.cy -= 2.5;
-      }
+    for (std::uint32_t seed = 1; seed <= kSeeds; ++seed) {
+      SCOPED_TRACE(testing::Message()
+                   << "truth shifted " << truth_shifted << ", seed " << seed);
+      const Scene scene =
+          truth_above(ab_scene(seed), truth_shifted ? 2.5 : 0.0);
+      const InitialRig start = first_rig(scene);
+      const RigSolution solution = solved(scene, start);
+      core::Result<PrincipalPointAB> ab = PrincipalPointAB{};
+      EXPECT_NO_THROW(ab = principal_point_ab(scene.cameras, scene.board,
+                                              scene.views, start, solution));
+      ASSERT_TRUE(ab.ok()) << ab.status().message();
+      EXPECT_EQ(ab->shift_px, 2.5);
+      EXPECT_GT(ab->corners, 0u);
+      const PrincipalPointArm& near =
+          truth_shifted ? ab->shifted : ab->as_given;
+      EXPECT_NEAR(near.legacy_rmse_px, near.rms_px / std::sqrt(2.0), 1e-12);
+      EXPECT_EQ(ab->verdict, truth_shifted ? PrincipalPointVerdict::Shifted
+                                           : PrincipalPointVerdict::AsGiven);
+      // The given side's transfer is the solution's.
+      const Transfer given = value_of(cross_camera_transfer(
+          scene.cameras, scene.board, scene.views, solution.world_to_camera));
+      EXPECT_EQ(ab->as_given.transfer_median_px, given.median_px);
+      EXPECT_EQ(ab->as_given.transfer_p90_px, given.p90_px);
     }
-    const InitialRig start = first_rig(scene);
-    const RigSolution solution = solved(scene, start);
-    core::Result<PrincipalPointAB> ab = PrincipalPointAB{};
-    EXPECT_NO_THROW(ab = principal_point_ab(scene.cameras, scene.board,
-                                            scene.views, start, solution));
-    ASSERT_TRUE(ab.ok()) << ab.status().message();
-    EXPECT_EQ(ab->shift_px, 2.5);
-    EXPECT_GT(ab->corners, 0u);
-    const PrincipalPointArm& near = truth_shifted ? ab->shifted : ab->as_given;
-    const PrincipalPointArm& far = truth_shifted ? ab->as_given : ab->shifted;
-    EXPECT_LT(near.rms_px, far.rms_px);
-    EXPECT_LT(near.transfer_median_px, far.transfer_median_px);
-    EXPECT_NEAR(near.legacy_rmse_px, near.rms_px / std::sqrt(2.0), 1e-12);
-    EXPECT_EQ(ab->verdict, truth_shifted ? PrincipalPointVerdict::Shifted
-                                         : PrincipalPointVerdict::AsGiven);
-    // The given side's transfer is the solution's.
-    const Transfer given = value_of(cross_camera_transfer(
-        scene.cameras, scene.board, scene.views, solution.world_to_camera));
-    EXPECT_EQ(ab->as_given.transfer_median_px, given.median_px);
-    EXPECT_EQ(ab->as_given.transfer_p90_px, given.p90_px);
   }
+}
+
+// The truth's principal points midway, 1.25 px above the lenses given and
+// 1.25 px below the shifted: neither side is right, and over the same plans
+// and draws the verdict names a side on at most one.
+TEST(PrincipalPointAB, MidwayTruthIsInconclusive) {
+  std::uint32_t decisive = 0;
+  for (std::uint32_t seed = 1; seed <= kSeeds; ++seed) {
+    const PrincipalPointAB ab = ab_of(truth_above(ab_scene(seed), 1.25));
+    decisive += ab.verdict != PrincipalPointVerdict::Inconclusive ? 1 : 0;
+  }
+  EXPECT_LE(decisive, 1u);
 }
 
 // The sides' RMS is over the corners both adjustments kept: re-solved here
@@ -858,7 +897,7 @@ TEST(PrincipalPointAB, RecordsARefusedReSolve) {
   EXPECT_EQ(ab->corners, 0u);
   EXPECT_TRUE(std::isnan(ab->as_given.rms_px));
   EXPECT_TRUE(std::isnan(ab->shifted.transfer_median_px));
-  EXPECT_EQ(ab->verdict, PrincipalPointVerdict::Mixed);
+  EXPECT_EQ(ab->verdict, PrincipalPointVerdict::Inconclusive);
 
   MetricsOptions options;
   options.principal_shift_px = 1000.0;
@@ -868,24 +907,115 @@ TEST(PrincipalPointAB, RecordsARefusedReSolve) {
   EXPECT_FALSE(m.transfer.errors.empty());
 }
 
-// A verdict needs both the RMS and the transfer's median to agree; a tie or
-// a figure not a number is mixed.
-TEST(PrincipalPointAB, AVerdictNeedsBothFiguresToAgree) {
-  const auto arm = [](double rms_px, double median_px) {
-    PrincipalPointArm a;
-    a.rms_px = rms_px;
-    a.transfer_median_px = median_px;
-    return a;
+PrincipalPointArm arm_of(double rms_px, double median_px = 1.0) {
+  PrincipalPointArm a;
+  a.rms_px = rms_px;
+  a.transfer_median_px = median_px;
+  return a;
+}
+
+// The verdict for `a` as given and `s` shifted is `want`, and with the two
+// swapped it is the other side's, or inconclusive still.
+void expect_verdict(const PrincipalPointArm& a, const PrincipalPointArm& s,
+                    PrincipalPointVerdict want,
+                    double margin_fraction = kPrincipalMarginFraction,
+                    double margin_px = kPrincipalMarginPx) {
+  using V = PrincipalPointVerdict;
+  const V swapped = want == V::Shifted   ? V::AsGiven
+                    : want == V::AsGiven ? V::Shifted
+                                         : V::Inconclusive;
+  EXPECT_EQ(principal_point_verdict(a, s, margin_fraction, margin_px), want)
+      << a.rms_px << " vs " << s.rms_px;
+  EXPECT_EQ(principal_point_verdict(s, a, margin_fraction, margin_px), swapped)
+      << s.rms_px << " vs " << a.rms_px;
+}
+
+// The verdict is the RMS alone, by min(2 % of the larger, 0.05 px); the
+// transfer is not taken, and an RMS not finite is inconclusive.
+TEST(PrincipalPointAB, TheVerdictIsTheRmsByAMargin) {
+  using V = PrincipalPointVerdict;
+  // 2 % of 0.3 px is 0.006 px.
+  expect_verdict(arm_of(0.300), arm_of(0.290), V::Shifted);
+  expect_verdict(arm_of(0.300), arm_of(0.296), V::Inconclusive);
+  expect_verdict(arm_of(0.300), arm_of(0.300), V::Inconclusive);
+  // From 2.5 px the 0.05 px cap binds: 2 % of 5 px would be 0.1 px.
+  expect_verdict(arm_of(5.00), arm_of(4.94), V::Shifted);
+  expect_verdict(arm_of(5.00), arm_of(4.96), V::Inconclusive);
+  // A gap exactly at the margin is decisive, at figures exactly represented:
+  // half the larger RMS, then a cap of 0.25 px below it.
+  expect_verdict(arm_of(1.0), arm_of(0.5), V::Shifted, 0.5, 1.0);
+  expect_verdict(arm_of(1.0), arm_of(0.5625), V::Inconclusive, 0.5, 1.0);
+  expect_verdict(arm_of(1.0), arm_of(0.75), V::Shifted, 0.5, 0.25);
+  expect_verdict(arm_of(1.0), arm_of(0.8125), V::Inconclusive, 0.5, 0.25);
+  // Both 0, the margin is 0, but a tie names no side.
+  expect_verdict(arm_of(0.0), arm_of(0.0), V::Inconclusive);
+  // A transfer that disagrees changes nothing.
+  expect_verdict(arm_of(0.300, 1.0), arm_of(0.290, 2.0), V::Shifted);
+  expect_verdict(arm_of(0.300, 2.0), arm_of(0.296, 1.0), V::Inconclusive);
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  for (const double bad : {nan, kInfinity, -kInfinity}) {
+    expect_verdict(arm_of(bad), arm_of(0.3), V::Inconclusive);
+    expect_verdict(arm_of(bad), arm_of(bad), V::Inconclusive);
+  }
+}
+
+// The gap is relative to the larger RMS, positive when the shifted side's is
+// less; NaN when an RMS is not finite or both are 0.
+TEST(PrincipalPointAB, TheGapIsRelativeToTheLargerRms) {
+  EXPECT_EQ(principal_point_gap(arm_of(1.0), arm_of(0.75)), 0.25);
+  EXPECT_EQ(principal_point_gap(arm_of(0.75), arm_of(1.0)), -0.25);
+  EXPECT_EQ(principal_point_gap(arm_of(0.5), arm_of(0.5)), 0.0);
+  EXPECT_EQ(principal_point_gap(arm_of(2.0), arm_of(0.0)), 1.0);
+  EXPECT_TRUE(std::isnan(principal_point_gap(arm_of(0.0), arm_of(0.0))));
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  for (const double bad : {nan, kInfinity}) {
+    EXPECT_TRUE(std::isnan(principal_point_gap(arm_of(bad), arm_of(0.3))));
+    EXPECT_TRUE(std::isnan(principal_point_gap(arm_of(0.3), arm_of(bad))));
+  }
+}
+
+// The margin given decides, in principal_point_ab and calibration_metrics
+// alike: a gap the default calls decisive is not, under half the larger RMS.
+TEST(PrincipalPointAB, TakesTheMarginItIsGiven) {
+  const Scene scene = truth_above(make_scene(20, 0.1), 2.5);
+  EXPECT_EQ(ab_of(scene).verdict, PrincipalPointVerdict::Shifted);
+  const PrincipalPointAB wide = ab_of(scene, 0.5, 1.0);
+  EXPECT_EQ(wide.verdict, PrincipalPointVerdict::Inconclusive);
+  EXPECT_GT(principal_point_gap(wide.as_given, wide.shifted), 0.02);
+
+  const InitialRig start = first_rig(scene);
+  const RigSolution solution = solved(scene, start);
+  MetricsOptions options;
+  options.principal_margin_fraction = 0.5;
+  options.principal_margin_px = 1.0;
+  const CalibrationMetrics m = measured(scene, start, solution, options);
+  EXPECT_EQ(m.options.principal_margin_fraction, 0.5);
+  EXPECT_EQ(m.options.principal_margin_px, 1.0);
+  EXPECT_EQ(m.principal_point.verdict, PrincipalPointVerdict::Inconclusive);
+  EXPECT_EQ(m.principal_point.shifted.rms_px, wide.shifted.rms_px);
+}
+
+TEST(PrincipalPointAB, RefusesAMarginOutOfRange) {
+  const Scene scene = make_scene(6);
+  const InitialRig start = first_rig(scene);
+  const RigSolution solution = solved(scene, start);
+  const auto refused = [&](double fraction, double px,
+                           const std::string& says) {
+    core::Result<PrincipalPointAB> ab = PrincipalPointAB{};
+    EXPECT_NO_THROW(ab = principal_point_ab(scene.cameras, scene.board,
+                                            scene.views, start, solution, {},
+                                            kPrincipalShiftPx, fraction, px));
+    EXPECT_EQ(ab.status().domain(), Code::InvalidArgument) << says;
+    EXPECT_EQ(ab.status().message().rfind("principal_point_ab: " + says, 0), 0u)
+        << ab.status().message();
   };
   const double nan = std::numeric_limits<double>::quiet_NaN();
-  using V = PrincipalPointVerdict;
-  EXPECT_EQ(principal_point_verdict(arm(1.0, 2.0), arm(0.9, 1.9)), V::Shifted);
-  EXPECT_EQ(principal_point_verdict(arm(0.9, 1.9), arm(1.0, 2.0)), V::AsGiven);
-  EXPECT_EQ(principal_point_verdict(arm(1.0, 2.0), arm(0.9, 2.1)), V::Mixed);
-  EXPECT_EQ(principal_point_verdict(arm(0.9, 2.1), arm(1.0, 2.0)), V::Mixed);
-  EXPECT_EQ(principal_point_verdict(arm(1.0, 2.0), arm(1.0, 1.9)), V::Mixed);
-  EXPECT_EQ(principal_point_verdict(arm(1.0, nan), arm(0.9, 1.9)), V::Mixed);
-  EXPECT_EQ(principal_point_verdict(arm(0.9, 1.9), arm(nan, nan)), V::Mixed);
+  for (const double fraction : {0.0, 1.0, -0.5, 1.5, nan}) {
+    refused(fraction, kPrincipalMarginPx, "margin_fraction");
+  }
+  for (const double px : {0.0, -0.05, kInfinity, nan}) {
+    refused(kPrincipalMarginFraction, px, "margin_px");
+  }
 }
 
 TEST(PrincipalPointAB, RefusesAShiftOfNothing) {
@@ -1017,6 +1147,16 @@ TEST(CalibrationMetrics, RefusesOptionsAndASolutionThatDoNotFit) {
   o = {};
   o.principal_shift_px = nan;
   refused(start, solution, o, "options.principal_shift_px");
+  for (const double fraction : {0.0, 1.0, nan}) {
+    o = {};
+    o.principal_margin_fraction = fraction;
+    refused(start, solution, o, "options.principal_margin_fraction");
+  }
+  for (const double px : {0.0, -0.05, kInfinity, nan}) {
+    o = {};
+    o.principal_margin_px = px;
+    refused(start, solution, o, "options.principal_margin_px");
+  }
   o = {};
   o.histogram_bin_px = 0.0;
   refused(start, solution, o, "options.histogram_bin_px");
@@ -1063,7 +1203,7 @@ TEST(CalibrationMetrics, RefusesOptionsAndASolutionThatDoNotFit) {
 TEST(CalibrationMetrics, NamesEachVerdict) {
   EXPECT_STREQ(to_string(PrincipalPointVerdict::AsGiven), "as_given");
   EXPECT_STREQ(to_string(PrincipalPointVerdict::Shifted), "shifted");
-  EXPECT_STREQ(to_string(PrincipalPointVerdict::Mixed), "mixed");
+  EXPECT_STREQ(to_string(PrincipalPointVerdict::Inconclusive), "inconclusive");
   EXPECT_STREQ(to_string(static_cast<PrincipalPointVerdict>(9)), "unknown");
 }
 
