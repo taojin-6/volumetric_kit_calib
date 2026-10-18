@@ -10,17 +10,19 @@
 // two queue families, under synchronization validation: a known point,
 // prepared on the compute family and drawn on the graphics family through
 // gfx's depth-cloud pipeline, the frame waiting for the preparation's
-// semaphore, lands on its pixel with its colour by recon's rule; a frozen
-// snapshot redraws at a new pose with no second preparation;
-// a frame EXCLUSIVE to the compute family is refused. And the device
-// calib_rig asks for. The GPU cases skip without a Vulkan device, the
-// cross-family ones also with one family.
+// semaphore, lands on its pixel with its colour by recon's rule, the snapshot
+// held until its frame retires; a frozen snapshot redraws at a new pose with
+// no second preparation; a frame EXCLUSIVE to the compute family is refused,
+// and with no camera placed nothing is drawn, neither holding anything. And
+// the device calib_rig asks for. The GPU cases skip without a Vulkan device,
+// the cross-family ones also with one family.
 
 #include <gtest/gtest.h>
 
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -233,6 +235,7 @@ TEST_F(AppCloud, PreparesEveryCameraAtTheOriginForAnyNumberOfCameras) {
       EXPECT_EQ(f.depth_camera.cam_to_world, recon::Mat4f(depth_to_color()));
     }
     ASSERT_NE(s->ready.semaphore, nullptr);
+    EXPECT_GT(s->ready.value, 0u);  // signalled, not the semaphore's start
     const core::Result<std::uint64_t> reached = s->ready.semaphore->value();
     ASSERT_TRUE(reached.ok());
     EXPECT_GE(reached.value(), s->ready.value);
@@ -244,8 +247,11 @@ TEST_F(AppCloud, PreparesEveryCameraAtTheOriginForAnyNumberOfCameras) {
   }
 }
 
-// The window takes the newest snapshot, once; offered faster than they are
-// prepared, the newest set is the last prepared and none comes out of order.
+// The window takes the newest snapshot, once. Offered faster than they are
+// prepared, the sets are not queued: each one waiting is let go when a newer
+// one is offered, so at most the set being prepared and the newest are held;
+// the newest is the last prepared, none comes out of order, and each
+// snapshot waits on a value of its own.
 TEST_F(AppCloud, TheNewestWins) {
   std::unique_ptr<CloudWorker> cloud = start(2);
   ASSERT_NE(cloud, nullptr);
@@ -259,23 +265,34 @@ TEST_F(AppCloud, TheNewestWins) {
   EXPECT_EQ(s->number, 2u);
   EXPECT_EQ(cloud->take_snapshot(), nullptr);
 
-  std::vector<std::weak_ptr<const void>> watched;
+  // Each set's pixels, watched apart: four offers take microseconds, one
+  // preparation milliseconds.
+  std::vector<std::vector<std::weak_ptr<const void>>> burst(4);
   for (std::uint64_t seq = 3; seq <= 6; ++seq) {
-    cloud->offer(make_set(2, seq, &watched));
+    cloud->offer(make_set(2, seq, &burst[seq - 3]));
   }
+  std::size_t held = 0;
+  for (const std::vector<std::weak_ptr<const void>>& set : burst) {
+    if (!all_gone(set)) ++held;
+  }
+  EXPECT_LE(held, 2u);
   std::uint64_t last = 2;
+  std::uint64_t ready = s->ready.value;
   const auto give_up = std::chrono::steady_clock::now() + kPatience;
   while (last < 6 && std::chrono::steady_clock::now() < give_up) {
     s = cloud->take_snapshot();
     if (s != nullptr) {
       EXPECT_GT(s->sequence, last);
+      EXPECT_GT(s->ready.value, ready);
       last = s->sequence;
+      ready = s->ready.value;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
   EXPECT_EQ(last, 6u);
-  EXPECT_LE(cloud->prepared(), 6u);
-  EXPECT_TRUE(all_gone(watched));
+  for (const std::vector<std::weak_ptr<const void>>& set : burst) {
+    EXPECT_TRUE(all_gone(set));
+  }
   EXPECT_TRUE(cloud->take_errors().empty());
 }
 
@@ -530,11 +547,13 @@ class AppCloudAcrossFamilies : public core::test::SharedDeviceTest {
 
   // record_cloud as the window runs it, as frame `next_`, into a
   // kDepthW x kDepthH target cleared to black: the frame's submission waits
-  // for what it returns at VERTEX_SHADER, with no host wait before it; then
-  // the frame's number is set and the retire queue polled.
+  // for what it returns at VERTEX_SHADER, with no host wait before it; then,
+  // once the frame has executed, `between` runs, which may release
+  // `snapshot`; then the frame's number is set and the retire queue polled.
   Rendered render(const std::shared_ptr<const CloudSnapshot>& snapshot,
                   const std::vector<viz::SceneCamera>& cameras,
-                  const viz::CloudStyle& s) {
+                  const viz::CloudStyle& s,
+                  const std::function<void()>& between = {}) {
     Rendered out;
     core::test::TwoFamilyDevice& two = two_family();
     core::Device& graphics = two.graphics();
@@ -590,6 +609,7 @@ class AppCloudAcrossFamilies : public core::test::SharedDeviceTest {
       return done.wait();
     }();
     EXPECT_TRUE(ran.ok()) << ran.message();
+    if (between) between();
     EXPECT_TRUE(timeline_->signal(number).ok());
     retire_->poll();
     const auto* px = static_cast<const std::uint8_t*>(target.value().pixels());
@@ -639,28 +659,42 @@ class AppCloudAcrossFamilies : public core::test::SharedDeviceTest {
 // A synthetic frame prepared on the compute family and drawn on the graphics
 // family in place: its one point lands on its depth pixel through a view of
 // its own depth camera, in the colour of the colour pixel recon's rule gives
-// it -- the nearest centre, through the factory extrinsic -- and the frame
-// held until it retires. The frame waits at the vertex stage for the
-// semaphore record_cloud returns, as gfx's contract asks of a producer on
-// another queue, and validation, synchronization included, stays clean.
+// it -- the nearest centre, through the factory extrinsic. The frame waits at
+// the vertex stage for the value the preparation signalled, which
+// record_cloud returns, as gfx's contract asks of a producer on another
+// queue, and validation, synchronization included, stays clean. The snapshot
+// is held until its frame retires: executed but not yet retired, with the
+// test's own reference gone, the retire queue alone keeps it.
 TEST_F(AppCloudAcrossFamilies, AKnownPointLandsOnItsPixelWithItsColour) {
   std::unique_ptr<CloudWorker> cloud = start(both());
   ASSERT_NE(cloud, nullptr);
   cloud->offer(make_set(1, 1));
   std::shared_ptr<const CloudSnapshot> snapshot = next_snapshot(*cloud);
   ASSERT_NE(snapshot, nullptr);
-  const sensor::DeviceFrame& frame = *snapshot->frames[0];
-  EXPECT_EQ(frame.depth->sharing_mode(), VK_SHARING_MODE_CONCURRENT);
-  EXPECT_EQ(frame.color->sharing_mode(), VK_SHARING_MODE_CONCURRENT);
+  EXPECT_EQ(snapshot->frames[0]->depth->sharing_mode(),
+            VK_SHARING_MODE_CONCURRENT);
+  EXPECT_EQ(snapshot->frames[0]->color->sharing_mode(),
+            VK_SHARING_MODE_CONCURRENT);
+  const core::TimelinePoint ready = snapshot->ready;
+  const std::weak_ptr<const CloudSnapshot> watched = snapshot;
 
   const Mat4d color_to_world = pose(17.0, {0.3, 1.0, 0.2}, {0.4, -0.2, 1.5});
   const Mat4d depth_to_world = color_to_world * depth_to_color();
   const Rendered drawn =
       render(snapshot, placed(color_to_world),
-             style(pinhole_view_proj(depth_model(), depth_to_world)));
+             style(pinhole_view_proj(depth_model(), depth_to_world)), [&] {
+               snapshot.reset();
+               EXPECT_EQ(retire_->pending(), 1u);
+               retire_->poll();  // the frame's number is not reached yet
+               EXPECT_FALSE(watched.expired());
+             });
+  EXPECT_TRUE(watched.expired());
+  EXPECT_EQ(retire_->pending(), 0u);
   ASSERT_TRUE(drawn.recorded.ok()) << drawn.recorded.message();
   ASSERT_TRUE(drawn.wait.has_value());
-  EXPECT_EQ(drawn.wait->semaphore, snapshot->ready.semaphore);
+  EXPECT_EQ(drawn.wait->semaphore, ready.semaphore);
+  EXPECT_EQ(drawn.wait->value, ready.value);
+  EXPECT_GT(drawn.wait->value, 0u);
   ASSERT_FALSE(drawn.rgba.empty());
 
   const glm::dvec2 c = image(
@@ -670,7 +704,6 @@ TEST_F(AppCloudAcrossFamilies, AKnownPointLandsOnItsPixelWithItsColour) {
   ASSERT_EQ(points.size(), 1u);
   EXPECT_EQ(points[0], std::make_pair(kU, kV));
   EXPECT_EQ(rgb_at(drawn.rgba, kU, kV), expected & 0x00FFFFFFu);
-  EXPECT_EQ(retire_->pending(), 0u);  // held until its frame retired
 }
 
 // Frozen, the snapshot redraws where a new pose puts its camera, with no
@@ -727,13 +760,32 @@ TEST_F(AppCloudAcrossFamilies, RefusesAFrameExclusiveToTheComputeFamily) {
             VK_SHARING_MODE_EXCLUSIVE);
   const Rendered drawn =
       render(snapshot, placed(Mat4d(1.0)),
-             style(pinhole_view_proj(depth_model(), depth_to_color())));
+             style(pinhole_view_proj(depth_model(), depth_to_color())),
+             [&] { EXPECT_EQ(retire_->pending(), 0u); });
   EXPECT_EQ(drawn.recorded.domain(), Code::InvalidArgument);
   EXPECT_NE(drawn.recorded.message().find("EXCLUSIVE"), std::string::npos)
       << drawn.recorded.message();
   EXPECT_FALSE(drawn.wait.has_value());
   EXPECT_TRUE(lit(drawn.rgba).empty());
-  EXPECT_EQ(retire_->pending(), 0u);
+}
+
+// With no camera placed there is nothing to draw: record_cloud returns no
+// wait, and holds nothing.
+TEST_F(AppCloudAcrossFamilies, DrawsAndHoldsNothingWithNoCameraPlaced) {
+  std::unique_ptr<CloudWorker> cloud = start(both());
+  ASSERT_NE(cloud, nullptr);
+  cloud->offer(make_set(1, 1));
+  const std::shared_ptr<const CloudSnapshot> snapshot = next_snapshot(*cloud);
+  ASSERT_NE(snapshot, nullptr);
+  std::vector<viz::SceneCamera> unplaced = placed(Mat4d(1.0));
+  unplaced[0].color_to_world.reset();
+  const Rendered drawn =
+      render(snapshot, unplaced,
+             style(pinhole_view_proj(depth_model(), depth_to_color())),
+             [&] { EXPECT_EQ(retire_->pending(), 0u); });
+  ASSERT_TRUE(drawn.recorded.ok()) << drawn.recorded.message();
+  EXPECT_FALSE(drawn.wait.has_value());
+  EXPECT_TRUE(lit(drawn.rgba).empty());
 }
 
 // --- The device
