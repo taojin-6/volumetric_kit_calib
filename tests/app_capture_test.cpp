@@ -710,6 +710,70 @@ TEST(AppCapture, AKeptViewNamesItsCameraWhenItsDetectionFailed) {
   }
 }
 
+// Each camera's depth is the one buffer the writer writes and the capture
+// keeps: a capture through the worker makes no more buffers of its size than
+// the same capture written by a session writer alone, whatever the writer
+// itself makes to encode it.
+TEST(AppCapture, NeverCopiesTheDepth) {
+  constexpr std::size_t kDepthBytes =
+      std::size_t{640} * 576 * sizeof(std::uint16_t);
+  ScratchDir root;
+  const CaptureSetup s = setup(root.path(), 2);
+
+  capture::SessionInfo info;
+  info.directory = (root.path() / "alone").string();
+  info.software = s.software;
+  info.sync_path = s.sync_path;
+  info.reference = s.cameras[s.reference].info.id;
+  info.board = legacy_femto_board();
+  info.depth_mode = s.depth_mode;
+  info.cameras = s.cameras;
+  CaptureRequest alone = request(2, 0.0);
+  capture::CaptureJob job;
+  job.meta = alone.meta;
+  for (CameraFrameCopy& part : alone.cameras) {
+    capture::CameraCapture out;
+    out.jpeg = std::move(part.jpeg);
+    out.depth = std::make_shared<const std::vector<std::uint16_t>>(
+        std::move(part.depth));
+    out.timestamp_ns = part.timestamp_ns;
+    out.sequence = part.sequence;
+    out.detection = std::move(part.live);
+    job.cameras.push_back(std::move(out));
+  }
+  std::size_t by_the_writer = 0;
+  {
+    const test::CountAllocations count(kDepthBytes);
+    core::Result<std::unique_ptr<capture::SessionWriter>> writer =
+        capture::SessionWriter::create(std::move(info));
+    ASSERT_TRUE(writer.ok()) << writer.status().message();
+    const core::Result<bool> queued = (*writer)->submit(std::move(job));
+    ASSERT_TRUE(queued.ok()) << queued.status().message();
+    ASSERT_TRUE(queued.value());
+    (*writer)->flush();
+    const std::vector<capture::WriteResult> results = (*writer)->take_results();
+    ASSERT_EQ(results.size(), 1u);
+    ASSERT_TRUE(results[0].status.ok()) << results[0].status.message();
+    by_the_writer = count.made();
+  }
+
+  std::unique_ptr<CaptureWorker> worker = make(s);
+  ASSERT_NE(worker, nullptr);
+  CaptureRequest r = request(2, 0.0);
+  std::size_t by_the_worker = 0;
+  {
+    const test::CountAllocations count(kDepthBytes);
+    ASSERT_TRUE(submit(*worker, std::move(r)));
+    worker->flush();
+    by_the_worker = count.made();
+  }
+  const std::vector<CaptureEvent> events = worker->take_events();
+  ASSERT_EQ(events.size(), 1u);
+  ASSERT_EQ(events[0].kind, CaptureEvent::Kind::Saved)
+      << events[0].status.message();
+  EXPECT_EQ(by_the_worker, by_the_writer);
+}
+
 // A drop publishes a new snapshot without the capture; one taken before is
 // unchanged, and the dropped capture's depth goes with it: once flush()
 // returns, the worker holds the snapshot it replaced no more.

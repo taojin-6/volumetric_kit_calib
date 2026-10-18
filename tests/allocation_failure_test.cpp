@@ -3,7 +3,7 @@
 
 // The out-of-memory sweep itself (support/allocation_failure.hpp): what it
 // fails, VC_TEST_OOM_EXHAUSTIVE, and its refusal of a call that allocates
-// otherwise than in its census, or more.
+// otherwise than in its census, or more; then the count of one size.
 
 #include <cstddef>
 #include <cstdlib>
@@ -11,6 +11,7 @@
 #include <new>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <gtest/gtest-spi.h>
@@ -143,6 +144,23 @@ TEST(SweepAllocations, RefusesACallThatAllocatesMore) {
       refused[1].find("the call made more than its census's 2 allocations"),
       std::string::npos)
       << refused[1];
+}
+
+// Every thread's allocations of the size, while alive; none of another size,
+// and none once destroyed.
+TEST(CountAllocations, CountsOneSizeOnEveryThread) {
+  static std::unique_ptr<char[]> held[4];
+  {
+    const CountAllocations count(1000);
+    held[0].reset(new char[1000]);
+    std::thread([] {
+      held[1].reset(new char[1000]);
+      held[2].reset(new char[999]);
+    }).join();
+    EXPECT_EQ(count.made(), 2u);
+  }
+  held[3].reset(new char[1000]);
+  EXPECT_EQ(allocation_count.made, 2u);
 }
 
 }  // namespace

@@ -11,8 +11,10 @@
 // Each allocation failed must come from the call stack the census recorded at
 // its index, or the sweep fails rather than test another.
 // VC_TEST_OOM_EXHAUSTIVE=1 fails every allocation instead, which takes
-// minutes under the sanitizers.
+// minutes under the sanitizers. The same replacement counts the allocations
+// of one size on every thread (CountAllocations).
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -66,6 +68,31 @@ class SpareVulkan {
   ~SpareVulkan() { allocation_failure.spare_vulkan = false; }
   SpareVulkan(const SpareVulkan&) = delete;
   SpareVulkan& operator=(const SpareVulkan&) = delete;
+};
+
+// Every thread's allocations of exactly `bytes` bytes, counted while `bytes`
+// is not 0 (CountAllocations).
+struct AllocationCount {
+  std::atomic<std::size_t> bytes{0};
+  std::atomic<std::size_t> made{0};
+};
+
+extern AllocationCount allocation_count;
+
+// While alive, counts the allocations of exactly `bytes` bytes on every
+// thread: how many buffers of a known size a call makes, a copy of one
+// included. One at a time.
+class CountAllocations {
+ public:
+  explicit CountAllocations(std::size_t bytes) noexcept {
+    allocation_count.made = 0;
+    allocation_count.bytes = bytes;
+  }
+  ~CountAllocations() { allocation_count.bytes = 0; }
+  CountAllocations(const CountAllocations&) = delete;
+  CountAllocations& operator=(const CountAllocations&) = delete;
+  // The allocations counted so far.
+  std::size_t made() const noexcept { return allocation_count.made; }
 };
 
 namespace detail {
