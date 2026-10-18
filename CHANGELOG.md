@@ -31,7 +31,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - calib_rig's live 3D view (DECISIONS.md, 2026-10-17): beside the mosaic, in
   the whole window or hidden, frozen or live, solid, tinted-luma or true
-  colour, each camera shown or not in its tint. `CloudWorker`, its T2
+  colour, each camera shown or not in its tint, at first gfx's categorical
+  colour of its index (`scene_camera`). `CloudWorker`, its T2
   thread, takes each set `LiveWorker` reads back through its new `SetSink`,
   prepares every `CloudOptions::live_every`-th on recon's queue family and
   publishes a `CloudSnapshot`; `record_cloud` draws a snapshot's points
@@ -114,9 +115,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `BoardEditor` and `draw_board_editor` (its fields through `board_fields`
   and `apply_fields`) edit the board, checked as the detector's `Board`
   takes it, until the first capture locks it. `VC_WITH_RIG` fetches
-  `volumetric_kit_gfx`, pinned at `4800cac` (main after #136, #137, with the
-  overlay scissor repair, #138, `DepthCloudPipeline`, and #141, a minimized
-  window's framebuffer size of 0 x 0).
+  `volumetric_kit_gfx`, pinned at `76d0655` (main after #136, #137, with the
+  overlay scissor repair, #138, `DepthCloudPipeline`, #141, a minimized
+  window's framebuffer size of 0 x 0, and #142, `categorical_rgba8`).
 - `marker_count`, the markers a board carries, in `calib/core/target.hpp`.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds

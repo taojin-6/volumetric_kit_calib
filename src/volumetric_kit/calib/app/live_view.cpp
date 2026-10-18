@@ -9,6 +9,8 @@
 #include <utility>
 
 #include "volumetric_kit/calib/compute/guarded.hpp"
+#include "volumetric_kit/core/base/check.hpp"
+#include "volumetric_kit/gfx/pipelines/color.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -121,6 +123,19 @@ core::Result<std::optional<core::TimelinePoint>> record_cloud(
 bool cloud_live(bool frozen, viz::ScenePlacement placement,
                 bool minimized) noexcept {
   return !frozen && placement != viz::ScenePlacement::Hidden && !minimized;
+}
+
+viz::SceneCamera scene_camera(const sensor::SensorInfo& info, std::size_t index,
+                              bool reference) {
+  VKC_CHECK(info.color.has_value(), "scene_camera: the sensor has no colour");
+  viz::SceneCamera camera;
+  camera.color = *info.color;
+  camera.depth = info.depth;
+  camera.depth_to_color = info.depth_to_color;
+  // TODO: CA12b places every camera at Calibrate's solved poses.
+  if (reference) camera.color_to_world = recon::camera::Mat4d(1.0);
+  camera.tint = gfx::pipelines::categorical_rgba8(index);
+  return camera;
 }
 
 }  // namespace volumetric_kit::calib::app

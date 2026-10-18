@@ -166,7 +166,10 @@ struct WindowDeleter {
 // --- The 3D view's settings, until the scenario has them.
 // TODO: take the stride, colour mode, point size and the live sets' sampling
 // from the core's calib_rig view settings once the scenario has them (CO5).
-constexpr viz::ScenePlacement kPlacement = viz::ScenePlacement::Beside;
+// Hidden at first: until Calibrate places the rig, the mosaic, where the board
+// is seen, has the window, and T2 prepares nothing (cloud_live).
+// TODO: CA12b shows the view beside the mosaic once Calibrate places the rig.
+constexpr viz::ScenePlacement kPlacement = viz::ScenePlacement::Hidden;
 constexpr int kMaxStride = 8;
 // The pointer's feel: radians of orbit per pixel dragged, and each wheel
 // step's zoom, in the 3D view and the mosaic.
@@ -703,19 +706,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     VKC_ASSIGN(capture::SessionCamera camera,
                session_camera(array.sensor(i), scenario.sync));
     sizes.push_back(camera.info.color->size);
-    // Before the rig is solved only its reference, the world's origin, is
-    // placed.
-    // TODO: CA12b places every camera at Calibrate's solved poses.
-    viz::SceneCamera scene_camera;
-    scene_camera.color = *camera.info.color;
-    scene_camera.depth = camera.info.depth;
-    scene_camera.depth_to_color = camera.info.depth_to_color;
-    if (i == array.primary()) {
-      scene_camera.color_to_world = recon::camera::Mat4d(1.0);
-    }
-    // TODO: give each camera its own default tint from gfx's categorical
-    // palette once gfx has one; until then every tint starts white.
-    scene_cameras.push_back(std::move(scene_camera));
+    scene_cameras.push_back(scene_camera(camera.info, i, i == array.primary()));
     setup.cameras.push_back(std::move(camera));
   }
   // TODO: cap cv::setNumThreads once H4 measures the contention between
