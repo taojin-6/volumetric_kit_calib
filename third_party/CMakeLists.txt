@@ -54,7 +54,7 @@ endif()
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG ea5b97a1c72f4da5f41f414d70d45ee50fe7e034)
+  GIT_TAG c862d5e26bc7558468b0516ee6f778c6e13a5d3e)
 FetchContent_MakeAvailable(volumetric_kit_core)
 # The set() above is lost when the application made the core available first.
 if(VC_WITH_RIG)
