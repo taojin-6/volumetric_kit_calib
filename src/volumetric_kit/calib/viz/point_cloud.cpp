@@ -50,6 +50,14 @@ core::Result<pipelines::DepthCloudDraw> cloud_draw(
     const recon::camera::Mat4d& depth_to_color, const CloudStyle& style) {
   return compute::guarded(
       "cloud_draw", [&]() -> core::Result<pipelines::DepthCloudDraw> {
+        // Two unset families would look like one, and let an EXCLUSIVE
+        // buffer through that the renderer may not read.
+        if (style.producer_family == VK_QUEUE_FAMILY_IGNORED ||
+            style.renderer_family == VK_QUEUE_FAMILY_IGNORED) {
+          return core::Status::invalid_argument(
+              "cloud_draw: the style leaves the producer's or the renderer's "
+              "queue family unset");
+        }
         if (frame.depth == nullptr) {
           return core::Status::invalid_argument(
               "cloud_draw: the frame has no depth");

@@ -101,10 +101,11 @@ points, its frusta, the world's axes and the solved boards.
   CONCURRENT across recon's and the renderer's families (recon's
   `depth_queue_families`, `color_queue_families`). `cloud_draw` refuses an
   EXCLUSIVE buffer while the families differ, which the validation layer
-  would not report. The preparation waits for its fence, which makes no
-  device write visible to another queue, so the worker then sets a timeline
-  value on recon's queue, and each frame that draws the snapshot waits for
-  it at the vertex stage, as gfx's contract asks.
+  would not report, and a style that leaves either family unset. The
+  preparation waits for its fence, which makes no device write visible to
+  another queue, so the worker then sets a timeline value on recon's queue,
+  and each frame that draws the snapshot waits for it at the vertex stage,
+  as gfx's contract asks.
 - **Upright.** gfx's `OrbitCamera` keeps +Y up, and the rig's world has +y
   down, so the view turns the world: the placed cameras' mean up (-y) to +Y,
   their mean forward, levelled, to -Z. An outside-in ring's forwards cancel,

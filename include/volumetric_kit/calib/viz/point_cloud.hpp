@@ -53,10 +53,12 @@ struct CloudStyle {
   VkRect2D viewport{};
   /// World to Vulkan clip space.
   glm::mat4 view_proj{1.0f};
-  /// The queue family that wrote the frame's buffers: recon's.
-  std::uint32_t producer_family = 0;
-  /// The queue family that draws them: the renderer's.
-  std::uint32_t renderer_family = 0;
+  /// The queue family that wrote the frame's buffers: recon's. Until it is
+  /// set, `VK_QUEUE_FAMILY_IGNORED`, which @ref cloud_draw refuses.
+  std::uint32_t producer_family = VK_QUEUE_FAMILY_IGNORED;
+  /// The queue family that draws them: the renderer's. Set as
+  /// @ref producer_family is.
+  std::uint32_t renderer_family = VK_QUEUE_FAMILY_IGNORED;
 };
 
 /// @brief One camera's prepared frame as gfx's draw of its points, at the
@@ -77,7 +79,8 @@ struct CloudStyle {
 /// @param style           How and where it is drawn, and by which queue
 ///                        family.
 /// @return The draw; or `InvalidArgument`, its message starting
-///         `cloud_draw: `, for a frame without depth, a buffer drawn from
+///         `cloud_draw: `, for a style that leaves either queue family
+///         unset, a frame without depth, a buffer drawn from
 ///         without `STORAGE_BUFFER` usage, a buffer that is EXCLUSIVE while
 ///         the producer's and the renderer's queue families differ (the
 ///         renderer may not read it: recon's

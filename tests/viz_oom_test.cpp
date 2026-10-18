@@ -187,7 +187,9 @@ TEST(VizOom, CloudDraws) {
   std::vector<SceneCamera> cameras(3);  // none placed: nothing to draw
   const std::vector<std::optional<recon::sensor::DeviceFrame>> frames(
       3, recon::sensor::DeviceFrame{});
-  const CloudStyle style;
+  CloudStyle style;
+  style.producer_family = 0;  // so a frame with no depth is what is refused
+  style.renderer_family = 0;
   expect_oom_anywhere([&] { return cloud_draws(frames, cameras, style); });
   cameras.pop_back();
   expect_oom_when_reporting([&] { return cloud_draws(frames, cameras, style); },

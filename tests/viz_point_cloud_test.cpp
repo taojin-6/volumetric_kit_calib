@@ -5,8 +5,10 @@
 // size, depth bound and pose lands in its own field, exactly, at the poses
 // given and not the frame's own; colour only where the mode reads it and the
 // frame has it; a buffer without storage usage, or EXCLUSIVE while the
-// producer's and the renderer's queue families differ, is refused, and one
-// CONCURRENT across two real families is not. Then each shown, placed
+// producer's and the renderer's queue families differ, is refused, as is a
+// style that leaves either family unset; across two real families, depth,
+// or colour the mode reads, EXCLUSIVE is refused and CONCURRENT is not.
+// Then each shown, placed
 // camera's draw in its tint. On real buffers, through the core's Vulkan test
 // fixtures (they skip without a device; the cross-family case also with one
 // family).
@@ -189,6 +191,15 @@ TEST_F(VizPointCloud, RefusesWhatTheRendererCannotRead) {
   CloudStyle across = style;
   across.renderer_family = style.producer_family + 1;
   refused(good, across, identity, identity, "EXCLUSIVE");
+  // A style that leaves a family unset could not tell the two apart.
+  const char* unset = "queue family unset";
+  refused(good, CloudStyle{}, identity, identity, unset);
+  CloudStyle half = style;
+  half.renderer_family = VK_QUEUE_FAMILY_IGNORED;
+  refused(good, half, identity, identity, unset);
+  half = style;
+  half.producer_family = VK_QUEUE_FAMILY_IGNORED;
+  refused(good, half, identity, identity, unset);
 }
 
 // Each camera shown, placed and with a frame is drawn, in its own tint; the
@@ -226,7 +237,7 @@ TEST_F(VizPointCloud, DrawsEachShownPlacedCameraInItsTint) {
 
 // On a device whose compute library and renderer use two queue families: a
 // buffer CONCURRENT across both is drawn, one EXCLUSIVE to the compute
-// library's is refused.
+// library's is refused where it is read.
 class VizPointCloudAcrossFamilies : public core::test::SharedDeviceTest {};
 
 TEST_F(VizPointCloudAcrossFamilies, DrawsConcurrentBuffersAndRefusesExclusive) {
@@ -255,6 +266,21 @@ TEST_F(VizPointCloudAcrossFamilies, DrawsConcurrentBuffersAndRefusesExclusive) {
   EXPECT_EQ(refused.domain(), Code::InvalidArgument);
   EXPECT_NE(refused.message().find("depth is EXCLUSIVE"), std::string::npos)
       << refused.message();
+  // Colour EXCLUSIVE to the compute library's family is refused where the
+  // mode reads it, and drawn past where it does not.
+  const sensor::DeviceFrame colour_exclusive =
+      frame_of(made(true), made(false));
+  const core::Status colour_refused =
+      cloud_draw(colour_exclusive, identity, identity, style).status();
+  EXPECT_EQ(colour_refused.domain(), Code::InvalidArgument);
+  EXPECT_NE(colour_refused.message().find("colour is EXCLUSIVE"),
+            std::string::npos)
+      << colour_refused.message();
+  style.mode = pipelines::CloudColor::Solid;
+  const core::Result<pipelines::DepthCloudDraw> solid =
+      cloud_draw(colour_exclusive, identity, identity, style);
+  ASSERT_TRUE(solid.ok()) << solid.status().message();
+  EXPECT_EQ(solid.value().color.buffer, nullptr);
 }
 
 }  // namespace
