@@ -78,8 +78,8 @@ locked decision above.)
 Calibrate puts the world at an AprilTag on the floor (CA12b), `kOriginTag`,
 which `detect::detect_tag` finds in each camera's image.
 
-- **36h11 id 0, its black border 0.15 m across:** the print on the rig's
-  floor, the one the legacy `set_world_from_tag.py` anchored its world to.
+- **The rig's print:** the one on the floor that the legacy
+  `set_world_from_tag.py` anchored its world to.
 - **OpenCV's detector, not libapriltag.** OpenCV is already every build's
   prerequisite and decodes AprilTag dictionaries; libapriltag would be a
   second detector to carry. The legacy script used OpenCV's too.
@@ -94,8 +94,8 @@ which `detect::detect_tag` finds in each camera's image.
   camera's blur (`detect_tag_test`), while across it each corner holds to
   0.15 px. The tag's centre stays put, so the frame does not move, but its
   edges read short, by up to 0.6 % at those sizes.
-- **Exactly one print.** Corners of a second id-0 print would be taken for
-  the tag's and move the world, so an image with two gives none.
+
+## 2026-10-17 — The live 3D view, drawn from prepared frames in place
 
 calib_rig shows the rig in 3D beside its mosaic or over it
 (`viz/scene_view.hpp`, `viz/point_cloud.hpp`, `app/cloud_worker.hpp`): each
