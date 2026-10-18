@@ -98,30 +98,32 @@ OpenCV. `VC_WITH_RIG` stays optional, for the Vulkan SDK, and alone builds
   OpenCV and its test (`opencv_requirement`), the OpenCV-free variants of the
   no-Vulkan package test and its consumer, and CI's `opencv` input.
 
-## 2026-10-16 — CI on the family's layout, on GitHub's runners
+## 2026-10-16 — CI on the family's layout: macOS on the Mac, the rest hosted
 
 calib's CI takes its siblings' layout: `ci.yml` calls `_build.yml`,
 `lint.yml` and `sanitizers.yml`, and its `required` job passes only when all
 of them did.
 
-- **Every job runs on a GitHub-hosted runner** (amended 2026-10-17, when
-  calib became public). Hosted runners are free for a public repository, and
-  no calib job needs the family's own hosts: none draws on an NVIDIA GPU, and
-  the hosted macOS image's GPU runs MoltenVK. So `required` always reports,
-  and each run checks a clean machine with only the documented prerequisites.
-  A job that ever needs the family's hosts moves to them with `runner:` (and a
-  Linux `container:`), as recon's GPU legs run, on runners registered by the
-  core's
-  [runner tooling](https://github.com/taojin-6/volumetric_kit_core/blob/main/tools/runners/README.md).
+- **The macOS legs run on the family's Mac** (label `mac`), as recon's and
+  gfx's do, on runners registered by the core's
+  [runner tooling](https://github.com/taojin-6/volumetric_kit_core/blob/main/tools/runners/README.md);
+  **everything else on GitHub-hosted runners**, free for a public repository
+  (amended 2026-10-17, when calib became public). Why the Mac: a hosted macOS
+  job spends 2-3 minutes installing Homebrew's OpenCV, Vulkan SDK and FFmpeg,
+  and tests on 3 cores; on the Mac they are installed and the tests run on 5.
+  No calib job needs the Linux GPU hosts: none draws on an NVIDIA GPU. The
+  hosted `required` gate always reports; while the Mac is offline its legs
+  queue, and `runner: ''` moves a leg back to a hosted runner.
 - **Two macOS legs:** Debug with shared libraries, and Release with the rig
-  tiers, whose GPU tests run on the image's GPU under the validation layer.
+  tiers, whose GPU tests run on the Mac's GPU under the validation layer.
   Ubuntu 24.04 and 26.04 build Release; Linux Debug is the sanitizer job's.
-  Every leg builds the OpenCV tiers (amended 2026-10-17): the macOS legs
-  install Homebrew's formulae on each run, and the Linux jobs restore their
-  cached OpenCV 5.
-- **A new Homebrew needs no cache clearing:** each macOS leg's dependency
+  Every leg builds the OpenCV tiers (amended 2026-10-17): the Mac's Homebrew
+  has OpenCV 5, and the Linux jobs restore their cached OpenCV 5.
+- **The Mac's Homebrew is shared**, so a job there installs nothing and fails
+  naming any formula missing; the owner installs it by hand while CI is idle.
+- **A brew upgrade needs no cache clearing:** each macOS leg's dependency
   cache keys on the installed versions of the formulae its build finds, by the
-  core's `homebrew-key` action, so an image with newer formulae rebuilds the
+  core's `homebrew-key` action, so the next run after an upgrade rebuilds the
   tree once. Why: the core's
   [DECISIONS.md](https://github.com/taojin-6/volumetric_kit_core/blob/main/DECISIONS.md#a-brew-upgrade-needs-no-cache-clearing).
 - **Protecting `main`** with the `required` check is the owner's choice.
