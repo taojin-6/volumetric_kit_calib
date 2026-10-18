@@ -287,8 +287,10 @@ TEST(QualityOom, CrossCameraTransfer) {
 }
 
 // Out of memory anywhere, a re-solve's included, fails the whole, as IPPE's
-// failure in the transfer does. On two cameras it makes every call stack it
-// makes on four, with about half the allocations.
+// failure in the transfer does. Two cameras make about half the allocations
+// four do, from every call stack four do but cv::invert's buffer for the
+// camera Schur block, small enough there to stay on the stack. The sweep still
+// fails that call, through its output; SolveOom.BundleAdjust fails the buffer.
 TEST(QualityOom, CalibrationMetrics) {
   const Solved s(2);
   ASSERT_EQ(s.metrics.leave_one_out.captures.size(), 3u);
