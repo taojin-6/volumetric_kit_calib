@@ -683,11 +683,13 @@ TEST(AppCapture, KeepsEachWrittenCaptureForCalibrate) {
 // every view.
 TEST(AppCapture, AKeptViewNamesItsCameraWhenItsDetectionFailed) {
   ScratchDir root;
+  // Rendered first: the render's own loops would take the stripe's failure.
+  CaptureRequest r = request(3, 0.0);
   const auto stripes = std::make_shared<FailAStripe>(1);
   const ParallelBackend backend(stripes);  // outlives the worker
   std::unique_ptr<CaptureWorker> worker = make(setup(root.path(), 3));
   ASSERT_NE(worker, nullptr);
-  ASSERT_TRUE(submit(*worker, request(3, 0.0)));
+  ASSERT_TRUE(submit(*worker, std::move(r)));
   worker->flush();
   ASSERT_TRUE(stripes->injected());
   const std::vector<core::Status> errors = worker->take_errors();
