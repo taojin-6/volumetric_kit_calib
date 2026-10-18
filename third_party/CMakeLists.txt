@@ -110,15 +110,15 @@ endif()
 # examples, install and -Werror stay off in a subproject; its ui tier is
 # build-tree only, so calib_viz is too (src/CMakeLists.txt).
 #
-# The pin is gfx main after PR #141 (4800cac): framebuffer_size is 0 x 0 while
-# the window is iconified, beside #138's DepthCloudPipeline and the region
-# writes, marks over a region and the fractional-scale scissor repair of PRs
-# #136 and #137.
+# The pin is gfx main after PR #142 (76d0655): categorical_rgba8, the cameras'
+# default tints, beside #141's 0 x 0 framebuffer while iconified, #138's
+# DepthCloudPipeline and the region writes, marks over a region and the
+# fractional-scale scissor repair of PRs #136 and #137.
 if(VC_WITH_RIG)
   FetchContent_Declare(
     volumetric_kit_gfx
     GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_gfx.git
-    GIT_TAG 4800cac31b571ac4da4dfd3221132d1bf50912d2)
+    GIT_TAG 76d0655ab04672c9971e0681adf8d937aa52eca0)
   FetchContent_MakeAvailable(volumetric_kit_gfx)
 endif()
 

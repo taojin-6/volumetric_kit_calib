@@ -9,6 +9,7 @@
 ///        the viz tier draws over and beside it; and of a 3D-view snapshot:
 ///        each camera's points, drawn in place at the rig's poses.
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -29,6 +30,7 @@
 #include "volumetric_kit/core/vulkan/vulkan.hpp"
 #include "volumetric_kit/gfx/core/retire_queue.hpp"
 #include "volumetric_kit/gfx/pipelines/depth_cloud_pipeline.hpp"
+#include "volumetric_kit/recon/sensor/rgbd_sensor.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -143,5 +145,24 @@ VC_APP_API core::Result<std::optional<core::TimelinePoint>> record_cloud(
 /// @endcode
 VC_APP_API bool cloud_live(bool frozen, viz::ScenePlacement placement,
                            bool minimized) noexcept;
+
+/// @brief Sensor @p index's camera in the 3D view before the rig is solved:
+///        its factory models, its tint gfx's @p index-th categorical colour,
+///        and placed, at the world's origin, only when it is the reference.
+/// @param info       The sensor: its colour model, and its depth model and
+///                   factory depth-to-colour extrinsic.
+/// @param index      Its index in the rig, which picks its tint.
+/// @param reference  Whether it is the rig's reference camera.
+/// @return The view's camera, shown.
+/// @pre `info.color` holds a model.
+///
+/// @code
+/// for (std::size_t i = 0; i < array.size(); ++i) {
+///   cameras.push_back(
+///       scene_camera(array.sensor(i).info(), i, i == array.primary()));
+/// }
+/// @endcode
+VC_APP_API viz::SceneCamera scene_camera(const recon::sensor::SensorInfo& info,
+                                         std::size_t index, bool reference);
 
 }  // namespace volumetric_kit::calib::app

@@ -39,6 +39,7 @@
 #include "volumetric_kit/core/vulkan/sync.hpp"
 #include "volumetric_kit/gfx/core/device_requirements.hpp"
 #include "volumetric_kit/gfx/core/offscreen_target.hpp"
+#include "volumetric_kit/gfx/pipelines/color.hpp"
 
 namespace volumetric_kit::calib::app {
 namespace {
@@ -412,6 +413,35 @@ TEST(AppLiveViewModels, GivesEachCameraItsLiveState) {
   EXPECT_FALSE(cameras.value()[0].lost.has_value());
   EXPECT_EQ(cameras.value()[1].lost, 7u);
   EXPECT_EQ(cameras.value()[1].frames.received, 42u);
+}
+
+// Before Calibrate only the reference is placed, at the world's origin, and
+// each camera, past the palette's own colours too, starts in gfx's
+// categorical colour of its index, so no two cameras share a tint.
+TEST(AppLiveViewModels, PlacesTheReferenceAndTintsEachCameraByItsIndex) {
+  sensor::SensorInfo info;
+  info.color = test::color_like_lens();
+  info.depth = test::depth_like_lens();
+  info.depth_to_color[3][0] = -0.032;  // the depth camera 32 mm to one side
+  constexpr std::size_t kCameras = gfx::pipelines::kCategoricalPaletteSize + 3;
+  constexpr std::size_t kReference = 2;
+  std::vector<std::uint32_t> tints;
+  for (std::size_t i = 0; i < kCameras; ++i) {
+    const viz::SceneCamera camera = scene_camera(info, i, i == kReference);
+    EXPECT_EQ(camera.tint, gfx::pipelines::categorical_rgba8(i)) << i;
+    EXPECT_EQ(camera.color_to_world.has_value(), i == kReference) << i;
+    EXPECT_TRUE(camera.shown) << i;
+    EXPECT_EQ(camera.color.size.width, info.color->size.width) << i;
+    EXPECT_EQ(camera.color.intrinsics.fx, info.color->intrinsics.fx) << i;
+    ASSERT_TRUE(camera.depth.has_value()) << i;
+    EXPECT_EQ(camera.depth->intrinsics.fx, info.depth->intrinsics.fx) << i;
+    EXPECT_EQ(camera.depth_to_color, info.depth_to_color) << i;
+    tints.push_back(camera.tint);
+  }
+  EXPECT_EQ(scene_camera(info, 0, true).color_to_world,
+            recon::camera::Mat4d(1.0));
+  std::sort(tints.begin(), tints.end());
+  EXPECT_EQ(std::adjacent_find(tints.begin(), tints.end()), tints.end());
 }
 
 }  // namespace
