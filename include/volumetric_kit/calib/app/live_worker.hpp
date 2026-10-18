@@ -155,7 +155,7 @@ class VC_APP_API SetSink {
  public:
   virtual ~SetSink() = default;
 
-  /// @brief Take a set the live worker polled.
+  /// @brief Take a set the live worker read back.
   /// @param set  The set, shared with the live worker's snapshot of it.
   virtual void offer(std::shared_ptr<const recon::sensor::FrameSet> set) = 0;
 
@@ -229,10 +229,11 @@ struct LiveOptions {
 /// detect in, is reported and skipped, and the live view goes on; so does a
 /// camera that is gone (disconnected), reported once.
 ///
-/// @warning The device and allocator the readback uses, and the capture sink,
-///          must outlive the worker. Release every snapshot before destroying
-///          it, so the frames go back to their sensors before the array
-///          closes them.
+/// @warning The device and allocator the readback uses, the capture sink and
+///          the set sink must outlive the worker. Release every snapshot, and
+///          have the set sink let go of every set it was offered
+///          (@ref CloudWorker::stop), before destroying it, so the frames go
+///          back to their sensors before the array closes them.
 ///
 /// @code
 /// VKC_ASSIGN(std::unique_ptr<LiveWorker> live,

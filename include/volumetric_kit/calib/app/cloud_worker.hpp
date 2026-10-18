@@ -9,7 +9,7 @@
 ///        and colour unless the view is solid -- and handed to the window,
 ///        which draws its points in place.
 ///
-/// The live worker offers each set it polls (@ref SetSink); this worker
+/// The live worker offers each set it reads back (@ref SetSink); this worker
 /// takes the newest, every `live_every`-th, prepares it with recon's
 /// `GpuFramePrep` (one per camera) in one batch, lets the set go, and
 /// publishes a @ref CloudSnapshot: newest wins. A snapshot carries no poses:
@@ -103,7 +103,9 @@ struct CloudOptions {
 ///
 /// @warning The device and allocator must outlive the worker and every
 ///          snapshot, and every snapshot must be released before the worker
-///          is destroyed: its @ref CloudSnapshot::ready is the worker's.
+///          is destroyed: its @ref CloudSnapshot::ready is the worker's. As
+///          a live worker's set sink, it is bound by @ref LiveWorker's
+///          warning too.
 ///
 /// @code
 /// VKC_ASSIGN(std::unique_ptr<CloudWorker> cloud,

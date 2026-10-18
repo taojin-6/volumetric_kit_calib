@@ -589,6 +589,12 @@ class KeepSets final : public SetSink {
     const std::lock_guard<std::mutex> lock(mutex);
     return sets;
   }
+  // Let every set go, as the worker asks of its set sink before it closes
+  // the sensors.
+  void release() {
+    const std::lock_guard<std::mutex> lock(mutex);
+    sets.clear();
+  }
 
  private:
   std::mutex mutex;
@@ -615,6 +621,7 @@ TEST_F(AppLive, OffersEachSetItReadsBackToItsSetSink) {
   EXPECT_EQ(taken[1], second->set);
   EXPECT_EQ(taken[1]->frames.size(), 3u);
   live->stop();
+  sets.release();
 }
 
 // Armed, a set missing a camera is not taken: the rule waits, naming the

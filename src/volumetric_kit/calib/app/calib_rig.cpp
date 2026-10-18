@@ -725,11 +725,6 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
              CloudWorker::create(
                  recon_device, recon_allocator, array.size(),
                  {shared->compute_family(), shared->graphics_family()}));
-  VKC_ASSIGN(std::unique_ptr<LiveWorker> live,
-             LiveWorker::create(std::move(array), recon_device, recon_allocator,
-                                editor.board(), editor.square_measured(),
-                                captures.get(), cloud.get()));
-  const std::vector<std::string>& ids = live->ids();
 
   // --- The window's side.
   VKC_ASSIGN(std::unique_ptr<viz::RigMosaic> mosaic,
@@ -745,9 +740,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
              gfx::pipelines::PrimitivePipeline::create(
                  app.device(), app.swapchain().layout()));
   gfx::RetireQueue retire(app.frame_loop().timeline());
-  // Both released before the workers, after the retire queue.
-  std::shared_ptr<const LiveSnapshot> latest;
-  View3d view3d;
+  View3d view3d;  // its snapshot released before the retire queue and cloud
   view3d.cameras = std::move(scene_cameras);
   view3d.max_point_size = clouds->max_point_size();
   VKC_TRY(view3d.view.frame(view3d.placed()));
@@ -769,6 +762,15 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   VKC_ASSIGN(std::unique_ptr<glfw::ImGuiGlfw> platform,
              glfw::ImGuiGlfw::create(window, overlay.context()));
 
+  // --- The live worker last, as its thread starts the cameras: from here
+  // every way out stops it, then the 3D view's worker (Teardown), so no set
+  // is held when the array closes.
+  VKC_ASSIGN(std::unique_ptr<LiveWorker> live,
+             LiveWorker::create(std::move(array), recon_device, recon_allocator,
+                                editor.board(), editor.square_measured(),
+                                captures.get(), cloud.get()));
+  const std::vector<std::string>& ids = live->ids();
+  std::shared_ptr<const LiveSnapshot> latest;  // released before live
   const Teardown teardown(*live, *cloud, app, retire);
   bool fresh = false;
   bool fitted = false;
