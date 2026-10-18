@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Tao Jin
+
+// Generated from software.cpp.in at every build
+// (src/volumetric_kit/calib/app/software.cmake).
+
+#include <opencv2/core/version.hpp>
+
+#include "volumetric_kit/calib/app/capture_worker.hpp"
+
+namespace volumetric_kit::calib::app {
+
+capture::Software app_software() {
+  capture::Software software;
+  software.calib = "@VC_APP_CALIB_COMMIT@";
+  software.recon = "@VC_APP_RECON_COMMIT@";
+  software.gfx = "@VC_APP_GFX_COMMIT@";
+  software.core = "@VC_APP_CORE_COMMIT@";
+  software.opencv = CV_VERSION;
+  software.orbbec_sdk = "@VC_APP_ORBBEC_SDK_VERSION@";
+  return software;
+}
+
+}  // namespace volumetric_kit::calib::app

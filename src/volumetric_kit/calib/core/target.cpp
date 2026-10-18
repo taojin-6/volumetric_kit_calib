@@ -83,6 +83,18 @@ core::Status check_tolerance(const std::optional<double>& value,
 
 }  // namespace
 
+bool operator==(const Target& a, const Target& b) noexcept {
+  return a.kind == b.kind && a.rows == b.rows && a.cols == b.cols &&
+         a.square_size_m == b.square_size_m &&
+         a.marker_size_m == b.marker_size_m && a.dictionary == b.dictionary &&
+         a.first_marker_id == b.first_marker_id &&
+         a.legacy_pattern == b.legacy_pattern &&
+         a.square_size_tolerance_m == b.square_size_tolerance_m &&
+         a.planarity_bow_m == b.planarity_bow_m;
+}
+
+bool operator!=(const Target& a, const Target& b) noexcept { return !(a == b); }
+
 core::Status check_target(const Target& target) {
   const std::optional<bool> has_markers = carries_markers(target.kind);
   if (!has_markers) return invalid("kind", "is not a TargetKind");

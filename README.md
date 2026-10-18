@@ -16,11 +16,12 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > `Status`/`Result` — builds and is tested (GoogleTest); so do the `compute`
 > tier's OpenCV bridge, the `detect` tier's board detection, the `solve`
 > tier's rig solve and the `quality` tier's live checks and solved-rig
-> metrics; and, with `VC_WITH_RIG`, the `capture` tier's session writer, the
-> `viz` tier's live view and the `depth` tier's board-plane fit and pairwise
-> depth agreement. The color and app tiers are not yet implemented; the
-> legacy `camera_calibration` Python scripts (a separate checkout beside the
-> `volumetric_kit/` folder) remain the reference oracle.
+> metrics; with `VC_WITH_RIG`, the `capture` tier's session writer, the `viz`
+> tier's live view and the `depth` tier's board-plane fit and pairwise depth
+> agreement; and, with GLFW and recon's Orbbec driver too, the `app` tier's
+> `calib_rig`, live view and capture. Calibrate and the color tier are not yet
+> implemented; the legacy `camera_calibration` Python scripts (a separate
+> checkout beside the `volumetric_kit/` folder) remain the reference oracle.
 
 [AGENTS.md](AGENTS.md) is the shared working guide for Codex and Claude Code;
 `CLAUDE.md` imports it. [DECISIONS.md](DECISIONS.md) records the locked
@@ -101,6 +102,13 @@ renderer.
   panels show each camera's view, the latest set, the session and the
   capture; the board's editor locks at the first capture
   ([DECISIONS.md](DECISIONS.md#2026-10-16--the-live-view-on-gfx)).
+- **App:** `calib_rig` opens every camera of the rig's sync file, at the
+  scenario's modes, and shows them live with the board found in each; Space
+  (or a clicker's "next") captures a still set, Backspace (or "back") drops
+  the last. A worker thread owns the rig and finds the board in each set's
+  luma, another detects each capture at full resolution and writes it, and
+  the window draws and never waits
+  ([DECISIONS.md](DECISIONS.md#2026-10-16--calib_rigs-live-view-and-capture)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
 
@@ -126,7 +134,12 @@ configure. `VC_WITH_RIG` (OFF by default) builds `capture`, `depth` and
 `viz`, over all of recon, which needs the Vulkan SDK and a GLSL compiler: the
 core's vulkan tier
 [prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
-`viz` fetches `volumetric_kit_gfx` (pinned by commit). To build against a
+`viz` fetches `volumetric_kit_gfx` (pinned by commit). Given GLFW
+(`brew install glfw`) and recon's Orbbec driver
+(`-DVR_WITH_ORBBEC=ON -DVR_WITH_FFMPEG=ON`, with the
+[Orbbec SDK](https://github.com/taojin-6/volumetric_kit_recon#optional-orbbec-sdk)
+and [FFmpeg](https://github.com/taojin-6/volumetric_kit_recon#optional-ffmpeg)),
+`VC_WITH_RIG` builds the `app` tier and `calib_rig` too. To build against a
 local core, recon or gfx checkout instead of the pinned one, pass
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>`,
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>` or
@@ -154,6 +167,22 @@ unknown fields and application compatibility. Edit `config/project_point.json`
 to change the camera and point. The demo accepts only `--config PATH` and `--help`;
 the calibration library itself keeps its core_base/recon_camera dependency.
 
+Run calib_rig on a rig (the session root must exist):
+
+```bash
+./build/apps/calib_rig --config my_rig.json
+```
+
+```json
+{"version": 1, "operation": "calibrate",
+ "source": {"kind": "live", "sync_config": "femto_mega_sync.json"},
+ "output": {"path": "sessions"}}
+```
+
+The core's
+[CONFIG.md](https://github.com/taojin-6/volumetric_kit_core/blob/main/CONFIG.md)
+has every field, the modes and the window among them.
+
 ## Use it in your project
 
 ```cmake
@@ -167,15 +196,17 @@ FetchContent_MakeAvailable(volumetric_kit_calib)
 target_link_libraries(your_app PRIVATE volumetric_kit::calib_core)
 ```
 
-`VC_BUILD_TESTS`, `VC_BUILD_EXAMPLES`, `VC_INSTALL`, and `VC_WARNINGS_AS_ERRORS`
-default ON only when `volumetric_kit_calib` is the top-level project, so a
-FetchContent build of it never fails on a warning your compiler adds.
-`volumetric_kit::calib_compute`, `volumetric_kit::calib_detect`,
+`VC_BUILD_TESTS`, `VC_BUILD_EXAMPLES`, `VC_BUILD_APPS`, `VC_INSTALL`, and
+`VC_WARNINGS_AS_ERRORS` default ON only when `volumetric_kit_calib` is the
+top-level project, so a FetchContent build of it never fails on a warning your
+compiler adds. `volumetric_kit::calib_compute`, `volumetric_kit::calib_detect`,
 `volumetric_kit::calib_solve` and `volumetric_kit::calib_quality` are always
 built. Set `VC_WITH_RIG` ON before calib is made available to link
-`volumetric_kit::calib_capture`, `volumetric_kit::calib_depth` and
-`volumetric_kit::calib_viz`, which is build-tree only: an installed calib
-lacks it, as an installed gfx lacks its ui tier.
+`volumetric_kit::calib_capture`, `volumetric_kit::calib_depth`,
+`volumetric_kit::calib_viz` and, with `VC_BUILD_APPS`, GLFW and recon's Orbbec
+driver, `volumetric_kit::calib_app`; `calib_viz` and `calib_app` are
+build-tree only: an installed calib lacks them, as an installed gfx lacks its
+ui tier.
 `VC_SANITIZE` is a semicolon list, empty (off) by default —
 e.g. `-DVC_SANITIZE="address;undefined"`. An installed calib carries the core
 and recon (its camera tier, or all of it with `VC_WITH_RIG`) beside it, and
@@ -185,9 +216,10 @@ it; if it finds another core first, calib is not found, and the message names
 both.
 
 calib needs `volumetric_kit_core` 0.6.1 or newer, with its vulkan tier for
-`VC_WITH_RIG`. An application that declares the core before calib, to share it
-with `recon` or `gfx`, pins at least that: on an older core, calib's configure
-fails at `vkc_require_core`, and an installed calib is not found. Without
+`VC_WITH_RIG`, and 0.11.0, with its config tier, for `calib_app`. An
+application that declares the core before calib, to share it with `recon` or
+`gfx`, pins at least that: on an older core, calib's configure fails at
+`vkc_require_core`, and an installed calib is not found. Without
 `VC_WITH_RIG`, calib makes recon available camera-only, so an application that
 uses recon beyond its camera tier makes recon available, with its options,
 before calib; with it, an application that makes recon available first makes

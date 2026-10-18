@@ -14,9 +14,10 @@
 
 include(FetchContent)
 
-# Only applications need the common JSON format. The calibration library keeps
+# Only applications need the common JSON format: the examples, and calib_rig
+# (VC_BUILD_APPS, with VC_WITH_RIG's viz tier). The calibration library keeps
 # its dependency on core_base and recon_camera alone.
-if(VC_BUILD_EXAMPLES)
+if(VC_BUILD_EXAMPLES OR (VC_BUILD_APPS AND VC_WITH_RIG))
   set(VKC_WITH_CONFIG ON)
 endif()
 
@@ -35,12 +36,11 @@ endif()
 # needs only the base tier, so it builds with no Vulkan SDK: calib turns the
 # vulkan tier on only with VC_WITH_RIG, for recon's sensor tier, and otherwise
 # leaves VKC_WITH_VULKAN unset rather than OFF, so an application that turns the
-# tier on for recon or gfx keeps it. Only examples opt into core_config.
+# tier on for recon or gfx keeps it. Only the examples and calib_rig opt into
+# core_config.
 #
-# The pin is core PR #32's head, 0.6.1, which merges first: its package can be
-# read twice in one configure (DECISIONS.md, 2026-10-13).
-#
-# TODO: re-pin core main, or v0.6.1, once core PR #32 merges.
+# The pin is core main at 0.11.0, for calib_rig's settings
+# (config::Application::CalibRig).
 if(VC_WITH_RIG)
   set(VKC_WITH_VULKAN ON)
 endif()
@@ -52,7 +52,7 @@ endif()
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG 278d449cc5ce543970d0dd65ecd3ab4f92397f73)
+  GIT_TAG a78f5f3262de20f30b07ed8815c4f2386bfd125e)
 FetchContent_MakeAvailable(volumetric_kit_core)
 # The set() above is lost when the application made the core available first.
 if(VC_WITH_RIG)

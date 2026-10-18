@@ -138,7 +138,7 @@ struct Software {
 /// depth_mode.max_m = 3.86f;
 /// @endcode
 struct DepthMode {
-  std::string name;  ///< As the driver names it, e.g. `"nfov_unbinned"`.
+  std::string name;  ///< As the camera maker names it, e.g. `"nfov_unbinned"`.
   /// What one depth unit is (metres), as `RgbdFrame::metres_per_unit`.
   float metres_per_unit = 0.001f;
   float min_m = 0.0f;  ///< The nearest depth kept (metres).

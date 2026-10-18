@@ -42,6 +42,14 @@ option(VC_WARNINGS_AS_ERRORS "Treat first-party compiler warnings as errors"
 option(VC_WITH_RIG
        "Build the rig tiers, capture, depth and viz (all of recon; Vulkan SDK)"
        OFF)
+# calib_rig and its app tier, an application: by default only at the top level,
+# as the examples are, so a project that adds calib builds neither. It needs the
+# viz tier (VC_WITH_RIG above), GLFW and recon's Orbbec driver too
+# (src/CMakeLists.txt).
+option(
+  VC_BUILD_APPS
+  "Build calib_rig and its app tier (with VC_WITH_RIG; needs GLFW and recon's VR_WITH_ORBBEC)"
+  ${VC_IS_TOP_LEVEL})
 
 # Semicolon list of sanitizers (e.g. "address;undefined"); empty = off. Applied
 # globally — see cmake/vc_sanitizers.cmake for why.
@@ -74,6 +82,12 @@ add_subdirectory(src)
 if(VC_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+# calib_rig, the live rig calibration application, built with its tier
+# (VC_BUILD_APPS).
+if(TARGET calib_app)
+  add_subdirectory(apps)
 endif()
 
 # Guard: examples/ is optional and may be absent in a slimmed checkout.

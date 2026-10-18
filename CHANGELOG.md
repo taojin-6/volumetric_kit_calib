@@ -29,6 +29,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The `app` tier, `volumetric_kit::calib_app`, and `calib_rig`, live view and
+  capture (DECISIONS.md, 2026-10-16), built with `viz` given `VC_BUILD_APPS`
+  (top-level only by default), GLFW and recon's Orbbec driver, build-tree
+  only. `calib_rig --config` loads a CalibRig scenario (`check_scenario`, its
+  preset and sync file as a `RigScenario`; `run_calib_rig`): every camera of
+  the rig's sync file opened at the scenario's modes (`rig_preset`,
+  `depth_mode`, `orbbec_options`) and held to them (`check_preset`);
+  `LiveWorker`, the one owner of the `SensorArray`, publishes a `LiveSnapshot`
+  per set (luma read back, hybrid detection, view checks, the capture rule)
+  and copies a taken capture out of its set as a `CaptureRequest`;
+  `CaptureWorker` detects it at full resolution and writes the session
+  (`session_camera`, `app_software`, the checkouts' commits read at every
+  build); `record_snapshot`, `tile_overlays` and `camera_lives` draw a
+  snapshot through the viz tier; `key_request` and `KeyQueue` map the keys and
+  a clicker.
+- `operator==` and `operator!=` for `Target`, every field compared.
 - The `depth` tier, `volumetric_kit::calib_depth`, built with `VC_WITH_RIG`
   (DECISIONS.md, 2026-10-16, "Depth checks are calib's kernels"):
   `DepthChecks::fit_planes` fits each view's board plane on the GPU to its
@@ -139,10 +155,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `cv_pose` now converts through recon's `rodrigues_from_matrix`, accurate
   where `cv::Rodrigues` returns zero (below about 1e-5 rad).
 - calib requires `volumetric_kit_core` 0.6.1 or newer (was 0.1.0), with its
-  vulkan tier under `VC_WITH_RIG`, and pins core PR #32 (0.6.1). The installed
-  package finds the core directly, at the version calib was built with, and
-  refuses another core, from recon or found by the application first; an
-  application may now find the core itself too (DECISIONS.md, 2026-10-13).
+  vulkan tier under `VC_WITH_RIG`, and 0.11.0, with its config tier, for
+  `calib_app`, and pins core main at 0.11.0. The installed package finds the
+  core directly, at the version calib was built with, and refuses another
+  core, from recon or found by the application first; an application may now
+  find the core itself too (DECISIONS.md, 2026-10-13).
 - calib's camera model is recon's (DECISIONS.md, 2026-10-12). Migrating:
   `PinholeBrownConrady`, `ImageSize` and `calib/core/camera_model.hpp` are
   removed; use `volumetric_kit::recon::camera::CameraModel` and

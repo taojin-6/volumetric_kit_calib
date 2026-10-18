@@ -143,6 +143,36 @@ if(VC_WITH_RIG)
   target_sources(vc_viz_oom_test PRIVATE support/allocation_failure.cpp)
 endif()
 
+if(TARGET calib_app)
+  # app: the preset and the keys from host data; the live worker over fake
+  # cameras whose synthetic board pictures sit in device images, and the mosaic
+  # drawn from its snapshots, through the core's Vulkan test fixtures (they skip
+  # without a device); the capture worker's sessions on disk, read back with
+  # recon's readers and nlohmann.
+  vc_add_test(app_preset volumetric_kit::calib_app)
+  # GLFW's key codes, through gfx_glfw, whose GLFW is gfx's own find.
+  vc_add_test(app_keys volumetric_kit::calib_app volumetric_kit::gfx_glfw)
+  vc_add_test(app_live volumetric_kit::calib_app vc_synthetic_rig
+              volumetric_kit::core_test_support)
+  vc_add_test(app_live_view volumetric_kit::calib_app vc_synthetic_rig
+              volumetric_kit::core_test_support)
+  # calib_capture before recon_io, which it links, so recon_io is linked once.
+  vc_add_test(app_capture volumetric_kit::calib_app vc_synthetic_rig
+              volumetric_kit::calib_capture volumetric_kit::recon_io)
+  target_include_directories(vc_app_capture_test SYSTEM
+                             PRIVATE "${VC_JSON_INCLUDE_DIR}")
+  # The calib commit a session records is the checkout's HEAD, "-dirty"
+  # included, as git gives it when the tests run (app_software_commit.cmake).
+  add_test(
+    NAME app_capture.software_commit
+    COMMAND
+      ${CMAKE_COMMAND} -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+      -DTEST=$<TARGET_FILE:vc_app_capture_test> -P
+      ${CMAKE_CURRENT_SOURCE_DIR}/app_software_commit.cmake)
+  set_tests_properties(app_capture.software_commit
+                       PROPERTIES SKIP_REGULAR_EXPRESSION "not a git checkout")
+endif()
+
 # The core calib requires (third_party/CMakeLists.txt): calib's configure
 # against a stand-in core of each version (core_requirement/) refuses one older
 # than VC_CORE_MIN_VERSION, 0.6.1 -- before 0.1.0 the core has no
@@ -207,6 +237,51 @@ if(VC_WITH_RIG)
     ON
     "VC_WITH_RIG needs all of volumetric_kit_recon, but it was made available camera-only"
   )
+
+  if(TARGET calib_app)
+    # calib_rig is an application's own choice (VC_BUILD_APPS): an application
+    # that adds calib with every one of calib_rig's prerequisites, having made
+    # the core available without its config tier, configures with calib_rig left
+    # out, and stops, naming the config tier, when it asks for it
+    # (app_requirement/). It takes every source this build fetched.
+    set(_vc_fetched)
+    get_cmake_property(_vc_cache_vars CACHE_VARIABLES)
+    foreach(_vc_var IN LISTS _vc_cache_vars)
+      if(NOT _vc_var MATCHES "^FETCHCONTENT_SOURCE_DIR_(.+)$")
+        continue()
+      endif()
+      set(_vc_name "${CMAKE_MATCH_1}")
+      if(NOT _vc_name MATCHES "^VOLUMETRIC_KIT_(CORE|RECON)$")
+        string(TOLOWER "${_vc_name}" _vc_lower)
+        FetchContent_GetProperties(${_vc_lower})
+        if(${_vc_lower}_SOURCE_DIR)
+          list(APPEND _vc_fetched "${_vc_name}=${${_vc_lower}_SOURCE_DIR}")
+        endif()
+      endif()
+    endforeach()
+    list(JOIN _vc_fetched "|" _vc_fetched)
+    function(vc_add_app_requirement_test name build_apps)
+      add_test(
+        NAME app_requirement.${name}
+        COMMAND
+          ${CMAKE_COMMAND} -DCALIB_SOURCE=${PROJECT_SOURCE_DIR}
+          -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/app_requirement/${name}
+          -DCORE_SOURCE=${volumetric_kit_core_SOURCE_DIR}
+          -DRECON_SOURCE=${volumetric_kit_recon_SOURCE_DIR}
+          "-DFETCHED=${_vc_fetched}" -DGENERATOR=${CMAKE_GENERATOR}
+          -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
+          -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} -DGLM_DIR=${glm_DIR}
+          -DGLFW_DIR=${glfw3_DIR} -DOPENCV_DIR=${OpenCV_DIR}
+          -DORBBEC_DIR=${OrbbecSDK_DIR} -DBUILD_APPS=${build_apps} ${ARGN} -P
+          ${CMAKE_CURRENT_SOURCE_DIR}/app_requirement/configure.cmake)
+    endfunction()
+    vc_add_app_requirement_test(not_asked OFF)
+    vc_add_app_requirement_test(
+      asked
+      ON
+      "-DEXPECT_ERROR=volumetric_kit_calib needs volumetric_kit_core's config tier"
+    )
+  endif()
 
   # The rig tiers from this build's install (rig_package/): a consumer finds
   # calib, the core and all of recon at the prefix, and builds and runs against
