@@ -325,10 +325,11 @@ definitions and the schemas).
   (`principal_point_gap`) of at least 2.7 % and the truth midway at most
   1.2 %: the margin's 2 % names the right side in all 32 draws and a side in
   none of the 16 midway, where requiring the transfer's median to agree too
-  failed 5 of the 32. It is no guarantee: at 0.1 px the truth midway reached
-  3.0 % (2 of 16 named a side), and with 20 placements at 0.3 px a side's own
-  gap fell to 1.7 %. `mixed` became `inconclusive` with `report.json` still
-  at version 1, since nothing reads it yet.
+  failed 5 of the 32. These are libc++'s draws: libstdc++'s
+  `std::normal_distribution` draws other noise from the same seeds, where the
+  tests pass too but the gaps were not measured. It is no guarantee: at
+  0.1 px the truth midway reached 3.0 % (2 of 16 named a side), and with 20
+  placements at 0.3 px a side's own gap fell to 1.7 %.
 - **Everything left out is listed:** the views `initialise` excluded, with
   what it measured, beside the adjustment's rejections, so each can be
   recaptured.
