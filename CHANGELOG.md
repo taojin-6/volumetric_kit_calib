@@ -29,6 +29,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- calib_rig's live 3D view (DECISIONS.md, 2026-10-17): beside the mosaic, in
+  the whole window or hidden, frozen or live, solid, tinted-luma or true
+  colour, each camera shown or not in its tint. `CloudWorker`, its T2
+  thread, takes each set `LiveWorker` reads back through its new `SetSink`,
+  prepares every `CloudOptions::live_every`-th on recon's queue family and
+  publishes a `CloudSnapshot`; `record_cloud` draws a snapshot's points
+  at the rig's poses and holds it until its frame retires;
+  `rig_requirements` merges recon's, calib_depth's and gfx's needs with
+  `largePoints`. In `viz`: `cloud_draw`, a prepared frame as gfx's
+  `DepthCloudDraw` (`CloudStyle`), and `cloud_draws`, each `SceneCamera`'s;
+  `frustum_lines`, `axes_lines`, `board_lines` and `scene_lines`;
+  `display_rotation`, `window_split` (`ScenePlacement`) and `SceneView`.
 - The `app` tier, `volumetric_kit::calib_app`, and `calib_rig`, live view and
   capture (DECISIONS.md, 2026-10-16), built with `viz` given `VC_BUILD_APPS`
   (top-level only by default), GLFW and recon's Orbbec driver, build-tree

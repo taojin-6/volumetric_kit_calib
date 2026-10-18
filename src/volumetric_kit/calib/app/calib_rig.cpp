@@ -26,23 +26,32 @@
 
 #include "imgui.h"
 #include "volumetric_kit/calib/app/capture_worker.hpp"
+#include "volumetric_kit/calib/app/cloud_worker.hpp"
 #include "volumetric_kit/calib/app/keys.hpp"
 #include "volumetric_kit/calib/app/live_view.hpp"
 #include "volumetric_kit/calib/app/live_worker.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
+#include "volumetric_kit/calib/depth/depth_checks.hpp"
 #include "volumetric_kit/calib/viz/board_editor.hpp"
 #include "volumetric_kit/calib/viz/mosaic.hpp"
 #include "volumetric_kit/calib/viz/overlay.hpp"
 #include "volumetric_kit/calib/viz/panels.hpp"
+#include "volumetric_kit/calib/viz/point_cloud.hpp"
+#include "volumetric_kit/calib/viz/scene_view.hpp"
 #include "volumetric_kit/core/vulkan/allocator.hpp"
+#include "volumetric_kit/core/vulkan/buffer.hpp"
 #include "volumetric_kit/core/vulkan/device.hpp"
 #include "volumetric_kit/core/vulkan/shared_device.hpp"
 #include "volumetric_kit/gfx/app/shared_device_config.hpp"
 #include "volumetric_kit/gfx/app/windowed_app.hpp"
+#include "volumetric_kit/gfx/core/device_requirements.hpp"
 #include "volumetric_kit/gfx/core/retire_queue.hpp"
+#include "volumetric_kit/gfx/core/texture_upload.hpp"
 #include "volumetric_kit/gfx/glfw/imgui_glfw.hpp"
 #include "volumetric_kit/gfx/glfw/shared_device.hpp"
 #include "volumetric_kit/gfx/glfw/window.hpp"
+#include "volumetric_kit/gfx/pipelines/depth_cloud_pipeline.hpp"
+#include "volumetric_kit/gfx/pipelines/primitive_pipeline.hpp"
 #include "volumetric_kit/gfx/ui/imgui_overlay.hpp"
 #include "volumetric_kit/gfx/ui/metrics_panel.hpp"
 #include "volumetric_kit/gfx/windowing/swapchain.hpp"
@@ -115,9 +124,9 @@ void on_scroll(GLFWwindow* window, double /*dx*/, double dy) {
 }
 
 // TODO: InputBinding, GlfwRun and WindowDeleter, the shared-device bring-up in
-// run_window and its wheel-and-drag view input are generic GLFW glue; move them
-// to gfx_glfw in a gfx PR, then port gfx's examples, recon's viewers and
-// calib_rig onto it.
+// run_window and its wheel-and-drag input for the mosaic and the 3D view
+// (steer) are generic GLFW glue; move them to gfx_glfw in a gfx PR, then port
+// gfx's examples, recon's viewers and calib_rig onto it.
 
 // Points the window's callbacks at an Input for as long as it lives.
 class InputBinding {
@@ -154,6 +163,74 @@ struct WindowDeleter {
   }
 };
 
+// --- The 3D view's settings, until the scenario has them.
+// TODO: take the stride, colour mode, point size and the live sets' sampling
+// from the core's calib_rig view settings once the scenario has them (CO5).
+constexpr viz::ScenePlacement kPlacement = viz::ScenePlacement::Beside;
+constexpr int kMaxStride = 8;
+// The pointer's feel: radians of orbit per pixel dragged, and each wheel
+// step's zoom, in the 3D view and the mosaic.
+constexpr float kOrbitPerPixel = 0.005f;
+constexpr float kSceneZoomStep = 0.9f;
+constexpr float kMosaicZoomStep = 1.1f;
+
+// What the window holds of the 3D view.
+struct View3d {
+  viz::ScenePlacement placement = kPlacement;
+  bool frozen = false;
+  // Its mode, stride and point size; the rest is set each frame.
+  viz::CloudStyle style;
+  viz::SceneOptions options;
+  std::vector<viz::SceneCamera> cameras;  // in the rig's order
+  viz::SceneView view;
+  std::shared_ptr<const CloudSnapshot> latest;  // released before the worker
+  std::shared_ptr<core::Buffer> lines;          // the scene's lines, uploaded
+  std::uint32_t line_vertices = 0;
+  bool lines_stale = true;
+  float max_point_size = 1.0f;
+  std::string last_error;  // the last failure said, said once
+
+  // The placed cameras' poses.
+  std::vector<recon::camera::Mat4d> placed() const {
+    std::vector<recon::camera::Mat4d> poses;
+    for (const viz::SceneCamera& camera : cameras) {
+      if (camera.color_to_world) poses.push_back(*camera.color_to_world);
+    }
+    return poses;
+  }
+
+  // A snapshot frozen without colour -- prepared in the solid mode -- has none
+  // to show, so the colour modes wait until the view is live again.
+  bool colour_modes_open() const {
+    return !frozen || latest == nullptr || latest->color;
+  }
+};
+
+// Which view a drag began in, and how it moves it.
+enum class Drag : std::uint8_t { None, Elsewhere, Mosaic, Orbit, Pan };
+
+struct Pointer {
+  Drag drag = Drag::None;
+  glm::vec2 from{0.0f};
+};
+
+bool inside(const VkRect2D& rect, glm::vec2 point) {
+  return point.x >= static_cast<float>(rect.offset.x) &&
+         point.y >= static_cast<float>(rect.offset.y) &&
+         point.x < static_cast<float>(rect.offset.x) +
+                       static_cast<float>(rect.extent.width) &&
+         point.y < static_cast<float>(rect.offset.y) +
+                       static_cast<float>(rect.extent.height);
+}
+
+std::uint32_t tint_of(const float rgb[3]) {
+  const auto byte = [](float v) {
+    return static_cast<std::uint8_t>(
+        std::lround(255.0f * std::clamp(v, 0.0f, 1.0f)));
+  };
+  return gfx::pipelines::pack_rgba8(byte(rgb[0]), byte(rgb[1]), byte(rgb[2]));
+}
+
 // What the window shows of the captures and the workers.
 struct Notices {
   std::deque<std::string> messages;  // newest last
@@ -167,6 +244,14 @@ struct Notices {
     while (messages.size() > kMessages) messages.pop_front();
   }
 };
+
+// A 3D-view failure, which repeats each frame until its cause goes: said
+// once, until another is.
+void report_view(View3d& v, const core::Status& status, Notices& notices) {
+  if (status.ok() || status.message() == v.last_error) return;
+  v.last_error = status.message();
+  notices.note("3D view: " + v.last_error);
+}
 
 // A press of Capture: refused, and said, once the live view has stopped.
 void arm(LiveWorker& live, Notices& notices) {
@@ -299,8 +384,12 @@ void flash(const Notices& notices) {
 }
 
 // What the workers reported since the last frame.
-void take_reports(LiveWorker& live, CaptureWorker& captures, Notices& notices) {
+void take_reports(LiveWorker& live, CloudWorker& cloud, CaptureWorker& captures,
+                  Notices& notices) {
   for (const core::Status& error : live.take_errors()) {
+    notices.note(error.message());
+  }
+  for (const core::Status& error : cloud.take_errors()) {
     notices.note(error.message());
   }
   for (const core::Status& error : captures.take_errors()) {
@@ -328,15 +417,201 @@ void take_reports(LiveWorker& live, CaptureWorker& captures, Notices& notices) {
   }
 }
 
-// Stops the live worker, waits for the renderer, and frees what the frames
-// held, on every way out of the loop.
+// The 3D view's window: where it sits, freeze, colouring, and each camera's
+// toggle and tint; then the worker told what the view needs.
+void view_window(View3d& v, CloudWorker& cloud,
+                 const std::vector<std::string>& ids, Notices& notices) {
+  ImGui::SetNextWindowPos(ImVec2(10, 760), ImGuiCond_FirstUseEver);
+  ImGui::Begin("3D view");
+  int placement = static_cast<int>(v.placement);
+  ImGui::RadioButton("hidden", &placement,
+                     static_cast<int>(viz::ScenePlacement::Hidden));
+  ImGui::SameLine();
+  ImGui::RadioButton("beside", &placement,
+                     static_cast<int>(viz::ScenePlacement::Beside));
+  ImGui::SameLine();
+  ImGui::RadioButton("full window", &placement,
+                     static_cast<int>(viz::ScenePlacement::FullWindow));
+  v.placement = static_cast<viz::ScenePlacement>(placement);
+  ImGui::Checkbox("freeze", &v.frozen);
+
+  using gfx::pipelines::CloudColor;
+  const bool open = v.colour_modes_open();
+  if (!open) v.style.mode = CloudColor::Solid;
+  constexpr const char* kModes[] = {"solid", "tinted luma", "true colour"};
+  if (ImGui::BeginCombo("colour", kModes[static_cast<int>(v.style.mode)])) {
+    for (int m = 0; m < 3; ++m) {
+      ImGui::BeginDisabled(m != 0 && !open);
+      if (ImGui::Selectable(kModes[m], m == static_cast<int>(v.style.mode))) {
+        v.style.mode = static_cast<CloudColor>(m);
+      }
+      ImGui::EndDisabled();
+    }
+    ImGui::EndCombo();
+  }
+  int stride = static_cast<int>(v.style.stride);
+  ImGui::SliderInt("stride", &stride, 1, kMaxStride);
+  v.style.stride =
+      static_cast<std::uint32_t>(std::clamp(stride, 1, kMaxStride));
+  ImGui::SliderFloat("point size", &v.style.point_size, 1.0f,
+                     std::max(1.0f, v.max_point_size), "%.0f px");
+  if (ImGui::Checkbox("depth frusta", &v.options.depth_frusta)) {
+    v.lines_stale = true;
+  }
+  if (ImGui::Button("reset view")) {
+    const core::Status framed = v.view.frame(v.placed());
+    if (!framed.ok()) notices.note(framed.message());
+  }
+  for (std::size_t i = 0; i < v.cameras.size() && i < ids.size(); ++i) {
+    viz::SceneCamera& camera = v.cameras[i];
+    ImGui::PushID(static_cast<int>(i));
+    if (ImGui::Checkbox(ids[i].c_str(), &camera.shown)) v.lines_stale = true;
+    ImGui::SameLine();
+    const std::uint32_t t = camera.tint;
+    float rgb[3] = {static_cast<float>(t & 0xFFu) / 255.0f,
+                    static_cast<float>((t >> 8) & 0xFFu) / 255.0f,
+                    static_cast<float>((t >> 16) & 0xFFu) / 255.0f};
+    if (ImGui::ColorEdit3(
+            "tint", rgb,
+            ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel)) {
+      camera.tint = tint_of(rgb);
+      v.lines_stale = true;
+    }
+    if (!camera.color_to_world) {
+      ImGui::SameLine();
+      ImGui::TextDisabled("not placed until the rig is solved");
+    }
+    ImGui::PopID();
+  }
+  ImGui::End();
+  cloud.set_live(!v.frozen && v.placement != viz::ScenePlacement::Hidden);
+  cloud.set_color(v.style.mode != CloudColor::Solid);
+}
+
+// The wheel and drags of this frame, to the view under the pointer: the
+// mosaic pans and zooms; the 3D view orbits (left), pans (right) and dollies.
+void steer(GLFWwindow* window, Input& input, Pointer& pointer, bool imgui_mouse,
+           const viz::WindowSplit& split, gfx::camera::ImageView2D& mosaic,
+           viz::SceneView& scene) {
+  const glm::vec2 cursor = glfw::cursor_in_framebuffer(window);
+  const auto scroll = static_cast<float>(std::exchange(input.scroll, 0.0));
+  if (imgui_mouse) {
+    pointer.drag = Drag::None;
+    return;
+  }
+  const bool over_scene = inside(split.scene, cursor);
+  const bool over_mosaic = inside(split.mosaic, cursor);
+  if (scroll != 0.0f && over_scene) {
+    scene.orbit().zoom(std::pow(kSceneZoomStep, scroll));
+  } else if (scroll != 0.0f && over_mosaic) {
+    mosaic.zoom_about(cursor, std::pow(kMosaicZoomStep, scroll));
+  }
+  const bool left =
+      glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+  const bool right =
+      glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+  if (!left && !right) {
+    pointer.drag = Drag::None;
+    return;
+  }
+  if (pointer.drag == Drag::None) {
+    pointer.drag = over_scene            ? (left ? Drag::Orbit : Drag::Pan)
+                   : over_mosaic && left ? Drag::Mosaic
+                                         : Drag::Elsewhere;
+    pointer.from = cursor;
+    return;
+  }
+  const glm::vec2 delta = cursor - pointer.from;
+  pointer.from = cursor;
+  gfx::camera::OrbitCamera& orbit = scene.orbit();
+  switch (pointer.drag) {
+    case Drag::Mosaic:
+      mosaic.pan(delta);
+      break;
+    case Drag::Orbit:
+      orbit.orbit(-kOrbitPerPixel * delta.x, kOrbitPerPixel * delta.y);
+      break;
+    case Drag::Pan: {
+      // A pixel's width at the target's distance, so the scene follows the
+      // pointer.
+      const float per_pixel =
+          2.0f * orbit.distance() * std::tan(0.5f * viz::SceneView::kFovY) /
+          std::max(1.0f, static_cast<float>(split.scene.extent.height));
+      orbit.pan(-delta.x * per_pixel, delta.y * per_pixel);
+      break;
+    }
+    case Drag::None:
+    case Drag::Elsewhere:
+      break;
+  }
+}
+
+// The scene's lines uploaded again after a change: the old buffer is freed
+// once frame `frame_number`, which no longer draws it, retires.
+core::Status refresh_lines(View3d& v, gfx::app::WindowedApp& app,
+                           gfx::RetireQueue& retire,
+                           std::uint64_t frame_number) {
+  if (!v.lines_stale) return {};
+  // TODO: CA12b passes the solved boards, and their board, once Calibrate
+  // places them.
+  VKC_ASSIGN(const std::vector<gfx::pipelines::ColorVertex> vertices,
+             viz::scene_lines(v.cameras, nullptr, {}, v.options));
+  std::shared_ptr<core::Buffer> fresh;
+  if (!vertices.empty()) {
+    gfx::BufferUploadDesc upload;
+    upload.data = vertices.data();
+    upload.size = vertices.size() * sizeof(gfx::pipelines::ColorVertex);
+    upload.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    VKC_ASSIGN(core::Buffer buffer,
+               gfx::upload_buffer(app.device(), app.allocator(), upload));
+    fresh = std::make_shared<core::Buffer>(std::move(buffer));
+  }
+  if (v.lines) retire.push(frame_number, [old = v.lines] { (void)old; });
+  v.lines = std::move(fresh);
+  v.line_vertices = static_cast<std::uint32_t>(vertices.size());
+  v.lines_stale = false;
+  return {};
+}
+
+// The 3D view's points and lines, inside the rendering scope; the frame
+// waits for the points' preparation at the vertex stage.
+core::Status draw_scene(View3d& v, gfx::pipelines::DepthCloudPipeline& clouds,
+                        const gfx::pipelines::PrimitivePipeline& primitives,
+                        gfx::RetireQueue& retire, gfx::windowing::Frame& frame,
+                        VkExtent2D extent, VkRect2D viewport,
+                        const core::SharedDevice& shared) {
+  const glm::mat4 view_proj = v.view.view_proj(viewport);
+  viz::CloudStyle style = v.style;
+  style.viewport = viewport;
+  style.view_proj = view_proj;
+  style.producer_family = shared.compute_family();
+  style.renderer_family = shared.graphics_family();
+  VKC_ASSIGN(const std::optional<core::TimelinePoint> wait,
+             record_cloud(clouds, retire, frame.cmd, extent, frame.number,
+                          v.latest, v.cameras, style));
+  if (wait) frame.waits.push_back({*wait, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT});
+  if (v.lines != nullptr && v.line_vertices > 0) {
+    gfx::pipelines::PrimitiveDraw lines;
+    lines.topology = gfx::pipelines::PrimitiveTopology::Lines;
+    lines.vertices = v.lines.get();
+    lines.vertex_count = v.line_vertices;
+    lines.viewport = viewport;
+    lines.view_proj = view_proj;
+    VKC_TRY(primitives.submit(frame.cmd, {extent, &lines, 1}));
+  }
+  return {};
+}
+
+// Stops the workers, waits for the renderer, and frees what the frames held,
+// on every way out of the loop.
 class Teardown {
  public:
-  Teardown(LiveWorker& live, gfx::app::WindowedApp& app,
+  Teardown(LiveWorker& live, CloudWorker& cloud, gfx::app::WindowedApp& app,
            gfx::RetireQueue& retire) noexcept
-      : live_(live), app_(app), retire_(retire) {}
+      : live_(live), cloud_(cloud), app_(app), retire_(retire) {}
   ~Teardown() {
     live_.stop();
+    cloud_.stop();
     const core::Status idle = app_.wait_idle();
     if (!idle.ok()) {
       std::fprintf(stderr, "calib_rig: %s\n", idle.message().c_str());
@@ -348,6 +623,7 @@ class Teardown {
 
  private:
   LiveWorker& live_;
+  CloudWorker& cloud_;
   gfx::app::WindowedApp& app_;
   gfx::RetireQueue& retire_;
 };
@@ -355,19 +631,35 @@ class Teardown {
 core::Status run_window(GLFWwindow* window, const core::config::Config& config,
                         const RigScenario& scenario) {
   const RigPreset& preset = scenario.preset;
-  // --- One VkDevice: gfx draws on its graphics side, recon decodes and reads
-  // back on its compute side.
+  Notices notices;
+  // --- One VkDevice: gfx draws on its graphics side, recon decodes, reads
+  // back and prepares frames on its compute side. Wide points where the GPU
+  // has them, one-pixel points where it does not.
   gfx::app::WindowedAppConfig app_config;
   app_config.app_name = "calib_rig";
   app_config.swapchain.extent = glfw::framebuffer_extent(window);
+  app_config.swapchain.depth_format = VK_FORMAT_D32_SFLOAT;  // the 3D view's
   app_config.frames_in_flight = 2;
   gfx::app::WindowDeviceConfig device_config;
   device_config.instance.app_name = app_config.app_name;
   device_config.instance.enable_validation = config.window.validation;
-  device_config.graphics = app_config.device;
-  VKC_ASSIGN(std::unique_ptr<core::SharedDevice> shared,
-             glfw::make_shared_device(window, recon::device_requirements(),
-                                      device_config));
+  VKC_ASSIGN(RigRequirements needs, rig_requirements(true));
+  device_config.graphics = needs.graphics;
+  core::Result<std::unique_ptr<core::SharedDevice>> made =
+      glfw::make_shared_device(window, needs.compute, device_config);
+  if (!made.ok() && made.status().domain() == core::Status::Code::Unsupported) {
+    VKC_ASSIGN(needs, rig_requirements(false));
+    device_config.graphics = needs.graphics;
+    made = glfw::make_shared_device(window, needs.compute, device_config);
+    if (made.ok()) {
+      notices.note(
+          "3D view: points are one pixel wide: the GPU has no "
+          "largePoints");
+    }
+  }
+  if (!made.ok()) return made.status();
+  const std::unique_ptr<core::SharedDevice> shared = std::move(made).value();
+  app_config.device = needs.graphics;
   VKC_ASSIGN(gfx::app::WindowedApp app,
              gfx::app::WindowedApp::adopt(
                  shared->graphics_payload(), app_config,
@@ -375,8 +667,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
                    return shared->release_surface();
                  }));
   VKC_ASSIGN(core::Device recon_device,
-             core::Device::adopt(shared->compute_payload(),
-                                 recon::device_requirements()));
+             core::Device::adopt(shared->compute_payload(), needs.compute));
   VKC_ASSIGN(
       core::Allocator recon_allocator,
       core::Allocator::create(shared->instance().handle(), recon_device));
@@ -403,10 +694,24 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   setup.reference = array.primary();
   setup.depth_mode = preset.depth_mode;
   std::vector<recon::camera::ImageSize> sizes;
+  std::vector<viz::SceneCamera> scene_cameras;
   for (std::size_t i = 0; i < array.size(); ++i) {
     VKC_ASSIGN(capture::SessionCamera camera,
                session_camera(array.sensor(i), scenario.sync));
     sizes.push_back(camera.info.color->size);
+    // Before the rig is solved only its reference, the world's origin, is
+    // placed.
+    // TODO: CA12b places every camera at Calibrate's solved poses.
+    viz::SceneCamera scene_camera;
+    scene_camera.color = *camera.info.color;
+    scene_camera.depth = camera.info.depth;
+    scene_camera.depth_to_color = camera.info.depth_to_color;
+    if (i == array.primary()) {
+      scene_camera.color_to_world = recon::camera::Mat4d(1.0);
+    }
+    // TODO: give each camera its own default tint from gfx's categorical
+    // palette once gfx has one; until then every tint starts white.
+    scene_cameras.push_back(std::move(scene_camera));
     setup.cameras.push_back(std::move(camera));
   }
   // TODO: cap cv::setNumThreads once H4 measures the contention between
@@ -415,18 +720,37 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
              CaptureWorker::create(std::move(setup)));
   VKC_ASSIGN(viz::BoardEditor editor,
              viz::BoardEditor::create(legacy_femto_board()));
+  // The 3D view's worker, prepared frames shared with the renderer's family.
+  VKC_ASSIGN(std::unique_ptr<CloudWorker> cloud,
+             CloudWorker::create(
+                 recon_device, recon_allocator, array.size(),
+                 {shared->compute_family(), shared->graphics_family()}));
   VKC_ASSIGN(std::unique_ptr<LiveWorker> live,
              LiveWorker::create(std::move(array), recon_device, recon_allocator,
                                 editor.board(), editor.square_measured(),
-                                captures.get()));
+                                captures.get(), cloud.get()));
   const std::vector<std::string>& ids = live->ids();
 
   // --- The window's side.
   VKC_ASSIGN(std::unique_ptr<viz::RigMosaic> mosaic,
              viz::RigMosaic::create(app.device(), app.allocator(),
                                     app.swapchain().layout(), sizes));
+  gfx::pipelines::DepthCloudPipelineDesc cloud_desc;
+  cloud_desc.max_draws = static_cast<std::uint32_t>(scene_cameras.size());
+  VKC_ASSIGN(std::unique_ptr<gfx::pipelines::DepthCloudPipeline> clouds,
+             gfx::pipelines::DepthCloudPipeline::create(
+                 app.device(), app.allocator(), app.swapchain().layout(),
+                 app.frame_loop().timeline(), cloud_desc));
+  VKC_ASSIGN(std::unique_ptr<gfx::pipelines::PrimitivePipeline> primitives,
+             gfx::pipelines::PrimitivePipeline::create(
+                 app.device(), app.swapchain().layout()));
   gfx::RetireQueue retire(app.frame_loop().timeline());
-  std::shared_ptr<const LiveSnapshot> latest;  // released before the worker
+  // Both released before the workers, after the retire queue.
+  std::shared_ptr<const LiveSnapshot> latest;
+  View3d view3d;
+  view3d.cameras = std::move(scene_cameras);
+  view3d.max_point_size = clouds->max_point_size();
+  VKC_TRY(view3d.view.frame(view3d.placed()));
 
   // GLFW's callbacks before ImGui's backend, which chains to them, so the keys
   // reach the app first.
@@ -445,18 +769,20 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   VKC_ASSIGN(std::unique_ptr<glfw::ImGuiGlfw> platform,
              glfw::ImGuiGlfw::create(window, overlay.context()));
 
-  const Teardown teardown(*live, app, retire);
-  Notices notices;
+  const Teardown teardown(*live, *cloud, app, retire);
   bool fresh = false;
   bool fitted = false;
-  std::optional<glm::vec2> dragged_from;
+  Pointer pointer;
   while (glfwWindowShouldClose(window) == GLFW_FALSE && !g_interrupted.load()) {
     glfwPollEvents();
     if (std::shared_ptr<const LiveSnapshot> s = live->take_snapshot()) {
       latest = std::move(s);
       fresh = true;
     }
-    take_reports(*live, *captures, notices);
+    if (std::shared_ptr<const CloudSnapshot> s = cloud->take_snapshot()) {
+      view3d.latest = std::move(s);
+    }
+    take_reports(*live, *cloud, *captures, notices);
     if (live->captures() > 0 && !editor.locked()) {
       (void)editor.edit(live->board(), live->square_measured());
       editor.lock();
@@ -471,10 +797,13 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     gfx::windowing::Frame& frame = *next;
     retire.poll();
     const VkExtent2D extent = frame.target->extent();
+    const viz::WindowSplit split = viz::window_split(view3d.placement, extent);
     gfx::camera::ImageView2D& view = mosaic->view();
-    view.set_viewport({0.0f, 0.0f},
-                      glm::vec2(static_cast<float>(extent.width),
-                                static_cast<float>(extent.height)));
+    view.set_viewport(
+        glm::vec2(static_cast<float>(split.mosaic.offset.x),
+                  static_cast<float>(split.mosaic.offset.y)),
+        glm::vec2(static_cast<float>(split.mosaic.extent.width),
+                  static_cast<float>(split.mosaic.extent.height)));
     if (!fitted) {
       view.fit();
       fitted = true;
@@ -486,6 +815,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     in.saver = {captures->pending(), captures->capacity(), captures->full()};
     in.directory = captures->directory();
     if (latest) in.stages = latest->stages;
+    if (view3d.latest) in.stages.merge(view3d.latest->stages);
     if (fresh && latest) {
       core::StageScope scope(in.stages, "tiles");
       VKC_TRY(
@@ -501,24 +831,11 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     overlay.new_frame();
     const ImGuiIO& io = ImGui::GetIO();
     act_on_keys(input.keys, io.WantTextInput, *live, *captures, notices);
-    const glm::vec2 cursor = glfw::cursor_in_framebuffer(window);
-    if (!io.WantCaptureMouse) {
-      if (input.scroll != 0.0) {
-        view.zoom_about(cursor,
-                        std::pow(1.1f, static_cast<float>(input.scroll)));
-      }
-      if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
-        if (dragged_from) view.pan(cursor - *dragged_from);
-        dragged_from = cursor;
-      } else {
-        dragged_from.reset();
-      }
-    } else {
-      dragged_from.reset();
-    }
-    input.scroll = 0.0;
+    steer(window, input, pointer, io.WantCaptureMouse, split, view,
+          view3d.view);
 
     capture_window(*live, *captures, notices, in);
+    view_window(view3d, *cloud, ids, notices);
     ImGui::SetNextWindowPos(ImVec2(10, 640), ImGuiCond_FirstUseEver);
     ImGui::Begin("Board");
     const Target before = editor.board();
@@ -532,10 +849,25 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       if (!taken.ok()) notices.note(taken.message());
     }
     ImGui::End();
-    if (latest) {
-      draw_marks(*mosaic, *latest, in);
-      rig_windows(*latest, editor, in);
+    const bool mosaic_shown = split.mosaic.extent.width > 0;
+    const bool scene_shown = split.scene.extent.width > 0;
+    if (scene_shown) {
+      report_view(view3d, refresh_lines(view3d, app, retire, frame.number),
+                  notices);
     }
+    if (latest && mosaic_shown) draw_marks(*mosaic, *latest, in);
+
+    gfx::RenderTargetBeginInfo begin;
+    frame.target->begin(frame.cmd, begin);
+    if (mosaic_shown) mosaic->draw(frame.cmd, extent);
+    if (scene_shown) {
+      core::StageScope scope(in.stages, "point cloud");
+      report_view(view3d,
+                  draw_scene(view3d, *clouds, *primitives, retire, frame,
+                             extent, split.scene, *shared),
+                  notices);
+    }
+    if (latest) rig_windows(*latest, editor, in);
     if (!notices.messages.empty()) {
       ImGui::Begin("Messages");
       for (const std::string& message : notices.messages) {
@@ -544,10 +876,6 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       ImGui::End();
     }
     flash(notices);
-
-    gfx::RenderTargetBeginInfo begin;
-    frame.target->begin(frame.cmd, begin);
-    mosaic->draw(frame.cmd, extent);
     overlay.render(frame.cmd);
     frame.target->end(frame.cmd);
     const core::Status ended = app.end_frame(frame);
@@ -560,6 +888,19 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
 }
 
 }  // namespace
+
+core::Result<RigRequirements> rig_requirements(bool large_points) {
+  return compute::guarded(
+      "rig_requirements", [&]() -> core::Result<RigRequirements> {
+        RigRequirements needs;
+        VKC_ASSIGN(needs.compute,
+                   core::merge(recon::device_requirements(),
+                               depth::DepthChecks::device_requirements()));
+        needs.graphics = gfx::device_requirements();
+        needs.graphics.features.largePoints = large_points ? VK_TRUE : VK_FALSE;
+        return needs;
+      });
+}
 
 core::Result<RigScenario> check_scenario(const core::config::Config& config) {
   return compute::guarded("check_scenario", [&]() -> core::Result<RigScenario> {

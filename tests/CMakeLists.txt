@@ -161,6 +161,10 @@ if(TARGET calib_app)
               volumetric_kit::core_test_support)
   vc_add_test(app_live_view volumetric_kit::calib_app vc_synthetic_rig
               volumetric_kit::core_test_support)
+  # app: the 3D view's worker over synthetic frames, and its points drawn on the
+  # renderer's queue family through gfx's depth-cloud pipeline.
+  vc_add_test(app_cloud volumetric_kit::calib_app
+              volumetric_kit::core_test_support)
   # calib_capture before recon_io, which it links, so recon_io is linked once.
   vc_add_test(app_capture volumetric_kit::calib_app vc_synthetic_rig
               volumetric_kit::calib_capture volumetric_kit::recon_io)

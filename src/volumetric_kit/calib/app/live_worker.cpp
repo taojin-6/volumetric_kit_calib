@@ -50,6 +50,7 @@ struct LiveWorker::State {
   bool have_previous = false;
   LiveOptions options;
   CaptureSink* sink = nullptr;
+  SetSink* sets = nullptr;
   std::uint64_t published = 0;
   std::optional<Clock::time_point> last_set;
   double rate = 0.0;
@@ -200,19 +201,24 @@ struct LiveWorker::State {
     return request;
   }
 
-  // One set: read back, detected, checked, ruled on, published.
-  core::Status process(sensor::FrameSet set, core::StageMetrics stages,
+  // One set: read back, offered to the set sink, detected, checked, ruled
+  // on, published.
+  core::Status process(sensor::FrameSet polled, core::StageMetrics stages,
                        const std::vector<std::string>& ids) {
     auto out = std::make_shared<LiveSnapshot>();
     out->stages = std::move(stages);
+    // The readback takes over each buffer picture's queue family.
     core::Result<std::vector<std::optional<sensor::PictureView>>> read =
-        readback->read(set.frames, sensor::PictureReadback::Planes::Luma,
+        readback->read(polled.frames, sensor::PictureReadback::Planes::Luma,
                        &out->stages);
     if (!read.ok()) {
       post(read.status().with_context("live view: set " +
-                                      std::to_string(set.sequence)));
+                                      std::to_string(polled.sequence)));
       return {};
     }
+    out->set = std::make_shared<const sensor::FrameSet>(std::move(polled));
+    const sensor::FrameSet& set = *out->set;
+    if (sets != nullptr) sets->offer(out->set);
     const std::vector<std::optional<sensor::PictureView>>& views = read.value();
     {
       core::StageScope scope(out->stages, "detect");
@@ -272,7 +278,6 @@ struct LiveWorker::State {
     last_set = now;
     out->sets_per_second = rate;
     out->number = ++published;
-    out->set = std::make_shared<const sensor::FrameSet>(std::move(set));
     const std::lock_guard<std::mutex> lock(mutex);
     snapshot = std::move(out);
     return {};
@@ -346,7 +351,7 @@ struct LiveWorker::State {
 core::Result<std::unique_ptr<LiveWorker>> LiveWorker::create(
     sensor::SensorArray&& array, const core::Device& device,
     core::Allocator& allocator, const Target& board, bool square_measured,
-    CaptureSink* sink, const LiveOptions& options) {
+    CaptureSink* sink, SetSink* sets, const LiveOptions& options) {
   auto state = std::make_unique<State>(std::move(array));
   if (options.idle.count() < 0) {
     return core::Status::invalid_argument(
@@ -376,6 +381,7 @@ core::Result<std::unique_ptr<LiveWorker>> LiveWorker::create(
         state->square_measured = square_measured;
         state->options = options;
         state->sink = sink;
+        state->sets = sets;
         std::unique_ptr<LiveWorker> worker(
             new LiveWorker(std::move(state), std::move(ids)));
         worker->state_->running.store(true);
