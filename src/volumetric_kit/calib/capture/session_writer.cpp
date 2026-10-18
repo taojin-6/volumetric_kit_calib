@@ -179,11 +179,12 @@ core::Status check_part(const SessionInfo& info, std::size_t i,
   if (part.jpeg.size() < 2 || part.jpeg[0] != 0xFF || part.jpeg[1] != 0xD8) {
     return invalid(where + "the colour is not a JPEG");
   }
+  if (part.depth == nullptr) return invalid(where + "no depth");
   const recon::camera::ImageSize& depth = camera.depth->size;
   const std::size_t samples =
       static_cast<std::size_t>(depth.width) * depth.height;
-  if (part.depth.size() != samples) {
-    return invalid(where + std::to_string(part.depth.size()) +
+  if (part.depth->size() != samples) {
+    return invalid(where + std::to_string(part.depth->size()) +
                    " depth samples for a " + size_text(depth) + " depth image");
   }
   const recon::camera::ImageSize& size = part.detection.image_size;
@@ -342,11 +343,12 @@ struct SessionWriter::State {
       const std::string& serial = info.cameras[i].info.id;
       const recon::camera::ImageSize& depth = info.cameras[i].info.depth->size;
       const CameraCapture& part = job.cameras[i];
+      const std::vector<std::uint16_t>& samples = *part.depth;
       VKC_TRY(core::write_file(
           detail::join(info.directory, detail::color_file(serial, index)),
           bytes_of(part.jpeg), core::WriteMode::CreateNew));
       VKC_ASSIGN(const std::vector<std::uint8_t> png,
-                 recon::io::encode_png_u16(part.depth.data(), part.depth.size(),
+                 recon::io::encode_png_u16(samples.data(), samples.size(),
                                            depth.width, depth.height));
       VKC_TRY(core::write_file(
           detail::join(info.directory, detail::depth_file(serial, index)),

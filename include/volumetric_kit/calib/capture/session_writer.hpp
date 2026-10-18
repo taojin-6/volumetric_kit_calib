@@ -215,7 +215,8 @@ struct SessionInfo {
 /// CameraCapture part;
 /// part.jpeg.assign(frame.color_bitstream.data,
 ///                  frame.color_bitstream.data + frame.color_bitstream.size);
-/// part.depth.assign(frame.depth, frame.depth + depth_samples);
+/// part.depth = std::make_shared<const std::vector<std::uint16_t>>(
+///     frame.depth, frame.depth + depth_samples);
 /// part.timestamp_ns = frame.timestamp_ns;
 /// part.sequence = frame.sequence;
 /// part.detection = std::move(full_detection);
@@ -226,8 +227,10 @@ struct CameraCapture {
   /// frame so the driver's buffers go back to it.
   std::vector<std::uint8_t> jpeg;
   /// The depth, a sample for each of the depth model's pixels, row-major, in
-  /// the sensor's units, as `RgbdFrame::depth`.
-  std::vector<std::uint16_t> depth;
+  /// the sensor's units, as `RgbdFrame::depth`; not null. Shared, so a caller
+  /// may keep the samples it hands over without a copy: the writer only reads
+  /// them, and lets them go once the capture is carried out.
+  std::shared_ptr<const std::vector<std::uint16_t>> depth;
   std::uint64_t timestamp_ns = 0;  ///< `RgbdFrame::timestamp_ns`.
   std::uint64_t sequence = 0;      ///< `RgbdFrame::sequence`.
   /// The board found in the colour image at full resolution: what the solver
@@ -352,8 +355,8 @@ class VC_CAPTURE_API SessionWriter {
   /// or the sync file is missing, `IoError` for a write that fails (a full
   /// disk), and `OutOfMemory`.
   /// @param job  The capture. Refused unless it has one part per camera,
-  ///             each with a JPEG (starting with its SOI marker), a depth
-  ///             sample per depth pixel, a detection in an image of the
+  ///             each with a JPEG (starting with its SOI marker), depth with
+  ///             a sample per depth pixel, a detection in an image of the
   ///             colour model's size, and finite pixels, weights and
   ///             measures; the same for the set's measures; and a
   ///             @ref ViewVerdict for each check.

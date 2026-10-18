@@ -16,9 +16,11 @@
 /// session's directory is created at the first capture, under the scenario's
 /// `output.path`. Captures and drops are carried out in the order they come,
 /// and each one's outcome is reported (@ref take_events), with the session's
-/// checks once it is written (@ref summary).
+/// checks once it is written (@ref summary) and the captures kept for
+/// Calibrate (@ref kept).
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -28,8 +30,12 @@
 #include "volumetric_kit/calib/app/live_worker.hpp"
 #include "volumetric_kit/calib/capture/session_writer.hpp"
 #include "volumetric_kit/calib/core/capture_meta.hpp"
+#include "volumetric_kit/calib/core/detection.hpp"
+#include "volumetric_kit/calib/core/target.hpp"
 #include "volumetric_kit/calib/quality/live_checks.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
+#include "volumetric_kit/calib/solve/bundle_adjust.hpp"
+#include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/recon/sensor/orbbec/orbbec_sync_config.hpp"
 #include "volumetric_kit/recon/sensor/rgbd_sensor.hpp"
@@ -98,6 +104,65 @@ struct CaptureSetup {
   /// Captures held at once: queued here, being detected, or queued on the
   /// writer; at least 1.
   std::size_t capacity = 4;
+  /// Captures kept and pending at once, at most: what one Calibrate adjusts,
+  /// which also bounds the raw depth held (@ref KeptCapture::depth), 2 bytes
+  /// per depth pixel per camera and capture (0.74 MB at nfov_unbinned,
+  /// 2.1 MB at wfov_unbinned); at least 1.
+  // TODO: more than 150 captures, should a session ever need them.
+  std::size_t max_kept = solve::BundleAdjustOptions{}.max_captures;
+};
+
+/// @brief A capture kept for Calibrate: each camera's full detection and raw
+///        depth, as the session wrote them.
+///
+/// @code
+/// for (std::size_t c = 0; c < capture.views.size(); ++c) {
+///   const Observation& view = capture.views[c].observation;
+///   if (!view.empty()) observations.push_back(view);  // the solve's input
+///   const std::vector<std::uint16_t>& depth = *capture.depth[c];
+/// }
+/// @endcode
+struct KeptCapture {
+  int index = -1;  ///< As the session numbers it (`captures/<NNN>.json`).
+  /// Each camera's board found at full resolution, in rig order: the
+  /// detection its file holds, with `observation.camera_id` the camera's
+  /// serial and `observation.frame_id` the capture's index. A camera that
+  /// found no board, or whose detection failed, has no corners.
+  std::vector<Detection> views;
+  /// Each camera's raw depth, in rig order, not null: the very samples the
+  /// session wrote as its PNG, shared with the writer, never copied.
+  std::vector<std::shared_ptr<const std::vector<std::uint16_t>>> depth;
+};
+
+/// @brief What Calibrate works on: the session's kept captures and what they
+///        were captured with.
+///
+/// Immutable once published (@ref CaptureWorker::kept), so any thread may
+/// read it, and it outlives the worker. Its captures are shared with later
+/// snapshots, so each publish copies pointers, not captures; a dropped
+/// capture's depth is freed once no snapshot holds it.
+///
+/// @code
+/// std::shared_ptr<const KeptCaptures> kept = captures->kept();
+/// VKC_ASSIGN(const compute::Board board, compute::Board::create(kept->board));
+/// const solve::RigCamera& reference = kept->cameras[kept->reference];
+/// @endcode
+struct KeptCaptures {
+  Target board;  ///< The session's board, locked at its first capture.
+  /// The rig's colour cameras, in rig order, as the session's checks take
+  /// them: each one's serial and colour model.
+  std::vector<solve::RigCamera> cameras;
+  /// Each camera's sensor, in rig order (`CaptureSetup::cameras`): its depth
+  /// model and `depth_to_color` among them.
+  std::vector<recon::sensor::SensorInfo> sensors;
+  std::size_t reference = 0;  ///< The reference camera, by index.
+  /// The rig's depth mode, in the session's depth unit.
+  capture::DepthMode depth_mode;
+  /// The solve's thresholds, the session's (`CaptureSetup::session.solve`).
+  solve::InitialiseOptions solve;
+  std::string directory;  ///< The session's directory.
+  /// Every capture written and not dropped, by index ascending.
+  std::vector<std::shared_ptr<const KeptCapture>> captures;
 };
 
 /// @brief What became of a capture or a drop.
@@ -138,6 +203,7 @@ struct CaptureEvent {
 /// VKC_TRY(captures->drop_last());  // the clicker's "back"
 /// for (const CaptureEvent& event : captures->take_events()) show(event);
 /// if (auto summary = captures->summary()) draw_session(*summary);
+/// if (auto kept = captures->kept()) calibrate(*kept);  // on another thread
 /// @endcode
 class VC_APP_API CaptureWorker final : public CaptureSink {
  public:
@@ -145,7 +211,7 @@ class VC_APP_API CaptureWorker final : public CaptureSink {
   ///        first capture.
   /// @param setup  What to write. Refused unless the root is non-empty, there
   ///               is a camera, each with a colour model, the reference is
-  ///               one, and the capacity is at least 1.
+  ///               one, and the capacity and `max_kept` are at least 1.
   /// @return The worker; `InvalidArgument` naming what @p setup gets wrong;
   ///         `IoError` if the thread cannot start; or `OutOfMemory`.
   static core::Result<std::unique_ptr<CaptureWorker>> create(
@@ -165,9 +231,11 @@ class VC_APP_API CaptureWorker final : public CaptureSink {
   /// @param request  The capture, one part per camera, each with its luma
   ///                 (`width * height` bytes) and the one depth unit.
   /// @return `true` once queued; `false`, with nothing queued, when
-  ///         @ref full; `InvalidArgument` for a request with a part per
-  ///         camera missing or extra, a part's luma not its size, or a part
-  ///         without a depth unit or in another unit than the first part; or
+  ///         @ref full; `Unsupported`, with nothing queued, while the
+  ///         captures kept and pending add up to `max_kept` (a drop makes
+  ///         room); `InvalidArgument` for a request with a part per camera
+  ///         missing or extra, a part's luma not its size, or a part without
+  ///         a depth unit or in another unit than the first part; or
   ///         `OutOfMemory`.
   core::Result<bool> submit(CaptureRequest request) override;
 
@@ -186,6 +254,16 @@ class VC_APP_API CaptureWorker final : public CaptureSink {
   ///         written.
   std::optional<quality::SessionSummary> summary() const;
 
+  /// @brief The captures kept, for Calibrate.
+  ///
+  /// A capture joins once written (its `Saved` event) and leaves when
+  /// dropped; one whose write failed never joins. Each change publishes a new
+  /// snapshot, with @ref summary in one step, so once @ref flush returns the
+  /// two count the same captures.
+  /// @return The latest snapshot (@ref KeptCaptures); null before the first
+  ///         capture is written.
+  std::shared_ptr<const KeptCaptures> kept() const;
+
   /// @return The captures queued, being detected, or queued on the writer.
   std::size_t pending() const;
   /// @return The most captures it holds at once.
@@ -199,7 +277,8 @@ class VC_APP_API CaptureWorker final : public CaptureSink {
   /// @return The failures, oldest first.
   std::vector<core::Status> take_errors();
 
-  /// @brief Wait until nothing is queued, being detected, or being written.
+  /// @brief Wait until nothing is queued, being detected, or being written,
+  ///        and the worker holds no snapshot but its latest (@ref kept).
   void flush();
 
  private:

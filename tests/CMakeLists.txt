@@ -170,8 +170,10 @@ if(TARGET calib_app)
   vc_add_test(app_cloud volumetric_kit::calib_app
               volumetric_kit::core_test_support)
   # calib_capture before recon_io, which it links, so recon_io is linked once.
+  # allocation_failure.cpp fails a detection and counts the depth buffers.
   vc_add_test(app_capture volumetric_kit::calib_app vc_synthetic_rig
               volumetric_kit::calib_capture volumetric_kit::recon_io)
+  target_sources(vc_app_capture_test PRIVATE support/allocation_failure.cpp)
   target_include_directories(vc_app_capture_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
   # The calib commit a session records is the checkout's HEAD, "-dirty"

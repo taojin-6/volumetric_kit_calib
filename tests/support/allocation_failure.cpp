@@ -14,6 +14,7 @@
 
 namespace volumetric_kit::calib::test {
 thread_local AllocationFailure allocation_failure;
+AllocationCount allocation_count;
 }  // namespace volumetric_kit::calib::test
 
 namespace {
@@ -108,6 +109,11 @@ bool exhaustive() noexcept {
 // Armed, the stack is walked only where needed: for each allocation of a
 // census or while the Vulkan driver is spared, and for the one failed.
 void* operator new(std::size_t bytes) {
+  const std::size_t counted =
+      test::allocation_count.bytes.load(std::memory_order_relaxed);
+  if (counted != 0 && bytes == counted) {
+    test::allocation_count.made.fetch_add(1, std::memory_order_relaxed);
+  }
   auto& failure = test::allocation_failure;
   if (failure.armed) {
     if (!failure.census && !failure.spare_vulkan && failure.remaining > 0) {
