@@ -139,6 +139,11 @@ if(VC_WITH_RIG)
   vc_add_test(board_editor volumetric_kit::calib_viz)
   vc_add_test(viz_render volumetric_kit::calib_viz
               volumetric_kit::core_test_support)
+  # viz: the 3D view's frusta, axes, boards, display rotation and window split
+  # from host data; each camera's prepared frame as gfx's draw, on real buffers.
+  vc_add_test(viz_scene volumetric_kit::calib_viz vc_synthetic_rig)
+  vc_add_test(viz_point_cloud volumetric_kit::calib_viz
+              volumetric_kit::core_test_support)
   vc_add_test(viz_oom volumetric_kit::calib_viz vc_test_support)
   target_sources(vc_viz_oom_test PRIVATE support/allocation_failure.cpp)
 endif()
