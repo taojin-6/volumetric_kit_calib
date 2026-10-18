@@ -68,7 +68,8 @@ CaptureJob make_job() {
   for (int i = 0; i < 2; ++i) {
     CameraCapture part;
     part.jpeg = {0xFF, 0xD8, 0xFF, 0xD9};
-    part.depth.assign(std::size_t{16} * 12, 1000);
+    part.depth = std::make_shared<const std::vector<std::uint16_t>>(
+        std::size_t{16} * 12, std::uint16_t{1000});
     part.detection.image_size = {64, 48};
     part.detection.observation.points = {{0, {10.0, 10.0}, 1.0}};
     part.check.verdict = ViewVerdict::Partial;

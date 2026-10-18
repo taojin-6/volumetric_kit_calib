@@ -3,9 +3,11 @@
 
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <mutex>
@@ -32,10 +34,13 @@ namespace sensor = recon::sensor;
 // queued.
 constexpr std::chrono::milliseconds kCollectEvery{20};
 
+using DepthSamples = std::shared_ptr<const std::vector<std::uint16_t>>;
+
 // A capture on the writer, awaiting its outcome.
 struct Written {
-  std::vector<Detection> full;  // each camera's, for the session's checks
-  CaptureEvent event;           // Saved, once its index is known
+  std::vector<Detection> full;      // each camera's, for the session's checks
+  std::vector<DepthSamples> depth;  // each camera's, shared with the writer
+  CaptureEvent event;               // Saved, once its index is known
 };
 
 // A capture, or a drop of the last one.
@@ -81,6 +86,8 @@ struct CaptureWorker::State {
   std::optional<quality::SessionChecks> checks;
   float metres_per_unit = 0.0f;  // the session's depth unit, its first's
   std::deque<Written> written;   // on the writer, in the order submitted
+  KeptCaptures kept_base;        // what each snapshot holds but its captures
+  std::vector<std::shared_ptr<const KeptCapture>> kept_captures;
 
   // Shared.
   mutable std::mutex mutex;
@@ -93,21 +100,31 @@ struct CaptureWorker::State {
   bool stopping = false;
   std::vector<CaptureEvent> events;
   std::optional<quality::SessionSummary> summary;
+  std::shared_ptr<const KeptCaptures> kept;  // published with `summary`
   std::string directory;
   std::vector<core::Status> errors;
   std::thread thread;
 
-  // Report outcomes, the captures and drops they resolve, and errors.
+  // Report outcomes, the captures and drops they resolve, and errors, with
+  // the session's summary and kept captures when they changed.
   void resolve(std::vector<CaptureEvent> outcomes, std::size_t captures_done,
                std::size_t drops_done, std::vector<core::Status> failures,
-               std::optional<quality::SessionSummary> latest = {}) {
-    const std::lock_guard<std::mutex> lock(mutex);
-    for (CaptureEvent& event : outcomes) events.push_back(std::move(event));
-    for (core::Status& failure : failures) errors.push_back(std::move(failure));
-    captures -= captures_done;
-    drops -= drops_done;
-    if (latest) summary = std::move(latest);
-    idle.notify_all();
+               std::optional<quality::SessionSummary> latest = {},
+               std::shared_ptr<const KeptCaptures> kept_latest = {}) {
+    {
+      const std::lock_guard<std::mutex> lock(mutex);
+      for (CaptureEvent& event : outcomes) events.push_back(std::move(event));
+      for (core::Status& failure : failures) {
+        errors.push_back(std::move(failure));
+      }
+      captures -= captures_done;
+      drops -= drops_done;
+      if (latest) summary = std::move(latest);
+      // The snapshot replaced is let go below, outside the lock: it may hold
+      // a dropped capture's depth.
+      if (kept_latest) kept.swap(kept_latest);
+      idle.notify_all();
+    }
   }
 
   void fail_capture(const CaptureMeta& meta, core::Status status) {
@@ -129,6 +146,14 @@ struct CaptureWorker::State {
     VKC_ASSIGN(quality::SessionChecks session,
                quality::SessionChecks::create(rig, made, setup.reference,
                                               setup.session));
+    KeptCaptures base;
+    base.board = request.board;
+    base.cameras = std::move(rig);
+    for (const capture::SessionCamera& camera : setup.cameras) {
+      base.sensors.push_back(camera.info);
+    }
+    base.reference = setup.reference;
+    base.solve = setup.session.solve;
     VKC_ASSIGN(const std::string stamp,
                capture::session_stamp(std::chrono::system_clock::now()));
     capture::SessionInfo info;
@@ -142,12 +167,15 @@ struct CaptureWorker::State {
     info.depth_mode.metres_per_unit = request.cameras.front().metres_per_unit;
     info.cameras = setup.cameras;
     const std::string directory_name = info.directory;
+    base.depth_mode = info.depth_mode;
+    base.directory = info.directory;
     capture::SessionWriterOptions options;
     options.queue_capacity = setup.capacity;
     VKC_ASSIGN(writer,
                capture::SessionWriter::create(std::move(info), options));
     board = std::move(made);
     checks = std::move(session);
+    kept_base = std::move(base);
     metres_per_unit = request.cameras.front().metres_per_unit;
     const std::lock_guard<std::mutex> lock(mutex);
     directory = directory_name;
@@ -210,11 +238,16 @@ struct CaptureWorker::State {
     capture::CaptureJob job;
     job.meta = event.meta;
     job.cameras.resize(n);
+    std::vector<DepthSamples> depth(n);
     for (std::size_t i = 0; i < n; ++i) {
       CameraFrameCopy& part = request.cameras[i];
       capture::CameraCapture& out = job.cameras[i];
       out.jpeg = std::move(part.jpeg);
-      out.depth = std::move(part.depth);
+      // The samples move into the one buffer the writer and the kept capture
+      // share.
+      depth[i] = std::make_shared<const std::vector<std::uint16_t>>(
+          std::move(part.depth));
+      out.depth = depth[i];
       out.timestamp_ns = part.timestamp_ns;
       out.sequence = part.sequence;
       out.detection = full[i];
@@ -232,7 +265,7 @@ struct CaptureWorker::State {
                        "capture refused: the session writer is full"));
       return;
     }
-    written.push_back({std::move(full), std::move(event)});
+    written.push_back({std::move(full), std::move(depth), std::move(event)});
   }
 
   void detect_one(std::size_t i, const CameraFrameCopy& part, Detection& found,
@@ -279,7 +312,8 @@ struct CaptureWorker::State {
     }
   }
 
-  // The writer's outcomes since the last look, and the session's checks.
+  // The writer's outcomes since the last look, the session's checks and the
+  // captures kept.
   void collect() {
     if (writer == nullptr) return;
     std::vector<capture::WriteResult> results = writer->take_results();
@@ -288,6 +322,8 @@ struct CaptureWorker::State {
     std::vector<core::Status> failures;
     std::size_t captures_done = 0;
     std::size_t drops_done = 0;
+    std::vector<std::shared_ptr<const KeptCapture>> now = kept_captures;
+    bool kept_changed = false;
     for (capture::WriteResult& result : results) {
       if (result.kind == capture::WriteResult::Kind::Capture) {
         ++captures_done;
@@ -299,8 +335,17 @@ struct CaptureWorker::State {
           done.event.meta.index = -1;
         } else {
           done.event.meta.index = result.index;
+          for (Detection& view : done.full) {
+            view.observation.frame_id = result.index;
+          }
           const core::Status added = checks->add(result.index, done.full);
           if (!added.ok()) failures.push_back(added.with_context("session"));
+          auto kept_capture = std::make_shared<KeptCapture>();
+          kept_capture->index = result.index;
+          kept_capture->views = std::move(done.full);
+          kept_capture->depth = std::move(done.depth);
+          now.push_back(std::move(kept_capture));
+          kept_changed = true;
         }
         outcomes.push_back(std::move(done.event));
         continue;
@@ -314,6 +359,13 @@ struct CaptureWorker::State {
         event.kind = CaptureEvent::Kind::Dropped;
         const core::Status dropped = checks->drop(result.index);
         if (!dropped.ok()) failures.push_back(dropped.with_context("session"));
+        const auto taken = std::find_if(
+            now.begin(), now.end(),
+            [&](const std::shared_ptr<const KeptCapture>& capture) {
+              return capture->index == result.index;
+            });
+        if (taken != now.end()) now.erase(taken);
+        kept_changed = true;
       }
       outcomes.push_back(std::move(event));
     }
@@ -324,8 +376,15 @@ struct CaptureWorker::State {
     } else {
       failures.push_back(latest.status().with_context("session"));
     }
+    std::shared_ptr<const KeptCaptures> kept_now;
+    if (kept_changed) {
+      auto snapshot = std::make_shared<KeptCaptures>(kept_base);
+      snapshot->captures = now;
+      kept_now = std::move(snapshot);
+      kept_captures = std::move(now);
+    }
     resolve(std::move(outcomes), captures_done, drops_done, std::move(failures),
-            std::move(summary_now));
+            std::move(summary_now), std::move(kept_now));
   }
 
   core::Status loop() {
@@ -382,6 +441,10 @@ core::Result<std::unique_ptr<CaptureWorker>> CaptureWorker::create(
         if (setup.capacity == 0) {
           return core::Status::invalid_argument(
               "CaptureWorker: a capacity of 0 holds no capture");
+        }
+        if (setup.max_kept == 0) {
+          return core::Status::invalid_argument(
+              "CaptureWorker: a max_kept of 0 keeps no capture");
         }
         auto state = std::make_unique<State>();
         for (const capture::SessionCamera& camera : setup.cameras) {
@@ -459,8 +522,16 @@ core::Result<bool> CaptureWorker::submit(CaptureRequest request) {
             "'s depth unit is not camera " + cameras.front().info.id + "'s");
       }
     }
+    const std::size_t max_kept = state_->setup.max_kept;
     {
       const std::lock_guard<std::mutex> lock(state_->mutex);
+      const std::size_t kept =
+          state_->kept != nullptr ? state_->kept->captures.size() : 0;
+      if (kept + state_->captures >= max_kept) {
+        return core::Status::unsupported(
+            "capture: drop a capture first: one Calibrate adjusts at most " +
+            std::to_string(max_kept));
+      }
       if (state_->captures >= capacity_) return false;
       state_->jobs.push_back({false, std::move(request)});
       ++state_->captures;
@@ -492,6 +563,11 @@ std::vector<CaptureEvent> CaptureWorker::take_events() {
 std::optional<quality::SessionSummary> CaptureWorker::summary() const {
   const std::lock_guard<std::mutex> lock(state_->mutex);
   return state_->summary;
+}
+
+std::shared_ptr<const KeptCaptures> CaptureWorker::kept() const {
+  const std::lock_guard<std::mutex> lock(state_->mutex);
+  return state_->kept;
 }
 
 std::size_t CaptureWorker::pending() const {

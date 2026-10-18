@@ -29,6 +29,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `CaptureWorker::kept`, the captures kept for Calibrate (DECISIONS.md,
+  2026-10-13): an immutable `KeptCaptures` snapshot of every capture written
+  and not dropped, each a `KeptCapture` of every camera's full detection,
+  numbered for the solve, and its raw depth, shared with the session writer;
+  with the session's board, cameras, sensors, depth mode and solve
+  thresholds. A capture that would make the captures kept and pending exceed
+  `CaptureSetup::max_kept`, by default `bundle_adjust`'s 150, is refused.
 - calib_rig's live 3D view (DECISIONS.md, 2026-10-17): beside the mosaic, in
   the whole window or hidden, frozen or live, solid, tinted-luma or true
   colour, each camera shown or not in its tint, at first gfx's categorical
@@ -157,6 +164,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `capture::CameraCapture::depth` is a
+  `std::shared_ptr<const std::vector<std::uint16_t>>`, so a caller keeps the
+  samples it hands the writer without a copy; `SessionWriter::submit` refuses
+  a null one.
 - OpenCV 5 is required, and `VC_WITH_OPENCV` is gone (DECISIONS.md,
   2026-10-17): `compute`, `detect`, `solve` and `quality` always build, the
   installed package always re-finds OpenCV, and `VC_WITH_RIG` alone builds

@@ -5,9 +5,10 @@
 // again at full resolution in its luma, checked, compared with its live
 // corners and written as a session under the scenario's root; drops, a full
 // queue, requests that do not fit the rig, a missing root and the drain at
-// shutdown; the session's depth unit, the frames'. Synthetic board renders, a
-// few cameras, no device. Then what a session records of each camera and of
-// the software.
+// shutdown; the session's depth unit, the frames'; the captures kept for
+// Calibrate, their depth shared with the writer, and their cap. Synthetic
+// board renders, a few cameras, no device. Then what a session records of
+// each camera and of the software.
 
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 
@@ -20,6 +21,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <regex>
 #include <string>
@@ -432,6 +434,9 @@ TEST(AppCapture, RefusesASetupItCannotWrite) {
   s = setup(root.path(), 2);
   s.cameras[1].info.color.reset();
   refused(s, "SYN1 has no colour model");
+  s = setup(root.path(), 2);
+  s.max_kept = 0;
+  refused(s, "a max_kept of 0");
 }
 
 // The writer finds no root: the capture fails, named, and the next is tried
@@ -452,6 +457,7 @@ TEST(AppCapture, AMissingRootFailsTheCapture) {
   EXPECT_EQ(events[0].meta.index, -1);
   EXPECT_FALSE(worker->full());
   EXPECT_FALSE(fs::exists(root.path() / "missing"));
+  EXPECT_EQ(worker->kept(), nullptr);
 }
 
 // Destroying the worker writes what it holds first.
@@ -516,6 +522,215 @@ TEST(AppCapture, TakesTheDepthUnitFromTheFrames) {
   ASSERT_FALSE(queued.ok());
   EXPECT_EQ(queued.status().message(),
             "capture: camera SYN0 has no depth unit");
+}
+
+// Each written capture is kept for Calibrate: every camera's full detection,
+// numbered for the solve, and the very depth samples submitted, which the
+// writer wrote; with the board, cameras, depth mode and thresholds the
+// session was captured with.
+TEST(AppCapture, KeepsEachWrittenCaptureForCalibrate) {
+  ScratchDir root;
+  CaptureSetup s = setup(root.path(), 3);
+  s.session.solve.weak_below = 7;
+  std::unique_ptr<CaptureWorker> worker = make(s);
+  ASSERT_NE(worker, nullptr);
+  EXPECT_EQ(worker->kept(), nullptr);
+  std::vector<std::vector<const std::uint16_t*>> buffers;  // as submitted
+  for (int tag = 0; tag < 3; ++tag) {
+    // Capture 1's camera 2 sees no board.
+    CaptureRequest r = request(3, 0.0, tag,
+                               tag == 1 ? std::optional<std::size_t>(2)
+                                        : std::optional<std::size_t>());
+    buffers.emplace_back();
+    for (const CameraFrameCopy& part : r.cameras) {
+      buffers.back().push_back(part.depth.data());
+    }
+    ASSERT_TRUE(submit(*worker, std::move(r)));
+  }
+  worker->flush();
+  EXPECT_TRUE(worker->take_errors().empty());
+  const std::shared_ptr<const KeptCaptures> kept = worker->kept();
+  ASSERT_NE(kept, nullptr);
+
+  EXPECT_EQ(kept->board, legacy_femto_board());
+  EXPECT_EQ(kept->directory, worker->directory());
+  EXPECT_EQ(kept->reference, 0u);
+  EXPECT_EQ(kept->solve.weak_below, 7);
+  EXPECT_EQ(kept->depth_mode.name, s.depth_mode.name);
+  EXPECT_EQ(kept->depth_mode.metres_per_unit, 0.001f);
+  EXPECT_EQ(kept->depth_mode.min_m, s.depth_mode.min_m);
+  EXPECT_EQ(kept->depth_mode.max_m, s.depth_mode.max_m);
+  ASSERT_EQ(kept->cameras.size(), 3u);
+  ASSERT_EQ(kept->sensors.size(), 3u);
+  for (std::size_t i = 0; i < 3; ++i) {
+    const sensor::SensorInfo& given = s.cameras[i].info;
+    EXPECT_EQ(kept->cameras[i].id, given.id);
+    EXPECT_EQ(kept->cameras[i].model.intrinsics.fx, given.color->intrinsics.fx);
+    EXPECT_EQ(kept->sensors[i].id, given.id);
+    ASSERT_TRUE(kept->sensors[i].depth.has_value());
+    EXPECT_EQ(kept->sensors[i].depth->size.width, given.depth->size.width);
+    EXPECT_EQ(kept->sensors[i].depth_to_color, given.depth_to_color);
+  }
+
+  ASSERT_EQ(kept->captures.size(), 3u);
+  const fs::path dir = worker->directory();
+  for (std::size_t k = 0; k < 3; ++k) {
+    SCOPED_TRACE("capture " + std::to_string(k));
+    const KeptCapture& capture = *kept->captures[k];
+    EXPECT_EQ(capture.index, static_cast<int>(k));
+    ASSERT_EQ(capture.views.size(), 3u);
+    ASSERT_EQ(capture.depth.size(), 3u);
+    const json file = json::parse(
+        read(dir / "captures" / ("00" + std::to_string(k) + ".json")));
+    for (std::size_t i = 0; i < 3; ++i) {
+      SCOPED_TRACE("camera " + std::to_string(i));
+      const std::string serial = "SYN" + std::to_string(i);
+      const Observation& view = capture.views[i].observation;
+      EXPECT_EQ(view.camera_id, serial);
+      EXPECT_EQ(view.frame_id, static_cast<std::int64_t>(k));
+      // The detection the capture's file holds.
+      const json& written = file["cameras"][serial]["detection"];
+      ASSERT_EQ(view.points.size(), written["ids"].size());
+      for (std::size_t p = 0; p < view.points.size(); ++p) {
+        EXPECT_EQ(view.points[p].id, written["ids"][p].get<int>());
+        EXPECT_EQ(view.points[p].pixel.x,
+                  written["corners_px"][p][0].get<double>());
+        EXPECT_EQ(view.points[p].pixel.y,
+                  written["corners_px"][p][1].get<double>());
+      }
+      EXPECT_EQ(capture.views[i].markers.size(), written["marker_ids"].size());
+      // The buffer submitted, which the writer wrote: never copied.
+      ASSERT_NE(capture.depth[i], nullptr);
+      EXPECT_EQ(capture.depth[i]->data(), buffers[k][i]);
+      EXPECT_TRUE(*capture.depth[i] == depth_of(i));
+      const core::Result<std::vector<std::uint16_t>> png =
+          recon::io::load_depth_u16(
+              (dir / "depth" / serial /
+               ("calib_depth_" + serial + "_00" + std::to_string(k) + ".png"))
+                  .string(),
+              640, 576);
+      ASSERT_TRUE(png.ok()) << png.status().message();
+      EXPECT_TRUE(png.value() == *capture.depth[i]);
+    }
+  }
+  EXPECT_TRUE(kept->captures[1]->views[2].observation.empty());
+  EXPECT_FALSE(kept->captures[0]->views[2].observation.empty());
+  const std::optional<quality::SessionSummary> summary = worker->summary();
+  ASSERT_TRUE(summary.has_value());
+  EXPECT_EQ(static_cast<std::size_t>(summary->kept), kept->captures.size());
+}
+
+// A drop publishes a new snapshot without the capture; one taken before is
+// unchanged, and the dropped capture's depth goes once nothing holds it.
+TEST(AppCapture, ADropLeavesEarlierSnapshotsAndFreesTheDepth) {
+  ScratchDir root;
+  std::unique_ptr<CaptureWorker> worker = make(setup(root.path(), 2));
+  ASSERT_NE(worker, nullptr);
+  for (int tag = 0; tag < 3; ++tag) {
+    ASSERT_TRUE(submit(*worker, request(2, 0.0, tag)));
+  }
+  worker->flush();
+  std::shared_ptr<const KeptCaptures> before = worker->kept();
+  ASSERT_NE(before, nullptr);
+  ASSERT_EQ(before->captures.size(), 3u);
+  const std::shared_ptr<const KeptCapture> first = before->captures[0];
+  const std::weak_ptr<const std::vector<std::uint16_t>> dropped =
+      before->captures[2]->depth[1];
+
+  ASSERT_TRUE(worker->drop_last().ok());
+  worker->flush();
+  const std::shared_ptr<const KeptCaptures> after = worker->kept();
+  ASSERT_NE(after, nullptr);
+  EXPECT_NE(after, before);
+  ASSERT_EQ(after->captures.size(), 2u);
+  EXPECT_EQ(after->captures[0], first);  // shared, not copied
+  EXPECT_EQ(after->captures[1]->index, 1);
+  ASSERT_EQ(before->captures.size(), 3u);
+  EXPECT_EQ(before->captures[2]->index, 2);
+  const std::optional<quality::SessionSummary> summary = worker->summary();
+  ASSERT_TRUE(summary.has_value());
+  EXPECT_EQ(static_cast<std::size_t>(summary->kept), after->captures.size());
+  EXPECT_EQ(summary->dropped, 1);
+
+  EXPECT_FALSE(dropped.expired());  // the earlier snapshot holds it
+  before.reset();
+  EXPECT_TRUE(dropped.expired());
+
+  ASSERT_TRUE(submit(*worker, request(2, 0.0, 3)));
+  worker->flush();
+  ASSERT_EQ(worker->kept()->captures.size(), 3u);
+  EXPECT_EQ(worker->kept()->captures.back()->index, 3);
+}
+
+// A capture the writer fails to write is never kept; the next one is.
+TEST(AppCapture, KeepsNoCaptureWhoseWriteFailed) {
+  if (::geteuid() == 0) GTEST_SKIP() << "root writes in read-only directories";
+  ScratchDir root;
+  std::unique_ptr<CaptureWorker> worker = make(setup(root.path(), 2));
+  ASSERT_NE(worker, nullptr);
+  ASSERT_TRUE(submit(*worker, request(2, 0.0, 0)));
+  worker->flush();
+  const fs::path images = fs::path(worker->directory()) / "images" / "SYN1";
+  fs::permissions(images, fs::perms::owner_read | fs::perms::owner_exec);
+  ASSERT_TRUE(submit(*worker, request(2, 0.0, 1)));
+  worker->flush();
+  fs::permissions(images, fs::perms::owner_all);
+  ASSERT_TRUE(submit(*worker, request(2, 0.0, 2)));
+  worker->flush();
+
+  const std::vector<CaptureEvent> events = worker->take_events();
+  ASSERT_EQ(events.size(), 3u);
+  EXPECT_EQ(events[0].kind, CaptureEvent::Kind::Saved);
+  EXPECT_EQ(events[1].kind, CaptureEvent::Kind::Failed);
+  EXPECT_EQ(events[2].kind, CaptureEvent::Kind::Saved);
+  EXPECT_EQ(events[2].meta.index, 2);  // the failed one's index is spent
+  const std::shared_ptr<const KeptCaptures> kept = worker->kept();
+  ASSERT_NE(kept, nullptr);
+  ASSERT_EQ(kept->captures.size(), 2u);
+  EXPECT_EQ(kept->captures[0]->index, 0);
+  EXPECT_EQ(kept->captures[1]->index, 2);
+  EXPECT_EQ(worker->summary()->kept, 2);
+}
+
+// Captures kept and pending add up to at most what one Calibrate adjusts: a
+// capture beyond is refused, named, with nothing queued, until a drop.
+TEST(AppCapture, RefusesACaptureBeyondWhatOneCalibrateAdjusts) {
+  EXPECT_EQ(CaptureSetup{}.max_kept, solve::BundleAdjustOptions{}.max_captures);
+  ScratchDir root;
+  CaptureSetup s = setup(root.path(), 1);
+  s.max_kept = 2;
+  std::unique_ptr<CaptureWorker> worker = make(std::move(s));
+  ASSERT_NE(worker, nullptr);
+  const auto refused = [&worker](int tag) {
+    const core::Result<bool> queued = worker->submit(request(1, 0.0, tag));
+    ASSERT_FALSE(queued.ok());
+    EXPECT_EQ(queued.status().domain(), Code::Unsupported);
+    EXPECT_EQ(queued.status().message(),
+              "capture: drop a capture first: one Calibrate adjusts at most 2");
+  };
+  ASSERT_TRUE(submit(*worker, request(1, 0.0, 0)));
+  ASSERT_TRUE(submit(*worker, request(1, 0.0, 1)));
+  refused(2);  // kept and pending, however far the two have got
+  worker->flush();
+  refused(3);  // both kept
+  EXPECT_EQ(worker->pending(), 0u);
+  std::vector<CaptureEvent> events = worker->take_events();
+  ASSERT_EQ(events.size(), 2u);
+  EXPECT_EQ(events[1].kind, CaptureEvent::Kind::Saved);
+  EXPECT_EQ(worker->kept()->captures.size(), 2u);
+  const json session =
+      json::parse(read(fs::path(worker->directory()) / "session.json"));
+  EXPECT_EQ(session["captures"].size(), 2u);
+
+  ASSERT_TRUE(worker->drop_last().ok());
+  worker->flush();
+  ASSERT_TRUE(submit(*worker, request(1, 0.0, 4)));
+  worker->flush();
+  events = worker->take_events();
+  ASSERT_EQ(events.size(), 2u);
+  EXPECT_EQ(events[1].kind, CaptureEvent::Kind::Saved);
+  ASSERT_EQ(worker->kept()->captures.size(), 2u);
+  EXPECT_EQ(worker->kept()->captures[1]->index, 2);
 }
 
 TEST(AppCapture, RecordsEachCameraAndItsDepthDelay) {

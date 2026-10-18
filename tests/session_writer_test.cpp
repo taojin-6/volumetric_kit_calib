@@ -212,12 +212,13 @@ CameraCapture make_part(int seed) {
   }
   part.jpeg.push_back(0xFF);
   part.jpeg.push_back(0xD9);
-  part.depth.resize(std::size_t{kDepthW} * kDepthH);
-  for (std::size_t i = 0; i < part.depth.size(); ++i) {
-    part.depth[i] = static_cast<std::uint16_t>(i * 977 + seed * 13);
+  std::vector<std::uint16_t> depth(std::size_t{kDepthW} * kDepthH);
+  for (std::size_t i = 0; i < depth.size(); ++i) {
+    depth[i] = static_cast<std::uint16_t>(i * 977 + seed * 13);
   }
-  part.depth[0] = 0;  // no return
-  part.depth[1] = 65535;
+  depth[0] = 0;  // no return
+  depth[1] = 65535;
+  part.depth = std::make_shared<const std::vector<std::uint16_t>>(depth);
   part.timestamp_ns = 1760348472003911000u + static_cast<std::uint64_t>(seed);
   part.sequence = 1234 + static_cast<std::uint64_t>(seed);
   part.detection.image_size = {kColorW, kColorH};
@@ -407,8 +408,36 @@ TEST(SessionWriter, WritesDepthAsSixteenBitPngReconReads) {
                                       "/calib_depth_" + serial + "_000.png",
                                   kDepthW, kDepthH);
     ASSERT_TRUE(depth.ok()) << depth.status().message();
-    EXPECT_EQ(*depth, job.cameras[i].depth);
+    EXPECT_EQ(*depth, *job.cameras[i].depth);
   }
+}
+
+// The writer holds the very depth it is handed, not a copy, and lets it go
+// once the capture is written, so a caller keeping it holds the only one.
+TEST(SessionWriter, LetsTheSharedDepthGoOnceWritten) {
+  const ScratchDir dir;
+  SessionInfo info = make_info(dir);
+  info.sync_path = dir / "sync.fifo";
+  auto writer = make_writer(info);
+  ASSERT_TRUE(writer);
+  FifoGate gate(info.sync_path);  // holds the first capture, as below
+  CaptureJob job = make_job(2);
+  const std::shared_ptr<const std::vector<std::uint16_t>> kept =
+      job.cameras[1].depth;
+  submit(*writer, std::move(job));
+  EXPECT_EQ(kept.use_count(), 2);
+  gate.open_with("rig");
+  const std::vector<WriteResult> results = finish(*writer);
+  ASSERT_EQ(results.size(), 1u);
+  expect_written(results[0], WriteResult::Kind::Capture, 0);
+  EXPECT_EQ(kept.use_count(), 1);
+  const std::string& serial = info.cameras[1].info.id;
+  vkc::Result<std::vector<std::uint16_t>> depth =
+      recon::io::load_depth_u16(info.directory + "/depth/" + serial +
+                                    "/calib_depth_" + serial + "_000.png",
+                                kDepthW, kDepthH);
+  ASSERT_TRUE(depth.ok()) << depth.status().message();
+  EXPECT_EQ(*depth, *kept);
 }
 
 TEST(SessionWriter, FactoryCalibrationReadsBackAsTheModels) {
@@ -1196,8 +1225,16 @@ TEST(SessionWriter, RefusesACaptureThatDoesNotFitTheSession) {
   }
   {
     CaptureJob job = make_job();
-    job.cameras[0].depth.pop_back();
+    std::vector<std::uint16_t> short_depth = *job.cameras[0].depth;
+    short_depth.pop_back();
+    job.cameras[0].depth =
+        std::make_shared<const std::vector<std::uint16_t>>(short_depth);
     refused(std::move(job), "191 depth samples for a 16x12 depth image");
+  }
+  {
+    CaptureJob job = make_job();
+    job.cameras[1].depth.reset();
+    refused(std::move(job), "camera CL2A141000N: no depth");
   }
   {
     CaptureJob job = make_job();

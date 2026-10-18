@@ -455,7 +455,10 @@ The `capture` tier writes the rig application's calibration sessions
   capture and keeps its files; no index is used twice.
 - **Written, never read.** calib reads no session back: no resume and no
   replay. A crash loses no capture already listed; a new run starts a new
-  session.
+  session. Calibrate takes the kept captures' detections and raw depth from
+  memory (`CaptureWorker::kept`), not from the files; the cap of one
+  Calibrate's captures bounds the depth held, about 0.74 MB per camera and
+  capture.
 - **Off the caller's thread.** One writer thread behind a bounded queue, which
   refuses a capture when full; the caller polls the outcomes. The writer
   encodes and writes; the full-resolution detection is the caller's, done on

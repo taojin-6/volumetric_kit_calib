@@ -113,8 +113,8 @@ renderer.
   the last. A worker thread owns the rig and finds the board in each set's
   luma, another prepares sets on the GPU for the 3D view (hidden until the
   rig is calibrated, then beside the mosaic or in the whole window), another
-  detects each capture at full resolution
-  and writes it, and the window draws and never waits
+  detects each capture at full resolution, writes it and keeps it in memory
+  for Calibrate, and the window draws and never waits
   ([DECISIONS.md](DECISIONS.md#2026-10-16--calib_rigs-live-view-and-capture)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
