@@ -8,7 +8,6 @@
 #include "volumetric_kit/calib/quality/live_checks.hpp"
 
 #include <cstddef>
-#include <cstdint>
 #include <limits>
 #include <optional>
 #include <string>
@@ -17,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include "detect_helpers.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
 #include "volumetric_kit/calib/detect/charuco.hpp"
@@ -360,9 +360,7 @@ TEST(LiveVsFull, ARenderedViewAgreesUntilACornerIsOff) {
       test::board_facing_camera(board, {0.2, 0.1, 2.6}, 40.0, 15.0);
   const cv::Mat image =
       test::camera_image(test::render_board(model, at, board));
-  const detect::LumaView luma{static_cast<std::uint32_t>(image.cols),
-                              static_cast<std::uint32_t>(image.rows),
-                              image.step[0], image.data};
+  const detect::LumaView luma = test::luma(image);
   Detection live =
       detect::detect_charuco(luma, board, detect::Mode::Hybrid).value();
   const Detection full =
