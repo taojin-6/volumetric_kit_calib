@@ -276,7 +276,8 @@ class VC_APP_API CaptureWorker final : public CaptureSink {
   /// @return The failures, oldest first.
   std::vector<core::Status> take_errors();
 
-  /// @brief Wait until nothing is queued, being detected, or being written.
+  /// @brief Wait until nothing is queued, being detected, or being written,
+  ///        and the worker holds no snapshot but its latest (@ref kept).
   void flush();
 
  private:

@@ -97,6 +97,7 @@ struct CaptureWorker::State {
   bool busy = false;         // a job is being carried out
   std::size_t captures = 0;  // captures queued and not yet resolved
   std::size_t drops = 0;     // drops queued and not yet resolved
+  bool releasing = false;    // a snapshot replaced is being let go
   bool stopping = false;
   std::vector<CaptureEvent> events;
   std::optional<quality::SessionSummary> summary;
@@ -111,6 +112,7 @@ struct CaptureWorker::State {
                std::size_t drops_done, std::vector<core::Status> failures,
                std::optional<quality::SessionSummary> latest = {},
                std::shared_ptr<const KeptCaptures> kept_latest = {}) {
+    const bool replaced = kept_latest != nullptr;
     {
       const std::lock_guard<std::mutex> lock(mutex);
       for (CaptureEvent& event : outcomes) events.push_back(std::move(event));
@@ -120,11 +122,19 @@ struct CaptureWorker::State {
       captures -= captures_done;
       drops -= drops_done;
       if (latest) summary = std::move(latest);
-      // The snapshot replaced is let go below, outside the lock: it may hold
-      // a dropped capture's depth.
-      if (kept_latest) kept.swap(kept_latest);
+      if (replaced) {
+        kept.swap(kept_latest);
+        releasing = true;
+      }
       idle.notify_all();
     }
+    if (!replaced) return;
+    // The snapshot replaced may hold a dropped capture's depth: it is let go
+    // outside the lock, and before flush() returns.
+    kept_latest.reset();
+    const std::lock_guard<std::mutex> lock(mutex);
+    releasing = false;
+    idle.notify_all();
   }
 
   void fail_capture(const CaptureMeta& meta, core::Status status) {
@@ -593,7 +603,7 @@ void CaptureWorker::flush() {
   std::unique_lock<std::mutex> lock(state_->mutex);
   state_->idle.wait(lock, [&] {
     return state_->jobs.empty() && !state_->busy && state_->captures == 0 &&
-           state_->drops == 0;
+           state_->drops == 0 && !state_->releasing;
   });
 }
 

@@ -711,7 +711,8 @@ TEST(AppCapture, AKeptViewNamesItsCameraWhenItsDetectionFailed) {
 }
 
 // A drop publishes a new snapshot without the capture; one taken before is
-// unchanged, and the dropped capture's depth goes once nothing holds it.
+// unchanged, and the dropped capture's depth goes with it: once flush()
+// returns, the worker holds the snapshot it replaced no more.
 TEST(AppCapture, ADropLeavesEarlierSnapshotsAndFreesTheDepth) {
   ScratchDir root;
   std::unique_ptr<CaptureWorker> worker = make(setup(root.path(), 2));
