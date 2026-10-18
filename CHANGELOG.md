@@ -101,8 +101,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `BoardEditor` and `draw_board_editor` (its fields through `board_fields`
   and `apply_fields`) edit the board, checked as the detector's `Board`
   takes it, until the first capture locks it. `VC_WITH_RIG` fetches
-  `volumetric_kit_gfx`, pinned at `ba7f705` (main after #136 and #137,
-  including the overlay scissor repair).
+  `volumetric_kit_gfx`, pinned at `82486e8` (main after #136, #137, with the
+  overlay scissor repair, and #138, `DepthCloudPipeline`).
 - `marker_count`, the markers a board carries, in `calib/core/target.hpp`.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds
@@ -150,8 +150,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   test every OpenCV tier on it.
 - `initialise` places the board of a capture whose views are all ambiguous,
   from those views, so the adjustment takes them.
-- recon is pinned at `bdbe26e` (recon main, with its #228, and its #245,
-  whose exported `pinhole.glsl` the depth tier's kernels include).
+- recon is pinned at `42f11ac` (recon main, with its #228; its #245, whose
+  exported `pinhole.glsl` the depth tier's kernels include; and its #246,
+  whose `GpuFramePrepConfig::depth_queue_families` shares a prepared frame's
+  depth with the renderer's queue family).
   `cv_pose` now converts through recon's `rodrigues_from_matrix`, accurate
   where `cv::Rodrigues` returns zero (below about 1e-5 rad).
 - calib requires `volumetric_kit_core` 0.6.1 or newer (was 0.1.0), with its
