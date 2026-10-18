@@ -23,18 +23,19 @@ jobs:
     name: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      # Every leg runs on a GitHub-hosted runner, free for a public repository
-      # (DECISIONS.md, 2026-10-16): no calib job needs the family's own hosts,
-      # as none draws on an NVIDIA GPU, and the hosted macOS image's GPU runs
-      # MoltenVK. Every leg builds every OpenCV tier: Ubuntu on OpenCV 5 built
-      # from source and cached (.github/actions/opencv), with no Vulkan; macOS
-      # on Homebrew's OpenCV 5, and the rig leg on its Vulkan SDK, FFmpeg and
-      # GLFW, each run from a clean image. The rig leg is static: shared
-      # libraries there would build core, recon and gfx shared too, which none
-      # of them is.
+      # The Ubuntu legs run on GitHub-hosted runners, free for a public
+      # repository, on OpenCV 5 built from source and cached
+      # (.github/actions/opencv), with no Vulkan. The macOS legs run on the
+      # family's Mac (label `mac`), as recon's and gfx's do, on its installed
+      # Homebrew OpenCV 5, Vulkan SDK, FFmpeg and GLFW, at the levels its
+      # runners' .env sets: a hosted macOS job spends 2-3 minutes installing
+      # those formulae and tests on 3 cores (DECISIONS.md, 2026-10-16). Every
+      # leg builds every OpenCV tier. The rig leg is static: shared libraries
+      # there would build core, recon and gfx shared too, which none of them
+      # is.
       #
-      # A leg moves to a self-hosted runner by passing _build.yml's `runner`
-      # (and, on Linux, `container`) inputs, as recon's GPU legs do.
+      # `runner: ''` moves a macOS leg back to a hosted runner, which then
+      # installs its formulae itself.
       matrix:
         include:
           - os: ubuntu-24.04
@@ -42,14 +43,17 @@ jobs:
           - os: ubuntu-26.04
             build_types: '["Release"]'
           - os: macos-26
+            runner: mac
             build_types: '["Debug"]'
             shared: true
           - os: macos-26
+            runner: mac
             build_types: '["Release"]'
             rig: true
     uses: ./.github/workflows/_build.yml
     with:
       os: ${{ matrix.os }}
+      runner: ${{ matrix.runner || '' }}
       build_types: ${{ matrix.build_types }}
       shared: ${{ matrix.shared || false }}
       rig: ${{ matrix.rig || false }}
