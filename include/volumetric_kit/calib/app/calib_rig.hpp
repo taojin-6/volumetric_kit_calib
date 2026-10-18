@@ -20,6 +20,9 @@
 /// so the window copies each decoded picture into its tile and draws each
 /// prepared depth as points on the GPU, and only the luma the detector reads
 /// crosses to the host.
+// TODO: CB5 runs Calibrate (CalibrateWorker, a fifth thread) from a
+// button and the C and F5 keys, with its progress line and Cancel, and shows
+// the rig at its result.
 
 #include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/app/preset.hpp"

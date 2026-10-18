@@ -29,6 +29,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Calibrate's worker, `app::CalibrateWorker` (T4; DECISIONS.md, 2026-10-18):
+  each request solves a snapshot of the kept captures from scratch with the
+  thread-free `app::calibrate` (`initialise`, `bundle_adjust`,
+  `calibration_metrics`, `format_results`, in the reference camera's gauge),
+  then `app::write_results` writes `residuals.csv`, `report.json` and
+  `array_calibration.json`, in that order, to the session's new
+  `results/<RRR>_<YYYY-MM-DD_HHMMSS>/`, numbered once and stamped at the
+  press; the result is published once the files are on disk. It reports its
+  stage and leave-one-out progress, cancels between re-solves writing
+  nothing, posts each refusal or failure, and stops on request.
 - The origin tag (DECISIONS.md, 2026-10-18): `OriginTag`, the rig's
   `kOriginTag` (AprilTag 36h11 id 0, 0.15 m) and `check_origin_tag` in
   `core`; `detect::detect_tag`, which finds exactly one print of it in a
@@ -171,6 +181,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `quality::SessionOptions::ready_from` defaults to
+  `solve::BundleAdjustOptions{}.min_shared`, the adjustment's own guard (3,
+  as before).
 - `capture::CameraCapture::depth` is a
   `std::shared_ptr<const std::vector<std::uint16_t>>`, so a caller keeps the
   samples it hands the writer without a copy; `SessionWriter::submit` refuses

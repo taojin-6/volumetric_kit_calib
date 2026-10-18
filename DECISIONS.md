@@ -73,6 +73,37 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-18 — Calibrate (T4)
+
+Calibrate runs on a worker of its own (`app/calibrate_worker.hpp` has the
+steps, the numbering and the write order).
+
+- **A snapshot, solved from scratch.** Each press takes the capture worker's
+  immutable snapshot of the kept captures, so capturing goes on while it
+  runs and what is captured meanwhile goes into the next press. Nothing
+  carries over from the last result: a result depends on the captures kept
+  alone, and a dropped capture leaves no trace in it.
+- **The reference camera's gauge throughout.** The solve, its metrics and the
+  results are all in it; a world at the floor tag is to be applied last, to
+  the outputs only, so the metrics' re-solves keep the gauge they check.
+- **A result is on disk before it is shown.** The results directory is
+  created only once the solve and the metrics are done, so a refusal or a
+  cancel writes nothing, and the result is published only after its three
+  files are written. Its name carries the press's time in the session's own
+  stamp format (the user's call), and its number is never used twice, even
+  by a run whose write failed. The calibration file is written last, so a
+  directory a failure leaves never looks complete.
+- **Colour lenses and poses only** in the results' calibration file (the
+  user's call): `SensorArray` reads only the poses, and the session's
+  factory file already has the depth models.
+- **Cancelled between re-solves.** `bundle_adjust` is not interruptible, so a
+  cancel takes effect at the next step: before the metrics or after a
+  leave-one-out re-solve. Once writing begins a cancel is refused, and the
+  run completes.
+- **Still to come:** the depth checks of the kept raw depth (CB6), the world
+  at the origin tag (CB8, CB9), and calib_rig's button, keys and progress
+  line (CB5); each is a `TODO:` where it lands.
+
 ## 2026-10-18 — The origin tag
 
 Calibrate puts the world at an AprilTag on the floor (CA12b), `kOriginTag`,

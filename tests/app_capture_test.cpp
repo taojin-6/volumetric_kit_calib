@@ -37,6 +37,7 @@
 
 #include "allocation_failure.hpp"
 #include "fake_sensor.hpp"
+#include "scratch_dir.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/app/preset.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
@@ -73,30 +74,7 @@ camera::Mat4d board_pose(const compute::Board& board, std::size_t i) {
                                    15.0 + 5.0 * k, 6.0 * k - 5.0);
 }
 
-// A fresh directory, removed with what it holds when the test ends.
-class ScratchDir {
- public:
-  ScratchDir() {
-    static std::atomic<int> counter{0};
-    const auto* test = ::testing::UnitTest::GetInstance()->current_test_info();
-    std::error_code ec;
-    path_ = fs::temp_directory_path(ec) /
-            ("vc_app_capture_" + std::to_string(::getpid()) + "_" +
-             test->name() + "_" + std::to_string(counter++));
-    fs::remove_all(path_, ec);
-    fs::create_directories(path_, ec);
-  }
-  ~ScratchDir() {
-    std::error_code ec;
-    fs::remove_all(path_, ec);
-  }
-  ScratchDir(const ScratchDir&) = delete;
-  ScratchDir& operator=(const ScratchDir&) = delete;
-  const fs::path& path() const { return path_; }
-
- private:
-  fs::path path_;
-};
+using test::ScratchDir;
 
 capture::SessionCamera rig_camera(std::size_t i) {
   capture::SessionCamera camera;
