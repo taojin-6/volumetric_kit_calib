@@ -29,6 +29,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The origin tag (DECISIONS.md, 2026-10-18): `OriginTag`, the rig's
+  `kOriginTag` (AprilTag 36h11 id 0, 0.15 m) and `check_origin_tag` in
+  `core`; `detect::detect_tag`, which finds exactly one print of it in a
+  `LumaView` with OpenCV's `ArucoDetector` and sub-pixel corners, as a
+  `MarkerSearch`. `compute::opencv_dictionary`, each `MarkerDictionary` as
+  OpenCV's, is public, and `LumaView` has a header of its own,
+  `detect/luma.hpp`, which `charuco.hpp` includes.
 - `CaptureWorker::kept`, the captures kept for Calibrate (DECISIONS.md,
   2026-10-13): an immutable `KeptCaptures` snapshot of every capture written
   and not dropped, each a `KeptCapture` of every camera's full detection,

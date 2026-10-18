@@ -64,9 +64,11 @@ vc_add_test(synthetic_rig vc_synthetic_rig opencv_geometry)
 vc_add_test(compute_oom volumetric_kit::calib_compute vc_test_support)
 target_sources(vc_compute_oom_test PRIVATE support/allocation_failure.cpp)
 
-# detect: the board in rendered camera images, JPEG-compressed too.
+# detect: the board in rendered camera images, JPEG-compressed too; the origin
+# tag warped into them.
 vc_add_test(detect_charuco volumetric_kit::calib_detect vc_synthetic_rig
             opencv_imgcodecs opencv_imgproc)
+vc_add_test(detect_tag volumetric_kit::calib_detect vc_synthetic_rig)
 vc_add_test(detect_oom volumetric_kit::calib_detect vc_test_support)
 target_sources(vc_detect_oom_test PRIVATE support/allocation_failure.cpp)
 

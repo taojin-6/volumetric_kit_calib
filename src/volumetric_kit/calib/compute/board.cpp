@@ -10,18 +10,12 @@
 #include <optional>
 #include <utility>
 
-#include <opencv2/objdetect/aruco_dictionary.hpp>
-
 #include "volumetric_kit/calib/compute/guarded.hpp"
 
 namespace volumetric_kit::calib::compute {
-namespace {
 
-// OpenCV's predefined dictionary for each MarkerDictionary, mapped by name:
-// the two enums' values differ. Empty for None and for a value that is not a
-// MarkerDictionary.
 std::optional<cv::aruco::PredefinedDictionaryType> opencv_dictionary(
-    MarkerDictionary dictionary) {
+    MarkerDictionary dictionary) noexcept {
   switch (dictionary) {
     case MarkerDictionary::None:
       return std::nullopt;
@@ -72,8 +66,6 @@ std::optional<cv::aruco::PredefinedDictionaryType> opencv_dictionary(
   }
   return std::nullopt;
 }
-
-}  // namespace
 
 Board::Board(const Target& target, const cv::aruco::CharucoBoard& charuco,
              std::vector<cv::Point3d> object_points)

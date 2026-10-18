@@ -2,13 +2,15 @@
 // Copyright (c) 2026 Tao Jin
 
 // The ChArUco board: OpenCV's board for a Target, its frame, corners and
-// centre, where a pose puts them, each dictionary's codes, and the targets it
-// refuses.
+// centre, where a pose puts them, each dictionary as OpenCV's and its codes,
+// and the targets it refuses.
 
 #include "volumetric_kit/calib/compute/board.hpp"
 
 #include <cmath>
+#include <cstddef>
 #include <limits>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -160,13 +162,10 @@ TEST(Board, NumbersTheMarkersFromTheFirstId) {
             (std::vector<int>{93, 94, 95, 96, 97, 98, 99}));
 }
 
-// Each MarkerDictionary is OpenCV's of the same name, and check_target counts
-// its codes as OpenCV does.
-TEST(Board, EachDictionaryIsOpenCVsOfTheSameName) {
-  const std::vector<
-      std::pair<MarkerDictionary, cv::aruco::PredefinedDictionaryType>>
-      names = {
-          {MarkerDictionary::ArUco4x4_50, cv::aruco::DICT_4X4_50},
+// Each MarkerDictionary after None and OpenCV's of the same name.
+std::vector<std::pair<MarkerDictionary, cv::aruco::PredefinedDictionaryType>>
+dictionary_names() {
+  return {{MarkerDictionary::ArUco4x4_50, cv::aruco::DICT_4X4_50},
           {MarkerDictionary::ArUco4x4_100, cv::aruco::DICT_4X4_100},
           {MarkerDictionary::ArUco4x4_250, cv::aruco::DICT_4X4_250},
           {MarkerDictionary::ArUco4x4_1000, cv::aruco::DICT_4X4_1000},
@@ -188,6 +187,29 @@ TEST(Board, EachDictionaryIsOpenCVsOfTheSameName) {
           {MarkerDictionary::AprilTag36h10, cv::aruco::DICT_APRILTAG_36h10},
           {MarkerDictionary::AprilTag36h11, cv::aruco::DICT_APRILTAG_36h11},
           {MarkerDictionary::ArUcoMip36h12, cv::aruco::DICT_ARUCO_MIP_36h12}};
+}
+
+// The bridge maps each dictionary to OpenCV's by name, and None, or a value
+// outside the enum, to nothing.
+TEST(Board, OpenCVDictionaryMapsEachByName) {
+  const auto names = dictionary_names();
+  ASSERT_EQ(names.size(),
+            static_cast<std::size_t>(MarkerDictionary::ArUcoMip36h12));
+  for (const auto& [ours, theirs] : names) {
+    const std::optional<cv::aruco::PredefinedDictionaryType> mapped =
+        opencv_dictionary(ours);
+    ASSERT_TRUE(mapped.has_value()) << to_string(ours);
+    EXPECT_EQ(*mapped, theirs) << to_string(ours);
+  }
+  EXPECT_FALSE(opencv_dictionary(MarkerDictionary::None).has_value());
+  EXPECT_FALSE(
+      opencv_dictionary(static_cast<MarkerDictionary>(99)).has_value());
+}
+
+// Each MarkerDictionary is OpenCV's of the same name, and check_target counts
+// its codes as OpenCV does.
+TEST(Board, EachDictionaryIsOpenCVsOfTheSameName) {
+  const auto names = dictionary_names();
   ASSERT_EQ(names.size(),
             static_cast<std::size_t>(MarkerDictionary::ArUcoMip36h12));
   for (const auto& [ours, theirs] : names) {

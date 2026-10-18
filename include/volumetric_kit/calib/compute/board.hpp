@@ -6,7 +6,7 @@
 /// @file board.hpp
 /// @brief A ChArUco @ref volumetric_kit::calib::Target as OpenCV's board, its
 ///        corners in the board's frame, and where a pose puts its centre and
-///        its printed face.
+///        its printed face; each marker dictionary as OpenCV's.
 ///
 /// The board frame is OpenCV's: the origin at the top-left outer corner of
 /// the chessboard, x right and y down across the printed face, and z into the
@@ -16,10 +16,12 @@
 /// marker. The corners come from OpenCV's `getChessboardCorners`; calib keeps
 /// no corner formula.
 
+#include <optional>
 #include <vector>
 
 #include <opencv2/core.hpp>
 #include <opencv2/objdetect/aruco_board.hpp>
+#include <opencv2/objdetect/aruco_dictionary.hpp>
 
 #include "volumetric_kit/calib/compute/export.hpp"
 #include "volumetric_kit/calib/core/target.hpp"
@@ -27,6 +29,20 @@
 #include "volumetric_kit/recon/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::compute {
+
+/// @brief OpenCV's predefined dictionary of the same name as @p dictionary.
+/// @param dictionary  A marker dictionary.
+/// @return OpenCV's (`DICT_4X4_100` for `ArUco4x4_100`, ...); empty for
+///         `MarkerDictionary::None` or a value that is not a
+///         @ref MarkerDictionary.
+///
+/// @code
+/// const auto opencv = compute::opencv_dictionary(kOriginTag.dictionary);
+/// const cv::aruco::Dictionary codes =
+///     cv::aruco::getPredefinedDictionary(*opencv);  // DICT_APRILTAG_36h11
+/// @endcode
+VC_COMPUTE_API std::optional<cv::aruco::PredefinedDictionaryType>
+opencv_dictionary(MarkerDictionary dictionary) noexcept;
 
 /// @brief A ChArUco board: its @ref Target, OpenCV's `CharucoBoard`, and each
 ///        corner's position by its id.

@@ -73,7 +73,29 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
-## 2026-10-17 — The live 3D view, drawn from prepared frames in place
+## 2026-10-18 — The origin tag
+
+Calibrate puts the world at an AprilTag on the floor (CA12b), `kOriginTag`,
+which `detect::detect_tag` finds in each camera's image.
+
+- **36h11 id 0, its black border 0.15 m across:** the print on the rig's
+  floor, the one the legacy `set_world_from_tag.py` anchored its world to.
+- **OpenCV's detector, not libapriltag.** OpenCV is already every build's
+  prerequisite and decodes AprilTag dictionaries; libapriltag would be a
+  second detector to carry. The legacy script used OpenCV's too.
+- **Sub-pixel refinement (SUBPIX).** On the 2026-09-29 session's JPEGs, in
+  the scratch study behind this choice, a still tag's corners varied by
+  0.23-0.30 px (largest sd) across captures with it, against 0.47-0.50 px
+  unrefined and 0.59-1.07 px with APRILTAG's, at the unrefined 43 ms per 4K
+  image; APRILTAG's took 475 ms and tilted the tag's z by 0.75 degrees
+  against the other two.
+- **Its pull.** cornerSubPix pulls a black square's outer corner in along the
+  corner's bisector: 0.1-0.3 px on synthetic tags 100-160 px across, at a
+  camera's blur (`detect_tag_test`), while across it each corner holds to
+  0.15 px. The tag's centre stays put, so the frame does not move, but its
+  edges read short, by up to 0.6 % at those sizes.
+- **Exactly one print.** Corners of a second id-0 print would be taken for
+  the tag's and move the world, so an image with two gives none.
 
 calib_rig shows the rig in 3D beside its mosaic or over it
 (`viz/scene_view.hpp`, `viz/point_cloud.hpp`, `app/cloud_worker.hpp`): each

@@ -2,12 +2,14 @@
 // Copyright (c) 2026 Tao Jin
 
 // The board: the rig's, what check_target accepts and refuses, and when two
-// boards are the same.
+// boards are the same. The origin tag: the rig's, and what check_origin_tag
+// refuses.
 
 #include "volumetric_kit/calib/core/target.hpp"
 
 #include <cstddef>
 #include <limits>
+#include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -357,6 +359,63 @@ TEST(Target, EqualOnlyWhenEveryFieldIs) {
   EXPECT_TRUE(a != b);
   b.planarity_bow_m = 0.0;
   EXPECT_TRUE(a == b);
+}
+
+::testing::AssertionResult TagRefusedNaming(const OriginTag& tag,
+                                            const std::string& field) {
+  return test::RefusedNamingPath(check_origin_tag(tag),
+                                 core::Status::Code::InvalidArgument,
+                                 "origin_tag." + field);
+}
+
+TEST(OriginTag, IsTheRigsTag) {
+  static_assert(kOriginTag.dictionary == MarkerDictionary::AprilTag36h11);
+  static_assert(kOriginTag.id == 0);
+  static_assert(kOriginTag.edge_m == 0.15);
+  EXPECT_TRUE(check_origin_tag(kOriginTag).ok())
+      << check_origin_tag(kOriginTag).message();
+}
+
+TEST(OriginTag, StartsEmptyAndIsRefused) {
+  const OriginTag tag;
+  EXPECT_EQ(tag.dictionary, MarkerDictionary::None);
+  EXPECT_EQ(tag.id, 0);
+  EXPECT_EQ(tag.edge_m, 0.0);
+  EXPECT_TRUE(TagRefusedNaming(tag, "dictionary"));
+}
+
+TEST(OriginTag, NamesADictionary) {
+  OriginTag tag = kOriginTag;
+  tag.dictionary = MarkerDictionary::None;
+  EXPECT_TRUE(TagRefusedNaming(tag, "dictionary"));
+  tag.dictionary = static_cast<MarkerDictionary>(99);
+  EXPECT_TRUE(TagRefusedNaming(tag, "dictionary"));
+  tag.dictionary = MarkerDictionary::ArUco4x4_50;
+  EXPECT_TRUE(check_origin_tag(tag).ok());
+}
+
+// The id is one of the dictionary's codes: 36h11's 587, 16h5's 30.
+TEST(OriginTag, IdIsOneTheDictionaryHolds) {
+  OriginTag tag = kOriginTag;
+  tag.id = -1;
+  EXPECT_TRUE(TagRefusedNaming(tag, "id"));
+  tag.id = 586;
+  EXPECT_TRUE(check_origin_tag(tag).ok());
+  tag.id = 587;
+  EXPECT_TRUE(TagRefusedNaming(tag, "id"));
+  tag.dictionary = MarkerDictionary::AprilTag16h5;
+  tag.id = 29;
+  EXPECT_TRUE(check_origin_tag(tag).ok());
+  tag.id = 30;
+  EXPECT_TRUE(TagRefusedNaming(tag, "id"));
+}
+
+TEST(OriginTag, NeedsAFinitePositiveEdge) {
+  for (const double edge : {0.0, -0.15, kNaN, kInf}) {
+    OriginTag tag = kOriginTag;
+    tag.edge_m = edge;
+    EXPECT_TRUE(TagRefusedNaming(tag, "edge_m")) << edge;
+  }
 }
 
 }  // namespace

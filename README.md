@@ -14,7 +14,7 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > and its check, observations, detections, view and capture records, lens and
 > sensor profiles) over recon's camera model and the core's exception-free
 > `Status`/`Result` — builds and is tested (GoogleTest); so do the `compute`
-> tier's OpenCV bridge, the `detect` tier's board detection, the `solve`
+> tier's OpenCV bridge, the `detect` tier's board and tag detection, the `solve`
 > tier's rig solve and the `quality` tier's live checks and solved-rig
 > metrics; with `VC_WITH_RIG`, the `capture` tier's session writer, the `viz`
 > tier's live and 3D views and the `depth` tier's board-plane fit and
@@ -60,7 +60,8 @@ renderer.
   deferred).
 - **Detection:** the `detect` tier finds the ChArUco board in an 8-bit luma
   image with OpenCV's detector, as corners by id and markers, at full
-  resolution or by the live view's faster hybrid.
+  resolution or by the live view's faster hybrid; and the origin tag on the
+  floor, one AprilTag by id, its corners refined to sub-pixel.
 - **Solve:** the rig's extrinsics from views of the board. `initialise` places
   every camera and board from the views alone -- each view's own pose (IPPE),
   the spanning tree of the camera links that share the most captures, each

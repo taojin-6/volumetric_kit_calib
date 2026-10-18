@@ -2,12 +2,13 @@
 // Copyright (c) 2026 Tao Jin
 
 // The synthetic source every calib test draws on: its lenses and rig, its plan
-// of placements, what the cameras detect of it, and its renderer, whose
-// orientation and edges the detector's tests will rely on.
+// of placements, what the cameras detect of it, its renderer and its marker,
+// whose orientation and edges the detectors' tests rely on.
 
 #include "synthetic_rig.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -17,6 +18,7 @@
 
 #include <gtest/gtest.h>
 #include <opencv2/geometry.hpp>
+#include <opencv2/objdetect/aruco_detector.hpp>
 
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 
@@ -315,7 +317,11 @@ std::vector<double> edge_errors(cv::Mat image, cv::Point2d p0, cv::Point2d p1,
                                 cv::Point2d inside,
                                 const RenderOptions& levels) {
   if (std::abs(p1.y - p0.y) < std::abs(p1.x - p0.x)) {
-    cv::transpose(image, image);
+    // Into a buffer of its own: a square image's transpose in place would
+    // turn the caller's, whose pixels this copy shares.
+    cv::Mat transposed;
+    cv::transpose(image, transposed);
+    image = transposed;
     for (cv::Point2d* p : {&p0, &p1, &inside}) *p = {p->y, p->x};
   }
   const auto edge_at = [&](double y) {
@@ -388,6 +394,58 @@ TEST(SyntheticRig, PlacesSquaresWhereTheyProject) {
       EXPECT_LT(std::abs(mean), 0.005) << view.name << ", edge " << e;
       EXPECT_LT(worst, 0.02) << view.name << ", edge " << e;
     }
+  }
+}
+
+// A marker's black border has straight edges between the corners its
+// homography puts, off the pixel grid, turned, squashed and in perspective;
+// the print keeps its orientation, so OpenCV's detector reads its id.
+TEST(SyntheticRig, DrawsAMarkerWhereItsHomographyPutsIt) {
+  const MarkerOptions options;
+  RenderOptions levels;
+  levels.black = options.black;
+  levels.white = options.white;
+  const cv::Matx33d front(150.0, 0.0, 120.31, 0.0, 150.0, 90.17, 0.0, 0.0, 1.0);
+  // Turned 30 degrees, squashed to 0.7 and in perspective, about (200, 200).
+  const double c = std::cos(30.0 * kPi / 180.0);
+  const double s = std::sin(30.0 * kPi / 180.0);
+  const cv::Matx33d turned =
+      cv::Matx33d(1.0, 0.0, 200.4, 0.0, 1.0, 199.8, 0.0, 0.0, 1.0) *
+      cv::Matx33d(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1e-3, -6e-4, 1.0) *
+      cv::Matx33d(c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0) *
+      cv::Matx33d(150.0, 0.0, -75.0, 0.0, 105.0, -52.5, 0.0, 0.0, 1.0);
+  for (const cv::Matx33d& print_to_image : {front, turned}) {
+    cv::Mat image(400, 400, CV_8UC1, cv::Scalar(110));
+    const std::array<cv::Point2d, 4> corners = draw_marker(
+        image, MarkerDictionary::AprilTag36h11, 3, print_to_image, options);
+    for (std::size_t k = 0; k < 4; ++k) {
+      const cv::Vec3d unit[4] = {
+          {0.0, 0.0, 1.0}, {1.0, 0.0, 1.0}, {1.0, 1.0, 1.0}, {0.0, 1.0, 1.0}};
+      const cv::Vec3d q = print_to_image * unit[k];
+      EXPECT_NEAR(corners[k].x, q[0] / q[2], 1e-9) << k;
+      EXPECT_NEAR(corners[k].y, q[1] / q[2], 1e-9) << k;
+    }
+    const cv::Vec3d m = print_to_image * cv::Vec3d(0.5, 0.5, 1.0);
+    const cv::Point2d inside(m[0] / m[2], m[1] / m[2]);
+    for (std::size_t e = 0; e < 4; ++e) {
+      const std::vector<double> errors =
+          edge_errors(image, corners[e], corners[(e + 1) % 4], inside, levels);
+      ASSERT_GE(errors.size(), 20u) << "edge " << e;
+      double mean = 0.0;
+      double worst = 0.0;
+      for (const double error : errors) {
+        mean += error / errors.size();
+        worst = std::max(worst, std::abs(error));
+      }
+      EXPECT_LT(std::abs(mean), 0.01) << "edge " << e;
+      EXPECT_LT(worst, 0.02) << "edge " << e;
+    }
+    std::vector<std::vector<cv::Point2f>> found;
+    std::vector<int> ids;
+    cv::aruco::ArucoDetector(
+        cv::aruco::getPredefinedDictionary(cv::aruco::DICT_APRILTAG_36h11))
+        .detectMarkers(image, found, ids);
+    EXPECT_EQ(ids, std::vector<int>{3});
   }
 }
 
