@@ -35,7 +35,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   thread, takes each set `LiveWorker` reads back through its new `SetSink`,
   prepares every `CloudOptions::live_every`-th on recon's queue family and
   publishes a `CloudSnapshot`; `record_cloud` draws a snapshot's points
-  at the rig's poses and holds it until its frame retires;
+  at the rig's poses and holds it until its frame retires; `cloud_live`
+  says when the worker prepares (not frozen, hidden or minimized);
   `rig_requirements` merges recon's, calib_depth's and gfx's needs with
   `largePoints`. In `viz`: `cloud_draw`, a prepared frame as gfx's
   `DepthCloudDraw` (`CloudStyle`), and `cloud_draws`, each `SceneCamera`'s;

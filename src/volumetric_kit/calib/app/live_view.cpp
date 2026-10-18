@@ -118,4 +118,9 @@ core::Result<std::optional<core::TimelinePoint>> record_cloud(
       });
 }
 
+bool cloud_live(bool frozen, viz::ScenePlacement placement,
+                bool minimized) noexcept {
+  return !frozen && placement != viz::ScenePlacement::Hidden && !minimized;
+}
+
 }  // namespace volumetric_kit::calib::app

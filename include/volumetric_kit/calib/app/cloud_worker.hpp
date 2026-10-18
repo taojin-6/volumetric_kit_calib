@@ -111,7 +111,7 @@ struct CloudOptions {
 ///                                {compute_family, graphics_family}));
 /// // The live worker offers it each set (LiveWorker::create's `sets`).
 /// // Each frame of the window:
-/// cloud->set_live(shown && !frozen);
+/// cloud->set_live(cloud_live(frozen, placement, minimized));
 /// cloud->set_color(mode != gfx::pipelines::CloudColor::Solid);
 /// if (auto s = cloud->take_snapshot()) cloud_latest = std::move(s);
 /// @endcode
@@ -152,8 +152,9 @@ class VC_APP_API CloudWorker final : public SetSink {
   void offer(std::shared_ptr<const recon::sensor::FrameSet> set) override;
 
   /// @brief Whether sets offered are prepared: false while the view is
-  ///        frozen or hidden, when offers are let go and the window keeps its
-  ///        last snapshot. Going live again prepares the next set offered.
+  ///        frozen, hidden or minimized (@ref cloud_live), when offers are
+  ///        let go and the window keeps its last snapshot. Going live again
+  ///        prepares the next set offered.
   /// @param live  Whether to prepare.
   void set_live(bool live);
   /// @return Whether sets offered are prepared.

@@ -13,7 +13,8 @@
 // semaphore, lands on its pixel with its colour by recon's rule, the snapshot
 // held until its frame retires; a frozen snapshot redraws at a new pose with
 // no second preparation; a frame EXCLUSIVE to the compute family is refused,
-// and with no camera placed nothing is drawn, neither holding anything. And
+// and with no camera placed nothing is drawn, neither holding anything. When
+// the worker prepares: not while the view is frozen, hidden or minimized. And
 // the device calib_rig asks for. The GPU cases skip without a Vulkan device,
 // the cross-family ones also with one family.
 
@@ -788,8 +789,21 @@ TEST_F(AppCloudAcrossFamilies, DrawsAndHoldsNothingWithNoCameraPlaced) {
   EXPECT_TRUE(lit(drawn.rgba).empty());
 }
 
-// --- The device
-// ---------------------------------------------------------------
+// --- When the worker prepares -----------------------------------------------
+
+// Only while the view is live and seen: not frozen, not hidden, and not in a
+// minimized window, which draws nothing.
+TEST(AppCloudLive, PreparesOnlyWhileTheViewIsLiveAndSeen) {
+  using viz::ScenePlacement;
+  EXPECT_TRUE(cloud_live(false, ScenePlacement::Beside, false));
+  EXPECT_TRUE(cloud_live(false, ScenePlacement::FullWindow, false));
+  EXPECT_FALSE(cloud_live(true, ScenePlacement::Beside, false));
+  EXPECT_FALSE(cloud_live(false, ScenePlacement::Hidden, false));
+  EXPECT_FALSE(cloud_live(false, ScenePlacement::Beside, true));
+  EXPECT_FALSE(cloud_live(false, ScenePlacement::FullWindow, true));
+}
+
+// --- The device -------------------------------------------------------------
 
 // calib_rig's renderer asks for wide points, which every point it draws may
 // use, and its compute side for recon's and the depth checks' needs.

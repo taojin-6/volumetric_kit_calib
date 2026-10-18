@@ -88,10 +88,10 @@ points, its frusta, the world's axes and the solved boards.
 - **A worker of its own (T2)** alone owns the preparations, one per camera,
   on recon's queue family. The live worker offers it each set it reads back;
   it prepares the newest, every `live_every`-th, lets the set go at once,
-  and publishes a snapshot, newest wins. Frozen or hidden, it prepares
-  nothing and lets offers go, and the window keeps its snapshot. In the solid
-  mode it prepares depth only, so a cloud frozen in it has no colour to show
-  and the colour modes wait until the view is live again.
+  and publishes a snapshot, newest wins. Frozen, hidden or minimized, it
+  prepares nothing and lets offers go, and the window keeps its snapshot.
+  In the solid mode it prepares depth only, so a cloud frozen in it has no
+  colour to show and the colour modes wait until the view is live again.
 - **Poses at draw time.** A frame is prepared with its colour camera at the
   origin, its baked pose ignored, and `cloud_draw` places it at the rig's
   poses when it is drawn, so a frozen cloud follows a new solve with no
@@ -116,9 +116,10 @@ points, its frusta, the world's axes and the solved boards.
   GPU that lacks it.
 - **Still to come:** the 3D view's settings in the scenario (the core's
   CO5), a default tint per camera from a palette gfx does not yet have, the
-  cameras' names over the view, which want a world-anchored label in gfx,
-  and the checks' and captured cloud's jobs in T2 (CA12b); each is a `TODO:`
-  where it lands.
+  cameras' names over the view, which want a world-anchored label in gfx, a
+  minimized window seen as one on macOS and X11, where gfx_glfw's
+  `framebuffer_size` does not yet report 0 x 0, and the checks' and captured
+  cloud's jobs in T2 (CA12b); each is a `TODO:` where it lands.
 
 ## 2026-10-17 — OpenCV 5 is required
 

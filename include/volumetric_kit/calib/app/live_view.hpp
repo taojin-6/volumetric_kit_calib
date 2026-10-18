@@ -130,4 +130,18 @@ VC_APP_API core::Result<std::optional<core::TimelinePoint>> record_cloud(
     const std::shared_ptr<const CloudSnapshot>& snapshot,
     const std::vector<viz::SceneCamera>& cameras, const viz::CloudStyle& style);
 
+/// @brief Whether the 3D view's worker prepares the sets offered
+///        (@ref CloudWorker::set_live): only while the view is live and can
+///        be seen.
+/// @param frozen     Whether the view is frozen.
+/// @param placement  Where the view sits.
+/// @param minimized  Whether the window is minimized, drawing nothing.
+/// @return False when frozen, hidden or minimized; true otherwise.
+///
+/// @code
+/// cloud->set_live(cloud_live(frozen, placement, !frame));
+/// @endcode
+VC_APP_API bool cloud_live(bool frozen, viz::ScenePlacement placement,
+                           bool minimized) noexcept;
+
 }  // namespace volumetric_kit::calib::app

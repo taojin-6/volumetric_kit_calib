@@ -484,7 +484,7 @@ void view_window(View3d& v, CloudWorker& cloud,
     ImGui::PopID();
   }
   ImGui::End();
-  cloud.set_live(!v.frozen && v.placement != viz::ScenePlacement::Hidden);
+  cloud.set_live(cloud_live(v.frozen, v.placement, false));
   cloud.set_color(v.style.mode != CloudColor::Solid);
 }
 
@@ -788,9 +788,13 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       editor.lock();
     }
 
+    // TODO: an iconified window keeps its framebuffer size on macOS and X11,
+    // so it is drawn on there; make gfx_glfw's framebuffer_size report 0 x 0
+    // while GLFW_ICONIFIED, as its doc says, in a gfx PR, and bump the pin.
     VKC_ASSIGN(std::optional<gfx::windowing::Frame> next,
                app.begin_frame(glfw::framebuffer_size(window)));
-    if (!next) {  // minimized
+    if (!next) {  // minimized: nothing is drawn, so nothing is prepared
+      cloud->set_live(cloud_live(view3d.frozen, view3d.placement, true));
       glfwWaitEventsTimeout(0.05);
       continue;
     }
