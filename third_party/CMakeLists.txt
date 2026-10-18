@@ -39,10 +39,8 @@ endif()
 # tier on for recon or gfx keeps it. Only the examples and calib_rig opt into
 # core_config.
 #
-# The pin is core PR #37's head, 0.11.0, which merges first: calib_rig's
-# settings (config::Application::CalibRig).
-#
-# TODO: re-pin core main once core PR #37 merges.
+# The pin is core main at 0.11.0, for calib_rig's settings
+# (config::Application::CalibRig).
 if(VC_WITH_RIG)
   set(VKC_WITH_VULKAN ON)
 endif()
@@ -54,7 +52,7 @@ endif()
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG c862d5e26bc7558468b0516ee6f778c6e13a5d3e)
+  GIT_TAG a78f5f3262de20f30b07ed8815c4f2386bfd125e)
 FetchContent_MakeAvailable(volumetric_kit_core)
 # The set() above is lost when the application made the core available first.
 if(VC_WITH_RIG)

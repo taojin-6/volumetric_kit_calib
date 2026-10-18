@@ -156,11 +156,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   where `cv::Rodrigues` returns zero (below about 1e-5 rad).
 - calib requires `volumetric_kit_core` 0.6.1 or newer (was 0.1.0), with its
   vulkan tier under `VC_WITH_RIG`, and 0.11.0, with its config tier, for
-  `calib_app`; it pins core PR #37's head (0.11.0) until that merges. The
-  installed package finds the core directly, at the version calib was built
-  with, and refuses another core, from recon or found by the application
-  first; an application may now find the core itself too (DECISIONS.md,
-  2026-10-13).
+  `calib_app`, and pins core main at 0.11.0. The installed package finds the
+  core directly, at the version calib was built with, and refuses another
+  core, from recon or found by the application first; an application may now
+  find the core itself too (DECISIONS.md, 2026-10-13).
 - calib's camera model is recon's (DECISIONS.md, 2026-10-12). Migrating:
   `PinholeBrownConrady`, `ImageSize` and `calib/core/camera_model.hpp` are
   removed; use `volumetric_kit::recon::camera::CameraModel` and

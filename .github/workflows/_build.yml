@@ -163,12 +163,12 @@ jobs:
       # so the first run after a brew upgrade builds the dependency tree afresh
       # (the core's tools/runners/README.md, "Upgrading Homebrew"). Linux has
       # no Homebrew, so its keys carry `none`.
-      # The ref is core main after taojin-6/volumetric_kit_core#39 (60d215a),
-      # which added the action.
+      # The ref is the core commit third_party/CMakeLists.txt pins, so calib
+      # keeps one core pin (the core's tools/runners/README.md).
       - name: Homebrew key
         id: brew
         if: runner.os == 'macOS'
-        uses: taojin-6/volumetric_kit_core/.github/actions/homebrew-key@60d215a78939af620e14d55fb6f2a0b24948069d
+        uses: taojin-6/volumetric_kit_core/.github/actions/homebrew-key@a78f5f3262de20f30b07ed8815c4f2386bfd125e
         with:
           formulae: ${{ steps.formulae.outputs.formulae }}
 
