@@ -75,9 +75,14 @@ locked decision above.)
 
 ## 2026-10-17 — The live 3D view, drawn from prepared frames in place
 
-calib_rig shows the rig in 3D beside its mosaic (`viz/scene_view.hpp`,
-`viz/point_cloud.hpp`, `app/cloud_worker.hpp`): each camera's depth as
-points, its frusta, the world's axes and the solved boards.
+calib_rig shows the rig in 3D beside its mosaic or over it
+(`viz/scene_view.hpp`, `viz/point_cloud.hpp`, `app/cloud_worker.hpp`): each
+camera's depth as points, its frusta, the world's axes and the solved boards.
+
+- **Hidden until the rig is calibrated** (amended 2026-10-18, the user's
+  call). Before Calibrate only the reference is placed, and the camera
+  images, where the board is aimed and checked, matter more: the mosaic has
+  the window and T2 prepares nothing. The panel can still show the view.
 
 - **No point cloud is built.** recon prepares each camera's frame
   (`GpuFramePrep`: undistorted depth, and colour), gfx draws a point per

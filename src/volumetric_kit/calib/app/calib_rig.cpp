@@ -166,7 +166,10 @@ struct WindowDeleter {
 // --- The 3D view's settings, until the scenario has them.
 // TODO: take the stride, colour mode, point size and the live sets' sampling
 // from the core's calib_rig view settings once the scenario has them (CO5).
-constexpr viz::ScenePlacement kPlacement = viz::ScenePlacement::Beside;
+// Hidden at first: until Calibrate places the rig, the mosaic, where the board
+// is seen, has the window, and T2 prepares nothing (cloud_live).
+// TODO: CA12b shows the view beside the mosaic once Calibrate places the rig.
+constexpr viz::ScenePlacement kPlacement = viz::ScenePlacement::Hidden;
 constexpr int kMaxStride = 8;
 // The pointer's feel: radians of orbit per pixel dragged, and each wheel
 // step's zoom, in the 3D view and the mosaic.

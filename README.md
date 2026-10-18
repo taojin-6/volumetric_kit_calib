@@ -111,8 +111,9 @@ renderer.
   scenario's modes, and shows them live with the board found in each; Space
   (or a clicker's "next") captures a still set, Backspace (or "back") drops
   the last. A worker thread owns the rig and finds the board in each set's
-  luma, another prepares sets on the GPU for the 3D view, beside the mosaic
-  or in the whole window, another detects each capture at full resolution
+  luma, another prepares sets on the GPU for the 3D view (hidden until the
+  rig is calibrated, then beside the mosaic or in the whole window), another
+  detects each capture at full resolution
   and writes it, and the window draws and never waits
   ([DECISIONS.md](DECISIONS.md#2026-10-16--calib_rigs-live-view-and-capture)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
