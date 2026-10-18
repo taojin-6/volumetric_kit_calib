@@ -114,8 +114,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `BoardEditor` and `draw_board_editor` (its fields through `board_fields`
   and `apply_fields`) edit the board, checked as the detector's `Board`
   takes it, until the first capture locks it. `VC_WITH_RIG` fetches
-  `volumetric_kit_gfx`, pinned at `82486e8` (main after #136, #137, with the
-  overlay scissor repair, and #138, `DepthCloudPipeline`).
+  `volumetric_kit_gfx`, pinned at `4800cac` (main after #136, #137, with the
+  overlay scissor repair, #138, `DepthCloudPipeline`, and #141, a minimized
+  window's framebuffer size of 0 x 0).
 - `marker_count`, the markers a board carries, in `calib/core/target.hpp`.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds
