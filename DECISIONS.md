@@ -83,8 +83,8 @@ points, its frusta, the world's axes and the solved boards.
   (`GpuFramePrep`: undistorted depth, and colour), gfx draws a point per
   depth pixel straight from those buffers (`DepthCloudPipeline`), and calib
   composes the two with its poses. No pixel crosses the host; the lines are
-  a few hundred bytes made on the host from the cameras' models, uploaded
-  when they change.
+  a few KB made on the host from the cameras' models, uploaded when they
+  change.
 - **A worker of its own (T2)** alone owns the preparations, one per camera,
   on recon's queue family. The live worker offers it each set it reads back;
   it prepares the newest, every `live_every`-th, lets the set go at once,
@@ -196,8 +196,9 @@ The `app` tier runs the rig (`app/calib_rig.hpp`, `live_worker.hpp`,
   pictures into the mosaic retires.
 - **One device, two families.** The cameras decode onto the compute side of
   the one `VkDevice` gfx shares (`gfx_glfw`'s `make_shared_device` with recon's
-  requirements), their pictures readable from both families, so T1 reads luma
-  back on compute while T0 copies the same images on graphics.
+  requirements, merged with calib_depth's and `largePoints` since 2026-10-17;
+  see the dated entry), their pictures readable from both families, so T1
+  reads luma back on compute while T0 copies the same images on graphics.
 - **Settings are the core's.** The scenario is `config::Application::CalibRig`
   (core 0.11.0): the sync file, the modes, the session root and the window.
   Detection and capture thresholds stay calib's defaults. The modes requested

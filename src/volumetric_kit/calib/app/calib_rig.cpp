@@ -462,6 +462,10 @@ void view_window(View3d& v, CloudWorker& cloud,
     const core::Status framed = v.view.frame(v.placed());
     if (!framed.ok()) notices.note(framed.message());
   }
+  // TODO: name each placed camera over the 3D view once gfx has a
+  // world-anchored overlay (a world point to ImGui display coordinates
+  // through view_proj and the viewport, framebuffer scale included), the 3D
+  // counterpart of ImageOverlay; until then this list names them.
   for (std::size_t i = 0; i < v.cameras.size() && i < ids.size(); ++i) {
     viz::SceneCamera& camera = v.cameras[i];
     ImGui::PushID(static_cast<int>(i));

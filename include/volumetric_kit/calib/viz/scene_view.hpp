@@ -12,9 +12,9 @@
 /// +z forward. gfx's `OrbitCamera` keeps +Y up, so the view turns the world
 /// by a display rotation (@ref display_rotation) that takes the cameras'
 /// mean up, their -y, to +Y. Points are gfx's draws from recon's prepared
-/// frames in place (@ref cloud_draws); lines are a few hundred bytes of
-/// `ColorVertex` made on the host from the cameras' models and poses
-/// (@ref scene_lines), uploaded only when they change.
+/// frames in place (@ref cloud_draws); lines are a few KB of `ColorVertex`
+/// made on the host from the cameras' models and poses (@ref scene_lines),
+/// uploaded only when they change.
 
 #include <cstddef>
 #include <cstdint>
