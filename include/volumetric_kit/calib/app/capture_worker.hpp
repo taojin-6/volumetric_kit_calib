@@ -126,7 +126,7 @@ struct KeptCapture {
   /// Each camera's board found at full resolution, in rig order: the
   /// detection its file holds, with `observation.camera_id` the camera's
   /// serial and `observation.frame_id` the capture's index. A camera that
-  /// found no board has no corners.
+  /// found no board, or whose detection failed, has no corners.
   std::vector<Detection> views;
   /// Each camera's raw depth, in rig order, not null: the very samples the
   /// session wrote as its PNG, shared with the writer, never copied.

@@ -277,7 +277,6 @@ struct CaptureWorker::State {
                                   part.luma.data()};
       VKC_ASSIGN(found,
                  detect::detect_charuco(luma, *board, detect::Mode::Full));
-      found.observation.camera_id = setup.cameras[i].info.id;
       return {};
     });
     if (!detect_error.ok()) {
@@ -335,8 +334,11 @@ struct CaptureWorker::State {
           done.event.meta.index = -1;
         } else {
           done.event.meta.index = result.index;
-          for (Detection& view : done.full) {
-            view.observation.frame_id = result.index;
+          // Every view names its camera, one whose detection failed too.
+          for (std::size_t c = 0; c < done.full.size(); ++c) {
+            Observation& view = done.full[c].observation;
+            view.camera_id = setup.cameras[c].info.id;
+            view.frame_id = result.index;
           }
           const core::Status added = checks->add(result.index, done.full);
           if (!added.ok()) failures.push_back(added.with_context("session"));

@@ -6,9 +6,10 @@
 // corners and written as a session under the scenario's root; drops, a full
 // queue, requests that do not fit the rig, a missing root and the drain at
 // shutdown; the session's depth unit, the frames'; the captures kept for
-// Calibrate, their depth shared with the writer, and their cap. Synthetic
-// board renders, a few cameras, no device. Then what a session records of
-// each camera and of the software.
+// Calibrate, each view named for its camera even when its detection failed,
+// their depth shared with the writer, and their cap. Synthetic board renders,
+// a few cameras, no device. Then what a session records of each camera and of
+// the software.
 
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 
@@ -32,7 +33,9 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <opencv2/core.hpp>
+#include <opencv2/core/parallel/parallel_backend.hpp>
 
+#include "allocation_failure.hpp"
 #include "fake_sensor.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/app/preset.hpp"
@@ -222,6 +225,57 @@ std::string read(const fs::path& path) {
   EXPECT_TRUE(bytes.ok()) << bytes.status().message();
   return bytes.ok() ? bytes.value() : std::string();
 }
+
+// OpenCV's parallel_for_ run on the calling thread, a stripe at a time, with
+// the first allocation of stripe `fail` of its first loop failing: the capture
+// worker's loop over the cameras gives each camera a stripe.
+class FailAStripe final : public cv::parallel::ParallelForAPI {
+ public:
+  explicit FailAStripe(int fail) : fail_(fail) {}
+  void parallel_for(int tasks, FN_parallel_for_body_cb_t body,
+                    void* data) override {
+    const bool first = !used_.exchange(true);
+    for (int t = 0; t < tasks; ++t) {
+      if (first && t == fail_) {
+        const test::FailAllocation failure(0);
+        body(t, t + 1, data);
+        injected_ = test::allocation_failure.injected;
+      } else {
+        body(t, t + 1, data);
+      }
+    }
+  }
+  int getThreadNum() const override { return 0; }
+  int getNumThreads() const override { return threads_; }
+  int setNumThreads(int threads) override {
+    const int old = threads_;
+    threads_ = threads;
+    return old;
+  }
+  const char* getName() const override { return "fail_a_stripe"; }
+  bool injected() const { return injected_; }
+
+ private:
+  int fail_;
+  int threads_ = 0;
+  std::atomic<bool> used_{false};
+  std::atomic<bool> injected_{false};
+};
+
+// OpenCV's parallel_for_ on `api` while alive, then on OpenCV's own again.
+// Made and destroyed while no other thread runs OpenCV.
+class ParallelBackend {
+ public:
+  explicit ParallelBackend(std::shared_ptr<cv::parallel::ParallelForAPI> api) {
+    cv::parallel::setParallelForBackend(api);
+  }
+  ~ParallelBackend() {
+    cv::parallel::setParallelForBackend(
+        std::shared_ptr<cv::parallel::ParallelForAPI>());
+  }
+  ParallelBackend(const ParallelBackend&) = delete;
+  ParallelBackend& operator=(const ParallelBackend&) = delete;
+};
 
 TEST(AppCapture, WritesEachCaptureDetectedAtFullResolution) {
   ScratchDir root;
@@ -618,6 +672,42 @@ TEST(AppCapture, KeepsEachWrittenCaptureForCalibrate) {
   const std::optional<quality::SessionSummary> summary = worker->summary();
   ASSERT_TRUE(summary.has_value());
   EXPECT_EQ(static_cast<std::size_t>(summary->kept), kept->captures.size());
+}
+
+// A camera whose full detection fails (out of memory here) is saved with no
+// view, named, and its kept view still names its camera, as the solve takes
+// every view.
+TEST(AppCapture, AKeptViewNamesItsCameraWhenItsDetectionFailed) {
+  ScratchDir root;
+  const auto stripes = std::make_shared<FailAStripe>(1);
+  const ParallelBackend backend(stripes);  // outlives the worker
+  std::unique_ptr<CaptureWorker> worker = make(setup(root.path(), 3));
+  ASSERT_NE(worker, nullptr);
+  ASSERT_TRUE(submit(*worker, request(3, 0.0)));
+  worker->flush();
+  ASSERT_TRUE(stripes->injected());
+  const std::vector<core::Status> errors = worker->take_errors();
+  ASSERT_EQ(errors.size(), 1u);
+  EXPECT_EQ(errors[0].domain(), Code::OutOfMemory);
+  EXPECT_EQ(errors[0].message().rfind("capture: camera SYN1", 0), 0u)
+      << errors[0].message();
+  const std::vector<CaptureEvent> events = worker->take_events();
+  ASSERT_EQ(events.size(), 1u);
+  ASSERT_EQ(events[0].kind, CaptureEvent::Kind::Saved)
+      << events[0].status.message();
+  EXPECT_EQ(events[0].usable_views, 2);
+
+  const std::shared_ptr<const KeptCaptures> kept = worker->kept();
+  ASSERT_NE(kept, nullptr);
+  ASSERT_EQ(kept->captures.size(), 1u);
+  const std::vector<Detection>& views = kept->captures[0]->views;
+  ASSERT_EQ(views.size(), 3u);
+  for (std::size_t i = 0; i < 3; ++i) {
+    SCOPED_TRACE("camera " + std::to_string(i));
+    EXPECT_EQ(views[i].observation.camera_id, "SYN" + std::to_string(i));
+    EXPECT_EQ(views[i].observation.frame_id, 0);
+    EXPECT_EQ(views[i].observation.empty(), i == 1);
+  }
 }
 
 // A drop publishes a new snapshot without the capture; one taken before is
