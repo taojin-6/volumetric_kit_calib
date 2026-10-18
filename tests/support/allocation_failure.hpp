@@ -3,9 +3,22 @@
 
 #pragma once
 
+// Out-of-memory sweeps. A sweep (sweep_allocations) runs a call once as a
+// census, recording the call stack of each allocation it makes, then once
+// failing the first allocation from each distinct call stack, and once failing
+// none. A call stack is its return addresses, hashed, so every allocation site
+// fails on each path that reaches it, in the first pass of any loop around it.
+// Each allocation failed must come from the call stack the census recorded at
+// its index, or the sweep fails rather than test another.
+// VC_TEST_OOM_EXHAUSTIVE=1 fails every allocation instead, which takes
+// minutes under the sanitizers.
+
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <type_traits>
+#include <unordered_set>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -23,6 +36,10 @@ struct AllocationFailure {
   // Neither count nor fail an allocation made under a Vulkan loader's,
   // layer's or driver's frame (SpareVulkan).
   bool spare_vulkan = false;
+  // Armed, record each allocation's call stack and fail none (the census).
+  bool census = false;
+  // The call stack of the allocation failed.
+  std::uint64_t failed_stack = 0;
 };
 
 extern thread_local AllocationFailure allocation_failure;
@@ -51,14 +68,76 @@ class SpareVulkan {
   SpareVulkan& operator=(const SpareVulkan&) = delete;
 };
 
-// Sweep every allocation in a rejected call, including with_context and
-// Result construction, without depending on string allocation counts or
-// small-string buffer sizes. The first uninjected call also checks retry.
+namespace detail {
+
+// Clears the census's call stacks; an armed FailAllocation records them.
+void begin_census() noexcept;
+// The allocations the census recorded.
+std::size_t census_size() noexcept;
+// The call stack the census recorded for allocation `index`.
+std::uint64_t census_stack(std::size_t index) noexcept;
+// Whether VC_TEST_OOM_EXHAUSTIVE is 1.
+bool exhaustive() noexcept;
+
+// The allocations a sweep fails, by index, in order. Here, not beside the
+// replacement operators, for the reason AllocationFailure gives.
+inline std::vector<std::size_t> sweep_plan() {
+  std::vector<std::size_t> plan;
+  std::unordered_set<std::uint64_t> seen;
+  for (std::size_t i = 0; i < census_size(); ++i) {
+    if (exhaustive() || seen.insert(census_stack(i)).second) plan.push_back(i);
+  }
+  return plan;
+}
+
+}  // namespace detail
+
+// Calls `attempt(after)` for each run of a sweep (above): the census, each
+// allocation failed, then none. `attempt` arms FailAllocation(after) once,
+// around the call alone, and checks what the call returned: as a failure's
+// when allocation_failure.injected, else as an unhindered run's.
+template <class Attempt>
+void sweep_allocations(const Attempt& attempt) {
+  std::vector<std::size_t> plan;
+  std::size_t count = 0;
+  for (std::size_t run = 0; run <= plan.size() + 1; ++run) {
+    const bool census = run == 0;
+    const std::size_t after = census               ? 0
+                              : run <= plan.size() ? plan[run - 1]
+                                                   : count;
+    if (census) detail::begin_census();
+    allocation_failure.census = census;
+    attempt(after);  // From one call site, so each run's stacks match.
+    allocation_failure.census = false;
+    if (census) {
+      plan = detail::sweep_plan();
+      count = detail::census_size();
+    }
+    if (::testing::Test::HasFatalFailure()) return;
+    if (census) continue;
+    if (run > plan.size()) {
+      EXPECT_FALSE(allocation_failure.injected)
+          << "the call made more than its census's " << count << " allocations";
+    } else if (!allocation_failure.injected) {
+      ADD_FAILURE() << "allocation " << after << " of the census's " << count
+                    << " was not made";
+    } else {
+      EXPECT_EQ(allocation_failure.failed_stack, detail::census_stack(after))
+          << "allocation " << after << " of " << count
+          << " came from another call stack than in the census";
+    }
+  }
+}
+
+// Sweep a rejected call, with_context and Result construction included,
+// without depending on string allocation counts or small-string buffer sizes.
+// The run failing none also checks retry.
 template <class Fn>
 void expect_oom_when_reporting(const Fn& fn, core::Status::Code expected) {
   const auto original = fn();
   ASSERT_EQ(original.status().domain(), expected);
-  for (std::size_t after = 0; after < 32; ++after) {
+  std::size_t oom = 0;
+  sweep_allocations([&](std::size_t after) {
     SCOPED_TRACE(after);
     std::optional<std::invoke_result_t<const Fn&>> result;
     EXPECT_NO_THROW({
@@ -67,25 +146,24 @@ void expect_oom_when_reporting(const Fn& fn, core::Status::Code expected) {
     });
     ASSERT_TRUE(result.has_value());
     if (!allocation_failure.injected) {
-      EXPECT_GT(after, 0u) << "the refusal must exercise allocation failure";
       EXPECT_EQ(result->status().domain(), expected);
       EXPECT_EQ(result->status().message(), original.status().message());
       return;
     }
     EXPECT_EQ(result->status().domain(), core::Status::Code::OutOfMemory);
-  }
-  FAIL() << "did not reach a refusal without an injected allocation failure";
+    ++oom;
+  });
+  EXPECT_GT(oom, 0u) << "the refusal must exercise allocation failure";
 }
 
-// Fail the n-th allocation of `fn`, for n = 0, 1, ... until a run allocates
-// fewer: each run that failed one returns OutOfMemory, or what `swallowed`
-// accepts as a failure OpenCV swallowed; the first that did not returns what
-// an unhindered run does.
+// Sweep `fn`: each run that failed an allocation returns OutOfMemory, or what
+// `swallowed` accepts as a failure OpenCV swallowed; the run failing none
+// returns what an unhindered run does.
 template <class Fn, class Swallowed>
 void expect_oom_anywhere(const Fn& fn, const Swallowed& swallowed) {
   const auto original = fn();
   std::size_t oom = 0;
-  for (std::size_t after = 0; after < 100000; ++after) {
+  sweep_allocations([&](std::size_t after) {
     std::optional<std::invoke_result_t<const Fn&>> result;
     EXPECT_NO_THROW({
       const FailAllocation failure(after);
@@ -93,7 +171,6 @@ void expect_oom_anywhere(const Fn& fn, const Swallowed& swallowed) {
     });
     ASSERT_TRUE(result.has_value());
     if (!allocation_failure.injected) {
-      EXPECT_GT(oom, 0u);
       EXPECT_EQ(result->status().domain(), original.status().domain());
       EXPECT_EQ(result->status().message(), original.status().message());
       return;
@@ -104,8 +181,8 @@ void expect_oom_anywhere(const Fn& fn, const Swallowed& swallowed) {
       ASSERT_TRUE(swallowed(*result))
           << "allocation " << after << ": " << result->status().message();
     }
-  }
-  FAIL() << "did not finish without an injected allocation failure";
+  });
+  EXPECT_GT(oom, 0u);
 }
 
 template <class Fn>

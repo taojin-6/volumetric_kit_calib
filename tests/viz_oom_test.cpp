@@ -131,8 +131,8 @@ TEST(VizOom, BoardEditorRefusals) {
   editor.lock();
   Target measured = editor.board();
   measured.square_size_m = 0.1505;
-  for (std::size_t after = 0;; ++after) {
-    ASSERT_LT(after, 32u);
+  std::size_t oom = 0;
+  test::sweep_allocations([&](std::size_t after) {
     std::optional<core::Status> status;
     EXPECT_NO_THROW({
       const test::FailAllocation failure(after);
@@ -142,12 +142,13 @@ TEST(VizOom, BoardEditorRefusals) {
     EXPECT_EQ(editor.board().square_size_m, 0.15);
     EXPECT_FALSE(editor.square_measured());
     if (!test::allocation_failure.injected) {
-      EXPECT_GT(after, 0u);
       EXPECT_EQ(status->domain(), Code::InvalidArgument);
-      break;
+      return;
     }
     EXPECT_EQ(status->domain(), Code::OutOfMemory);
-  }
+    ++oom;
+  });
+  EXPECT_GT(oom, 0u);
 }
 
 // The 3D view's lines, through OpenCV's undistortion, and its turn's refusal.

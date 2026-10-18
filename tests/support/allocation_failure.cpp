@@ -6,9 +6,11 @@
 #include <dlfcn.h>
 #include <execinfo.h>
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <vector>
 
 namespace volumetric_kit::calib::test {
 thread_local AllocationFailure allocation_failure;
@@ -16,37 +18,115 @@ thread_local AllocationFailure allocation_failure;
 
 namespace {
 
-// Whether a frame of the calling thread's stack is in the Vulkan loader
-// (libvulkan*), a layer (*VkLayer*) or MoltenVK. Neither call reaches
-// operator new.
-bool under_vulkan() noexcept {
-  void* frames[128];
-  const int depth = backtrace(frames, 128);
-  for (int i = 0; i < depth; ++i) {
-    Dl_info info;
-    if (dladdr(frames[i], &info) == 0 || info.dli_fname == nullptr) continue;
-    const char* slash = std::strrchr(info.dli_fname, '/');
-    const char* name = slash == nullptr ? info.dli_fname : slash + 1;
-    if (std::strncmp(name, "libvulkan", 9) == 0 ||
-        std::strstr(name, "VkLayer") != nullptr ||
-        std::strstr(name, "MoltenVK") != nullptr) {
-      return true;
-    }
+namespace test = volumetric_kit::calib::test;
+
+// Storage from malloc, so recording an allocation makes none, and nothing in
+// this file allocates with operator new for GCC to pair with delete's free.
+template <class T>
+struct MallocAllocator {
+  using value_type = T;
+  MallocAllocator() = default;
+  template <class U>
+  MallocAllocator(const MallocAllocator<U>&) noexcept {}
+  T* allocate(std::size_t n) {
+    void* p = std::malloc(n * sizeof(T));
+    if (p == nullptr) std::abort();
+    return static_cast<T*>(p);
   }
-  return false;
-}
+  void deallocate(T* p, std::size_t) noexcept { std::free(p); }
+  friend bool operator==(MallocAllocator, MallocAllocator) noexcept {
+    return true;
+  }
+  friend bool operator!=(MallocAllocator, MallocAllocator) noexcept {
+    return false;
+  }
+};
+
+// The census's call stacks, one for each allocation in order.
+thread_local std::vector<std::uint64_t, MallocAllocator<std::uint64_t>>
+    census_stacks;
+
+constexpr int kMaxFrames = 128;
+
+// The calling thread's return addresses, innermost first. Neither backtrace
+// nor dladdr reaches operator new.
+struct Stack {
+  Stack() noexcept : depth(backtrace(frames, kMaxFrames)) {}
+
+  void* frames[kMaxFrames];
+  int depth;
+
+  // Whether a frame is in the Vulkan loader (libvulkan*), a layer
+  // (*VkLayer*) or MoltenVK.
+  bool under_vulkan() const noexcept {
+    for (int i = 0; i < depth; ++i) {
+      Dl_info info;
+      if (dladdr(frames[i], &info) == 0 || info.dli_fname == nullptr) continue;
+      const char* slash = std::strrchr(info.dli_fname, '/');
+      const char* name = slash == nullptr ? info.dli_fname : slash + 1;
+      if (std::strncmp(name, "libvulkan", 9) == 0 ||
+          std::strstr(name, "VkLayer") != nullptr ||
+          std::strstr(name, "MoltenVK") != nullptr) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // The return addresses, hashed (splitmix64's finaliser over each).
+  std::uint64_t id() const noexcept {
+    std::uint64_t h = 0x9e3779b97f4a7c15u;
+    for (int i = 0; i < depth; ++i) {
+      std::uint64_t x = h + reinterpret_cast<std::uintptr_t>(frames[i]);
+      x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9u;
+      x = (x ^ (x >> 27)) * 0x94d049bb133111ebu;
+      h = x ^ (x >> 31);
+    }
+    return h;
+  }
+};
 
 }  // namespace
 
+namespace volumetric_kit::calib::test::detail {
+
+void begin_census() noexcept { census_stacks.clear(); }
+
+std::size_t census_size() noexcept { return census_stacks.size(); }
+
+std::uint64_t census_stack(std::size_t index) noexcept {
+  return index < census_stacks.size() ? census_stacks[index] : 0;
+}
+
+bool exhaustive() noexcept {
+  const char* every = std::getenv("VC_TEST_OOM_EXHAUSTIVE");
+  return every != nullptr && std::strcmp(every, "1") == 0;
+}
+
+}  // namespace volumetric_kit::calib::test::detail
+
+// Armed, the stack is walked only where needed: for each allocation of a
+// census or while the Vulkan driver is spared, and for the one failed.
 void* operator new(std::size_t bytes) {
-  auto& failure = volumetric_kit::calib::test::allocation_failure;
-  if (failure.armed && !(failure.spare_vulkan && under_vulkan())) {
-    if (failure.remaining == 0) {
-      failure.armed = false;  // The OutOfMemory message can allocate.
-      failure.injected = true;
-      throw std::bad_alloc();
+  auto& failure = test::allocation_failure;
+  if (failure.armed) {
+    if (!failure.census && !failure.spare_vulkan && failure.remaining > 0) {
+      --failure.remaining;
+    } else {
+      const Stack stack;
+      if (!(failure.spare_vulkan && stack.under_vulkan())) {
+        if (failure.census) {
+          census_stacks.push_back(stack.id());
+        } else if (failure.remaining > 0) {
+          --failure.remaining;
+        } else {
+          failure.armed = false;  // The OutOfMemory message can allocate.
+          failure.injected = true;
+          failure.failed_stack = stack.id();
+          throw std::bad_alloc();
+        }
+      }
     }
-    --failure.remaining;
   }
   if (void* p = std::malloc(bytes == 0 ? 1 : bytes)) return p;
   throw std::bad_alloc();

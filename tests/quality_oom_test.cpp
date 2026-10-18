@@ -38,15 +38,15 @@ const core::Status& status_of(const core::Result<T>& result) {
   return result.status();
 }
 
-// `fn` on a copy of `base`, made before allocation fails: each run that fails
-// one returns OutOfMemory, and the first that does not returns what an
+// `fn` on a copy of `base`, made before allocation fails, swept: each run that
+// fails one returns OutOfMemory, and the run failing none returns what an
 // unhindered run does.
 template <class T, class Fn>
 void expect_oom_on_a_copy(const T& base, const Fn& fn) {
   T fresh = base;
   const auto original = fn(fresh);
   std::size_t oom = 0;
-  for (std::size_t after = 0;; ++after) {
+  test::sweep_allocations([&](std::size_t after) {
     T copy = base;
     std::optional<decltype(fn(copy))> result;
     EXPECT_NO_THROW({
@@ -55,14 +55,14 @@ void expect_oom_on_a_copy(const T& base, const Fn& fn) {
     });
     ASSERT_TRUE(result.has_value());
     if (!test::allocation_failure.injected) {
-      EXPECT_GT(oom, 0u);
       EXPECT_EQ(status_of(*result).domain(), status_of(original).domain());
       EXPECT_EQ(status_of(*result).message(), status_of(original).message());
       return;
     }
     ASSERT_EQ(status_of(*result).domain(), Code::OutOfMemory) << after;
     ++oom;
-  }
+  });
+  EXPECT_GT(oom, 0u);
 }
 
 bool ippe_failed(const core::Status& status) {
@@ -153,9 +153,9 @@ TEST(QualityOom, CaptureRuleIsUnchangedByAFailure) {
         Case{&waiting, &warned, press + milliseconds(3000)}}) {
     CaptureRule fresh = *c.rule;
     const CaptureDecision expected = fresh.update(*c.set, c.now).value();
+    SCOPED_TRACE(expected.message);
     std::size_t oom = 0;
-    for (std::size_t after = 0;; ++after) {
-      SCOPED_TRACE(expected.message);
+    test::sweep_allocations([&](std::size_t after) {
       SCOPED_TRACE(after);
       CaptureRule rule = *c.rule;
       std::optional<core::Result<CaptureDecision>> result;
@@ -170,7 +170,7 @@ TEST(QualityOom, CaptureRuleIsUnchangedByAFailure) {
         EXPECT_EQ(result->value().hold, expected.hold);
         EXPECT_EQ(result->value().message, expected.message);
         EXPECT_EQ(rule.armed(), fresh.armed());
-        break;
+        return;
       }
       ASSERT_EQ(result->status().domain(), Code::OutOfMemory)
           << result->status().message();
@@ -180,15 +180,15 @@ TEST(QualityOom, CaptureRuleIsUnchangedByAFailure) {
       CaptureRule untouched = *c.rule;
       const CaptureDecision held = rule.tick(press).value();
       const CaptureDecision was = untouched.tick(press).value();
-      EXPECT_EQ(held.hold, was.hold) << after;
-      EXPECT_EQ(held.message, was.message) << after;
+      EXPECT_EQ(held.hold, was.hold);
+      EXPECT_EQ(held.message, was.message);
       const CaptureDecision again = rule.update(*c.set, c.now).value();
-      EXPECT_EQ(again.state, expected.state) << after;
-      EXPECT_EQ(again.hold, expected.hold) << after;
-      EXPECT_EQ(again.message, expected.message) << after;
-      EXPECT_EQ(rule.armed(), fresh.armed()) << after;
-    }
-    EXPECT_GT(oom, 0u) << expected.message;
+      EXPECT_EQ(again.state, expected.state);
+      EXPECT_EQ(again.hold, expected.hold);
+      EXPECT_EQ(again.message, expected.message);
+      EXPECT_EQ(rule.armed(), fresh.armed());
+    });
+    EXPECT_GT(oom, 0u);
   }
   expect_oom_on_a_copy(waiting, [&](CaptureRule& rule) {
     return rule.tick(press + milliseconds(2000));
@@ -216,7 +216,7 @@ TEST(QualityOom, SessionChecksAreUnchangedByAFailure) {
   ASSERT_TRUE(base.add(0, scene.captures[0]).ok());
   ASSERT_TRUE(base.add(1, scene.captures[1]).ok());
   std::size_t oom = 0;
-  for (std::size_t after = 0;; ++after) {
+  test::sweep_allocations([&](std::size_t after) {
     SessionChecks checks = base;
     core::Status added;
     EXPECT_NO_THROW({
@@ -225,7 +225,7 @@ TEST(QualityOom, SessionChecksAreUnchangedByAFailure) {
     });
     if (!test::allocation_failure.injected) {
       EXPECT_TRUE(added.ok()) << added.message();
-      break;
+      return;
     }
     if (added.domain() == Code::OutOfMemory) {
       ++oom;
@@ -234,16 +234,17 @@ TEST(QualityOom, SessionChecksAreUnchangedByAFailure) {
     }
     EXPECT_EQ(checks.summary().value().kept, 2) << after;
     EXPECT_TRUE(checks.add(2, scene.captures[2]).ok()) << after;
-  }
+  });
   EXPECT_GT(oom, 0u);
   expect_oom_anywhere([&] { return base.summary(); });
   expect_oom_on_a_copy(base,
                        [](SessionChecks& checks) { return checks.drop(7); });
 }
 
-// A solved rig of 3 captures, every camera seeing each, on exact data, so
-// each re-solve takes few iterations; each link needs 2 shared captures, so
-// each capture can be left out.
+// A solved rig of the synthetic rig's first `count` cameras and 3 captures,
+// every camera seeing each, on exact data, so each re-solve takes few
+// iterations; each link needs 2 shared captures, so each capture can be left
+// out.
 struct Solved {
   compute::Board board = test::femto_board();
   std::vector<test::SyntheticCamera> rig = test::synthetic_rig();
@@ -254,13 +255,14 @@ struct Solved {
   solve::RigSolution solution;
   CalibrationMetrics metrics;
 
-  Solved() {
+  explicit Solved(std::size_t count = 4) {
+    rig.resize(count);
     for (const test::SyntheticCamera& cam : rig) {
       cameras.push_back({cam.id, cam.model});
     }
     test::PlanOptions plan;
     plan.count = 3;
-    plan.min_cameras = 4;
+    plan.min_cameras = count;
     views = test::observe(rig, board, test::synthetic_plan(rig, board, plan),
                           {0.0, 1});
     options.bundle_adjust.min_shared = 2;
@@ -285,9 +287,12 @@ TEST(QualityOom, CrossCameraTransfer) {
 }
 
 // Out of memory anywhere, a re-solve's included, fails the whole, as IPPE's
-// failure in the transfer does.
+// failure in the transfer does. Two cameras make about half the allocations
+// four do, from every call stack four do but cv::invert's buffer for the
+// camera Schur block, small enough there to stay on the stack. The sweep still
+// fails that call, through its output; SolveOom.BundleAdjust fails the buffer.
 TEST(QualityOom, CalibrationMetrics) {
-  const Solved s;
+  const Solved s(2);
   ASSERT_EQ(s.metrics.leave_one_out.captures.size(), 3u);
   for (const LeftOut& left : s.metrics.leave_one_out.captures) {
     ASSERT_TRUE(left.refused.empty()) << left.refused;
