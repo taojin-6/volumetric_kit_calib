@@ -15,8 +15,8 @@
 include(FetchContent)
 
 # Only applications need the common JSON format: the examples, and calib_rig
-# (VC_BUILD_APPS, with the viz tier, VC_WITH_RIG). The calibration library
-# keeps its dependency on core_base and recon_camera alone.
+# (VC_BUILD_APPS, with VC_WITH_RIG's viz tier). The calibration library keeps
+# its dependency on core_base and recon_camera alone.
 if(VC_BUILD_EXAMPLES OR (VC_BUILD_APPS AND VC_WITH_RIG))
   set(VKC_WITH_CONFIG ON)
 endif()
