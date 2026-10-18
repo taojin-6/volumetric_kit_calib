@@ -6,22 +6,29 @@
 /// @file live_view.hpp
 /// @brief What the window (calib_rig's T0 thread) makes of a live snapshot:
 ///        its pictures copied into the rig mosaic, and the marks and panels
-///        the viz tier draws over and beside it.
+///        the viz tier draws over and beside it; and of a 3D-view snapshot:
+///        each camera's points, drawn in place at the rig's poses.
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "volumetric_kit/calib/app/cloud_worker.hpp"
 #include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/app/live_worker.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
 #include "volumetric_kit/calib/viz/mosaic.hpp"
 #include "volumetric_kit/calib/viz/overlay.hpp"
 #include "volumetric_kit/calib/viz/panels.hpp"
+#include "volumetric_kit/calib/viz/point_cloud.hpp"
+#include "volumetric_kit/calib/viz/scene_view.hpp"
 #include "volumetric_kit/core/base/result.hpp"
+#include "volumetric_kit/core/vulkan/sync.hpp"
 #include "volumetric_kit/core/vulkan/vulkan.hpp"
 #include "volumetric_kit/gfx/core/retire_queue.hpp"
+#include "volumetric_kit/gfx/pipelines/depth_cloud_pipeline.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -87,5 +94,54 @@ VC_APP_API core::Result<std::vector<viz::TileOverlay>> tile_overlays(
 /// @endcode
 VC_APP_API core::Result<std::vector<viz::CameraLive>> camera_lives(
     const LiveSnapshot& snapshot);
+
+/// @brief Record @p snapshot's points, each shown and placed camera's at its
+///        pose now (`viz::cloud_draws`), and hold the snapshot in @p retire
+///        until frame @p frame_number retires, so its buffers outlive the
+///        draws on the GPU.
+/// @param pipeline      gfx's depth-cloud pipeline, on the frame loop's
+///                      timeline.
+/// @param retire        The window's retire queue, on the same timeline.
+/// @param cmd           The frame's command buffer, recording, inside its
+///                      rendering scope.
+/// @param extent        The target's size, in pixels.
+/// @param frame_number  The frame's number (`windowing::Frame::number`).
+/// @param snapshot      The snapshot; null draws nothing.
+/// @param cameras       The rig's cameras: their poses, tints and toggles.
+/// @param style         How and where the points are drawn.
+/// @return What the frame's submission must wait for at
+///         `VK_PIPELINE_STAGE_VERTEX_SHADER_BIT` (@ref CloudSnapshot::ready),
+///         already reached; empty when nothing was drawn, and nothing held;
+///         what `viz::cloud_draws` refuses, with nothing recorded or held;
+///         or what gfx's `DepthCloudPipeline::submit` refuses, with nothing
+///         recorded and the snapshot held until the frame retires.
+///
+/// @code
+/// VKC_ASSIGN(const auto wait, record_cloud(*clouds, retire, frame.cmd, extent,
+///                                          frame.number, cloud_latest,
+///                                          cameras, style));
+/// if (wait) {
+///   frame.waits.push_back({*wait, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT});
+/// }
+/// @endcode
+VC_APP_API core::Result<std::optional<core::TimelinePoint>> record_cloud(
+    gfx::pipelines::DepthCloudPipeline& pipeline, gfx::RetireQueue& retire,
+    VkCommandBuffer cmd, VkExtent2D extent, std::uint64_t frame_number,
+    const std::shared_ptr<const CloudSnapshot>& snapshot,
+    const std::vector<viz::SceneCamera>& cameras, const viz::CloudStyle& style);
+
+/// @brief Whether the 3D view's worker prepares the sets offered
+///        (@ref CloudWorker::set_live): only while the view is live and can
+///        be seen.
+/// @param frozen     Whether the view is frozen.
+/// @param placement  Where the view sits.
+/// @param minimized  Whether the window is minimized, drawing nothing.
+/// @return False when frozen, hidden or minimized; true otherwise.
+///
+/// @code
+/// cloud->set_live(cloud_live(frozen, placement, !frame));
+/// @endcode
+VC_APP_API bool cloud_live(bool frozen, viz::ScenePlacement placement,
+                           bool minimized) noexcept;
 
 }  // namespace volumetric_kit::calib::app

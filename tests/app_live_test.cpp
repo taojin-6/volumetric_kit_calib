@@ -9,7 +9,8 @@
 // rule takes holds every camera's luma, JPEG, depth, times and live corners;
 // a full writer refuses it; the board locks. What the rule is told of a set:
 // a camera missing, the frames' spread; a taken set the worker cannot copy
-// out. The window takes the newest snapshot, once. Then the thread's end: a
+// out. The window takes the newest snapshot, once, and the set sink every set
+// read back. Then the thread's end: a
 // sensor that throws posts why, a camera gone is said once, and stopping
 // releases every frame. Runs under the validation layer when the environment
 // asks (VKC_TEST_VALIDATION); skips without a Vulkan device.
@@ -169,14 +170,15 @@ class AppLive : public core::test::VulkanDeviceTest {
   }
 
   // The worker over the rig.
-  std::unique_ptr<LiveWorker> start(CaptureSink* sink = nullptr) {
+  std::unique_ptr<LiveWorker> start(CaptureSink* sink = nullptr,
+                                    SetSink* sets = nullptr) {
     core::Result<sensor::SensorArray> array =
         sensor::SensorArray::open(std::move(sensors_), {});
     EXPECT_TRUE(array.ok()) << array.status().message();
     if (!array.ok()) return nullptr;
     core::Result<std::unique_ptr<LiveWorker>> worker =
         LiveWorker::create(std::move(array).value(), device(), allocator(),
-                           legacy_femto_board(), false, sink);
+                           legacy_femto_board(), false, sink, sets);
     EXPECT_TRUE(worker.ok()) << worker.status().message();
     return worker.ok() ? std::move(worker).value() : nullptr;
   }
@@ -574,6 +576,52 @@ TEST_F(AppLive, TheNewestSnapshotWinsAndIsTakenOnce) {
   EXPECT_FALSE(frames[2].expired());
   EXPECT_EQ(live->take_snapshot(), nullptr);  // taken once
   EXPECT_TRUE(live->take_errors().empty());
+}
+
+// Keeps every set the worker offers it.
+class KeepSets final : public SetSink {
+ public:
+  void offer(std::shared_ptr<const sensor::FrameSet> set) override {
+    const std::lock_guard<std::mutex> lock(mutex);
+    sets.push_back(std::move(set));
+  }
+  std::vector<std::shared_ptr<const sensor::FrameSet>> taken() {
+    const std::lock_guard<std::mutex> lock(mutex);
+    return sets;
+  }
+  // Let every set go, as the worker asks of its set sink before it closes
+  // the sensors.
+  void release() {
+    const std::lock_guard<std::mutex> lock(mutex);
+    sets.clear();
+  }
+
+ private:
+  std::mutex mutex;
+  std::vector<std::shared_ptr<const sensor::FrameSet>> sets;
+};
+
+// Each set the worker reads back is offered to its set sink, the very set its
+// snapshot holds, for the 3D view's worker to prepare.
+TEST_F(AppLive, OffersEachSetItReadsBackToItsSetSink) {
+  make_rig(3);
+  KeepSets sets;
+  std::unique_ptr<LiveWorker> live = start(nullptr, &sets);
+  ASSERT_NE(live, nullptr);
+  push(1);
+  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  ASSERT_NE(first, nullptr);
+  push(2);
+  const std::shared_ptr<const LiveSnapshot> second = next(*live, first->number);
+  ASSERT_NE(second, nullptr);
+  const std::vector<std::shared_ptr<const sensor::FrameSet>> taken =
+      sets.taken();
+  ASSERT_EQ(taken.size(), 2u);
+  EXPECT_EQ(taken[0], first->set);
+  EXPECT_EQ(taken[1], second->set);
+  EXPECT_EQ(taken[1]->frames.size(), 3u);
+  live->stop();
+  sets.release();
 }
 
 // Armed, a set missing a camera is not taken: the rule waits, naming the

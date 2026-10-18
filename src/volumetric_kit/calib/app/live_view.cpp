@@ -93,4 +93,34 @@ core::Result<std::vector<viz::CameraLive>> camera_lives(
       });
 }
 
+core::Result<std::optional<core::TimelinePoint>> record_cloud(
+    gfx::pipelines::DepthCloudPipeline& pipeline, gfx::RetireQueue& retire,
+    VkCommandBuffer cmd, VkExtent2D extent, std::uint64_t frame_number,
+    const std::shared_ptr<const CloudSnapshot>& snapshot,
+    const std::vector<viz::SceneCamera>& cameras,
+    const viz::CloudStyle& style) {
+  return compute::guarded(
+      "record_cloud",
+      [&]() -> core::Result<std::optional<core::TimelinePoint>> {
+        if (snapshot == nullptr) return std::optional<core::TimelinePoint>();
+        VKC_ASSIGN(const std::vector<gfx::pipelines::DepthCloudDraw> draws,
+                   viz::cloud_draws(snapshot->frames, cameras, style));
+        if (draws.empty()) return std::optional<core::TimelinePoint>();
+        // Held, not freed: recon reuses a prepared buffer only once no frame
+        // holds it, after the GPU is done with the frame that drew it. Held
+        // before the draws are recorded, so an allocation failure cannot
+        // leave them recorded with nothing holding their buffers.
+        retire.push(frame_number, [held = snapshot] { (void)held; });
+        VKC_TRY(
+            pipeline.submit(cmd, {extent, frame_number, draws.data(),
+                                  static_cast<std::uint32_t>(draws.size())}));
+        return std::optional<core::TimelinePoint>(snapshot->ready);
+      });
+}
+
+bool cloud_live(bool frozen, viz::ScenePlacement placement,
+                bool minimized) noexcept {
+  return !frozen && placement != viz::ScenePlacement::Hidden && !minimized;
+}
+
 }  // namespace volumetric_kit::calib::app

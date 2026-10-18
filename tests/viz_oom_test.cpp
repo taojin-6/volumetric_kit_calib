@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-// The viz tier runs out of memory anywhere in its models and returns
-// OutOfMemory, never throwing; a board editor is then as it was.
+// The viz tier runs out of memory anywhere in its models and the 3D view's
+// geometry and draws, and returns OutOfMemory, never throwing; a board editor
+// is then as it was.
 
 #include <cstddef>
 #include <memory>
@@ -17,6 +18,8 @@
 #include "volumetric_kit/calib/viz/mosaic.hpp"
 #include "volumetric_kit/calib/viz/overlay.hpp"
 #include "volumetric_kit/calib/viz/panels.hpp"
+#include "volumetric_kit/calib/viz/point_cloud.hpp"
+#include "volumetric_kit/calib/viz/scene_view.hpp"
 #include "volumetric_kit/core/vulkan/image.hpp"
 
 namespace volumetric_kit::calib::viz {
@@ -145,6 +148,56 @@ TEST(VizOom, BoardEditorRefusals) {
     }
     EXPECT_EQ(status->domain(), Code::OutOfMemory);
   }
+}
+
+// The 3D view's lines, through OpenCV's undistortion, and its turn's refusal.
+TEST(VizOom, SceneLinesAndTurn) {
+  recon::camera::CameraModel lens;
+  lens.size = {1280, 720};
+  lens.intrinsics = {900.0, 901.0, 640.5, 359.5};
+  lens.distortion.k1 = -0.12;
+  lens.distortion.k2 = 0.03;
+  std::vector<SceneCamera> cameras(2);
+  for (SceneCamera& camera : cameras) {
+    camera.color = lens;
+    camera.depth = lens;
+  }
+  cameras[0].color_to_world = recon::camera::Mat4d(1.0);
+  SceneOptions options;
+  options.depth_frusta = true;
+  const compute::Board board =
+      compute::Board::create(legacy_femto_board()).value();
+  const std::vector<recon::camera::Mat4d> boards(2, recon::camera::Mat4d(1.0));
+  expect_oom_anywhere(
+      [&] { return scene_lines(cameras, &board, boards, options); });
+  expect_oom_when_reporting(
+      [&] { return scene_lines(cameras, nullptr, boards, options); },
+      Code::InvalidArgument);
+  expect_oom_when_reporting(
+      [&] { return frustum_lines(lens, recon::camera::Mat4d(1.0), 0.0, 0); },
+      Code::InvalidArgument);
+  // A turn allocates nothing but its refusal.
+  const std::vector<recon::camera::Mat4d> none;
+  expect_oom_when_reporting([&] { return display_rotation(none); },
+                            Code::InvalidArgument);
+}
+
+// The points' draws, and their refusals, from frames with no buffer.
+TEST(VizOom, CloudDraws) {
+  std::vector<SceneCamera> cameras(3);  // none placed: nothing to draw
+  const std::vector<std::optional<recon::sensor::DeviceFrame>> frames(
+      3, recon::sensor::DeviceFrame{});
+  CloudStyle style;
+  style.producer_family = 0;  // so a frame with no depth is what is refused
+  style.renderer_family = 0;
+  expect_oom_anywhere([&] { return cloud_draws(frames, cameras, style); });
+  cameras.pop_back();
+  expect_oom_when_reporting([&] { return cloud_draws(frames, cameras, style); },
+                            Code::InvalidArgument);
+  const recon::camera::Mat4d identity(1.0);
+  expect_oom_when_reporting(
+      [&] { return cloud_draw(frames[0].value(), identity, identity, style); },
+      Code::InvalidArgument);
 }
 
 }  // namespace

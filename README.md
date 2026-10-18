@@ -17,11 +17,12 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > tier's OpenCV bridge, the `detect` tier's board detection, the `solve`
 > tier's rig solve and the `quality` tier's live checks and solved-rig
 > metrics; with `VC_WITH_RIG`, the `capture` tier's session writer, the `viz`
-> tier's live view and the `depth` tier's board-plane fit and pairwise depth
-> agreement; and, with GLFW and recon's Orbbec driver too, the `app` tier's
-> `calib_rig`, live view and capture. Calibrate and the color tier are not yet
-> implemented; the legacy `camera_calibration` Python scripts (a separate
-> checkout beside the `volumetric_kit/` folder) remain the reference oracle.
+> tier's live and 3D views and the `depth` tier's board-plane fit and
+> pairwise depth agreement; and, with GLFW and recon's Orbbec driver too, the
+> `app` tier's `calib_rig`, live view, 3D view and capture. Calibrate and the
+> color tier are not yet implemented; the legacy `camera_calibration` Python
+> scripts (a separate checkout beside the `volumetric_kit/` folder) remain
+> the reference oracle.
 
 [AGENTS.md](AGENTS.md) is the shared working guide for Codex and Claude Code;
 `CLAUDE.md` imports it. [DECISIONS.md](DECISIONS.md) records the locked
@@ -101,13 +102,18 @@ renderer.
   coverage marked over each tile in the detector's pixels;
   panels show each camera's view, the latest set, the session and the
   capture; the board's editor locks at the first capture
-  ([DECISIONS.md](DECISIONS.md#2026-10-16--the-live-view-on-gfx)).
+  ([DECISIONS.md](DECISIONS.md#2026-10-16--the-live-view-on-gfx)). The 3D
+  view draws each camera's prepared depth as points where recon left it, at
+  the rig's poses, with the cameras' frusta, the world's axes and the solved
+  boards, turned upright
+  ([DECISIONS.md](DECISIONS.md#2026-10-17--the-live-3d-view-drawn-from-prepared-frames-in-place)).
 - **App:** `calib_rig` opens every camera of the rig's sync file, at the
   scenario's modes, and shows them live with the board found in each; Space
   (or a clicker's "next") captures a still set, Backspace (or "back") drops
   the last. A worker thread owns the rig and finds the board in each set's
-  luma, another detects each capture at full resolution and writes it, and
-  the window draws and never waits
+  luma, another prepares sets on the GPU for the 3D view, beside the mosaic
+  or in the whole window, another detects each capture at full resolution
+  and writes it, and the window draws and never waits
   ([DECISIONS.md](DECISIONS.md#2026-10-16--calib_rigs-live-view-and-capture)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.

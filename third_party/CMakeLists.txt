@@ -75,12 +75,14 @@ endif()
 # targets link recon_camera. It leaves an application's VR_CAMERA_ONLY as set,
 # so an application that turns it off keeps the rest of recon.
 #
-# The pin is recon main after PR #245 (bdbe26e), whose recon_core exports
-# pinhole.glsl under its VR_SHADER_INCLUDE_DIR for calib_depth's kernels.
+# The pin is recon main at PR #246 (42f11ac): its recon_core exports
+# pinhole.glsl under its VR_SHADER_INCLUDE_DIR for calib_depth's kernels (PR
+# #245), and GpuFramePrep shares a prepared frame's depth with another queue
+# family (depth_queue_families), which the 3D view draws in place.
 FetchContent_Declare(
   volumetric_kit_recon
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_recon.git
-  GIT_TAG bdbe26e1378a3d4ab46bb89da05b318f6cfe82c2)
+  GIT_TAG 42f11ac84c0fa31f5189f6b09a1d2c63705564a4)
 # VC_WITH_RIG takes all of recon: the capture tier links its sensor and io
 # tiers. An application's own VR_WITH_ORBBEC / VR_WITH_FFMPEG still apply.
 if(VC_WITH_RIG)
@@ -101,19 +103,22 @@ endif()
 
 # --- volumetric_kit_gfx: the viz tier's renderer and UI ----------------------
 # The rig mosaic (ImagePipeline's region writes), the marks over its tiles
-# (ImageOverlay's regions), the panels (ImGui, draw_metrics_panel) and the view
-# (ImageView2D). Pinned by commit, never main, and declared after the core, so
-# gfx's own core pin yields to calib's. gfx's tests, examples, install and
-# -Werror stay off in a subproject; its ui tier is build-tree only, so calib_viz
-# is too (src/CMakeLists.txt).
+# (ImageOverlay's regions), the panels (ImGui, draw_metrics_panel), the views
+# (ImageView2D, OrbitCamera) and the 3D view (DepthCloudPipeline's points from
+# depth buffers, PrimitivePipeline's lines). Pinned by commit, never main, and
+# declared after the core, so gfx's own core pin yields to calib's. gfx's tests,
+# examples, install and -Werror stay off in a subproject; its ui tier is
+# build-tree only, so calib_viz is too (src/CMakeLists.txt).
 #
-# The pin is gfx main after PRs #136 and #137: region writes, marks over a
-# region, and the fractional-scale scissor repair (59e2449).
+# The pin is gfx main after PR #141 (4800cac): framebuffer_size is 0 x 0 while
+# the window is iconified, beside #138's DepthCloudPipeline and the region
+# writes, marks over a region and the fractional-scale scissor repair of PRs
+# #136 and #137.
 if(VC_WITH_RIG)
   FetchContent_Declare(
     volumetric_kit_gfx
     GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_gfx.git
-    GIT_TAG ba7f7059e480ff24ef6907e0535bc90e102f806f)
+    GIT_TAG 4800cac31b571ac4da4dfd3221132d1bf50912d2)
   FetchContent_MakeAvailable(volumetric_kit_gfx)
 endif()
 

@@ -17,7 +17,9 @@
 /// window skips sets rather than queueing them, and the worker holds at most
 /// the set it is on and the one published. A capture the rule takes is copied
 /// out of its set and handed to a @ref CaptureSink, so the set's frames go
-/// back to the driver at once.
+/// back to the driver at once. Each set read back is also offered, before
+/// the board is searched for, to a @ref SetSink: the 3D view's worker, which
+/// prepares its depth.
 
 #include <chrono>
 #include <cstddef>
@@ -131,6 +133,38 @@ class VC_APP_API CaptureSink {
   CaptureSink& operator=(const CaptureSink&) = default;
 };
 
+/// @brief Where a @ref LiveWorker offers every set it reads back, before it
+///        searches the set for the board: the 3D view's worker
+///        (@ref CloudWorker), or a test's stand-in.
+///
+/// Called from the live worker's thread while the window's thread may call
+/// the sink's own members: an implementation is thread-safe, and returns at
+/// once, keeping the set no longer than it needs it, since every set held
+/// keeps its frames from the driver.
+///
+/// @code
+/// class Keep final : public SetSink {
+///  public:
+///   void offer(std::shared_ptr<const recon::sensor::FrameSet> set) override {
+///     latest = std::move(set);  // under a mutex
+///   }
+///   std::shared_ptr<const recon::sensor::FrameSet> latest;
+/// };
+/// @endcode
+class VC_APP_API SetSink {
+ public:
+  virtual ~SetSink() = default;
+
+  /// @brief Take a set the live worker read back.
+  /// @param set  The set, shared with the live worker's snapshot of it.
+  virtual void offer(std::shared_ptr<const recon::sensor::FrameSet> set) = 0;
+
+ protected:
+  SetSink() = default;
+  SetSink(const SetSink&) = default;
+  SetSink& operator=(const SetSink&) = default;
+};
+
 /// @brief What the live view knows of one set: the frames, where the board is
 ///        in each, what each view is worth, and how the rig keeps up.
 ///
@@ -195,10 +229,11 @@ struct LiveOptions {
 /// detect in, is reported and skipped, and the live view goes on; so does a
 /// camera that is gone (disconnected), reported once.
 ///
-/// @warning The device and allocator the readback uses, and the capture sink,
-///          must outlive the worker. Release every snapshot before destroying
-///          it, so the frames go back to their sensors before the array
-///          closes them.
+/// @warning The device and allocator the readback uses, the capture sink and
+///          the set sink must outlive the worker. Release every snapshot, and
+///          have the set sink let go of every set it was offered
+///          (@ref CloudWorker::stop), before destroying it, so the frames go
+///          back to their sensors before the array closes them.
 ///
 /// @code
 /// VKC_ASSIGN(std::unique_ptr<LiveWorker> live,
@@ -225,6 +260,8 @@ class VC_APP_API LiveWorker {
   /// @param square_measured  Whether its square size was measured.
   /// @param sink             Where captures go; null for a live view that
   ///                         captures nothing (@ref arm refuses).
+  /// @param sets             Where each set read back is offered, before the
+  ///                         board is searched for; null for none.
   /// @param options          How it detects, checks and captures.
   /// @return The worker, its thread running; `InvalidArgument` for a sensor
   ///         without a colour model (naming it), a board or options refused,
@@ -233,7 +270,8 @@ class VC_APP_API LiveWorker {
   static core::Result<std::unique_ptr<LiveWorker>> create(
       recon::sensor::SensorArray&& array, const core::Device& device,
       core::Allocator& allocator, const Target& board, bool square_measured,
-      CaptureSink* sink, const LiveOptions& options = {});
+      CaptureSink* sink, SetSink* sets = nullptr,
+      const LiveOptions& options = {});
 
   /// @brief As @ref stop, then release the array, closing its sensors.
   ~LiveWorker();

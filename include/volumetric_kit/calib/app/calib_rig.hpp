@@ -8,23 +8,57 @@
 ///        every camera of the rig live, with the board found in each, and
 ///        captures saved to a session on disk.
 ///
-/// Three threads. The window's (T0) draws the rig mosaic and its marks and
-/// panels, and turns the keys and buttons into requests; it never waits on a
-/// camera, a detector or the disk. The live worker (T1, @ref LiveWorker)
-/// polls the rig, reads each set's luma back, finds the board and drives the
-/// capture rule. The capture worker (T3, @ref CaptureWorker) detects each
-/// capture at full resolution and queues it on the session writer. The rig's
-/// cameras decode onto the compute library's side of one `VkDevice` that gfx
-/// shares, so the window copies each decoded picture into its tile on the
-/// GPU, and only the luma the detector reads crosses to the host.
+/// Four threads. The window's (T0) draws the rig mosaic and its marks and
+/// panels, and the 3D view, and turns the keys and buttons into requests; it
+/// never waits on a camera, a detector or the disk. The live worker (T1,
+/// @ref LiveWorker) polls the rig, reads each set's luma back, finds the
+/// board and drives the capture rule. The 3D-view worker (T2,
+/// @ref CloudWorker) prepares each sampled set's depth and colour on the
+/// GPU. The capture worker (T3, @ref CaptureWorker) detects each capture at
+/// full resolution and queues it on the session writer. The rig's cameras
+/// decode onto the compute library's side of one `VkDevice` that gfx shares,
+/// so the window copies each decoded picture into its tile and draws each
+/// prepared depth as points on the GPU, and only the luma the detector reads
+/// crosses to the host.
 
 #include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/app/preset.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/config/config.hpp"
+#include "volumetric_kit/core/vulkan/device_requirements.hpp"
 #include "volumetric_kit/recon/sensor/orbbec/orbbec_sync_config.hpp"
 
 namespace volumetric_kit::calib::app {
+
+/// @brief What calib_rig's one device must give each side that adopts it.
+///
+/// @code
+/// VKC_ASSIGN(const RigRequirements needs, rig_requirements());
+/// config.graphics = needs.graphics;
+/// VKC_ASSIGN(auto shared,
+///            gfx::glfw::make_shared_device(window, needs.compute, config));
+/// @endcode
+struct RigRequirements {
+  /// The compute library's side: recon's decoders, readback and frame
+  /// preparation, merged with calib_depth's checks.
+  core::DeviceRequirements compute;
+  /// The renderer's: gfx's, with `largePoints` for points wider than a pixel
+  /// when asked.
+  core::DeviceRequirements graphics;
+};
+
+/// @brief The device calib_rig asks for.
+/// @param large_points  Whether the renderer enables `largePoints`. Without
+///                      it gfx draws every point one pixel wide, which a
+///                      device that lacks the feature is left with.
+/// @return Both sides' requirements; or `InvalidArgument` if recon's and
+///         calib_depth's cannot merge (`core::merge`).
+///
+/// @code
+/// VKC_ASSIGN(const RigRequirements wide, rig_requirements(true));
+/// @endcode
+VC_APP_API core::Result<RigRequirements> rig_requirements(
+    bool large_points = true);
 
 /// @brief What calib_rig takes from its scenario before it opens a window or
 ///        a camera.
@@ -66,8 +100,10 @@ VC_APP_API core::Result<RigScenario> check_scenario(
 /// back when it returns. Space, Right,
 /// Page Down or S (or the Capture button) captures; Backspace, Left or Page Up
 /// (or Drop last) drops the last capture (@ref key_request). Dragging pans
-/// the mosaic and the wheel zooms it. On the way out it stops the live worker,
-/// lets the capture worker write what it holds, and waits for the GPU.
+/// the mosaic and the wheel zooms it. The 3D view sits beside the mosaic, in
+/// the whole window, or hidden; over it a left drag orbits, a right drag pans
+/// and the wheel dollies. On the way out it stops the workers, lets the
+/// capture worker write what it holds, and waits for the GPU.
 /// @param config  The scenario.
 /// @return OK once the window closes; or what failed: the scenario, the
 ///         window or device, a camera's open or preset, a frame, or what

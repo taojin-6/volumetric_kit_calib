@@ -29,6 +29,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- calib_rig's live 3D view (DECISIONS.md, 2026-10-17): beside the mosaic, in
+  the whole window or hidden, frozen or live, solid, tinted-luma or true
+  colour, each camera shown or not in its tint. `CloudWorker`, its T2
+  thread, takes each set `LiveWorker` reads back through its new `SetSink`,
+  prepares every `CloudOptions::live_every`-th on recon's queue family and
+  publishes a `CloudSnapshot`; `record_cloud` draws a snapshot's points
+  at the rig's poses and holds it until its frame retires; `cloud_live`
+  says when the worker prepares (not frozen, hidden or minimized);
+  `rig_requirements` merges recon's, calib_depth's and gfx's needs with
+  `largePoints`. In `viz`: `cloud_draw`, a prepared frame as gfx's
+  `DepthCloudDraw` (`CloudStyle`), and `cloud_draws`, each `SceneCamera`'s;
+  `frustum_lines`, `axes_lines`, `board_lines` and `scene_lines`;
+  `display_rotation`, `window_split` (`ScenePlacement`) and `SceneView`.
 - The `app` tier, `volumetric_kit::calib_app`, and `calib_rig`, live view and
   capture (DECISIONS.md, 2026-10-16), built with `viz` given `VC_BUILD_APPS`
   (top-level only by default), GLFW and recon's Orbbec driver, build-tree
@@ -101,8 +114,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `BoardEditor` and `draw_board_editor` (its fields through `board_fields`
   and `apply_fields`) edit the board, checked as the detector's `Board`
   takes it, until the first capture locks it. `VC_WITH_RIG` fetches
-  `volumetric_kit_gfx`, pinned at `ba7f705` (main after #136 and #137,
-  including the overlay scissor repair).
+  `volumetric_kit_gfx`, pinned at `4800cac` (main after #136, #137, with the
+  overlay scissor repair, #138, `DepthCloudPipeline`, and #141, a minimized
+  window's framebuffer size of 0 x 0).
 - `marker_count`, the markers a board carries, in `calib/core/target.hpp`.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds
@@ -150,9 +164,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   test every OpenCV tier on it.
 - `initialise` places the board of a capture whose views are all ambiguous,
   from those views, so the adjustment takes them.
-- recon is pinned at `bdbe26e` (recon main, with its #228, and its #245,
-  whose exported `pinhole.glsl` the depth tier's kernels include).
-  `cv_pose` now converts through recon's `rodrigues_from_matrix`, accurate
+- recon is pinned at `42f11ac` (recon main, with its #228; its #245, whose
+  exported `pinhole.glsl` the depth tier's kernels include; and its #246,
+  whose `GpuFramePrepConfig::depth_queue_families` shares a prepared frame's
+  depth with the renderer's queue family), and CI's Orbbec SDK action with
+  it. `cv_pose` now converts through recon's `rodrigues_from_matrix`, accurate
   where `cv::Rodrigues` returns zero (below about 1e-5 rad).
 - calib requires `volumetric_kit_core` 0.6.1 or newer (was 0.1.0), with its
   vulkan tier under `VC_WITH_RIG`, and 0.11.0, with its config tier, for

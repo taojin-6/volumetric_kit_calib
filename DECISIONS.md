@@ -73,6 +73,53 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-17 — The live 3D view, drawn from prepared frames in place
+
+calib_rig shows the rig in 3D beside its mosaic (`viz/scene_view.hpp`,
+`viz/point_cloud.hpp`, `app/cloud_worker.hpp`): each camera's depth as
+points, its frusta, the world's axes and the solved boards.
+
+- **No point cloud is built.** recon prepares each camera's frame
+  (`GpuFramePrep`: undistorted depth, and colour), gfx draws a point per
+  depth pixel straight from those buffers (`DepthCloudPipeline`), and calib
+  composes the two with its poses. No pixel crosses the host; the lines are
+  a few KB made on the host from the cameras' models, uploaded when they
+  change.
+- **A worker of its own (T2)** alone owns the preparations, one per camera,
+  on recon's queue family. The live worker offers it each set it reads back;
+  it prepares the newest, every `live_every`-th, lets the set go at once,
+  and publishes a snapshot, newest wins. Frozen, hidden or minimized, it
+  prepares nothing and lets offers go, and the window keeps its snapshot.
+  In the solid mode it prepares depth only, so a cloud frozen in it has no
+  colour to show and the colour modes wait until the view is live again.
+- **Poses at draw time.** A frame is prepared with its colour camera at the
+  origin, its baked pose ignored, and `cloud_draw` places it at the rig's
+  poses when it is drawn, so a frozen cloud follows a new solve with no
+  second preparation. Before Calibrate only the reference camera, the
+  world's origin, is placed: CalibRig takes no calibration file.
+- **Read in place across families.** The prepared depth and colour are
+  CONCURRENT across recon's and the renderer's families (recon's
+  `depth_queue_families`, `color_queue_families`). `cloud_draw` refuses an
+  EXCLUSIVE buffer while the families differ, which the validation layer
+  would not report, and a style that leaves either family unset. The
+  preparation waits for its fence, which makes no device write visible to
+  another queue, so the worker then sets a timeline value on recon's queue,
+  and each frame that draws the snapshot waits for it at the vertex stage,
+  as gfx's contract asks.
+- **Upright.** gfx's `OrbitCamera` keeps +Y up, and the rig's world has +y
+  down, so the view turns the world: the placed cameras' mean up (-y) to +Y,
+  their mean forward, levelled, to -Z. An outside-in ring's forwards cancel,
+  so the first camera's is taken.
+- **Wide points where the GPU has them.** calib_rig's device asks for
+  `largePoints`, merged with recon's and calib_depth's needs
+  (`rig_requirements`), and is made without it, with one-pixel points, on a
+  GPU that lacks it.
+- **Still to come:** the 3D view's settings in the scenario (the core's
+  CO5), a default tint per camera from a palette gfx does not yet have, the
+  cameras' names over the view, which want a world-anchored label in gfx,
+  and the checks' and captured cloud's jobs in T2 (CA12b); each is a `TODO:`
+  where it lands.
+
 ## 2026-10-17 — OpenCV 5 is required
 
 calib has one dependency set on every platform: OpenCV 5 is a prerequisite of
@@ -133,7 +180,8 @@ of them did.
 The `app` tier runs the rig (`app/calib_rig.hpp`, `live_worker.hpp`,
 `capture_worker.hpp`); `apps/calib_rig/main.cpp` only loads the scenario.
 
-- **Three threads, one owner each.** The live worker (T1) alone touches the
+- **Three threads, one owner each** (a fourth, the 3D view's, since
+  2026-10-17; see the dated entry). The live worker (T1) alone touches the
   rig's `SensorArray`, which is not thread-safe: it polls each set, reads every
   camera's luma back in one submit, finds the board (hybrid) and checks each
   view, drives the capture rule, and publishes a snapshot, newest wins. The
@@ -147,8 +195,9 @@ The `app` tier runs the rig (`app/calib_rig.hpp`, `live_worker.hpp`,
   pictures into the mosaic retires.
 - **One device, two families.** The cameras decode onto the compute side of
   the one `VkDevice` gfx shares (`gfx_glfw`'s `make_shared_device` with recon's
-  requirements), their pictures readable from both families, so T1 reads luma
-  back on compute while T0 copies the same images on graphics.
+  requirements, merged with calib_depth's and `largePoints` since 2026-10-17;
+  see the dated entry), their pictures readable from both families, so T1
+  reads luma back on compute while T0 copies the same images on graphics.
 - **Settings are the core's.** The scenario is `config::Application::CalibRig`
   (core 0.11.0): the sync file, the modes, the session root and the window.
   Detection and capture thresholds stay calib's defaults. The modes requested
@@ -324,8 +373,9 @@ The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
   gfx's libraries must build against calib's core pin, the one every sibling
   compiles against, as gfx's own core pin yields to it. `viz` also links
   recon's sensor array tier, whose frame sets, counters and decoded pictures
-  its panels and mosaic take. `calib_viz` is build-tree only, as gfx's ui
-  tier is, until gfx installs the ImGui headers.
+  its panels and mosaic take, and its sensor utils tier, whose prepared
+  frames the 3D view draws. `calib_viz` is build-tree only, as gfx's ui tier
+  is, until gfx installs the ImGui headers.
 
 ## 2026-10-14 — The bundle adjustment on `cv::LevMarq`
 

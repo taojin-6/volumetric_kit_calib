@@ -139,6 +139,11 @@ if(VC_WITH_RIG)
   vc_add_test(board_editor volumetric_kit::calib_viz)
   vc_add_test(viz_render volumetric_kit::calib_viz
               volumetric_kit::core_test_support)
+  # viz: the 3D view's frusta, axes, boards, display rotation and window split
+  # from host data; each camera's prepared frame as gfx's draw, on real buffers.
+  vc_add_test(viz_scene volumetric_kit::calib_viz vc_synthetic_rig)
+  vc_add_test(viz_point_cloud volumetric_kit::calib_viz
+              volumetric_kit::core_test_support)
   vc_add_test(viz_oom volumetric_kit::calib_viz vc_test_support)
   target_sources(vc_viz_oom_test PRIVATE support/allocation_failure.cpp)
 endif()
@@ -155,6 +160,10 @@ if(TARGET calib_app)
   vc_add_test(app_live volumetric_kit::calib_app vc_synthetic_rig
               volumetric_kit::core_test_support)
   vc_add_test(app_live_view volumetric_kit::calib_app vc_synthetic_rig
+              volumetric_kit::core_test_support)
+  # app: the 3D view's worker over synthetic frames, and its points drawn on the
+  # renderer's queue family through gfx's depth-cloud pipeline.
+  vc_add_test(app_cloud volumetric_kit::calib_app
               volumetric_kit::core_test_support)
   # calib_capture before recon_io, which it links, so recon_io is linked once.
   vc_add_test(app_capture volumetric_kit::calib_app vc_synthetic_rig
