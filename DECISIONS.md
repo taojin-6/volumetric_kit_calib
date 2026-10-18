@@ -83,6 +83,10 @@ which `detect::detect_tag` finds in each camera's image.
 - **OpenCV's detector, not libapriltag.** OpenCV is already every build's
   prerequisite and decodes AprilTag dictionaries; libapriltag would be a
   second detector to carry. The legacy script used OpenCV's too.
+- **OpenCV's corner order, not AprilTag's.** The legacy script built its
+  world on OpenCV's order, so a world built from the first corner to the
+  second matches its world; it is turned 180 degrees about z from one built
+  along the top edge of a print of AprilTag's own image.
 - **Sub-pixel refinement (SUBPIX).** On the 2026-09-29 session's JPEGs, in
   the scratch study behind this choice, a still tag's corners varied by
   0.23-0.30 px (largest sd) across captures with it, against 0.47-0.50 px

@@ -3,9 +3,9 @@
 
 // The origin tag in a luma image: tags warped into a 4K image at 100-160 px
 // across against where their homographies put the corners, in OpenCV's order
-// as the print turns, beside the board, rows stride apart and on several
-// threads; no tag, another id, two prints and the board's own markers; the
-// tags and images it refuses, and what OpenCV throws.
+// as the print turns and on AprilTag's own print, beside the board, rows
+// stride apart and on several threads; no tag, another id, two prints and the
+// board's own markers; the tags and images it refuses, and what OpenCV throws.
 
 #include "volumetric_kit/calib/detect/tag.hpp"
 
@@ -23,9 +23,11 @@
 
 #include <gtest/gtest.h>
 #include <opencv2/core.hpp>
+#include <opencv2/objdetect/aruco_dictionary.hpp>
 
 #include "detect_helpers.hpp"
 #include "synthetic_rig.hpp"
+#include "volumetric_kit/calib/compute/board.hpp"
 
 namespace volumetric_kit::calib::detect {
 namespace {
@@ -168,10 +170,10 @@ TEST(DetectTag, FindsAWarpedTagInOpenCVsCornerOrder) {
   EXPECT_TRUE(Accurate(errors));
 }
 
-// The same print turned about its centre a quarter at a time: its border
-// covers the same pixels, so its corners are found in the same four places,
-// but the first is always the printed top-left: each quarter turn clockwise
-// puts it where the top-right was.
+// The same print of OpenCV's image turned about its centre a quarter at a
+// time: its border covers the same pixels, so its corners are found in the
+// same four places, but the first is always the printed top-left: each
+// quarter turn clockwise puts it where the top-right was.
 TEST(DetectTag, FollowsThePrintedTopLeftAsThePrintTurns) {
   std::vector<DetectedMarker> turned;
   for (int quarter = 0; quarter < 4; ++quarter) {
@@ -192,6 +194,49 @@ TEST(DetectTag, FollowsThePrintedTopLeftAsThePrintTurns) {
           << "quarter " << quarter << ", corner " << k;
     }
   }
+}
+
+// AprilTag's own image of 36h11 id 0 (apriltag-imgs' tag36_11_00000.png):
+// its code, 0xd5d628584, row by row from the top-left, most significant bit
+// first, white for 1, inside the black border. It is OpenCV's image turned
+// 180 degrees, so on a print of it the first corner is the printed
+// bottom-right.
+TEST(DetectTag, StartsAtTheBottomRightOfAprilTagsOwnPrint) {
+  constexpr std::uint64_t kCode = 0xd5d628584;
+  cv::Mat apriltags(8, 8, CV_8UC1, cv::Scalar(0));
+  for (int bit = 0; bit < 36; ++bit) {
+    if ((kCode >> (35 - bit)) & 1u) {
+      apriltags.at<std::uint8_t>(1 + bit / 6, 1 + bit % 6) = 255;
+    }
+  }
+  cv::Mat opencvs;
+  cv::aruco::getPredefinedDictionary(
+      *compute::opencv_dictionary(kOriginTag.dictionary))
+      .generateImageMarker(kOriginTag.id, 8, opencvs, 1);
+  cv::Mat turned;
+  cv::rotate(opencvs, turned, cv::ROTATE_180);
+  ASSERT_EQ(cv::countNonZero(apriltags != turned), 0);
+
+  // AprilTag's print is OpenCV's drawn through a half turn of its frame.
+  const cv::Matx33d print_to_image =
+      placed({1700.2, 950.9}, 130.0, 25.0, 0.8, {5e-4, -5e-4});
+  const cv::Matx33d half_turn(-1.0, 0.0, 1.0, 0.0, -1.0, 1.0, 0.0, 0.0, 1.0);
+  cv::Mat render = background();
+  test::draw_marker(render, kOriginTag.dictionary, kOriginTag.id,
+                    print_to_image * half_turn);
+  const auto printed = [&](double x, double y) {
+    const cv::Vec3d q = print_to_image * cv::Vec3d(x, y, 1.0);
+    return cv::Point2d(q[0] / q[2], q[1] / q[2]);
+  };
+  // Clockwise from the printed bottom-right.
+  const Corners expected = {printed(1.0, 1.0), printed(0.0, 1.0),
+                            printed(0.0, 0.0), printed(1.0, 0.0)};
+  const MarkerSearch found = search(picture(render, 110));
+  EXPECT_EQ(found.matches, 1);
+  ASSERT_TRUE(found.found.has_value());
+  Errors errors;
+  errors.add(*found.found, expected);
+  EXPECT_TRUE(Accurate(errors));
 }
 
 // A capture's picture holds the board too: its markers are another
