@@ -122,9 +122,9 @@ struct CalibrateResult {
 ///                  the caller tells its own stop from a failure.
 /// @return The result, its @ref CalibrateResult::number -1;
 ///         `InvalidArgument` for no capture, more than `bundle_adjust` takes
-///         (150), a capture whose views are not one per camera or name
-///         another camera or capture, or a refusal of the solve's (a camera
-///         outside the tree, a link short of `min_shared`, naming them);
+///         (150), a null capture, one whose views are not one per camera or
+///         name another camera or capture, or a refusal of the solve's (a
+///         camera outside the tree, a link short of `min_shared`, naming them);
 ///         `Numerical` for a solve that fails; or another error of the
 ///         solve's, the metrics', the formatter's or @p progress's. Each
 ///         message starts `calibrate: `.
@@ -185,11 +185,11 @@ struct WrittenResults {
 /// @param sink          Writes each file; empty for the core's
 ///                      `write_file(CreateNew)`.
 /// @return Where it wrote; `NotFound` when @p session does not exist;
-///         `InvalidArgument` when `results/` is not a directory, or for a
-///         number out of range, or none left below 1000; or the failure of
-///         the directory's creation or of a file's write, naming it, with
-///         the files after it unwritten. Each message starts
-///         `write_results: `.
+///         `InvalidArgument` for an empty @p session, when `results/` is not
+///         a directory, or for a number out of range, or none left below
+///         1000; or the failure of the directory's creation or of a file's
+///         write, naming it, with the files after it unwritten. Each message
+///         starts `write_results: `.
 ///
 /// @code
 /// VKC_ASSIGN(const WrittenResults written,

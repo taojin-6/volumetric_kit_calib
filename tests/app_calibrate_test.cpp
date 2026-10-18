@@ -265,6 +265,10 @@ TEST(Calibrate, RefusesWhatTheSolveCannotTake) {
             "calibrate: 151 captures, more than one Calibrate adjusts (150): "
             "drop some");
 
+  KeptCaptures null = base;
+  null.captures[1] = nullptr;
+  EXPECT_EQ(refusal(null), "calibrate: a kept capture is null");
+
   KeptCaptures short_of = base;
   auto fewer = std::make_shared<KeptCapture>(*base.captures[2]);
   fewer->views.pop_back();
@@ -425,6 +429,12 @@ TEST(WriteResults, RefusesAMissingSessionOrAResultsFile) {
   EXPECT_EQ(lost.status().message().rfind("write_results: ", 0), 0u)
       << lost.status().message();
   EXPECT_FALSE(fs::exists(missing));
+  // Not the working directory's results/.
+  const core::Result<WrittenResults> empty =
+      write_results("", 0, kPressed, files);
+  EXPECT_EQ(empty.status().domain(), Code::InvalidArgument);
+  EXPECT_EQ(empty.status().message(), "write_results: no session directory");
+  EXPECT_FALSE(fs::exists(kResultsDirectory));
 
   ASSERT_TRUE(core::write_file(root / kResultsDirectory, "not a directory",
                                core::WriteMode::CreateNew)

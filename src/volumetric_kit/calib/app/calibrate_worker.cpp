@@ -188,6 +188,11 @@ core::Result<WrittenResults> write_results(
     const auto in = [&](const core::Status& status) {
       return status.with_context(kWhat);
     };
+    if (session.empty()) {
+      // Not the working directory's results/.
+      return core::Status::invalid_argument(std::string(kWhat) +
+                                            ": no session directory");
+    }
     if (first_number < 0 || first_number > kMaxNumber) {
       return core::Status::invalid_argument(
           std::string(kWhat) + ": first_number " +
