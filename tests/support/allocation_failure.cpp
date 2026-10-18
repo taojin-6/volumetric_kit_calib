@@ -10,8 +10,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
-#include <numeric>
-#include <unordered_set>
 #include <vector>
 
 namespace volumetric_kit::calib::test {
@@ -22,7 +20,8 @@ namespace {
 
 namespace test = volumetric_kit::calib::test;
 
-// Storage from malloc, so recording an allocation makes none.
+// Storage from malloc, so recording an allocation makes none, and nothing in
+// this file allocates with operator new for GCC to pair with delete's free.
 template <class T>
 struct MallocAllocator {
   using value_type = T;
@@ -87,34 +86,21 @@ struct Stack {
   }
 };
 
-bool exhaustive() {
-  const char* every = std::getenv("VC_TEST_OOM_EXHAUSTIVE");
-  return every != nullptr && std::strcmp(every, "1") == 0;
-}
-
 }  // namespace
 
 namespace volumetric_kit::calib::test::detail {
 
 void begin_census() noexcept { census_stacks.clear(); }
 
-std::vector<std::size_t> end_census(std::size_t& count) {
-  count = census_stacks.size();
-  std::vector<std::size_t> plan;
-  if (exhaustive()) {
-    plan.resize(count);
-    std::iota(plan.begin(), plan.end(), std::size_t{0});
-    return plan;
-  }
-  std::unordered_set<std::uint64_t> seen;
-  for (std::size_t i = 0; i < count; ++i) {
-    if (seen.insert(census_stacks[i]).second) plan.push_back(i);
-  }
-  return plan;
-}
+std::size_t census_size() noexcept { return census_stacks.size(); }
 
 std::uint64_t census_stack(std::size_t index) noexcept {
   return index < census_stacks.size() ? census_stacks[index] : 0;
+}
+
+bool exhaustive() noexcept {
+  const char* every = std::getenv("VC_TEST_OOM_EXHAUSTIVE");
+  return every != nullptr && std::strcmp(every, "1") == 0;
 }
 
 }  // namespace volumetric_kit::calib::test::detail

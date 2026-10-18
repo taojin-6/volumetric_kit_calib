@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <optional>
 #include <type_traits>
+#include <unordered_set>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -71,11 +72,23 @@ namespace detail {
 
 // Clears the census's call stacks; an armed FailAllocation records them.
 void begin_census() noexcept;
-// The allocations a sweep fails, by index, in order, of the `count` the
-// census recorded.
-std::vector<std::size_t> end_census(std::size_t& count);
+// The allocations the census recorded.
+std::size_t census_size() noexcept;
 // The call stack the census recorded for allocation `index`.
 std::uint64_t census_stack(std::size_t index) noexcept;
+// Whether VC_TEST_OOM_EXHAUSTIVE is 1.
+bool exhaustive() noexcept;
+
+// The allocations a sweep fails, by index, in order. Here, not beside the
+// replacement operators, for the reason AllocationFailure gives.
+inline std::vector<std::size_t> sweep_plan() {
+  std::vector<std::size_t> plan;
+  std::unordered_set<std::uint64_t> seen;
+  for (std::size_t i = 0; i < census_size(); ++i) {
+    if (exhaustive() || seen.insert(census_stack(i)).second) plan.push_back(i);
+  }
+  return plan;
+}
 
 }  // namespace detail
 
@@ -96,7 +109,10 @@ void sweep_allocations(const Attempt& attempt) {
     allocation_failure.census = census;
     attempt(after);  // From one call site, so each run's stacks match.
     allocation_failure.census = false;
-    if (census) plan = detail::end_census(count);
+    if (census) {
+      plan = detail::sweep_plan();
+      count = detail::census_size();
+    }
     if (::testing::Test::HasFatalFailure()) return;
     if (census) continue;
     if (run > plan.size()) {
