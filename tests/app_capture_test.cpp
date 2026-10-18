@@ -563,6 +563,9 @@ TEST(AppCapture, TakesTheDepthUnitFromTheFrames) {
   EXPECT_EQ(session["streams"]["depth"]["metres_per_unit"].get<double>(),
             0.0005);
   EXPECT_EQ(session["captures"].size(), 1u);
+  // The captures kept for Calibrate are in the session's unit too.
+  ASSERT_NE(worker->kept(), nullptr);
+  EXPECT_EQ(worker->kept()->depth_mode.metres_per_unit, 0.0005f);
 
   CaptureRequest mixed = request(2, 0.0, 3);
   mixed.cameras[1].metres_per_unit = 0.0005f;
@@ -585,6 +588,7 @@ TEST(AppCapture, TakesTheDepthUnitFromTheFrames) {
 TEST(AppCapture, KeepsEachWrittenCaptureForCalibrate) {
   ScratchDir root;
   CaptureSetup s = setup(root.path(), 3);
+  s.reference = 1;  // not the default
   s.session.solve.weak_below = 7;
   std::unique_ptr<CaptureWorker> worker = make(s);
   ASSERT_NE(worker, nullptr);
@@ -608,7 +612,7 @@ TEST(AppCapture, KeepsEachWrittenCaptureForCalibrate) {
 
   EXPECT_EQ(kept->board, legacy_femto_board());
   EXPECT_EQ(kept->directory, worker->directory());
-  EXPECT_EQ(kept->reference, 0u);
+  EXPECT_EQ(kept->reference, 1u);
   EXPECT_EQ(kept->solve.weak_below, 7);
   EXPECT_EQ(kept->depth_mode.name, s.depth_mode.name);
   EXPECT_EQ(kept->depth_mode.metres_per_unit, 0.001f);
