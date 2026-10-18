@@ -105,8 +105,9 @@ struct CaptureSetup {
   /// writer; at least 1.
   std::size_t capacity = 4;
   /// Captures kept and pending at once, at most: what one Calibrate adjusts,
-  /// which also bounds the raw depth held (@ref KeptCapture::depth); at
-  /// least 1.
+  /// which also bounds the raw depth held (@ref KeptCapture::depth), 2 bytes
+  /// per depth pixel per camera and capture (0.74 MB at nfov_unbinned,
+  /// 2.1 MB at wfov_unbinned); at least 1.
   // TODO: more than 150 captures, should a session ever need them.
   std::size_t max_kept = solve::BundleAdjustOptions{}.max_captures;
 };
