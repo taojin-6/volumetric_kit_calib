@@ -162,7 +162,8 @@ std::shared_ptr<const CloudSnapshot> next_snapshot(CloudWorker& cloud) {
 void wait_prepared(const CloudWorker& cloud, std::uint64_t count) {
   const auto give_up = std::chrono::steady_clock::now() + kPatience;
   while (cloud.prepared() < count) {
-    ASSERT_LT(std::chrono::steady_clock::now(), give_up) << "prepared " << count;
+    ASSERT_LT(std::chrono::steady_clock::now(), give_up)
+        << "prepared " << count;
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 }
@@ -559,9 +560,8 @@ class AppCloudAcrossFamilies : public core::test::SharedDeviceTest {
     begin.clear_color.float32[3] = 1.0f;
     const gfx::RenderTarget rt = target.value().target();
     rt.begin(raw, begin);
-    core::Result<std::optional<core::TimelinePoint>> wait =
-        record_cloud(*pipeline_, *retire_, raw, desc.extent, number, snapshot,
-                     cameras, s);
+    core::Result<std::optional<core::TimelinePoint>> wait = record_cloud(
+        *pipeline_, *retire_, raw, desc.extent, number, snapshot, cameras, s);
     rt.end(raw);
     target.value().record_readback(raw);
     EXPECT_TRUE(cmd.value().end().ok());
@@ -696,8 +696,8 @@ TEST_F(AppCloudAcrossFamilies, AFrozenSnapshotRedrawsAtNewPosesWithoutARePrep) {
   ASSERT_TRUE(second.recorded.ok()) << second.recorded.message();
   ASSERT_FALSE(second.rgba.empty());
 
-  const Vec3d world = Vec3d(after * depth_to_color() *
-                            glm::dvec4(the_point(), 1.0));
+  const Vec3d world =
+      Vec3d(after * depth_to_color() * glm::dvec4(the_point(), 1.0));
   const glm::dvec2 at =
       image(depth_model(),
             Vec3d(camera::rigid_inverse(view_pose) * glm::dvec4(world, 1.0)));
@@ -736,7 +736,8 @@ TEST_F(AppCloudAcrossFamilies, RefusesAFrameExclusiveToTheComputeFamily) {
   EXPECT_EQ(retire_->pending(), 0u);
 }
 
-// --- The device ---------------------------------------------------------------
+// --- The device
+// ---------------------------------------------------------------
 
 // calib_rig's renderer asks for wide points, which every point it draws may
 // use, and its compute side for recon's and the depth checks' needs.

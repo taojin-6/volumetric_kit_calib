@@ -53,8 +53,8 @@ sensor::DeviceFrame frame_of(std::shared_ptr<const core::Buffer> depth,
   frame.color = std::move(color);
   const recon::Mat4f baked =
       glm::translate(recon::Mat4f(1.0f), glm::vec3(5.0f, 6.0f, 7.0f));
-  frame.depth_camera = {500.25f, 499.75f, 321.5f, 287.25f,
-                        0.5f,    3.86f,   640,    576,     baked};
+  frame.depth_camera = {500.25f, 499.75f, 321.5f, 287.25f, 0.5f,
+                        3.86f,   640,     576,    baked};
   frame.color_camera = {1800.5f, 1799.25f, 1919.75f, 1081.5f,
                         3840,    2160,     baked};
   return frame;
@@ -67,9 +67,9 @@ CloudStyle style_of(std::uint32_t family) {
   style.stride = 3;
   style.point_size = 2.5f;
   style.viewport = {{10, 20}, {300, 200}};
-  style.view_proj = glm::mat4(glm::vec4(1, 2, 3, 4), glm::vec4(5, 6, 7, 8),
-                              glm::vec4(9, 10, 11, 12),
-                              glm::vec4(13, 14, 15, 16));
+  style.view_proj =
+      glm::mat4(glm::vec4(1, 2, 3, 4), glm::vec4(5, 6, 7, 8),
+                glm::vec4(9, 10, 11, 12), glm::vec4(13, 14, 15, 16));
   style.producer_family = family;
   style.renderer_family = family;
   return style;

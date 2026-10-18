@@ -38,8 +38,8 @@ core::Status readable(const core::Buffer& buffer, const char* what,
 
 template <class Params>
 gfx::camera::PinholeCamera pinhole(const Params& params) noexcept {
-  return {params.fx, params.fy, params.cx, params.cy, params.width,
-          params.height};
+  return {params.fx, params.fy,    params.cx,
+          params.cy, params.width, params.height};
 }
 
 }  // namespace

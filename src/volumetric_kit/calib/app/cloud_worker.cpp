@@ -89,9 +89,9 @@ struct CloudWorker::State {
     // visible to another queue: a signal after it on the same queue gives
     // the renderer's frame a semaphore to wait on that does.
     const std::uint64_t value = signalled + 1;
-    VKC_ASSIGN(core::Device::PendingSubmit done,
-               device.submit_pending([](VkCommandBuffer) {}, {},
-                                     {{&ready, value}}));
+    VKC_ASSIGN(
+        core::Device::PendingSubmit done,
+        device.submit_pending([](VkCommandBuffer) {}, {}, {{&ready, value}}));
     signalled = value;
     VKC_TRY(done.wait());
     out->ready = {&ready, value};
@@ -110,8 +110,8 @@ struct CloudWorker::State {
         set = std::move(pending);
         with_color = color;
       }
-      core::Result<SnapshotPtr> made = compute::guarded(
-          "3D view", [&]() -> core::Result<SnapshotPtr> {
+      core::Result<SnapshotPtr> made =
+          compute::guarded("3D view", [&]() -> core::Result<SnapshotPtr> {
             return prepare(std::move(set), with_color);
           });
       if (!made.ok()) {
@@ -142,8 +142,7 @@ core::Result<std::unique_ptr<CloudWorker>> CloudWorker::create(
           return core::Status::invalid_argument("CloudWorker: no camera");
         }
         if (options.live_every == 0) {
-          return core::Status::invalid_argument(
-              "CloudWorker: live_every is 0");
+          return core::Status::invalid_argument("CloudWorker: live_every is 0");
         }
         if (families.size() > core::BufferDesc::kMaxQueueFamilies) {
           return core::Status::invalid_argument(

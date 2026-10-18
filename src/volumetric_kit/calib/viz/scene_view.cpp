@@ -83,11 +83,11 @@ core::Result<Lines> frustum_lines(const recon::camera::CameraModel& camera,
     // The image's outer edges: half a pixel past the corner pixels' centres.
     const double right = static_cast<double>(camera.size.width) - 0.5;
     const double bottom = static_cast<double>(camera.size.height) - 0.5;
-    VKC_ASSIGN(const std::vector<cv::Point2d> rays,
-               compute::undistort_points(cv, {{-0.5, -0.5},
-                                              {right, -0.5},
-                                              {right, bottom},
-                                              {-0.5, bottom}}));
+    VKC_ASSIGN(
+        const std::vector<cv::Point2d> rays,
+        compute::undistort_points(
+            cv,
+            {{-0.5, -0.5}, {right, -0.5}, {right, bottom}, {-0.5, bottom}}));
     const Vec3d centre = apply(to_world, Vec3d(0.0));
     std::array<Vec3d, 4> corners{};
     for (std::size_t i = 0; i < corners.size(); ++i) {
@@ -131,8 +131,8 @@ core::Result<Lines> board_lines(const compute::Board& board,
                                 const Mat4d& board_to_world,
                                 std::uint32_t rgba) {
   return compute::guarded("board_lines", [&]() -> core::Result<Lines> {
-    VKC_TRY(recon::camera::check_rigid(board_to_world)
-                .with_context("board_lines"));
+    VKC_TRY(
+        recon::camera::check_rigid(board_to_world).with_context("board_lines"));
     // The chessboard spans twice its centre, from the frame's origin.
     const cv::Point3d middle = board.centre();
     const double w = 2.0 * middle.x;
@@ -198,8 +198,8 @@ core::Result<std::vector<pipelines::DepthCloudDraw>> cloud_draws(
       [&]() -> core::Result<std::vector<pipelines::DepthCloudDraw>> {
         if (frames.size() != cameras.size()) {
           return core::Status::invalid_argument(
-              "cloud_draws: " + std::to_string(frames.size()) +
-              " frames for " + std::to_string(cameras.size()) + " cameras");
+              "cloud_draws: " + std::to_string(frames.size()) + " frames for " +
+              std::to_string(cameras.size()) + " cameras");
         }
         std::vector<pipelines::DepthCloudDraw> draws;
         draws.reserve(cameras.size());
@@ -241,9 +241,8 @@ core::Result<Mat3d> display_rotation(const std::vector<Mat4d>& color_to_world) {
     }
     const Vec3d up = ups / length;
     std::optional<Vec3d> forward = levelled(forwards, up);
-    for (const Vec3d& fallback :
-         {Mat3d(color_to_world.front())[2], Vec3d(0.0, 0.0, 1.0),
-          Vec3d(1.0, 0.0, 0.0)}) {
+    for (const Vec3d& fallback : {Mat3d(color_to_world.front())[2],
+                                  Vec3d(0.0, 0.0, 1.0), Vec3d(1.0, 0.0, 0.0)}) {
       if (forward) break;
       forward = levelled(fallback, up);
     }

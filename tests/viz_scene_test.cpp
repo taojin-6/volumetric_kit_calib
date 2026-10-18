@@ -306,10 +306,9 @@ TEST(VizScene, TheDisplayRotationRefusesNoCameraAndUpsThatCancel) {
   const core::Status cancel = display_rotation({Mat4d(1.0), flipped}).status();
   EXPECT_EQ(cancel.domain(), Code::InvalidArgument);
   EXPECT_NE(cancel.message().find("cancel"), std::string::npos);
-  EXPECT_EQ(display_rotation({glm::scale(Mat4d(1.0), Vec3d(2.0))})
-                .status()
-                .domain(),
-            Code::InvalidArgument);
+  EXPECT_EQ(
+      display_rotation({glm::scale(Mat4d(1.0), Vec3d(2.0))}).status().domain(),
+      Code::InvalidArgument);
 }
 
 // Clip space of a world point through a view.
