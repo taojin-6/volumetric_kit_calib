@@ -974,8 +974,20 @@ TEST(PrincipalPointAB, TheGapIsRelativeToTheLargerRms) {
   }
 }
 
+// The margin's defaults are the decided min(2 % of the larger RMS, 0.05 px),
+// and MetricsOptions takes them.
+TEST(PrincipalPointAB, DefaultsAreTheDecidedMargins) {
+  EXPECT_EQ(kPrincipalMarginFraction, 0.02);
+  EXPECT_EQ(kPrincipalMarginPx, 0.05);
+  EXPECT_EQ(MetricsOptions{}.principal_margin_fraction,
+            kPrincipalMarginFraction);
+  EXPECT_EQ(MetricsOptions{}.principal_margin_px, kPrincipalMarginPx);
+}
+
 // The margin given decides, in principal_point_ab and calibration_metrics
-// alike: a gap the default calls decisive is not, under half the larger RMS.
+// alike: a gap the default calls decisive is not under a wider margin, here
+// half the larger RMS, capped at 0.05 px in calibration_metrics, where the
+// two margins swapped would name a side.
 TEST(PrincipalPointAB, TakesTheMarginItIsGiven) {
   const Scene scene = truth_above(make_scene(20, 0.1), 2.5);
   EXPECT_EQ(ab_of(scene).verdict, PrincipalPointVerdict::Shifted);
@@ -987,11 +999,14 @@ TEST(PrincipalPointAB, TakesTheMarginItIsGiven) {
   const RigSolution solution = solved(scene, start);
   MetricsOptions options;
   options.principal_margin_fraction = 0.5;
-  options.principal_margin_px = 1.0;
+  options.principal_margin_px = 0.05;
   const CalibrationMetrics m = measured(scene, start, solution, options);
   EXPECT_EQ(m.options.principal_margin_fraction, 0.5);
-  EXPECT_EQ(m.options.principal_margin_px, 1.0);
+  EXPECT_EQ(m.options.principal_margin_px, 0.05);
   EXPECT_EQ(m.principal_point.verdict, PrincipalPointVerdict::Inconclusive);
+  EXPECT_NE(principal_point_verdict(m.principal_point.as_given,
+                                    m.principal_point.shifted, 0.05, 0.5),
+            m.principal_point.verdict);
   EXPECT_EQ(m.principal_point.shifted.rms_px, wide.shifted.rms_px);
 }
 
