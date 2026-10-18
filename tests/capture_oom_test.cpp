@@ -20,6 +20,7 @@
 
 #include "allocation_failure.hpp"
 #include "volumetric_kit/calib/capture/session_writer.hpp"
+#include "volumetric_kit/core/base/check.hpp"
 
 namespace volumetric_kit::calib::capture {
 namespace {
@@ -29,7 +30,8 @@ namespace vkc = volumetric_kit::core;
 using Code = vkc::Status::Code;
 using test::expect_oom_when_reporting;
 
-// Enough for a sweep: its first call, then one for each allocation it fails.
+// Enough for a sweep: its first call, the census, one for each allocation it
+// fails and one failing none.
 constexpr std::size_t kCalls = 33;
 
 camera::CameraModel model(std::uint32_t width, std::uint32_t height) {
@@ -82,6 +84,7 @@ class Supply {
  public:
   explicit Supply(const T& each) : items_(kCalls, each) {}
   T take() {
+    VKC_CHECK(!items_.empty(), "a sweep took more than kCalls calls");
     T item = std::move(items_.back());
     items_.pop_back();
     return item;
@@ -141,7 +144,7 @@ TEST(CaptureOom, SubmitRefusingACapture) {
 TEST(CaptureOom, SessionStamp) {
   const auto time =
       std::chrono::system_clock::time_point(std::chrono::seconds(1760348467));
-  for (std::size_t after = 0; after < kCalls; ++after) {
+  test::sweep_allocations([&](std::size_t after) {
     SCOPED_TRACE(after);
     std::optional<vkc::Result<std::string>> stamp;
     EXPECT_NO_THROW({
@@ -154,8 +157,7 @@ TEST(CaptureOom, SessionStamp) {
       return;
     }
     EXPECT_EQ(stamp->status().domain(), Code::OutOfMemory);
-  }
-  FAIL() << "session_stamp kept failing";
+  });
 }
 
 }  // namespace

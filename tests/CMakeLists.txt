@@ -20,12 +20,16 @@ function(vc_add_test name)
 endfunction()
 
 # The tests' header-only helpers (support/); allocation_failure.cpp, which an
-# out-of-memory test adds, walks the stack with dladdr.
+# out-of-memory test adds, walks the stack with backtrace and dladdr.
 add_library(vc_test_support INTERFACE)
 target_include_directories(vc_test_support
                            INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/support")
 target_link_libraries(vc_test_support INTERFACE volumetric_kit::calib_core
                                                 GTest::gtest ${CMAKE_DL_LIBS})
+# The out-of-memory sweep itself.
+vc_add_test(allocation_failure vc_test_support)
+target_sources(vc_allocation_failure_test
+               PRIVATE support/allocation_failure.cpp)
 
 # version smoke test.
 vc_add_test(version volumetric_kit::calib_core)
