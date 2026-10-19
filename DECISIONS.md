@@ -114,11 +114,9 @@ which `detect::detect_tag` finds in each camera's image.
 - **OpenCV's corner order, not AprilTag's.** The legacy script built its
   world on OpenCV's order, so a world built from the first corner to the
   second matches its world; it is turned 180 degrees about z from one built
-  along the top edge of a print of AprilTag's own image.
-- **The legacy script's world.** The tag's frame (`solve/world_tag.hpp`) is
-  the one `set_world_from_tag.py` re-anchored to, its z out of the face, up.
-  libapriltag's z, which implicit_surface_compression's per-camera tag pose
-  used, points into the tag.
+  along the top edge of a print of AprilTag's own image. libapriltag's z,
+  which implicit_surface_compression's per-camera tag pose used, points into
+  the tag.
 - **Triangulated, never one view's pose.** On the 2026-09-29 JPEGs each
   camera's own IPPE_SQUARE pose put the tag's centre 23-77 mm from the
   others' and its normal 0.4-1.6 degrees off. So the corners are
@@ -127,9 +125,8 @@ which `detect::detect_tag` finds in each camera's image.
   the origin (the user's call).
 - **Its size measured, not assumed.** In the same study a rigid 0.15 m square
   fitted the corners worse than free ones (1.2-1.7 against 0.65-1.0 px RMS)
-  and gave a frame only 0.05-0.07 mm and 0.07-0.19 degrees from theirs. The
-  free corners' mean edge, 147.7-148.6 mm there, is only compared with the
-  print's.
+  and gave a frame only 0.05-0.07 mm and 0.07-0.19 degrees from theirs; the
+  free corners' mean edge was 147.7-148.6 mm there.
 - **Each camera above it.** The legacy script refused a world only when the
   cameras were below the tag on average. A camera that saw the printed face
   is above it, so any one below means a tag face down or corners mirrored.
