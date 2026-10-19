@@ -343,7 +343,8 @@ VC_VIZ_API core::Result<std::vector<PanelLine>> calibration_panel(
 ///   fails), and the largest signed median of the pairs that pass or fail,
 ///   naming its pair;
 /// - `pair <from> -> <to>` for each pooled pair that fails (red): its signed
-///   median, its median magnitude and its samples in the window;
+///   median, its median magnitude and the share of its overlap inside the
+///   window (%);
 /// - `capture <k>` for each capture with pairs that fail on their own
 ///   (amber): those pairs.
 /// @param ids      Each camera's id, in the rig's order.

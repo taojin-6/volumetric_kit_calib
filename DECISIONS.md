@@ -203,9 +203,6 @@ camera's depth as points, its frusta, the world's axes and the solved boards.
   `largePoints`, merged with recon's and calib_depth's needs
   (`rig_requirements`), and is made without it, with one-pixel points, on a
   GPU that lacks it.
-- **Live sets only** (amended 2026-10-19). The depth checks are Calibrate's
-  (the 2026-10-16 entry, "Depth checks: the host's geometry over the
-  device's results"), so T2 prepares no captured set.
 - **Still to come:** the 3D view's settings in the scenario (the core's
   CO5) and the cameras' names over the view, which want a world-anchored
   label in gfx; each is a `TODO:` where it lands.
