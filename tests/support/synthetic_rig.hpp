@@ -196,6 +196,21 @@ std::array<cv::Point2d, 4> draw_marker(cv::Mat& image,
                                        const cv::Matx33d& print_to_image,
                                        const MarkerOptions& options = {});
 
+/// @brief Where a print goes in an image: its frame (@ref draw_marker) to
+///        the image's pixels.
+/// @param centre       Where the print's centre lands (pixels).
+/// @param side_px      Its side along its x axis (pixels).
+/// @param roll_deg     Its turn about its centre (degrees, clockwise on
+///                     screen, y being down).
+/// @param squash       Its side along its y axis, as a fraction of
+///                     @p side_px.
+/// @param perspective  The perspective it is seen in, per pixel from its
+///                     centre; 0 for none.
+/// @return The homography: scaled, then turned, then seen, then moved.
+cv::Matx33d marker_placement(const cv::Point2d& centre, double side_px,
+                             double roll_deg, double squash = 1.0,
+                             const cv::Vec2d& perspective = {});
+
 /// @brief The rig's board, @ref legacy_femto_board, as compute builds it.
 /// @return The board.
 compute::Board femto_board();

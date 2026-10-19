@@ -407,13 +407,8 @@ TEST(SyntheticRig, DrawsAMarkerWhereItsHomographyPutsIt) {
   levels.white = options.white;
   const cv::Matx33d front(150.0, 0.0, 120.31, 0.0, 150.0, 90.17, 0.0, 0.0, 1.0);
   // Turned 30 degrees, squashed to 0.7 and in perspective, about (200, 200).
-  const double c = std::cos(30.0 * kPi / 180.0);
-  const double s = std::sin(30.0 * kPi / 180.0);
   const cv::Matx33d turned =
-      cv::Matx33d(1.0, 0.0, 200.4, 0.0, 1.0, 199.8, 0.0, 0.0, 1.0) *
-      cv::Matx33d(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1e-3, -6e-4, 1.0) *
-      cv::Matx33d(c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0) *
-      cv::Matx33d(150.0, 0.0, -75.0, 0.0, 105.0, -52.5, 0.0, 0.0, 1.0);
+      marker_placement({200.4, 199.8}, 150.0, 30.0, 0.7, {1e-3, -6e-4});
   for (const cv::Matx33d& print_to_image : {front, turned}) {
     cv::Mat image(400, 400, CV_8UC1, cv::Scalar(110));
     const std::array<cv::Point2d, 4> corners = draw_marker(

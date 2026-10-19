@@ -196,24 +196,15 @@ using Corners = std::array<cv::Point2d, 4>;
 // the top-left corner, and with `prints` 2 another by the bottom-right.
 // Returns the first print's corners, where the detector should find them.
 Corners draw_origin_tag(CaptureRequest& r, std::size_t i, int prints = 1) {
-  const auto at = [](const cv::Point2d& centre, double side_px,
-                     double roll_deg) {
-    const double a = roll_deg * 3.14159265358979323846 / 180.0;
-    const double c = side_px * std::cos(a);
-    const double s = side_px * std::sin(a);
-    // The print's frame, (0, 0) to (1, 1), turned about its centre.
-    return cv::Matx33d(c, -s, centre.x - 0.5 * (c - s), s, c,
-                       centre.y - 0.5 * (s + c), 0.0, 0.0, 1.0);
-  };
   CameraFrameCopy& part = r.cameras[i];
   cv::Mat luma(static_cast<int>(part.height), static_cast<int>(part.width),
                CV_8UC1, part.luma.data());
   const Corners first =
       test::draw_marker(luma, kOriginTag.dictionary, kOriginTag.id,
-                        at({130.4, 118.7}, 92.0, 12.0));
+                        test::marker_placement({130.4, 118.7}, 92.0, 12.0));
   if (prints > 1) {
     test::draw_marker(luma, kOriginTag.dictionary, kOriginTag.id,
-                      at({826.3, 431.2}, 88.0, -20.0));
+                      test::marker_placement({826.3, 431.2}, 88.0, -20.0));
   }
   return first;
 }

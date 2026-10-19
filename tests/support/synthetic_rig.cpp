@@ -516,6 +516,21 @@ std::array<cv::Point2d, 4> draw_marker(cv::Mat& image,
   return corners;
 }
 
+cv::Matx33d marker_placement(const cv::Point2d& centre, double side_px,
+                             double roll_deg, double squash,
+                             const cv::Vec2d& perspective) {
+  const double c = std::cos(roll_deg * kPi / 180.0);
+  const double s = std::sin(roll_deg * kPi / 180.0);
+  const cv::Matx33d middle(1.0, 0.0, -0.5, 0.0, 1.0, -0.5, 0.0, 0.0, 1.0);
+  const cv::Matx33d size(side_px, 0.0, 0.0, 0.0, squash * side_px, 0.0, 0.0,
+                         0.0, 1.0);
+  const cv::Matx33d turn(c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0);
+  const cv::Matx33d view(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, perspective[0],
+                         perspective[1], 1.0);
+  const cv::Matx33d move(1.0, 0.0, centre.x, 0.0, 1.0, centre.y, 0.0, 0.0, 1.0);
+  return move * view * turn * size * middle;
+}
+
 compute::Board femto_board() {
   return compute::Board::create(legacy_femto_board()).value();
 }
