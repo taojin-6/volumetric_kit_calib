@@ -80,6 +80,9 @@ vc_add_test(spanning_tree volumetric_kit::calib_solve)
 vc_add_test(initialise volumetric_kit::calib_solve vc_synthetic_rig)
 vc_add_test(bundle_adjust volumetric_kit::calib_solve vc_synthetic_rig
             opencv_calib opencv_geometry)
+# solve: the world at the origin tag on the synthetic rig, and the outputs moved
+# into it, read back with recon's calibration file.
+vc_add_test(world_tag volumetric_kit::calib_solve vc_synthetic_rig)
 vc_add_test(solve_oom volumetric_kit::calib_solve vc_synthetic_rig)
 target_sources(vc_solve_oom_test PRIVATE support/allocation_failure.cpp)
 

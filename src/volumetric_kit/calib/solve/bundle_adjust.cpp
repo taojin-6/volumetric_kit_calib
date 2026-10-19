@@ -7,7 +7,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
-#include <cstdio>
 #include <limits>
 #include <map>
 #include <string>
@@ -29,22 +28,17 @@ namespace {
 
 namespace camera = recon::camera;
 using detail::Derivatives;
+using detail::huber;
+using detail::huber_weight;
+using detail::kLevMarqTolerance;
+using detail::number;
 using detail::Pose;
+using detail::pose_of;
 using detail::Projection;
 
 constexpr const char* kWhat = "bundle_adjust: ";
 constexpr double kInfinity = std::numeric_limits<double>::infinity();
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
-// cv::LevMarq stops when the energy's relative change, or the step's squared
-// norm, falls below this.
-constexpr double kTolerance = 1e-12;
-// 1.4826 times the median absolute deviation estimates a normal
-// distribution's standard deviation.
-constexpr double kMadToSigma = 1.4826;
-
-Pose pose_of(const camera::RodriguesTransform& t) noexcept {
-  return {t.rvec.x, t.rvec.y, t.rvec.z, t.tvec.x, t.tvec.y, t.tvec.z};
-}
 
 Pose pose_of(const compute::CvPose& t) noexcept {
   return {t.rvec[0], t.rvec[1], t.rvec[2], t.tvec[0], t.tvec[1], t.tvec[2]};
@@ -64,21 +58,6 @@ Pose within_pi(Pose p) noexcept {
       (angle - 2.0 * pi * std::round(angle / (2.0 * pi))) / angle;
   for (int i = 0; i < 3; ++i) p[i] *= scale;
   return p;
-}
-
-// Huber's cost of a residual of norm s, and its IRLS weight: the cost's
-// derivative over 2 s.
-double huber(double s, double delta) noexcept {
-  return s <= delta ? s * s : 2.0 * delta * s - delta * delta;
-}
-double huber_weight(double s, double delta) noexcept {
-  return s <= delta ? 1.0 : delta / s;
-}
-
-std::string number(double v) {
-  char text[32];
-  std::snprintf(text, sizeof text, "%.6g", v);
-  return text;
 }
 
 bool positive(double v) noexcept { return v > 0.0 && std::isfinite(v); }
@@ -318,8 +297,8 @@ core::Status solve_once(Problem& p, const BundleAdjustOptions& options,
   cv::LevMarq solver(x, callback,
                      cv::LevMarq::Settings()
                          .setMaxIterations(options.max_iterations)
-                         .setRelEnergyDeltaTolerance(kTolerance)
-                         .setStepNormTolerance(kTolerance)
+                         .setRelEnergyDeltaTolerance(kLevMarqTolerance)
+                         .setStepNormTolerance(kLevMarqTolerance)
                          .setCheckMinGradient(false),
                      cv::noArray(), cv::MatrixType::DENSE,
                      cv::VariableType::LINEAR, false, cv::DECOMP_CHOLESKY);
@@ -429,11 +408,8 @@ core::Result<bool> drop_outliers(Problem& p, const compute::Board& board,
     }
   }
   if (fits.empty()) return false;
-  const double centre = detail::median(components);
-  for (double& c : components) c = std::abs(c - centre);
-  const double corner_bound =
-      std::max(options.outlier_px,
-               options.outlier_mads * kMadToSigma * detail::median(components));
+  const double corner_bound = detail::outlier_bound(
+      std::move(components), options.outlier_px, options.outlier_mads);
   std::vector<double> rms;
   for (Fit& fit : fits) {
     double within = 0.0;

@@ -46,6 +46,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `MarkerSearch`. `compute::opencv_dictionary`, each `MarkerDictionary` as
   OpenCV's, is public, and `LumaView` has a header of its own,
   `detect/luma.hpp`, which `charuco.hpp` includes.
+- The world at the origin tag (`solve/world_tag.hpp`; DECISIONS.md,
+  2026-10-18): `solve::origin_tag_frame` locates the tag from a solved rig,
+  its poses fixed, from every camera's `TagView` of it (an N-view DLT, then
+  `cv::LevMarq` on the corners, `bundle_adjust`'s outlier rule on whole
+  views, and a size-free square fitted in OpenCV's marker frame), as a
+  `WorldOrigin`: a `TagWorld` (the frame, corners, edges against the
+  print's, residuals per view, each camera's height) or a `TagMiss` with its
+  reason (`TagFrameOptions`). `solve::anchor_rig` moves a solution's outputs,
+  never the solution, into that world as an `AnchoredRig`. `compute::finite`,
+  whether a transform's numbers are finite, which the solve and the checks
+  share.
 - `CaptureWorker::kept`, the captures kept for Calibrate (DECISIONS.md,
   2026-10-13): an immutable `KeptCaptures` snapshot of every capture written
   and not dropped, each a `KeptCapture` of every camera's full detection,

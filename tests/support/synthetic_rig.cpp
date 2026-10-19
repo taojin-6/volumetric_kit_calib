@@ -45,6 +45,16 @@ camera::Vec3d apply(const camera::Mat4d& m, const camera::Vec3d& p) {
   return camera::Vec3d(m * glm::dvec4(p, 1.0));
 }
 
+// A standard normal draw by Box-Muller, the same with every standard
+// library: std::mt19937's sequence is the standard's, where
+// std::normal_distribution's is each library's own.
+double portable_normal(std::mt19937& rng) {
+  constexpr double kToUnit = 1.0 / 4294967296.0;  // 2^-32
+  const double u1 = (static_cast<double>(rng()) + 0.5) * kToUnit;
+  const double u2 = (static_cast<double>(rng()) + 0.5) * kToUnit;
+  return std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * kPi * u2);
+}
+
 // World to the camera at `centre` looking at `target`, x level with the floor
 // before `roll_deg` turns it about the view direction.
 camera::Mat4d look_at(const camera::Vec3d& centre, const camera::Vec3d& target,
@@ -310,6 +320,77 @@ std::vector<Observation> observe(const std::vector<SyntheticCamera>& rig,
     }
   }
   return views;
+}
+
+std::array<cv::Point3d, 4> floor_tag_corners(const FloorTag& tag) {
+  const double a = tag.yaw_deg * kDeg;
+  const camera::Vec3d x(std::cos(a), std::sin(a), 0.0);
+  const camera::Vec3d y(-std::sin(a), std::cos(a), 0.0);
+  const double h = 0.5 * tag.edge_m;
+  // OpenCV's marker frame: TL, TR, BR, BL at (-h, h), (h, h), (h, -h),
+  // (-h, -h).
+  const double model[4][2] = {{-h, h}, {h, h}, {h, -h}, {-h, -h}};
+  std::array<cv::Point3d, 4> corners;
+  for (std::size_t k = 0; k < 4; ++k) {
+    const camera::Vec3d p = tag.centre + model[k][0] * x + model[k][1] * y;
+    corners[k] = cv::Point3d(p.x, p.y, p.z);
+  }
+  return corners;
+}
+
+std::vector<MarkerSighting> observe_marker(
+    const std::vector<SyntheticCamera>& rig, int id,
+    const std::array<cv::Point3d, 4>& corners, std::size_t captures,
+    const ObserveOptions& options, double margin_px) {
+  const auto at = [&](std::size_t k) {
+    return camera::Vec3d(corners[k].x, corners[k].y, corners[k].z);
+  };
+  // The face's normal, x cross y, and its centre.
+  const camera::Vec3d normal =
+      glm::normalize(glm::cross(at(1) - at(0), at(0) - at(3)));
+  const camera::Vec3d centre = 0.25 * (at(0) + at(1) + at(2) + at(3));
+  const std::vector<cv::Point3d> points(corners.begin(), corners.end());
+  std::vector<std::size_t> seeing;
+  std::vector<std::vector<cv::Point2d>> pixels;
+  for (std::size_t c = 0; c < rig.size(); ++c) {
+    const SyntheticCamera& cam = rig[c];
+    const camera::Vec3d eye(camera::rigid_inverse(cam.world_to_camera)[3]);
+    if (!(glm::dot(eye - centre, normal) > 0.0)) continue;
+    bool inside = true;
+    for (std::size_t k = 0; k < 4; ++k) {
+      if (!(apply(cam.world_to_camera, at(k)).z > 0.0)) inside = false;
+    }
+    if (!inside) continue;
+    const std::vector<cv::Point2d> q =
+        project(cam.model, cam.world_to_camera, points);
+    const double w = cam.model.size.width;
+    const double h = cam.model.size.height;
+    for (const cv::Point2d& p : q) {
+      if (!(p.x >= margin_px && p.y >= margin_px &&
+            p.x <= w - 1.0 - margin_px && p.y <= h - 1.0 - margin_px)) {
+        inside = false;
+      }
+    }
+    if (!inside) continue;
+    seeing.push_back(c);
+    pixels.push_back(q);
+  }
+  std::mt19937 rng(options.seed);
+  std::vector<MarkerSighting> sightings;
+  for (std::size_t capture = 0; capture < captures; ++capture) {
+    for (std::size_t s = 0; s < seeing.size(); ++s) {
+      MarkerSighting& sighting = sightings.emplace_back();
+      sighting.camera = seeing[s];
+      sighting.capture = static_cast<std::int64_t>(capture);
+      sighting.marker.id = id;
+      for (std::size_t k = 0; k < 4; ++k) {
+        const double dx = options.noise_px * portable_normal(rng);
+        const double dy = options.noise_px * portable_normal(rng);
+        sighting.marker.corners[k] = {pixels[s][k].x + dx, pixels[s][k].y + dy};
+      }
+    }
+  }
+  return sightings;
 }
 
 cv::Mat render_board(const camera::CameraModel& model,

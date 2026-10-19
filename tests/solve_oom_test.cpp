@@ -9,6 +9,7 @@
 // solvePnPGeneric.
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,7 @@
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
 #include "volumetric_kit/calib/solve/view_pose.hpp"
+#include "volumetric_kit/calib/solve/world_tag.hpp"
 
 namespace volumetric_kit::calib::solve {
 namespace {
@@ -92,6 +94,72 @@ TEST(SolveOom, BundleAdjust) {
   expect_oom_anywhere([&] {
     return bundle_adjust(scene.cameras, scene.board, scene.views, short_of);
   });
+}
+
+// The small scene's solution and what its cameras see of the origin tag:
+// every camera in 2 captures, the second's views of the tag moved, so the
+// location drops them in an outlier round and solves again.
+struct Tagged {
+  Small scene;
+  RigSolution solution;
+  std::vector<TagView> views;
+
+  Tagged() {
+    const InitialRig rig =
+        initialise(scene.cameras, scene.board, scene.views, 0).value();
+    solution =
+        bundle_adjust(scene.cameras, scene.board, scene.views, rig).value();
+    const auto add = [&](const test::FloorTag& tag, std::int64_t capture) {
+      const test::ObserveOptions noise{0.3,
+                                       static_cast<std::uint32_t>(capture + 1)};
+      for (const test::MarkerSighting& s :
+           test::observe_marker(scene.rig, kOriginTag.id,
+                                test::floor_tag_corners(tag), 1, noise)) {
+        views.push_back({scene.rig[s.camera].id, capture,
+                         scene.rig[s.camera].model.size, s.marker});
+      }
+    };
+    add({}, 0);
+    add({}, 1);
+    add({0.15, {0.05, 0.03, 0.0}, 4.0}, 2);
+  }
+};
+
+TEST(SolveOom, OriginTagFrame) {
+  const Tagged tagged;
+  ASSERT_EQ(tagged.views.size(), 12u);
+  const core::Result<WorldOrigin> origin = origin_tag_frame(
+      tagged.scene.cameras, tagged.solution, tagged.views, kOriginTag);
+  ASSERT_TRUE(origin.ok() && origin->tag && origin->tag->solves == 2);
+  expect_oom_anywhere([&] {
+    return origin_tag_frame(tagged.scene.cameras, tagged.solution, tagged.views,
+                            kOriginTag);
+  });
+  // A miss, and a refusal.
+  const std::vector<TagView> one(tagged.views.begin(),
+                                 tagged.views.begin() + 1);
+  expect_oom_anywhere([&] {
+    return origin_tag_frame(tagged.scene.cameras, tagged.solution, one,
+                            kOriginTag);
+  });
+  std::vector<TagView> other = tagged.views;
+  other[5].marker.id = 3;
+  expect_oom_anywhere([&] {
+    return origin_tag_frame(tagged.scene.cameras, tagged.solution, other,
+                            kOriginTag);
+  });
+}
+
+TEST(SolveOom, AnchorRig) {
+  const Tagged tagged;
+  const WorldOrigin origin =
+      origin_tag_frame(tagged.scene.cameras, tagged.solution, tagged.views,
+                       kOriginTag)
+          .value();
+  ASSERT_TRUE(origin.tag);
+  expect_oom_anywhere([&] { return anchor_rig(tagged.solution, origin); });
+  expect_oom_anywhere([&] { return anchor_rig(tagged.solution, {}); });
+  expect_oom_anywhere([&] { return anchor_rig(RigSolution{}, origin); });
 }
 
 TEST(SolveOom, ViewResiduals) {

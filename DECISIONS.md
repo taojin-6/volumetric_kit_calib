@@ -82,9 +82,10 @@ steps, the numbering and the write order).
   runs, and what is captured meanwhile goes into the next press. A result
   depends on the captures kept alone: a dropped capture leaves no trace, and
   a recalibration owes nothing to the last.
-- **The reference camera's gauge throughout.** A world at the floor tag is to
-  be applied last, to the outputs only, so the metrics' re-solves keep the
-  gauge they check.
+- **The reference camera's gauge throughout.** The world at the floor tag is
+  applied last, to the outputs only (`solve::anchor_rig`), so the metrics'
+  re-solves, the leave-one-out moves and the covariance keep the gauge they
+  were measured in.
 - **On disk before it is shown.** The window never shows a result whose files
   are missing, and nothing is written until the solve and the metrics are
   done, so a refusal or a cancel leaves nothing behind. The directory's
@@ -96,8 +97,9 @@ steps, the numbering and the write order).
   cancel takes effect before the metrics or after a leave-one-out re-solve;
   the writing, a few files, is not cancelled.
 - **Still to come:** the depth checks of the kept raw depth (CB6), the world
-  at the origin tag (CB8, CB9), and calib_rig's button, keys and progress
-  line (CB5); each is a `TODO:` where it lands.
+  at the origin tag in Calibrate's results (CB9, over `solve/world_tag.hpp`),
+  and calib_rig's button, keys and progress line (CB5); each is a `TODO:`
+  where it lands.
 
 ## 2026-10-18 — The origin tag
 
@@ -115,7 +117,22 @@ which `detect::detect_tag` finds in each camera's image.
 - **OpenCV's corner order, not AprilTag's.** The legacy script built its
   world on OpenCV's order, so a world built from the first corner to the
   second matches its world; it is turned 180 degrees about z from one built
-  along the top edge of a print of AprilTag's own image.
+  along the top edge of a print of AprilTag's own image. libapriltag's z,
+  which implicit_surface_compression's per-camera tag pose used, points into
+  the tag.
+- **Triangulated, never one view's pose.** On the 2026-09-29 JPEGs each
+  camera's own IPPE_SQUARE pose put the tag's centre 23-77 mm from the
+  others' and its normal 0.4-1.6 degrees off. So the corners are
+  triangulated, as the legacy script did (a DLT, then a least-squares
+  refinement), from 2 or more cameras; with fewer the reference camera stays
+  the origin (the user's call).
+- **Its size measured, not assumed.** In the same study a rigid 0.15 m square
+  fitted the corners worse than free ones (1.2-1.7 against 0.65-1.0 px RMS)
+  and gave a frame only 0.05-0.07 mm and 0.07-0.19 degrees from theirs; the
+  free corners' mean edge was 147.7-148.6 mm there.
+- **Each camera above it.** The legacy script refused a world only when the
+  cameras were below the tag on average. A camera that saw the printed face
+  is above it, so any one below means a tag face down or corners mirrored.
 - **Sub-pixel refinement (SUBPIX).** On the 2026-09-29 session's JPEGs, in
   the scratch study behind this choice, a still tag's corners varied by
   0.23-0.30 px (largest sd) across captures with it, against 0.47-0.50 px

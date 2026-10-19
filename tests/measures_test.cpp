@@ -2,8 +2,8 @@
 // Copyright (c) 2026 Tao Jin
 
 // The measures the solve and the checks share: a median, numpy's linear
-// quantile, and the angles between directions and between rotations,
-// accurate near 0 and 180 degrees.
+// quantile, the angles between directions and between rotations, accurate
+// near 0 and 180 degrees, and whether a transform is finite.
 
 #include "volumetric_kit/calib/compute/measures.hpp"
 
@@ -77,6 +77,24 @@ TEST(RotationAngleDeg, IsTheAngleOfTheRotationBetween) {
         << deg;
   }
   EXPECT_NEAR(rotation_angle_deg(a, a), 0.0, 1e-12);
+}
+
+TEST(Finite, IsFalseForAnyOfTheSixNumbersNotFinite) {
+  const camera::RodriguesTransform t{{0.3, -0.2, 0.1}, {1.0, 2.0, -3.0}};
+  EXPECT_TRUE(finite(t));
+  EXPECT_TRUE(finite(camera::RodriguesTransform{}));
+  for (const double bad : {std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity(),
+                           -std::numeric_limits<double>::infinity()}) {
+    for (int i = 0; i < 3; ++i) {
+      camera::RodriguesTransform r = t;
+      r.rvec[i] = bad;
+      EXPECT_FALSE(finite(r)) << "rvec " << i << ' ' << bad;
+      camera::RodriguesTransform s = t;
+      s.tvec[i] = bad;
+      EXPECT_FALSE(finite(s)) << "tvec " << i << ' ' << bad;
+    }
+  }
 }
 
 }  // namespace

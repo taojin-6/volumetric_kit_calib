@@ -5,8 +5,8 @@
 
 /// @file measures.hpp
 /// @brief The small measures the solve and the checks share: a median and a
-///        quantile, the angle between two directions, and the angle between
-///        two rotations.
+///        quantile, the angle between two directions, the angle between two
+///        rotations, and whether a transform is finite.
 
 #include <vector>
 
@@ -66,5 +66,16 @@ VC_COMPUTE_API double angle_deg(const recon::camera::Vec3d& a,
 /// @endcode
 VC_COMPUTE_API double rotation_angle_deg(
     const recon::camera::Mat3d& a, const recon::camera::Mat3d& b) noexcept;
+
+/// @brief Whether a transform's six numbers are finite.
+/// @param transform  A transform, as OpenCV writes one.
+/// @return False when a component of its `rvec` or `tvec` is infinite or not
+///         a number.
+///
+/// @code
+/// if (!finite(solution.world_to_camera[c])) return refuse(c);
+/// @endcode
+VC_COMPUTE_API bool finite(
+    const recon::camera::RodriguesTransform& transform) noexcept;
 
 }  // namespace volumetric_kit::calib::compute
