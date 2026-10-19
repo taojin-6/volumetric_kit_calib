@@ -8,8 +8,9 @@
 // held. Then the app's device split: the live worker reads a camera's picture
 // back on the compute library's queue family while the window copies the same
 // images into the mosaic on the renderer's. Then the marks and panels a
-// snapshot gives each camera, and the origin tag's coverage of the captures
-// kept. The GPU cases run under the validation layer
+// snapshot gives each camera, the origin tag's coverage of the captures
+// kept, and the 3D view's cameras before and at Calibrate's result. The GPU
+// cases run under the validation layer
 // when the environment asks (VKC_TEST_VALIDATION) and skip without a Vulkan
 // device, the cross-family case also with one family.
 
@@ -19,6 +20,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
@@ -468,6 +471,61 @@ TEST(AppLiveViewModels, PlacesTheReferenceAndTintsEachCameraByItsIndex) {
             recon::camera::Mat4d(1.0));
   std::sort(tints.begin(), tints.end());
   EXPECT_EQ(std::adjacent_find(tints.begin(), tints.end()), tints.end());
+}
+
+// At a result every camera is placed at its own pose, in rig order, whatever
+// its id, the reference among them; each keeps its models, tint and toggle.
+// Poses for another number of cameras move none.
+TEST(AppLiveViewModels, PlacesEveryCameraAtItsPoseInRigOrder) {
+  sensor::SensorInfo info;
+  info.color = test::color_like_lens();
+  info.depth = test::depth_like_lens();
+  for (const std::size_t n : {1u, 3u, 5u}) {
+    SCOPED_TRACE(n);
+    const std::size_t reference = n / 2;
+    std::vector<viz::SceneCamera> cameras;
+    std::vector<recon::camera::Mat4d> poses;
+    for (std::size_t i = 0; i < n; ++i) {
+      cameras.push_back(scene_camera(info, i, i == reference));
+      cameras.back().shown = i % 2 == 0;
+      cameras.back().depth_to_color[3][0] = -0.01 * static_cast<double>(i);
+      // A turn about y and a step along x, each camera's own.
+      const double turn = 0.3 * static_cast<double>(i);
+      recon::camera::Mat4d pose(1.0);
+      pose[0][0] = std::cos(turn);
+      pose[0][2] = -std::sin(turn);
+      pose[2][0] = std::sin(turn);
+      pose[2][2] = std::cos(turn);
+      pose[3][0] = 0.5 * static_cast<double>(i);
+      poses.push_back(i == reference ? recon::camera::Mat4d(1.0) : pose);
+    }
+    const std::vector<viz::SceneCamera> before = cameras;
+
+    std::vector<recon::camera::Mat4d> extra = poses;
+    extra.push_back(recon::camera::Mat4d(1.0));
+    const std::vector<recon::camera::Mat4d> fewer(poses.begin(),
+                                                  poses.end() - 1);
+    for (const auto& wrong : {extra, fewer}) {
+      const core::Status refused = placed_cameras(cameras, wrong);
+      EXPECT_EQ(refused.domain(), Code::InvalidArgument);
+      for (std::size_t i = 0; i < n; ++i) {
+        EXPECT_EQ(cameras[i].color_to_world, before[i].color_to_world) << i;
+      }
+    }
+
+    const core::Status placed = placed_cameras(cameras, poses);
+    ASSERT_TRUE(placed.ok()) << placed.message();
+    for (std::size_t i = 0; i < n; ++i) {
+      SCOPED_TRACE(i);
+      ASSERT_TRUE(cameras[i].color_to_world.has_value());
+      EXPECT_EQ(*cameras[i].color_to_world, poses[i]);
+      EXPECT_EQ(cameras[i].tint, before[i].tint);
+      EXPECT_EQ(cameras[i].shown, before[i].shown);
+      EXPECT_EQ(cameras[i].depth_to_color, before[i].depth_to_color);
+      EXPECT_EQ(cameras[i].color.intrinsics.fx, info.color->intrinsics.fx);
+      EXPECT_TRUE(cameras[i].depth.has_value());
+    }
+  }
 }
 
 }  // namespace

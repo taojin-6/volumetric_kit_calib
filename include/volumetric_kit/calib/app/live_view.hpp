@@ -8,7 +8,8 @@
 ///        its pictures copied into the rig mosaic, and the marks and panels
 ///        the viz tier draws over and beside it; of the captures kept: the
 ///        origin tag's coverage; and of a 3D-view snapshot: each camera's
-///        points, drawn in place at the rig's poses.
+///        points, drawn in place at the rig's poses, which Calibrate's result
+///        sets.
 
 #include <cstddef>
 #include <cstdint>
@@ -163,9 +164,10 @@ VC_APP_API core::Result<std::optional<core::TimelinePoint>> record_cloud(
 VC_APP_API bool cloud_live(bool frozen, viz::ScenePlacement placement,
                            bool minimized) noexcept;
 
-/// @brief Sensor @p index's camera in the 3D view before the rig is solved:
-///        its factory models, its tint gfx's @p index-th categorical colour,
-///        and placed, at the world's origin, only when it is the reference.
+/// @brief Sensor @p index's camera in the 3D view before the rig is solved
+///        (@ref placed_cameras places them all): its factory models, its tint
+///        gfx's @p index-th categorical colour, and placed, at the world's
+///        origin, only when it is the reference.
 /// @param info       The sensor: its colour model, and its depth model and
 ///                   factory depth-to-colour extrinsic.
 /// @param index      Its index in the rig, which picks its tint.
@@ -181,5 +183,22 @@ VC_APP_API bool cloud_live(bool frozen, viz::ScenePlacement placement,
 /// @endcode
 VC_APP_API viz::SceneCamera scene_camera(const recon::sensor::SensorInfo& info,
                                          std::size_t index, bool reference);
+
+/// @brief Place every camera of the 3D view at Calibrate's poses; each
+///        keeps its models, tint and toggle.
+/// @param cameras         The rig's cameras, in rig order.
+/// @param color_to_world  Each one's colour frame to the world, in rig order
+///                        (`CalibrateResult::color_to_world`).
+/// @return OK; or `InvalidArgument`, with no camera moved, for as many poses
+///         as cameras missing or extra; or `OutOfMemory`.
+///
+/// @code
+/// if (auto result = calibrate->take_result()) {
+///   VKC_TRY(placed_cameras(view_cameras, result->color_to_world));
+/// }
+/// @endcode
+VC_APP_API core::Status placed_cameras(
+    std::vector<viz::SceneCamera>& cameras,
+    const std::vector<recon::camera::Mat4d>& color_to_world);
 
 }  // namespace volumetric_kit::calib::app

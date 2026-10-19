@@ -148,10 +148,25 @@ viz::SceneCamera scene_camera(const sensor::SensorInfo& info, std::size_t index,
   camera.color = *info.color;
   camera.depth = info.depth;
   camera.depth_to_color = info.depth_to_color;
-  // TODO: CA12b places every camera at Calibrate's solved poses.
   if (reference) camera.color_to_world = recon::camera::Mat4d(1.0);
   camera.tint = gfx::pipelines::categorical_rgba8(index);
   return camera;
+}
+
+core::Status placed_cameras(
+    std::vector<viz::SceneCamera>& cameras,
+    const std::vector<recon::camera::Mat4d>& color_to_world) {
+  return compute::guarded("placed_cameras", [&]() -> core::Status {
+    if (color_to_world.size() != cameras.size()) {
+      return core::Status::invalid_argument(
+          "placed_cameras: " + std::to_string(color_to_world.size()) +
+          " poses for " + std::to_string(cameras.size()) + " cameras");
+    }
+    for (std::size_t i = 0; i < cameras.size(); ++i) {
+      cameras[i].color_to_world = color_to_world[i];
+    }
+    return {};
+  });
 }
 
 }  // namespace volumetric_kit::calib::app

@@ -25,11 +25,14 @@
 #include <glm/vec2.hpp>
 
 #include "imgui.h"
+#include "volumetric_kit/calib/app/calibrate_worker.hpp"
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 #include "volumetric_kit/calib/app/cloud_worker.hpp"
 #include "volumetric_kit/calib/app/keys.hpp"
 #include "volumetric_kit/calib/app/live_view.hpp"
 #include "volumetric_kit/calib/app/live_worker.hpp"
+#include "volumetric_kit/calib/app/rig_mode.hpp"
+#include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/depth/depth_checks.hpp"
 #include "volumetric_kit/calib/viz/board_editor.hpp"
@@ -166,10 +169,6 @@ struct WindowDeleter {
 // --- The 3D view's settings, until the scenario has them.
 // TODO: take the stride, colour mode, point size and the live sets' sampling
 // from the core's calib_rig view settings once the scenario has them (CO5).
-// Hidden at first: until Calibrate places the rig, the mosaic, where the board
-// is seen, has the window, and T2 prepares nothing (cloud_live).
-// TODO: CA12b shows the view beside the mosaic once Calibrate places the rig.
-constexpr viz::ScenePlacement kPlacement = viz::ScenePlacement::Hidden;
 constexpr int kMaxStride = 8;
 // The pointer's feel: radians of orbit per pixel dragged, and each wheel
 // step's zoom, in the 3D view and the mosaic.
@@ -179,12 +178,14 @@ constexpr float kMosaicZoomStep = 1.1f;
 
 // What the window holds of the 3D view.
 struct View3d {
-  viz::ScenePlacement placement = kPlacement;
+  viz::ScenePlacement placement = viz::ScenePlacement::Hidden;  // the mode's
   bool frozen = false;
   // Its mode, stride and point size; the rest is set each frame.
   viz::CloudStyle style;
   viz::SceneOptions options;
-  std::vector<viz::SceneCamera> cameras;  // in the rig's order
+  std::vector<viz::SceneCamera> cameras;     // in the rig's order
+  std::optional<compute::Board> board;       // the solved boards'
+  std::vector<recon::camera::Mat4d> boards;  // each solved board's T_wb
   viz::SceneView view;
   std::shared_ptr<const CloudSnapshot> latest;  // released before the worker
   std::shared_ptr<core::Buffer> lines;          // the scene's lines, uploaded
@@ -266,21 +267,6 @@ void drop_last(CaptureWorker& captures, Notices& notices) {
   if (!dropped.ok()) notices.note(dropped.message());
 }
 
-// The keys polled before this frame, mapped with its WantTextInput.
-void act_on_keys(KeyQueue& keys, bool want_text_input, LiveWorker& live,
-                 CaptureWorker& captures, Notices& notices) {
-  const core::Result<std::vector<KeyRequest>> requests =
-      keys.take(want_text_input);
-  if (!requests.ok()) {
-    notices.note(requests.status().message());
-    return;
-  }
-  for (const KeyRequest request : requests.value()) {
-    if (request == KeyRequest::Capture) arm(live, notices);
-    if (request == KeyRequest::DropLast) drop_last(captures, notices);
-  }
-}
-
 // Everything a frame's UI reads.
 struct FrameInputs {
   const std::vector<std::string>* ids = nullptr;
@@ -289,16 +275,123 @@ struct FrameInputs {
   viz::SaverQueue saver;
   std::string directory;
   core::StageMetrics stages;
+
+  bool ready() const { return summary && summary->ready; }
 };
 
-// The capture's window: its buttons, then where it stands.
-void capture_window(LiveWorker& live, CaptureWorker& captures, Notices& notices,
+// What the window's requests reach.
+struct Workers {
+  LiveWorker& live;
+  CaptureWorker& captures;
+  CalibrateWorker& calibrate;
+};
+
+// A press of Calibrate, its key's or a button's: the captures kept go to T4
+// once the gate lets them; otherwise why not is said.
+void press_calibrate(CalibrateWorker& calibrate, RigMode& mode,
+                     const FrameInputs& in, Notices& notices) {
+  const CalibrateGate gate = calibrate_gate(mode, in.ready(), in.saver.pending);
+  if (!gate.enabled) {
+    notices.note("calibrate: " + std::string(gate.reason));
+    return;
+  }
+  const core::Result<bool> started = calibrate.request(in.kept);
+  if (!started.ok()) {
+    notices.note(started.status().message());
+  } else if (!started.value()) {
+    notices.note("calibrate: already running");
+  } else {
+    mode.calibrating = true;
+  }
+}
+
+// A press of Cancel, Escape's or the button's.
+void cancel_calibrate(CalibrateWorker& calibrate, Notices& notices) {
+  notices.note(calibrate.cancel()
+                   ? "calibrate: cancelled"
+                   : "calibrate: too late to cancel: writing its results");
+}
+
+// Back to the camera images: the 3D view's snapshot let go -- each frame that
+// drew it holds it until it retires -- and its freeze undone, so the view is
+// live when it is shown again.
+void show_images(RigMode& mode, View3d& v) {
+  mode.view = RigView::Images;
+  v.latest.reset();
+  v.frozen = false;
+}
+
+// The keys polled before this frame, mapped with its WantTextInput, each
+// done as the window's mode has it (rig_action).
+void act_on_keys(KeyQueue& keys, bool want_text_input, const Workers& workers,
+                 RigMode& mode, View3d& v, const FrameInputs& in,
+                 Notices& notices) {
+  const core::Result<std::vector<KeyRequest>> requests =
+      keys.take(want_text_input);
+  if (!requests.ok()) {
+    notices.note(requests.status().message());
+    return;
+  }
+  for (const KeyRequest request : requests.value()) {
+    const RigStep step = rig_action(mode, request);
+    if (!step.hint.empty()) notices.note(std::string(step.hint));
+    switch (step.action) {
+      case RigAction::Arm:
+        arm(workers.live, notices);
+        break;
+      case RigAction::DropLast:
+        drop_last(workers.captures, notices);
+        break;
+      case RigAction::Calibrate:
+        press_calibrate(workers.calibrate, mode, in, notices);
+        break;
+      case RigAction::Cancel:
+        cancel_calibrate(workers.calibrate, notices);
+        break;
+      case RigAction::ShowImages:
+        show_images(mode, v);
+        break;
+      case RigAction::ShowScene:
+        mode.view = RigView::Scene;
+        break;
+      case RigAction::Ignore:
+        break;
+    }
+  }
+}
+
+// Calibrate's controls: its button, held back with the gate's reason; or,
+// while it runs, its progress and Cancel.
+void calibrate_controls(CalibrateWorker& calibrate, RigMode& mode,
+                        const FrameInputs& in, Notices& notices) {
+  if (const std::optional<CalibrateProgress> at = calibrate.progress()) {
+    const core::Result<viz::PanelLine> line = viz::calibrate_progress_line(
+        to_string(at->stage), at->done, at->total, at->seconds);
+    if (line.ok()) viz::draw_panel_lines("calibrating", {line.value()});
+    if (ImGui::Button("Cancel")) cancel_calibrate(calibrate, notices);
+    return;
+  }
+  const CalibrateGate gate = calibrate_gate(mode, in.ready(), in.saver.pending);
+  ImGui::BeginDisabled(!gate.enabled);
+  if (ImGui::Button("Calibrate")) press_calibrate(calibrate, mode, in, notices);
+  ImGui::EndDisabled();
+  if (!gate.enabled) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("%.*s", static_cast<int>(gate.reason.size()),
+                        gate.reason.data());
+  }
+}
+
+// The capture's window: its buttons and Calibrate's, then where it stands.
+void capture_window(const Workers& workers, RigMode& mode, Notices& notices,
                     const FrameInputs& in) {
+  LiveWorker& live = workers.live;
   ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
   ImGui::Begin("Capture");
   if (ImGui::Button("Capture")) arm(live, notices);
   ImGui::SameLine();
-  if (ImGui::Button("Drop last")) drop_last(captures, notices);
+  if (ImGui::Button("Drop last")) drop_last(workers.captures, notices);
+  calibrate_controls(workers.calibrate, mode, in, notices);
   notices.capture.decision = live.decision();
   const core::Result<std::vector<viz::PanelLine>> lines =
       viz::capture_panel(notices.capture);
@@ -355,10 +448,49 @@ void rig_windows(const LiveSnapshot& snapshot, const viz::BoardEditor& editor,
       ImGui::End();
     }
   }
+}
 
+// The board's editor; an edit goes to the live worker.
+void board_window(viz::BoardEditor& editor, LiveWorker& live,
+                  Notices& notices) {
+  ImGui::SetNextWindowPos(ImVec2(10, 640), ImGuiCond_FirstUseEver);
+  ImGui::Begin("Board");
+  const Target before = editor.board();
+  const bool measured_before = editor.square_measured();
+  const core::Status edited = viz::draw_board_editor(editor);
+  if (!edited.ok()) notices.note(edited.message());
+  if (editor.board() != before || editor.square_measured() != measured_before) {
+    const core::Status taken =
+        live.set_board(editor.board(), editor.square_measured());
+    if (!taken.ok()) notices.note(taken.message());
+  }
+  ImGui::End();
+}
+
+void stages_window(const LiveSnapshot& snapshot, const FrameInputs& in) {
   const core::Result<gfx::FrameMetrics> metrics =
       viz::stage_frame_metrics(in.stages, snapshot.sets_per_second);
   if (metrics.ok()) gfx::ui::draw_metrics_panel(metrics.value(), "Stages");
+}
+
+// The Calibration window, once a result is shown: Calibrate's controls and
+// what the result is worth; collapsed as the images come back, open as the
+// 3D view does.
+void calibration_window(const Workers& workers, RigMode& mode,
+                        bool view_changed,
+                        const std::vector<viz::PanelLine>& lines,
+                        const FrameInputs& in, Notices& notices) {
+  if (!mode.calibrated) return;
+  if (view_changed) {
+    ImGui::SetNextWindowCollapsed(mode.view == RigView::Images,
+                                  ImGuiCond_Always);
+  }
+  ImGui::SetNextWindowPos(ImVec2(430, 10), ImGuiCond_FirstUseEver);
+  if (ImGui::Begin("Calibration")) {
+    calibrate_controls(workers.calibrate, mode, in, notices);
+    viz::draw_panel_lines("calibration", lines);
+  }
+  ImGui::End();
 }
 
 // Each tile's marks, behind every ImGui window.
@@ -393,14 +525,18 @@ void flash(const Notices& notices) {
 }
 
 // What the workers reported since the last frame.
-void take_reports(LiveWorker& live, CloudWorker& cloud, CaptureWorker& captures,
+void take_reports(const Workers& workers, CloudWorker& cloud,
                   Notices& notices) {
-  for (const core::Status& error : live.take_errors()) {
+  for (const core::Status& error : workers.live.take_errors()) {
     notices.note(error.message());
   }
   for (const core::Status& error : cloud.take_errors()) {
     notices.note(error.message());
   }
+  for (const core::Status& error : workers.calibrate.take_errors()) {
+    notices.note(error.message());
+  }
+  CaptureWorker& captures = workers.captures;
   for (const core::Status& error : captures.take_errors()) {
     notices.note(error.message());
   }
@@ -427,22 +563,11 @@ void take_reports(LiveWorker& live, CloudWorker& cloud, CaptureWorker& captures,
   }
 }
 
-// The 3D view's window: where it sits, freeze, colouring, and each camera's
-// toggle and tint; then the worker told what the view needs.
-void view_window(View3d& v, CloudWorker& cloud,
-                 const std::vector<std::string>& ids, Notices& notices) {
+// The 3D view's window: freeze, colouring, and each camera's toggle and tint.
+void view_window(View3d& v, const std::vector<std::string>& ids,
+                 Notices& notices) {
   ImGui::SetNextWindowPos(ImVec2(10, 760), ImGuiCond_FirstUseEver);
   ImGui::Begin("3D view");
-  int placement = static_cast<int>(v.placement);
-  ImGui::RadioButton("hidden", &placement,
-                     static_cast<int>(viz::ScenePlacement::Hidden));
-  ImGui::SameLine();
-  ImGui::RadioButton("beside", &placement,
-                     static_cast<int>(viz::ScenePlacement::Beside));
-  ImGui::SameLine();
-  ImGui::RadioButton("full window", &placement,
-                     static_cast<int>(viz::ScenePlacement::FullWindow));
-  v.placement = static_cast<viz::ScenePlacement>(placement);
   ImGui::Checkbox("freeze", &v.frozen);
 
   using gfx::pipelines::CloudColor;
@@ -491,15 +616,9 @@ void view_window(View3d& v, CloudWorker& cloud,
       camera.tint = tint_of(rgb);
       v.lines_stale = true;
     }
-    if (!camera.color_to_world) {
-      ImGui::SameLine();
-      ImGui::TextDisabled("not placed until the rig is solved");
-    }
     ImGui::PopID();
   }
   ImGui::End();
-  cloud.set_live(cloud_live(v.frozen, v.placement, false));
-  cloud.set_color(v.style.mode != CloudColor::Solid);
 }
 
 // The wheel and drags of this frame, to the view under the pointer: the
@@ -566,10 +685,9 @@ core::Status refresh_lines(View3d& v, gfx::app::WindowedApp& app,
                            gfx::RetireQueue& retire,
                            std::uint64_t frame_number) {
   if (!v.lines_stale) return {};
-  // TODO: CA12b passes the solved boards, and their board, once Calibrate
-  // places them.
   VKC_ASSIGN(const std::vector<gfx::pipelines::ColorVertex> vertices,
-             viz::scene_lines(v.cameras, nullptr, {}, v.options));
+             viz::scene_lines(v.cameras, v.board ? &*v.board : nullptr,
+                              v.boards, v.options));
   std::shared_ptr<core::Buffer> fresh;
   if (!vertices.empty()) {
     gfx::BufferUploadDesc upload;
@@ -616,14 +734,59 @@ core::Status draw_scene(View3d& v, gfx::pipelines::DepthCloudPipeline& clouds,
   return {};
 }
 
+// A Calibrate result in the 3D view: every camera at its pose, the solved
+// boards drawn, the view framed on the result's origin when it is new
+// (frame_on_result), its panel's lines, and the 3D view in the window.
+// Nothing changes when the result cannot be shown.
+core::Status show_result(const CalibrateResult& result,
+                         const KeptCaptures& kept, RigMode& mode, View3d& v,
+                         std::optional<RigOrigin>& framed,
+                         std::vector<viz::PanelLine>& panel, Notices& notices) {
+  VKC_ASSIGN(compute::Board board, compute::Board::create(kept.board));
+  VKC_ASSIGN(std::vector<viz::PanelLine> lines,
+             viz::calibration_panel(result.ids, result.metrics, result.number,
+                                    result.directory, result.captures,
+                                    result.seconds));
+  std::vector<recon::camera::Mat4d> boards = result.boards_to_world;
+  VKC_TRY(placed_cameras(v.cameras, result.color_to_world));
+  v.board = std::move(board);
+  v.boards = std::move(boards);
+  v.lines_stale = true;
+  panel = std::move(lines);
+  // TODO: CB9 takes the origin tag's world from the result: the origin, the
+  // view levelled +z up, the tag's and world's lines and the cameras'
+  // heights.
+  const RigOrigin origin{result.reference};
+  if (frame_on_result(framed, origin)) {
+    const core::Status aimed = v.view.frame(v.placed());
+    if (aimed.ok()) {
+      framed = origin;
+    } else {
+      report_view(v, aimed, notices);
+    }
+  }
+  mode = on_result(mode);
+  char rrr[16];
+  std::snprintf(rrr, sizeof rrr, "%03d", result.number);
+  notices.note("calibration " + std::string(rrr) + ": written to " +
+               result.directory);
+  return {};
+}
+
 // Stops the workers, waits for the renderer, and frees what the frames held,
-// on every way out of the loop.
+// on every way out of the loop: Calibrate first, whose run stops at its next
+// step, then the live view, which feeds the 3D view's worker.
 class Teardown {
  public:
-  Teardown(LiveWorker& live, CloudWorker& cloud, gfx::app::WindowedApp& app,
-           gfx::RetireQueue& retire) noexcept
-      : live_(live), cloud_(cloud), app_(app), retire_(retire) {}
+  Teardown(CalibrateWorker& calibrate, LiveWorker& live, CloudWorker& cloud,
+           gfx::app::WindowedApp& app, gfx::RetireQueue& retire) noexcept
+      : calibrate_(calibrate),
+        live_(live),
+        cloud_(cloud),
+        app_(app),
+        retire_(retire) {}
   ~Teardown() {
+    calibrate_.stop();
     live_.stop();
     cloud_.stop();
     const core::Status idle = app_.wait_idle();
@@ -636,6 +799,7 @@ class Teardown {
   Teardown& operator=(const Teardown&) = delete;
 
  private:
+  CalibrateWorker& calibrate_;
   LiveWorker& live_;
   CloudWorker& cloud_;
   gfx::app::WindowedApp& app_;
@@ -727,6 +891,9 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
              CloudWorker::create(
                  recon_device, recon_allocator, array.size(),
                  {shared->compute_family(), shared->graphics_family()}));
+  // Calibrate's worker (T4), after the 3D view's, so it goes first.
+  VKC_ASSIGN(std::unique_ptr<CalibrateWorker> calibrate,
+             CalibrateWorker::create());
 
   // --- The window's side.
   VKC_ASSIGN(std::unique_ptr<viz::RigMosaic> mosaic,
@@ -765,15 +932,20 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
              glfw::ImGuiGlfw::create(window, overlay.context()));
 
   // --- The live worker last, as its thread starts the cameras: from here
-  // every way out stops it, then the 3D view's worker (Teardown), so no set
-  // is held when the array closes.
+  // every way out stops Calibrate's worker, then it, then the 3D view's
+  // (Teardown), so no set is held when the array closes.
   VKC_ASSIGN(std::unique_ptr<LiveWorker> live,
              LiveWorker::create(std::move(array), recon_device, recon_allocator,
                                 editor.board(), editor.square_measured(),
                                 captures.get(), cloud.get()));
   const std::vector<std::string>& ids = live->ids();
   std::shared_ptr<const LiveSnapshot> latest;  // released before live
-  const Teardown teardown(*live, *cloud, app, retire);
+  const Teardown teardown(*calibrate, *live, *cloud, app, retire);
+  const Workers workers{*live, *captures, *calibrate};
+  RigMode mode;
+  RigView shown = mode.view;        // the last frame's
+  std::optional<RigOrigin> framed;  // the 3D view's, once framed on a result
+  std::vector<viz::PanelLine> calibration;  // the result's panel
   bool fresh = false;
   bool fitted = false;
   Pointer pointer;
@@ -784,9 +956,20 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       fresh = true;
     }
     if (std::shared_ptr<const CloudSnapshot> s = cloud->take_snapshot()) {
-      view3d.latest = std::move(s);
+      // Held only while the 3D view is shown (show_images).
+      if (mode.view == RigView::Scene) view3d.latest = std::move(s);
     }
-    take_reports(*live, *cloud, *captures, notices);
+    take_reports(workers, *cloud, notices);
+    if (std::shared_ptr<const CalibrateResult> result =
+            calibrate->take_result()) {
+      const std::shared_ptr<const KeptCaptures> kept = captures->kept();
+      const core::Status placed =
+          kept != nullptr ? show_result(*result, *kept, mode, view3d, framed,
+                                        calibration, notices)
+                          : core::Status::not_found("no captures kept");
+      if (!placed.ok()) notices.note("calibrate: " + placed.message());
+    }
+    mode.calibrating = calibrate->busy();
     if (live->captures() > 0 && !editor.locked()) {
       (void)editor.edit(live->board(), live->square_measured());
       editor.lock();
@@ -801,28 +984,45 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     }
     gfx::windowing::Frame& frame = *next;
     retire.poll();
+
+    // Captures pending first, so a snapshot read after holds every capture
+    // written before it.
+    FrameInputs in;
+    in.ids = &ids;
+    in.saver = {captures->pending(), captures->capacity(), captures->full()};
+    in.summary = captures->summary();
+    in.kept = captures->kept();
+    in.directory = captures->directory();
+    if (latest) in.stages = latest->stages;
+    if (view3d.latest) in.stages.merge(view3d.latest->stages);
+
+    // The keys before the layout, so a switch of view shows in this frame.
+    platform->new_frame();
+    overlay.new_frame();
+    const ImGuiIO& io = ImGui::GetIO();
+    act_on_keys(input.keys, io.WantTextInput, workers, mode, view3d, in,
+                notices);
+    const bool view_changed = mode.view != shown;
+    shown = mode.view;
+    view3d.placement = scene_placement(mode);
+
     const VkExtent2D extent = frame.target->extent();
     const viz::WindowSplit split = viz::window_split(view3d.placement, extent);
+    const bool mosaic_shown = split.mosaic.extent.width > 0;
+    const bool scene_shown = split.scene.extent.width > 0;
     gfx::camera::ImageView2D& view = mosaic->view();
     view.set_viewport(
         glm::vec2(static_cast<float>(split.mosaic.offset.x),
                   static_cast<float>(split.mosaic.offset.y)),
         glm::vec2(static_cast<float>(split.mosaic.extent.width),
                   static_cast<float>(split.mosaic.extent.height)));
-    if (!fitted) {
+    if (!fitted && mosaic_shown) {
       view.fit();
       fitted = true;
     }
-
-    FrameInputs in;
-    in.ids = &ids;
-    in.summary = captures->summary();
-    in.kept = captures->kept();
-    in.saver = {captures->pending(), captures->capacity(), captures->full()};
-    in.directory = captures->directory();
-    if (latest) in.stages = latest->stages;
-    if (view3d.latest) in.stages.merge(view3d.latest->stages);
-    if (fresh && latest) {
+    // The tiles only while the mosaic is shown: a snapshot taken meanwhile
+    // stays fresh for the images' return.
+    if (fresh && latest && mosaic_shown) {
       core::StageScope scope(in.stages, "tiles");
       VKC_TRY(
           record_snapshot(*mosaic, retire, frame.cmd, latest, frame.number));
@@ -832,31 +1032,18 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       }
       fresh = false;
     }
-
-    platform->new_frame();
-    overlay.new_frame();
-    const ImGuiIO& io = ImGui::GetIO();
-    act_on_keys(input.keys, io.WantTextInput, *live, *captures, notices);
     steer(window, input, pointer, io.WantCaptureMouse, split, view,
           view3d.view);
 
-    capture_window(*live, *captures, notices, in);
-    view_window(view3d, *cloud, ids, notices);
-    ImGui::SetNextWindowPos(ImVec2(10, 640), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Board");
-    const Target before = editor.board();
-    const bool measured_before = editor.square_measured();
-    const core::Status edited = viz::draw_board_editor(editor);
-    if (!edited.ok()) notices.note(edited.message());
-    if (editor.board() != before ||
-        editor.square_measured() != measured_before) {
-      const core::Status taken =
-          live->set_board(editor.board(), editor.square_measured());
-      if (!taken.ok()) notices.note(taken.message());
+    if (mode.view == RigView::Images) {
+      capture_window(workers, mode, notices, in);
+      board_window(editor, *live, notices);
+    } else {
+      view_window(view3d, ids, notices);
     }
-    ImGui::End();
-    const bool mosaic_shown = split.mosaic.extent.width > 0;
-    const bool scene_shown = split.scene.extent.width > 0;
+    calibration_window(workers, mode, view_changed, calibration, in, notices);
+    cloud->set_live(cloud_live(view3d.frozen, view3d.placement, false));
+    cloud->set_color(view3d.style.mode != gfx::pipelines::CloudColor::Solid);
     if (scene_shown) {
       report_view(view3d, refresh_lines(view3d, app, retire, frame.number),
                   notices);
@@ -873,7 +1060,10 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
                              extent, split.scene, *shared),
                   notices);
     }
-    if (latest) rig_windows(*latest, editor, in);
+    if (latest && mode.view == RigView::Images) {
+      rig_windows(*latest, editor, in);
+    }
+    if (latest) stages_window(*latest, in);
     if (!notices.messages.empty()) {
       ImGui::Begin("Messages");
       for (const std::string& message : notices.messages) {

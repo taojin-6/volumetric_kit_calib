@@ -19,9 +19,8 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > metrics; with `VC_WITH_RIG`, the `capture` tier's session writer, the `viz`
 > tier's live and 3D views and the `depth` tier's board-plane fit and
 > pairwise depth agreement; and, with GLFW and recon's Orbbec driver too, the
-> `app` tier's `calib_rig`, live view, 3D view, capture and Calibrate's worker.
-> Calibrate in calib_rig's window and the color tier are not yet
-> implemented; the legacy `camera_calibration` Python
+> `app` tier's `calib_rig`, live view, 3D view, capture and Calibrate. The
+> color tier is not yet implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain
 > the reference oracle.
 
@@ -117,13 +116,13 @@ renderer.
   (or a clicker's "next") captures a still set, Backspace (or "back") drops
   the last. A worker thread owns the rig and finds the board in each set's
   luma, another prepares sets on the GPU for the 3D view (hidden until the
-  rig is calibrated, then beside the mosaic or in the whole window), another
-  finds the board and the origin tag in each capture at full resolution,
-  writes it and keeps it in memory for Calibrate, and the window draws and
-  never waits
+  rig is calibrated), another finds the board and the origin tag in each
+  capture at full resolution, writes it and keeps it in memory for
+  Calibrate, and the window draws and never waits
   ([DECISIONS.md](DECISIONS.md#2026-10-16--calib_rigs-live-view-and-capture)).
   Calibrate's worker solves and measures the kept captures and writes a
-  results directory
+  results directory; each result fills the window with the live points at
+  the solved poses, and a key goes back to the images
   ([DECISIONS.md](DECISIONS.md#2026-10-18--calibrate-t4)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
@@ -198,6 +197,16 @@ Run calib_rig on a rig (the session root must exist):
 The core's
 [CONFIG.md](https://github.com/taojin-6/volumetric_kit_core/blob/main/CONFIG.md)
 has every field, the modes and the window among them.
+
+Its keys, on a press (none while a text field has the keyboard):
+
+| Key | Camera images | 3D view |
+| --- | --- | --- |
+| Space, →, Page Down, S | capture | to the images, "press again" |
+| Backspace, ←, Page Up | drop the last capture | to the images |
+| C, F5 | Calibrate | Calibrate |
+| V, B, `.` | to the 3D view, once calibrated | to the images |
+| Escape | cancel Calibrate | cancel Calibrate |
 
 ## Use it in your project
 

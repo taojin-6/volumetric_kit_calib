@@ -29,6 +29,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Calibrate in calib_rig (DECISIONS.md, 2026-10-18, "Calibrate (T4)"): C,
+  F5 or a Calibrate button runs `CalibrateWorker` on the captures kept, with
+  a progress line and Cancel (Escape) while it runs; each result fills the
+  window with the 3D view, every camera's live points at the solved poses
+  with its frusta and the solved boards, and V, B or `.` goes back to the
+  camera images to capture more. `app::RigMode` (`app/rig_mode.hpp`) is the
+  window's mode: `rig_action`, what each key does in the images and in the
+  3D view; `calibrate_gate`, when Calibrate may run and why not;
+  `scene_placement`, `on_result` and `frame_on_result` (`RigOrigin`).
+  `KeyRequest` gains `Calibrate`, `SwitchView` and `Cancel`.
+  `app::placed_cameras` places the 3D view's cameras at a result's poses.
+  In `viz`: `calibration_panel`, the Calibration window's lines (the RMS,
+  the transfer, the leave-one-out moves, the principal-point verdict, each
+  camera's centre, the results directory), and `calibrate_progress_line`.
 - Calibrate's worker, `app::CalibrateWorker` (T4; DECISIONS.md, 2026-10-18):
   each request solves a snapshot of the kept captures from scratch with the
   thread-free `app::calibrate` (`initialise`, `bundle_adjust`,
@@ -203,6 +217,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- calib_rig's 3D view is hidden with the camera images and fills the window
+  at a result: its placement radio is gone, and the mosaic's tiles are
+  recorded only while it is shown.
 - `report.json` writes `solver.seconds` to the microsecond, with six
   decimals, so a report's length does not vary with its solve's time.
 - `quality::SessionOptions::ready_from` defaults to

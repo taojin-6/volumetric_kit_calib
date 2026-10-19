@@ -96,10 +96,15 @@ steps, the numbering and the write order).
 - **Cancelled between re-solves.** `bundle_adjust` is not interruptible, so a
   cancel takes effect before the metrics or after a leave-one-out re-solve;
   the writing, a few files, is not cancelled.
-- **Still to come:** the depth checks of the kept raw depth (CB6), the world
-  at the origin tag in Calibrate's results (CB9, over `solve/world_tag.hpp`),
-  and calib_rig's button, keys and progress line (CB5); each is a `TODO:`
-  where it lands.
+- **The images, then the cloud** (2026-10-19, the user's call). calib_rig
+  shows the camera images until a result, then the live points at the solved
+  poses in the whole window, and a key goes back to the images to capture
+  more and recalibrate (`app/rig_mode.hpp`). Calibrate is C or F5 and Escape
+  cancels; the keys the clicker's extra buttons send are not known, so the
+  capture and drop keys stay as they were.
+- **Still to come:** the depth checks of the kept raw depth (CB6) and the
+  world at the origin tag in Calibrate's results and the 3D view (CB9, over
+  `solve/world_tag.hpp`); each is a `TODO:` where it lands.
 
 ## 2026-10-18 — The origin tag
 
@@ -147,14 +152,15 @@ which `detect::detect_tag` finds in each camera's image.
 
 ## 2026-10-17 — The live 3D view, drawn from prepared frames in place
 
-calib_rig shows the rig in 3D beside its mosaic or over it
+calib_rig shows the rig in 3D over its mosaic
 (`viz/scene_view.hpp`, `viz/point_cloud.hpp`, `app/cloud_worker.hpp`): each
 camera's depth as points, its frusta, the world's axes and the solved boards.
 
-- **Hidden until the rig is calibrated** (amended 2026-10-18, the user's
-  call). Before Calibrate only the reference is placed, and the camera
-  images, where the board is aimed and checked, matter more: the mosaic has
-  the window and T2 prepares nothing. The panel can still show the view.
+- **Hidden until the rig is calibrated** (amended 2026-10-18 and 2026-10-19,
+  the user's calls). Before Calibrate only the reference is placed, and the
+  camera images, where the board is aimed and checked, matter more: the
+  mosaic has the window and T2 prepares nothing. A result gives the view the
+  whole window (the 2026-10-18 entry, "Calibrate (T4)").
 
 - **No point cloud is built.** recon prepares each camera's frame
   (`GpuFramePrep`: undistorted depth, and colour), gfx draws a point per
@@ -257,7 +263,8 @@ The `app` tier runs the rig (`app/calib_rig.hpp`, `live_worker.hpp`,
 `capture_worker.hpp`); `apps/calib_rig/main.cpp` only loads the scenario.
 
 - **Three threads, one owner each** (a fourth, the 3D view's, since
-  2026-10-17; see the dated entry). The live worker (T1) alone touches the
+  2026-10-17, and a fifth, Calibrate's, since 2026-10-18; see the dated
+  entries). The live worker (T1) alone touches the
   rig's `SensorArray`, which is not thread-safe: it polls each set, reads every
   camera's luma back in one submit, finds the board (hybrid) and checks each
   view, drives the capture rule, and publishes a snapshot, newest wins. The
