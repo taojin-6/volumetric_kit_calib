@@ -6,14 +6,15 @@
 /// @file kept_scene.hpp
 /// @brief Calibrate's tests' input: the synthetic scene of 2 to 5 cameras
 ///        (synthetic_scene.hpp's @ref make_kept_scene) and its captures as the
-///        capture worker keeps them (`app::KeptCaptures`). Its users link
-///        calib_app and vc_synthetic_rig.
+///        capture worker keeps them (`app::KeptCaptures`), with or without the
+///        origin tag. Its users link calib_app and vc_synthetic_rig.
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "synthetic_scene.hpp"
@@ -84,6 +85,34 @@ inline app::KeptCaptures kept_captures(const Scene& scene,
         view.points;
   }
   kept.captures.assign(made.begin(), made.end());
+  return kept;
+}
+
+/// @brief @p kept with the origin tag, lying at the world's origin
+///        (@ref FloorTag's defaults), in each camera's tags that sees it, in
+///        every capture, as @ref observe_marker sees it.
+/// @param kept      Captures of @p scene (@ref kept_captures); each is
+///                  replaced by a copy with the tags.
+/// @param scene     The scene.
+/// @param noise_px  The corners' noise (@ref ObserveOptions::noise_px).
+/// @param seed      The noise's seed.
+/// @return The snapshot.
+inline app::KeptCaptures with_origin_tag(app::KeptCaptures kept,
+                                         const Scene& scene,
+                                         double noise_px = 0.3,
+                                         std::uint32_t seed = 1) {
+  const std::vector<MarkerSighting> seen =
+      observe_marker(scene.rig, kOriginTag.id, floor_tag_corners(),
+                     kept.captures.size(), {noise_px, seed});
+  for (std::size_t k = 0; k < kept.captures.size(); ++k) {
+    auto copy = std::make_shared<app::KeptCapture>(*kept.captures[k]);
+    for (const MarkerSighting& s : seen) {
+      if (s.capture == static_cast<std::int64_t>(k)) {
+        copy->tags[s.camera] = s.marker;
+      }
+    }
+    kept.captures[k] = std::move(copy);
+  }
   return kept;
 }
 
