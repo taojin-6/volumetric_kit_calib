@@ -2,7 +2,8 @@
 # Copyright (c) 2026 Tao Jin
 
 # --- calib_detect: Tier 2 ----------------------------------------------------
-# The ChArUco board in a luma image, through OpenCV's detector.
+# The ChArUco board and the origin tag in a luma image, through OpenCV's
+# detectors.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
@@ -11,7 +12,7 @@ set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 add_library(calib_detect)
 add_library(volumetric_kit::calib_detect ALIAS calib_detect)
 
-target_sources(calib_detect PRIVATE charuco.cpp)
+target_sources(calib_detect PRIVATE charuco.cpp tag.cpp)
 
 # The tier's own export macro and guard (see calib_core).
 generate_export_header(

@@ -5,7 +5,7 @@
 
 /// @file target.hpp
 /// @brief Calibration target (board) description, its check, and the rig's
-///        board.
+///        board; the origin tag, which fixes the world, and its check.
 ///
 /// Carries the geometry the detector and solver need, plus the physical
 /// tolerances the quality tier propagates: the measured square size and its
@@ -176,5 +176,39 @@ VC_CORE_API const char* to_string(MarkerDictionary dictionary) noexcept;
 /// The square size is the nominal one, and the tolerances are unknown.
 /// @return The board, which passes @ref check_target.
 VC_CORE_API Target legacy_femto_board() noexcept;
+
+/// @brief A printed marker laid on the floor to fix the world: its
+///        dictionary, its id, and the size of its black border.
+///
+/// A plain value, as @ref kOriginTag gives the rig's.
+///
+/// @code
+/// VKC_TRY(check_origin_tag(kOriginTag));
+/// VKC_ASSIGN(const detect::MarkerSearch search,
+///            detect::detect_tag(luma, kOriginTag));
+/// @endcode
+struct OriginTag {
+  /// The dictionary it was printed from; `None` until set.
+  MarkerDictionary dictionary = MarkerDictionary::None;
+  int id = 0;  ///< Its id in @ref dictionary.
+  /// The outer edge of its black border as printed (metres); the white
+  /// margin around it is not counted.
+  double edge_m = 0.0;
+};
+
+// TODO: take the origin tag from the scenario once the core's CO5 settings
+// carry it.
+/// @brief The rig's origin tag: AprilTag 36h11 id 0, its black border
+///        0.15 m across. It passes @ref check_origin_tag.
+inline constexpr OriginTag kOriginTag{MarkerDictionary::AprilTag36h11, 0, 0.15};
+
+/// @brief Whether @p tag describes a marker a detector can find.
+///
+/// The tag needs a @ref MarkerDictionary other than `None`, an id the
+/// dictionary holds, and a finite positive edge.
+/// @param tag  The tag.
+/// @return OK; or `Status::Code::InvalidArgument` whose message starts with
+///         `origin_tag.<field>`.
+VC_CORE_API core::Status check_origin_tag(const OriginTag& tag);
 
 }  // namespace volumetric_kit::calib

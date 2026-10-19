@@ -245,4 +245,24 @@ Target legacy_femto_board() noexcept {
   return board;
 }
 
+core::Status check_origin_tag(const OriginTag& tag) {
+  const auto refused = [](const std::string& field, const std::string& what) {
+    return core::Status::invalid_argument("origin_tag." + field + " " + what);
+  };
+  if (tag.dictionary == MarkerDictionary::None) {
+    return refused("dictionary", "must name the tag's dictionary");
+  }
+  const std::int64_t codes = dictionary_size(tag.dictionary);
+  if (codes < 0) return refused("dictionary", "is not a MarkerDictionary");
+  if (tag.id < 0) return refused("id", "must not be negative");
+  if (tag.id >= codes) {
+    return refused("id", std::to_string(tag.id) + " is past the dictionary's " +
+                             std::to_string(codes) + " codes");
+  }
+  if (!(std::isfinite(tag.edge_m) && tag.edge_m > 0.0)) {
+    return refused("edge_m", "must be finite and positive");
+  }
+  return {};
+}
+
 }  // namespace volumetric_kit::calib

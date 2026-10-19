@@ -20,7 +20,7 @@
 
 namespace volumetric_kit::calib {
 
-/// @brief One marker found.
+/// @brief One marker found: a board's, or the origin tag.
 ///
 /// @code
 /// for (const DetectedMarker& marker : detection.markers) {
@@ -28,8 +28,9 @@ namespace volumetric_kit::calib {
 /// }
 /// @endcode
 struct DetectedMarker {
-  int id = -1;  ///< Its id in the board's dictionary.
-  /// Its corners, clockwise from its top-left as printed: OpenCV's order.
+  int id = -1;  ///< Its id in its dictionary.
+  /// Its corners, clockwise from the top-left of OpenCV's image of the
+  /// marker (`generateImageMarker`): OpenCV's order.
   std::array<recon::camera::Vec2d, 4> corners{};
 };
 

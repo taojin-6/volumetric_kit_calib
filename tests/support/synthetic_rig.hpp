@@ -6,7 +6,8 @@
 /// @file synthetic_rig.hpp
 /// @brief The one synthetic source for calib's tests: lenses like the Femto
 ///        Mega's, a four-camera rig, a plan of board placements, noisy
-///        detections of it, and an exact-inverse renderer of the board.
+///        detections of it, an exact-inverse renderer of the board, and a
+///        marker drawn through a homography.
 ///
 /// World: z up, the floor at z = 0. Poses are recon's `Mat4d`s, named by what
 /// they map (`world_to_camera` is OpenCV's extrinsic). Projections are exact:
@@ -14,6 +15,7 @@
 /// `cv::projectPoints`, with no Rodrigues round trip. @ref camera_image adds
 /// a camera's blur and noise to a render.
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -161,6 +163,38 @@ cv::Mat render_board(const recon::camera::CameraModel& model,
                      const recon::camera::Mat4d& board_to_camera,
                      const compute::Board& board,
                      const RenderOptions& options = {});
+
+/// @brief How @ref draw_marker draws.
+struct MarkerOptions {
+  float black = 30.0f;   ///< The black cells' level.
+  float white = 220.0f;  ///< The white cells' and the margin's level.
+  /// The white margin around the black border, in the marker's cells.
+  double margin_cells = 2.0;
+  int supersampling = 8;  ///< Samples per pixel on each axis.
+};
+
+/// @brief A printed marker drawn into @p image through a homography: a clean,
+///        geometric render (no blur, noise or compression).
+///
+/// The print's frame puts the black border's outer corners at (0, 0),
+/// (1, 0), (1, 1) and (0, 1), x right and y down as printed. Each pixel the
+/// print reaches is the mean of S x S samples of OpenCV's marker image
+/// (`generateImageMarker`, 100 px a cell), warped bilinearly; the border's
+/// edges fall on that image's texel edges, so they sit where the homography
+/// puts them, within 0.01 px on average along an edge and 0.02 px on any
+/// pixel row (`SyntheticRig.DrawsAMarkerWhereItsHomographyPutsIt`). Pixels
+/// it does not reach keep their level.
+/// @param image           An 8-bit luma image, drawn into.
+/// @param dictionary      The marker's dictionary, not `None`.
+/// @param id              Its id there.
+/// @param print_to_image  The print's frame to the image's pixels.
+/// @param options         Levels, margin and sampling.
+/// @return The black border's outer corners in the image's pixels, clockwise
+///         from the top-left as printed: where a detector should find them.
+std::array<cv::Point2d, 4> draw_marker(cv::Mat& image,
+                                       MarkerDictionary dictionary, int id,
+                                       const cv::Matx33d& print_to_image,
+                                       const MarkerOptions& options = {});
 
 /// @brief The rig's board, @ref legacy_femto_board, as compute builds it.
 /// @return The board.

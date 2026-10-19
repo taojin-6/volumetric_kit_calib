@@ -22,11 +22,11 @@
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <opencv2/core/parallel/parallel_backend.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/objdetect/charuco_detector.hpp>
 
+#include "detect_helpers.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 
@@ -38,11 +38,9 @@ using Code = core::Status::Code;
 
 using test::board_facing_camera;
 using test::femto_board;
-
-LumaView luma(const cv::Mat& image) {
-  return {static_cast<std::uint32_t>(image.cols),
-          static_cast<std::uint32_t>(image.rows), image.step[0], image.data};
-}
+using test::luma;
+using test::Refused;
+using test::ThrowingParallelFor;
 
 // An image of the board, and where its corners and markers project.
 struct View {
@@ -680,20 +678,6 @@ core::Status refusal(const LumaView& image, Mode mode) {
   return detection.ok() ? core::Status{} : detection.status();
 }
 
-::testing::AssertionResult Refused(const core::Status& status,
-                                   const std::string& message) {
-  if (status.ok()) return ::testing::AssertionFailure() << "accepted";
-  if (status.domain() != Code::InvalidArgument) {
-    return ::testing::AssertionFailure()
-           << "refused as " << core::to_string(status.domain()) << ": "
-           << status.message();
-  }
-  if (status.message() != message) {
-    return ::testing::AssertionFailure() << "refused with " << status.message();
-  }
-  return ::testing::AssertionSuccess();
-}
-
 TEST(DetectCharuco, RefusesAnImageItCannotRead) {
   const std::vector<std::uint8_t> pixels(64, 110);
   const LumaView good{8, 8, 8, pixels.data()};
@@ -746,44 +730,6 @@ TEST(DetectCharuco, RefusesAnImageItCannotRead) {
   EXPECT_TRUE(Refused(refusal(good, static_cast<Mode>(-1)),
                       "detect_charuco: mode is not a Mode"));
 }
-
-// OpenCV's parallel_for_ backend replaced, while it lives, by one that throws
-// `code` instead of running the loop; OpenCV's detector runs loops on it.
-class ThrowingParallelFor {
- public:
-  explicit ThrowingParallelFor(cv::Error::Code code)
-      : threads_(cv::getNumThreads()) {
-    cv::parallel::setParallelForBackend(std::make_shared<Backend>(code), false);
-    // parallel_for_ calls a backend only with more than one thread.
-    cv::setNumThreads(4);
-  }
-  ~ThrowingParallelFor() {
-    cv::parallel::setParallelForBackend(
-        std::shared_ptr<cv::parallel::ParallelForAPI>(), false);
-    cv::setNumThreads(threads_);
-  }
-  ThrowingParallelFor(const ThrowingParallelFor&) = delete;
-  ThrowingParallelFor& operator=(const ThrowingParallelFor&) = delete;
-
- private:
-  class Backend : public cv::parallel::ParallelForAPI {
-   public:
-    explicit Backend(cv::Error::Code code) : code_(code) {}
-    void parallel_for(int, FN_parallel_for_body_cb_t, void*) override {
-      throw cv::Exception(code_, "injected", "parallel_for", __FILE__,
-                          __LINE__);
-    }
-    int getThreadNum() const override { return 0; }
-    int getNumThreads() const override { return 4; }
-    int setNumThreads(int) override { return 4; }
-    const char* getName() const override { return "throwing"; }
-
-   private:
-    cv::Error::Code code_;
-  };
-
-  int threads_;
-};
 
 // Full mode: Hybrid's first loop is in the resize, inside OpenCV's KleidiCV
 // HAL on Arm, whose C code an exception cannot cross. Both modes run one

@@ -13,6 +13,7 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/objdetect/charuco_detector.hpp>
 
+#include "detail/luma_check.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 
 namespace volumetric_kit::calib::detect {
@@ -31,26 +32,11 @@ core::Status check_image(const LumaView& image, Mode mode) {
   if (mode != Mode::Full && mode != Mode::Hybrid) {
     return core::Status::invalid_argument("detect_charuco: mode is not a Mode");
   }
-  const std::uint32_t min_side = mode == Mode::Hybrid ? 2 : 1;
-  if (image.width < min_side || image.height < min_side) {
+  if (mode == Mode::Hybrid && (image.width < 2 || image.height < 2)) {
     return core::Status::invalid_argument(
-        mode == Mode::Hybrid
-            ? "detect_charuco: a Hybrid image is at least 2 x 2 pixels"
-            : "detect_charuco: the image has no pixels");
+        "detect_charuco: a Hybrid image is at least 2 x 2 pixels");
   }
-  constexpr std::uint32_t kMaxSide = std::numeric_limits<int>::max();
-  if (image.width > kMaxSide || image.height > kMaxSide) {
-    return core::Status::invalid_argument(
-        "detect_charuco: the image is larger than OpenCV's int sizes hold");
-  }
-  if (image.data == nullptr) {
-    return core::Status::invalid_argument("detect_charuco: image.data is null");
-  }
-  if (image.stride < image.width) {
-    return core::Status::invalid_argument(
-        "detect_charuco: image.stride is below image.width");
-  }
-  return {};
+  return detail::check_luma(image, "detect_charuco");
 }
 
 // The image's even part halved: INTER_AREA at exactly half the size averages

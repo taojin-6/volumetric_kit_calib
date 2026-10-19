@@ -13,6 +13,7 @@
 
 #include <opencv2/geometry.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/objdetect/aruco_dictionary.hpp>
 
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
@@ -439,6 +440,80 @@ cv::Mat render_board(const camera::CameraModel& model,
   coarse.copyTo(image(roi));
   image.convertTo(out, CV_8U);
   return out;
+}
+
+std::array<cv::Point2d, 4> draw_marker(cv::Mat& image,
+                                       MarkerDictionary dictionary, int id,
+                                       const cv::Matx33d& print_to_image,
+                                       const MarkerOptions& options) {
+  const auto at = [&](const cv::Matx33d& h, double x, double y) {
+    const cv::Vec3d q = h * cv::Vec3d(x, y, 1.0);
+    return cv::Point2d(q[0] / q[2], q[1] / q[2]);
+  };
+  const std::array<cv::Point2d, 4> corners = {
+      at(print_to_image, 0.0, 0.0), at(print_to_image, 1.0, 0.0),
+      at(print_to_image, 1.0, 1.0), at(print_to_image, 0.0, 1.0)};
+
+  // The print: OpenCV's marker, 100 px a cell, in its white margin, at the
+  // options' levels. Its texel (i, j) covers [i - 0.5, i + 0.5] x
+  // [j - 0.5, j + 0.5] in OpenCV's pixels, so the border's outer edge lies on
+  // texel edges, at margin - 0.5 and margin + side - 0.5.
+  constexpr int kCellPx = 100;
+  const cv::aruco::Dictionary codes = cv::aruco::getPredefinedDictionary(
+      *compute::opencv_dictionary(dictionary));
+  const int side = (codes.markerSize + 2) * kCellPx;
+  const int margin =
+      static_cast<int>(std::lround(options.margin_cells * kCellPx));
+  cv::Mat marker;
+  codes.generateImageMarker(id, side, marker, 1);
+  cv::Mat printed;
+  cv::copyMakeBorder(marker, printed, margin, margin, margin, margin,
+                     cv::BORDER_CONSTANT, cv::Scalar(255));
+  cv::Mat texture;
+  printed.convertTo(texture, CV_32F, (options.white - options.black) / 255.0,
+                    options.black);
+  const cv::Matx33d print_to_texture(side, 0.0, margin - 0.5, 0.0, side,
+                                     margin - 0.5, 0.0, 0.0, 1.0);
+  const cv::Matx33d texture_to_image = print_to_image * print_to_texture.inv();
+
+  // The pixels the print and its margin reach.
+  const double far = printed.cols - 0.5;
+  double min_x = 1e300, min_y = 1e300, max_x = -1e300, max_y = -1e300;
+  for (const cv::Point2d& q :
+       {at(texture_to_image, -0.5, -0.5), at(texture_to_image, far, -0.5),
+        at(texture_to_image, far, far), at(texture_to_image, -0.5, far)}) {
+    min_x = std::min(min_x, q.x);
+    max_x = std::max(max_x, q.x);
+    min_y = std::min(min_y, q.y);
+    max_y = std::max(max_y, q.y);
+  }
+  const int x0 = std::max(0, static_cast<int>(std::floor(min_x)) - 1);
+  const int y0 = std::max(0, static_cast<int>(std::floor(min_y)) - 1);
+  const int x1 =
+      std::min(image.cols - 1, static_cast<int>(std::ceil(max_x)) + 1);
+  const int y1 =
+      std::min(image.rows - 1, static_cast<int>(std::ceil(max_y)) + 1);
+  if (x1 < x0 || y1 < y0) return corners;
+
+  // S x S samples per pixel: pixel x is S (x - x0 + 0.5) - 0.5 among them,
+  // and INTER_AREA averages its S x S samples back into it. Samples off the
+  // print keep the pixel's level.
+  const int S = options.supersampling;
+  const cv::Rect roi(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+  cv::Mat region;
+  image(roi).convertTo(region, CV_32F);
+  cv::Mat fine;
+  cv::resize(region, fine, cv::Size(roi.width * S, roi.height * S), 0.0, 0.0,
+             cv::INTER_NEAREST);
+  const cv::Matx33d to_fine(S, 0.0, S * (0.5 - x0) - 0.5, 0.0, S,
+                            S * (0.5 - y0) - 0.5, 0.0, 0.0, 1.0);
+  cv::warpPerspective(texture, fine, to_fine * texture_to_image, fine.size(),
+                      cv::INTER_LINEAR, cv::BORDER_TRANSPARENT);
+  cv::Mat coarse;
+  cv::resize(fine, coarse, roi.size(), 0.0, 0.0, cv::INTER_AREA);
+  cv::Mat out = image(roi);
+  coarse.convertTo(out, CV_8U);
+  return corners;
 }
 
 compute::Board femto_board() {
