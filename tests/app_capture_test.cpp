@@ -8,9 +8,9 @@
 // shutdown; the session's depth unit, the frames'; the captures kept for
 // Calibrate, each view named for its camera even when its detection failed,
 // their depth shared with the writer, and their cap; the origin tag found in
-// each camera's luma, kept, written and counted, and an image with two prints
-// of it. Synthetic board and tag renders, a few cameras, no device. Then what
-// a session records of each camera and of the software.
+// each camera's luma, kept, written and counted, an image with two prints of
+// it and a failed search. Synthetic board and tag renders, a few cameras, no
+// device. Then what a session records of each camera and of the software.
 
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 
@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <regex>
@@ -223,19 +224,23 @@ bool submit(CaptureWorker& worker, CaptureRequest r) {
 }
 
 // OpenCV's parallel_for_ run on the calling thread, a stripe at a time, with
-// the first allocation of stripe `fail` of its first loop failing: the capture
-// worker's loop over the cameras gives each camera a stripe.
+// allocation `after` (the first by default) of stripe `fail` of its first loop
+// failing: the capture worker's loop over the cameras gives each camera a
+// stripe. made() counts the stripe's allocations before the one failed, or
+// all of them when it makes no more than `after`.
 class FailAStripe final : public cv::parallel::ParallelForAPI {
  public:
-  explicit FailAStripe(int fail) : fail_(fail) {}
+  explicit FailAStripe(int fail, std::size_t after = 0)
+      : fail_(fail), after_(after) {}
   void parallel_for(int tasks, FN_parallel_for_body_cb_t body,
                     void* data) override {
     const bool first = !used_.exchange(true);
     for (int t = 0; t < tasks; ++t) {
       if (first && t == fail_) {
-        const test::FailAllocation failure(0);
+        const test::FailAllocation failure(after_);
         body(t, t + 1, data);
         injected_ = test::allocation_failure.injected;
+        made_ = after_ - test::allocation_failure.remaining;
       } else {
         body(t, t + 1, data);
       }
@@ -250,12 +255,15 @@ class FailAStripe final : public cv::parallel::ParallelForAPI {
   }
   const char* getName() const override { return "fail_a_stripe"; }
   bool injected() const { return injected_; }
+  std::size_t made() const { return made_; }
 
  private:
   int fail_;
+  std::size_t after_;
   int threads_ = 0;
   std::atomic<bool> used_{false};
   std::atomic<bool> injected_{false};
+  std::atomic<std::size_t> made_{0};
 };
 
 // OpenCV's parallel_for_ on `api` while alive, then on OpenCV's own again.
@@ -983,6 +991,73 @@ TEST(AppCapture, KeepsNoTagFromAnImageWithTwoAndSaysSo) {
       read(fs::path(worker->directory()) / "captures" / "000.json"));
   EXPECT_TRUE(capture["cameras"]["SYN0"]["origin_tag"].is_null());
   EXPECT_FALSE(capture["cameras"]["SYN1"]["origin_tag"].is_null());
+}
+
+// A camera's search for the tag that fails (out of memory here) is said,
+// named, and the camera keeps no tag; the capture is saved all the same, with
+// that camera's view of the board and another camera's tag.
+TEST(AppCapture, PostsAFailedTagSearchAndSavesTheCapture) {
+  // Rendered first: the render's own loops would take the stripe's failure.
+  // Camera 0's stripe, run first, finds the tag too, so whatever OpenCV makes
+  // once is made there: camera 1's makes the same allocations in both runs.
+  std::array<CaptureRequest, 2> requests;
+  for (CaptureRequest& r : requests) {
+    r = request(3, 0.0);
+    draw_origin_tag(r, 0);
+    draw_origin_tag(r, 1);
+  }
+  // Camera 1's stripe's allocations, counted: its last is detect_tag's. Any
+  // other may be KleidiCV's, whose failure ends the program.
+  std::size_t made = 0;
+  {
+    ScratchDir root;
+    const auto census = std::make_shared<FailAStripe>(
+        1, std::numeric_limits<std::size_t>::max());
+    const ParallelBackend backend(census);  // outlives the worker
+    std::unique_ptr<CaptureWorker> worker = make(setup(root.path(), 3));
+    ASSERT_NE(worker, nullptr);
+    ASSERT_TRUE(submit(*worker, std::move(requests[0])));
+    worker->flush();
+    ASSERT_FALSE(census->injected());
+    EXPECT_TRUE(worker->take_errors().empty());
+    made = census->made();
+  }
+  ASSERT_GT(made, 0u);
+
+  ScratchDir root;
+  const auto stripes = std::make_shared<FailAStripe>(1, made - 1);
+  const ParallelBackend backend(stripes);  // outlives the worker
+  std::unique_ptr<CaptureWorker> worker = make(setup(root.path(), 3));
+  ASSERT_NE(worker, nullptr);
+  ASSERT_TRUE(submit(*worker, std::move(requests[1])));
+  worker->flush();
+  ASSERT_TRUE(stripes->injected());
+  const std::vector<core::Status> errors = worker->take_errors();
+  ASSERT_EQ(errors.size(), 1u);
+  EXPECT_EQ(errors[0].domain(), Code::OutOfMemory);
+  EXPECT_EQ(errors[0].message().rfind("capture: camera SYN1: detect_tag", 0),
+            0u)
+      << errors[0].message();
+  const std::vector<CaptureEvent> events = worker->take_events();
+  ASSERT_EQ(events.size(), 1u);
+  ASSERT_EQ(events[0].kind, CaptureEvent::Kind::Saved)
+      << events[0].status.message();
+  EXPECT_EQ(events[0].usable_views, 3);
+  EXPECT_EQ(events[0].tag_cameras, 1);
+
+  const std::shared_ptr<const KeptCaptures> kept = worker->kept();
+  ASSERT_NE(kept, nullptr);
+  ASSERT_EQ(kept->captures.size(), 1u);
+  const std::vector<std::optional<DetectedMarker>>& tags =
+      kept->captures[0]->tags;
+  ASSERT_EQ(tags.size(), 3u);
+  EXPECT_TRUE(tags[0].has_value());
+  EXPECT_FALSE(tags[1].has_value());
+  EXPECT_FALSE(kept->captures[0]->views[1].observation.empty());
+  const json capture = json::parse(
+      read(fs::path(worker->directory()) / "captures" / "000.json"));
+  EXPECT_FALSE(capture["cameras"]["SYN0"]["origin_tag"].is_null());
+  EXPECT_TRUE(capture["cameras"]["SYN1"]["origin_tag"].is_null());
 }
 
 // The tag's coverage counts the captures kept: a drop takes its views of the
