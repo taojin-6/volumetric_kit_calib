@@ -316,9 +316,20 @@ definitions and the schemas).
 - **Re-solves are warm.** Leave one out and the principal-point A/B test run
   `bundle_adjust` from the solution. A re-solve `bundle_adjust` refuses
   (`InvalidArgument` or `Numerical`, e.g. a link short of `min_shared`) is
-  recorded as refused, not an error, so it costs no other metric. The A/B
-  sides' RMS is over the corners both keep, and a verdict needs both the RMS
-  and the transfer's median to agree.
+  recorded as refused, not an error, so it costs no other metric.
+- **The A/B verdict is the RMS alone, by a margin** (amended 2026-10-18, the
+  user's call). The sides' RMS is over the corners both keep, so their gap is
+  paired and far steadier than the transfer, which stays as information. On
+  the synthetic rig (`make_scene`'s 60 placements at 0.3 px of noise, seeds
+  1 to 16 for plan and noise), the truth at either side gave a gap
+  (`principal_point_gap`) of at least 2.7 % and the truth midway at most
+  1.2 %: the margin's 2 % names the right side in all 32 draws and a side in
+  none of the 16 midway, where requiring the transfer's median to agree too
+  failed 5 of the 32. These are libc++'s draws: libstdc++'s
+  `std::normal_distribution` draws other noise from the same seeds, where the
+  tests pass too but the gaps were not measured. It is no guarantee: at
+  0.1 px the truth midway reached 3.0 % (2 of 16 named a side), and with 20
+  placements at 0.3 px a side's own gap fell to 1.7 %.
 - **Everything left out is listed:** the views `initialise` excluded, with
   what it measured, beside the adjustment's rejections, so each can be
   recaptured.

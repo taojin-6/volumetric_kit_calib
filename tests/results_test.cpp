@@ -51,6 +51,8 @@ struct Solved {
     }
     options.histogram_bins = 8;
     options.principal_shift_px = 1.5;
+    options.principal_margin_fraction = 0.25;
+    options.principal_margin_px = 0.125;
     start =
         value_of(solve::initialise(scene.cameras, scene.board, scene.views, 0));
     solution = value_of(
@@ -218,9 +220,10 @@ TEST(Results, TheReportHasItsSchema) {
   EXPECT_EQ(a["max_captures"].get<std::size_t>(), adjust.max_captures);
   EXPECT_EQ(a["focal_fraction"].get<double>(), adjust.focal_fraction);
   EXPECT_EQ(a["principal_px"].get<double>(), adjust.principal_px);
-  EXPECT_EQ(settings["metrics"],
-            json::parse(R"({"principal_shift_px": 1.5, "histogram_bin_px": 0.1,
-                            "histogram_bins": 8})"));
+  EXPECT_EQ(settings["metrics"], json::parse(R"({"principal_shift_px": 1.5,
+                            "principal_margin_fraction": 0.25,
+                            "principal_margin_px": 0.125,
+                            "histogram_bin_px": 0.1, "histogram_bins": 8})"));
 
   const json& solver = doc["solver"];
   EXPECT_EQ(solver.size(), 6u);
@@ -432,7 +435,9 @@ TEST(Results, TheReportHasItsSchema) {
     expect_number(j["transfer_median_px"], side->transfer_median_px);
     expect_number(j["transfer_p90_px"], side->transfer_p90_px);
   }
-  EXPECT_EQ(principal["verdict"], to_string(ab.verdict));
+  // Within the margins of settings.metrics.
+  EXPECT_EQ(ab.verdict, PrincipalPointVerdict::Inconclusive);
+  EXPECT_EQ(principal["verdict"], "inconclusive");
 
   const json& geometry = doc["geometry"];
   for (std::size_t c = 0; c < k; ++c) {

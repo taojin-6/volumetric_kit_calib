@@ -168,6 +168,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `std::shared_ptr<const std::vector<std::uint16_t>>`, so a caller keeps the
   samples it hands the writer without a copy; `SessionWriter::submit` refuses
   a null one.
+- The principal-point A/B verdict is the RMS alone, by a margin of
+  min(2 % of the larger RMS, 0.05 px) (DECISIONS.md, 2026-10-16, amended
+  2026-10-18): `MetricsOptions::principal_margin_fraction` and
+  `principal_margin_px`, which `principal_point_verdict` and
+  `principal_point_ab` take too and `report.json`'s `settings.metrics`
+  records. The transfer is information. `PrincipalPointVerdict::Mixed` is
+  now `Inconclusive`, named `inconclusive` in the report (still version 1).
+  `principal_point_gap` gives the sides' gap relative to the larger RMS.
 - OpenCV 5 is required, and `VC_WITH_OPENCV` is gone (DECISIONS.md,
   2026-10-17): `compute`, `detect`, `solve` and `quality` always build, the
   installed package always re-finds OpenCV, and `VC_WITH_RIG` alone builds
