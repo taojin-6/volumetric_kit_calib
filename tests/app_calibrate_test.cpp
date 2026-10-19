@@ -630,15 +630,18 @@ TEST(CalibrateWorker, PostsARefusalAndWritesNothing) {
       << failed[0].message();
 }
 
-// A cancel during leave one out ends the run within a second, and nothing is
-// written, published or posted.
+// A cancel during leave one out stops the run at its next re-solve: held as
+// it ends, it has counted none after the cancel. Nothing is written,
+// published or posted.
 TEST(CalibrateWorker, ACancelWritesNothing) {
   const ScratchDir session;
   const test::Scene scene = test::make_kept_scene(4, 60);
+  const auto gate = std::make_shared<Gate>();
   const std::unique_ptr<CalibrateWorker> worker = make_worker();
   ASSERT_NE(worker, nullptr);
-  ASSERT_TRUE(*worker->request(
-      shared(test::kept_captures(scene, 0, session.path().string()))));
+  const LetGoAtTheEnd let_go{*gate};
+  ASSERT_TRUE(*worker->request(held_at_its_end(
+      test::kept_captures(scene, 0, session.path().string()), gate)));
   ASSERT_TRUE(measuring(*worker));
   const std::optional<CalibrateProgress> at = worker->progress();
   ASSERT_TRUE(at.has_value());
@@ -646,10 +649,18 @@ TEST(CalibrateWorker, ACancelWritesNothing) {
   EXPECT_EQ(at->total, 60u);
   EXPECT_LT(at->done, at->total);
   EXPECT_GT(at->seconds, 0.0);
-  const SteadyClock::time_point cancelled = SteadyClock::now();
+  const SteadyClock::time_point cancelling = SteadyClock::now();
   EXPECT_TRUE(worker->cancel());
+  const std::optional<CalibrateProgress> cancelled = worker->progress();
+  ASSERT_TRUE(gate->held());
+  EXPECT_LT(SteadyClock::now() - cancelling, std::chrono::seconds(1));
+  const std::optional<CalibrateProgress> ended = worker->progress();
+  ASSERT_TRUE(cancelled.has_value());
+  ASSERT_TRUE(ended.has_value());
+  EXPECT_EQ(ended->done, cancelled->done);
+  EXPECT_LT(ended->done, ended->total);
+  gate->let_go();
   ASSERT_TRUE(idle(*worker));
-  EXPECT_LT(SteadyClock::now() - cancelled, std::chrono::seconds(1));
   EXPECT_EQ(worker->take_result(), nullptr);
   EXPECT_TRUE(worker->take_errors().empty());
   EXPECT_TRUE(entries(session.path()).empty());
@@ -679,22 +690,36 @@ TEST(CalibrateWorker, ACancelAsAFailedRunEndsPostsNothing) {
   EXPECT_TRUE(entries(session.path()).empty());
 }
 
-// stop() cancels a run and returns once its thread has; the worker then
-// takes no request. The destructor stops it too, and a worker given none
-// goes at once.
+// stop() cancels a run at its next re-solve, short of the last, and returns
+// once its thread has; the worker then takes no request. The destructor
+// stops it too, and a worker given none goes at once.
 TEST(CalibrateWorker, StopsWithARunUnderWay) {
   const ScratchDir session;
   const test::Scene scene = test::make_kept_scene(4, 60);
-  const auto kept =
-      shared(test::kept_captures(scene, 0, session.path().string()));
+  const KeptCaptures captures =
+      test::kept_captures(scene, 0, session.path().string());
+  const auto kept = shared(captures);
   {
+    const auto gate = std::make_shared<Gate>();
     const std::unique_ptr<CalibrateWorker> worker = make_worker();
     ASSERT_NE(worker, nullptr);
-    ASSERT_TRUE(*worker->request(kept));
+    const LetGoAtTheEnd let_go{*gate};
+    ASSERT_TRUE(*worker->request(held_at_its_end(captures, gate)));
     ASSERT_TRUE(measuring(*worker));
+    // While stop() waits, what the run counted, held as it ends.
+    std::optional<CalibrateProgress> ended;
+    std::thread watcher([&] {
+      if (gate->held()) ended = worker->progress();
+      gate->let_go();
+    });
     const SteadyClock::time_point stopping = SteadyClock::now();
     worker->stop();
     EXPECT_LT(SteadyClock::now() - stopping, std::chrono::seconds(1));
+    watcher.join();
+    ASSERT_TRUE(ended.has_value());
+    EXPECT_EQ(ended->stage, CalibrateStage::Measuring);
+    EXPECT_EQ(ended->total, 60u);
+    EXPECT_LT(ended->done, ended->total);
     EXPECT_FALSE(worker->busy());
     EXPECT_FALSE(*worker->request(kept));
     EXPECT_EQ(worker->take_result(), nullptr);
