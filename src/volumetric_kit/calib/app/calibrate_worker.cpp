@@ -293,6 +293,7 @@ struct CalibrateWorker::State {
     core::Result<CalibrateResult> made =
         calibrate(kept, [this](const CalibrateProgress& now) { step(now); });
     {
+      // A success is decided here: once writing, cancel() is refused.
       const std::lock_guard<std::mutex> lock(mutex);
       if (cancelled) return ResultPtr();
       if (made.ok()) at = {CalibrateStage::Writing, 0, 0, 0.0};
@@ -331,7 +332,10 @@ struct CalibrateWorker::State {
       ResultPtr replaced;
       const std::lock_guard<std::mutex> lock(mutex);
       if (!outcome.ok()) {
-        errors.push_back(outcome.status());
+        // A failure is decided here, under the lock cancel() takes: one
+        // cancelled since run_one looked (the snapshot freed meanwhile) was
+        // told it cancelled the run, so the failure is not posted.
+        if (!cancelled) errors.push_back(outcome.status());
       } else if (*outcome != nullptr) {
         replaced = std::move(result);
         result = *std::move(outcome);

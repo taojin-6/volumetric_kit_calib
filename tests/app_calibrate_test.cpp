@@ -12,9 +12,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <set>
@@ -109,6 +112,75 @@ std::unique_ptr<CalibrateWorker> make_worker() {
 
 std::shared_ptr<const KeptCaptures> shared(KeptCaptures kept) {
   return std::make_shared<const KeptCaptures>(std::move(kept));
+}
+
+// Holds the thread that reaches it until the test lets it go.
+class Gate {
+ public:
+  // On the thread held: waits to be let go.
+  void hold() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    held_ = true;
+    changed_.notify_all();
+    changed_.wait(lock, [this] { return open_; });
+  }
+  // Whether a thread is held, waiting a minute for one.
+  bool held() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return changed_.wait_for(lock, std::chrono::minutes(1),
+                             [this] { return held_; });
+  }
+  // Lets the thread held, and any after it, go.
+  void let_go() {
+    {
+      const std::lock_guard<std::mutex> lock(mutex_);
+      open_ = true;
+    }
+    changed_.notify_all();
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable changed_;
+  bool held_ = false;
+  bool open_ = false;
+};
+
+// Lets a gate go as the test ends, before the worker declared ahead of it is
+// stopped, whatever assertion ended the test.
+struct LetGoAtTheEnd {
+  Gate& gate;
+  ~LetGoAtTheEnd() { gate.let_go(); }
+};
+
+// `kept`, with its first capture's first depth freed only once `gate` lets
+// go: the worker frees its snapshot as its run ends, so the run is held
+// there, still busy, its outcome decided and not yet posted. The caller
+// keeps none of what it gives the worker.
+std::shared_ptr<const KeptCaptures> held_at_its_end(
+    KeptCaptures kept, const std::shared_ptr<Gate>& gate) {
+  auto first = std::make_shared<KeptCapture>(*kept.captures.front());
+  first->depth.front() = std::shared_ptr<const std::vector<std::uint16_t>>(
+      new std::vector<std::uint16_t>(),
+      [gate](const std::vector<std::uint16_t>* depth) {
+        gate->hold();
+        delete depth;
+      });
+  kept.captures.front() = std::move(first);
+  return shared(std::move(kept));
+}
+
+// `scene`'s captures with camera CL0B (rig camera 3) in none: initialise
+// refuses them, naming it.
+KeptCaptures unlinked_captures(const test::Scene& scene,
+                               const std::string& directory) {
+  KeptCaptures kept = test::kept_captures(scene, 0, directory);
+  for (std::shared_ptr<const KeptCapture>& capture : kept.captures) {
+    auto copy = std::make_shared<KeptCapture>(*capture);
+    copy->views[3].observation.points.clear();
+    capture = copy;
+  }
+  return kept;
 }
 
 // Every camera within a millimetre and 0.05 degrees of the truth in the
@@ -529,16 +601,10 @@ TEST(CalibrateWorker, ARecalibrationEqualsAFreshRun) {
 TEST(CalibrateWorker, PostsARefusalAndWritesNothing) {
   const ScratchDir session;
   const test::Scene scene = test::make_kept_scene(4, 20);
-  KeptCaptures unlinked =
-      test::kept_captures(scene, 0, session.path().string());
-  for (std::shared_ptr<const KeptCapture>& capture : unlinked.captures) {
-    auto copy = std::make_shared<KeptCapture>(*capture);
-    copy->views[3].observation.points.clear();
-    capture = copy;
-  }
   const std::unique_ptr<CalibrateWorker> worker = make_worker();
   ASSERT_NE(worker, nullptr);
-  ASSERT_TRUE(*worker->request(shared(unlinked)));
+  ASSERT_TRUE(*worker->request(
+      shared(unlinked_captures(scene, session.path().string()))));
   ASSERT_TRUE(idle(*worker));
   EXPECT_EQ(worker->take_result(), nullptr);
   const std::vector<core::Status> errors = worker->take_errors();
@@ -588,6 +654,29 @@ TEST(CalibrateWorker, ACancelWritesNothing) {
   EXPECT_TRUE(worker->take_errors().empty());
   EXPECT_TRUE(entries(session.path()).empty());
   EXPECT_FALSE(worker->cancel());  // nothing to cancel
+}
+
+// A cancel taken as a failed run ends, its failure decided and not yet
+// posted, holds: the run reports nothing, as cancel() said.
+TEST(CalibrateWorker, ACancelAsAFailedRunEndsPostsNothing) {
+  const ScratchDir session;
+  const test::Scene scene = test::make_kept_scene(4, 20);
+  const auto gate = std::make_shared<Gate>();
+  const std::unique_ptr<CalibrateWorker> worker = make_worker();
+  ASSERT_NE(worker, nullptr);
+  const LetGoAtTheEnd let_go{*gate};
+  ASSERT_TRUE(*worker->request(held_at_its_end(
+      unlinked_captures(scene, session.path().string()), gate)));
+  ASSERT_TRUE(gate->held());  // refused by initialise, and ending
+  const std::optional<CalibrateProgress> at = worker->progress();
+  ASSERT_TRUE(at.has_value());
+  EXPECT_EQ(at->stage, CalibrateStage::Solving);
+  EXPECT_TRUE(worker->cancel());
+  gate->let_go();
+  ASSERT_TRUE(idle(*worker));
+  EXPECT_TRUE(worker->take_errors().empty());
+  EXPECT_EQ(worker->take_result(), nullptr);
+  EXPECT_TRUE(entries(session.path()).empty());
 }
 
 // stop() cancels a run and returns once its thread has; the worker then
