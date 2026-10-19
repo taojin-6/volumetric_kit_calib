@@ -486,6 +486,9 @@ TEST(SessionWriter, SessionJsonHoldsWhatWasGivenExactly) {
   EXPECT_EQ(board["square_measured"], true);
   EXPECT_TRUE(board["square_tolerance_m"].is_null());
   EXPECT_EQ(board["planarity_bow_m"].get<double>(), 0.0005);
+  // The rig's, by default.
+  EXPECT_EQ(doc["origin_tag"], json::parse(R"({"dictionary":
+      "DICT_APRILTAG_36h11", "id": 0, "edge_m": 0.15})"));
 
   const json& streams = doc["streams"];
   EXPECT_EQ(streams["color"],
@@ -597,6 +600,42 @@ TEST(SessionWriter, CaptureJsonHoldsWhatWasGivenExactly) {
   EXPECT_EQ(doc["cameras"]["CL2A14100A4"]["check"]["pnp_rms_px"].get<double>(),
             0.21000000000000002);
   EXPECT_TRUE(doc["cameras"]["CL2A141000N"]["check"]["pnp_rms_px"].is_null());
+}
+
+// The origin tag a camera found, in numbers that read back exactly, named by
+// the session's tag; null for a camera that found none. session.json records
+// the tag it was given.
+TEST(SessionWriter, WritesEachCamerasOriginTagExactly) {
+  const ScratchDir dir;
+  SessionInfo info = make_info(dir);
+  info.origin_tag = {MarkerDictionary::AprilTag36h11, 5, 0.2005};
+  auto writer = make_writer(info);
+  ASSERT_TRUE(writer);
+  CaptureJob job = make_job();
+  DetectedMarker tag;
+  tag.id = 5;
+  tag.corners = {{{30.1 + 0.2, 20.000000000000004},
+                  {41.3, 1.0 / 3.0},
+                  {40.9, 31.700000000000003},
+                  {29.8, 1e-300}}};
+  job.cameras[1].origin_tag = tag;
+  submit(*writer, job);
+  finish(*writer);
+
+  EXPECT_EQ(parse(info.directory + "/session.json")["origin_tag"],
+            json::parse(R"({"dictionary": "DICT_APRILTAG_36h11", "id": 5,
+                            "edge_m": 0.2005})"));
+  const json cameras = parse(info.directory + "/captures/000.json")["cameras"];
+  EXPECT_TRUE(cameras["CL2A14100A4"]["origin_tag"].is_null());
+  const json& written = cameras["CL2A141000N"]["origin_tag"];
+  EXPECT_EQ(written["dictionary"], "DICT_APRILTAG_36h11");
+  EXPECT_EQ(written["id"], 5);
+  ASSERT_EQ(written["corners_px"].size(), 4u);
+  for (std::size_t k = 0; k < 4; ++k) {
+    ASSERT_EQ(written["corners_px"][k].size(), 2u);
+    EXPECT_EQ(written["corners_px"][k][0].get<double>(), tag.corners[k].x);
+    EXPECT_EQ(written["corners_px"][k][1].get<double>(), tag.corners[k].y);
+  }
 }
 
 TEST(SessionWriter, TimesBeforeTheEpochRoundDown) {
@@ -1069,6 +1108,16 @@ TEST(SessionWriter, RefusesASessionItCannotWrite) {
   }
   {
     SessionInfo info = good;
+    info.origin_tag.edge_m = 0.0;
+    refused(info, Code::InvalidArgument, "SessionWriter: origin_tag.edge_m");
+  }
+  {
+    SessionInfo info = good;
+    info.origin_tag.dictionary = MarkerDictionary::None;
+    refused(info, Code::InvalidArgument, "origin_tag.dictionary");
+  }
+  {
+    SessionInfo info = good;
     info.depth_mode.metres_per_unit = std::numeric_limits<float>::infinity();
     refused(info, Code::InvalidArgument, "metres_per_unit");
   }
@@ -1221,6 +1270,20 @@ TEST(SessionWriter, RefusesACaptureThatDoesNotFitTheSession) {
     CaptureJob job = make_job();
     job.cameras[1].detection.markers[0].corners[2].x = kNaN;
     refused(std::move(job), "marker 3 is not finite");
+  }
+  {
+    CaptureJob job = make_job();
+    job.cameras[1].origin_tag = DetectedMarker{3, {}};
+    refused(std::move(job),
+            "camera CL2A141000N: origin tag 3 is not the session's 0");
+  }
+  {
+    CaptureJob job = make_job();
+    DetectedMarker tag;
+    tag.id = 0;
+    tag.corners[3].y = kNaN;
+    job.cameras[0].origin_tag = tag;
+    refused(std::move(job), "camera CL2A14100A4: the origin tag is not finite");
   }
   {
     CaptureJob job = make_job();

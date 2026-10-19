@@ -52,6 +52,8 @@
 ///            "first_marker_id": 0, "legacy_pattern": true,
 ///            "square_measured": false, "square_tolerance_m": null,
 ///            "planarity_bow_m": null},
+///  "origin_tag": {"dictionary": "DICT_APRILTAG_36h11", "id": 0,
+///                 "edge_m": 0.15},
 ///  "streams": {"color": {"width": 3840, "height": 2160, "codec": "mjpeg"},
 ///              "depth": {"width": 640, "height": 576,
 ///                        "mode": "nfov_unbinned", "metres_per_unit": 0.001,
@@ -67,8 +69,9 @@
 ///                "dropped": false}]}
 /// @endcode
 ///
-/// `captures/<NNN>.json`, with `null` for a measure that is empty;
-/// `usable_views` counts the cameras whose verdict @ref is_usable accepts:
+/// `captures/<NNN>.json`, with `null` for a measure that is empty and for an
+/// origin tag the camera did not find; `usable_views` counts the cameras whose
+/// verdict @ref is_usable accepts:
 ///
 /// @code{.json}
 /// {"format": "volumetric_kit_calib.capture", "version": 1,
@@ -88,7 +91,10 @@
 ///                                         [779.6, 380.2], [699.8, 379.8]]]},
 ///    "check": {"corners": 8, "markers": 7, "collinear": false,
 ///              "distance_m": 2.8, "tilt_deg": 12.0, "pnp_rms_px": 0.21,
-///              "cell": 4, "verdict": "good"}}},
+///              "cell": 4, "verdict": "good"},
+///    "origin_tag": {"dictionary": "DICT_APRILTAG_36h11", "id": 0,
+///                   "corners_px": [[1904.3, 1201.7], [2010.6, 1203.2],
+///                                  [2008.9, 1287.4], [1902.1, 1285.0]]}}},
 ///  "usable_views": 1}
 /// @endcode
 
@@ -96,6 +102,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -199,6 +206,9 @@ struct SessionInfo {
   /// Whether `board.square_size_m` was measured, rather than the print's
   /// nominal size.
   bool square_measured = false;
+  /// The tag each camera's colour image was searched for
+  /// (@ref CameraCapture::origin_tag): one @ref check_origin_tag accepts.
+  OriginTag origin_tag = kOriginTag;
   DepthMode depth_mode;  ///< The rig's depth mode.
   /// The cameras, in the order every capture gives them. Every camera
   /// streams the same colour and depth sizes at the same rate.
@@ -207,9 +217,9 @@ struct SessionInfo {
 
 /// @brief One camera's part of a capture.
 ///
-/// The detection and the check are the caller's: this tier cannot link
-/// `detect`, so an application runs the full-resolution detection on a thread
-/// of its own before it submits the capture.
+/// The detections and the check are the caller's: this tier cannot link
+/// `detect`, so an application runs the full-resolution detections on a
+/// thread of its own before it submits the capture.
 ///
 /// @code
 /// CameraCapture part;
@@ -221,6 +231,7 @@ struct SessionInfo {
 /// part.sequence = frame.sequence;
 /// part.detection = std::move(full_detection);
 /// part.check = check;
+/// part.origin_tag = tag_search.found;  // detect::detect_tag's
 /// @endcode
 struct CameraCapture {
   /// The camera's JPEG (`RgbdFrame::color_bitstream`), copied out of the
@@ -239,6 +250,10 @@ struct CameraCapture {
   /// detection under the camera's serial.
   Detection detection;
   ViewCheck check;  ///< What the view is worth.
+  /// The origin tag (@ref SessionInfo::origin_tag) found in the colour image
+  /// at full resolution, in its pixels; empty when the camera found none, or
+  /// more than one print of it.
+  std::optional<DetectedMarker> origin_tag;
 };
 
 /// @brief One capture: a set from every camera, and its set-level facts.
@@ -319,8 +334,9 @@ class VC_CAPTURE_API SessionWriter {
   ///        until the first capture.
   /// @param info     The session. Refused unless: the directory and sync path
   ///                 are non-empty; the board is a ChArUco board
-  ///                 @ref check_target accepts; the depth mode has a finite,
-  ///                 positive `metres_per_unit` and finite
+  ///                 @ref check_target accepts, and the origin tag one
+  ///                 @ref check_origin_tag accepts; the depth mode has a
+  ///                 finite, positive `metres_per_unit` and finite
   ///                 `0 < min_m < max_m`; each serial is a plain file name
   ///                 (letters, digits, `-`, `_`, `.`; not `.` or `..`), and
   ///                 no two differ only in case; each camera has colour and
@@ -357,7 +373,8 @@ class VC_CAPTURE_API SessionWriter {
   /// @param job  The capture. Refused unless it has one part per camera,
   ///             each with a JPEG (starting with its SOI marker), depth with
   ///             a sample per depth pixel, a detection in an image of the
-  ///             colour model's size, and finite pixels, weights and
+  ///             colour model's size, an origin tag, if any, with the
+  ///             session's tag's id, and finite pixels, weights and
   ///             measures; the same for the set's measures; and a
   ///             @ref ViewVerdict for each check.
   /// @return `true` once queued; `false`, with nothing queued, when

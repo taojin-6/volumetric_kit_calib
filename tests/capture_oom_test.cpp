@@ -75,6 +75,8 @@ CaptureJob make_job() {
     part.check.verdict = ViewVerdict::Partial;
     job.cameras.push_back(std::move(part));
   }
+  job.cameras[1].origin_tag = DetectedMarker{
+      0, {{{30.0, 20.0}, {40.0, 20.0}, {40.0, 30.0}, {30.0, 30.0}}}};
   return job;
 }
 
@@ -110,6 +112,15 @@ TEST(CaptureOom, CreateRefusingASession) {
       Code::InvalidArgument);
 }
 
+TEST(CaptureOom, CreateRefusingAnOriginTag) {
+  SessionInfo info = make_info();
+  info.origin_tag.id = 587;  // past 36h11's codes
+  Supply<SessionInfo> infos(info);
+  expect_oom_when_reporting(
+      [&infos] { return SessionWriter::create(infos.take()); },
+      Code::InvalidArgument);
+}
+
 TEST(CaptureOom, CreateRefusingWhatReconRefuses) {
   SessionInfo info = make_info();
   info.cameras[0].info.color->intrinsics.fx =
@@ -135,6 +146,17 @@ TEST(CaptureOom, SubmitRefusingACapture) {
   ASSERT_TRUE(writer.ok()) << writer.status().message();
   CaptureJob job = make_job();
   job.cameras[1].detection.image_size = {32, 24};
+  Supply<CaptureJob> jobs(job);
+  expect_oom_when_reporting([&] { return (*writer)->submit(jobs.take()); },
+                            Code::InvalidArgument);
+}
+
+TEST(CaptureOom, SubmitRefusingAnotherTag) {
+  vkc::Result<std::unique_ptr<SessionWriter>> writer =
+      SessionWriter::create(make_info());
+  ASSERT_TRUE(writer.ok()) << writer.status().message();
+  CaptureJob job = make_job();
+  job.cameras[1].origin_tag->id = 3;
   Supply<CaptureJob> jobs(job);
   expect_oom_when_reporting([&] { return (*writer)->submit(jobs.take()); },
                             Code::InvalidArgument);

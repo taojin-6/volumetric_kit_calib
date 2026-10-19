@@ -96,6 +96,20 @@ json check_json(const ViewCheck& check) {
   return j;
 }
 
+json origin_tag_json(const OriginTag& tag,
+                     const std::optional<DetectedMarker>& found) {
+  if (!found) return nullptr;
+  json corners = json::array();
+  for (const recon::camera::Vec2d& corner : found->corners) {
+    corners.push_back(pixel(corner));
+  }
+  json j;
+  j["dictionary"] = to_string(tag.dictionary);
+  j["id"] = found->id;
+  j["corners_px"] = std::move(corners);
+  return j;
+}
+
 // Strings from a driver or an application may not be UTF-8: their bad bytes
 // become U+FFFD rather than a throw.
 std::string text_of(const json& doc) {
@@ -189,6 +203,11 @@ std::string format_session(const SessionInfo& info, const std::string& created,
   b["square_tolerance_m"] = optional_number(board.square_size_tolerance_m);
   b["planarity_bow_m"] = optional_number(board.planarity_bow_m);
 
+  json& tag = doc["origin_tag"];
+  tag["dictionary"] = to_string(info.origin_tag.dictionary);
+  tag["id"] = info.origin_tag.id;
+  tag["edge_m"] = info.origin_tag.edge_m;
+
   // Every camera streams what the first does.
   const recon::sensor::SensorInfo& first = info.cameras.front().info;
   const DepthMode& mode = info.depth_mode;
@@ -261,6 +280,7 @@ std::string format_capture(const SessionInfo& info, const CaptureJob& job) {
     c["sequence"] = part.sequence;
     c["detection"] = detection_json(part.detection);
     c["check"] = check_json(part.check);
+    c["origin_tag"] = origin_tag_json(info.origin_tag, part.origin_tag);
     cameras[serial] = std::move(c);
     if (is_usable(part.check.verdict)) ++usable_views;
   }
