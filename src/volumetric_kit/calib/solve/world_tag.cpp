@@ -34,8 +34,11 @@ constexpr const char* kWhat = "origin_tag_frame: ";
 constexpr double kInfinity = std::numeric_limits<double>::infinity();
 // cv::LevMarq's iterations in one solve, at most, and its stopping rule (as
 // bundle_adjust's): the energy's relative change, or the step's squared
-// norm, below kTolerance.
-constexpr int kMaxIterations = 100;
+// norm, below kTolerance. Two cameras whose rays disagree by more than twice
+// huber_px leave Huber's cost nearly flat between them, and cv::LevMarq
+// crawls: on the synthetic rig up to 80 iterations a pixel of disagreement,
+// so 1000 places a tag the two see 13 px apart. An iteration is cheap.
+constexpr int kMaxIterations = 1000;
 constexpr double kTolerance = 1e-12;
 // The corners, 4 of 3 coordinates, as cv::LevMarq's parameters.
 constexpr int kParameters = 12;

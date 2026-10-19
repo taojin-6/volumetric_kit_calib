@@ -390,6 +390,29 @@ TEST(OriginTagFrame, MissesWhenOutliersLeaveOneCamera) {
       << origin.reason;
 }
 
+// Two cameras whose rays disagree by a few pixels, as a small pose or lens
+// error makes them: camera 0's corners 3.4 px off in every view put both in
+// Huber's linear region, where cv::LevMarq crawls, and the tag is still
+// placed between them.
+TEST(OriginTagFrame, PlacesTheTagBetweenTwoCamerasThatDisagree) {
+  const std::vector<SyntheticCamera> rig = test::kept_scene_rig(2);
+  for (const std::size_t captures : {1u, 5u, 20u}) {
+    SCOPED_TRACE(std::to_string(captures) + " captures");
+    std::vector<TagView> views = see(rig, {}, captures, 0.0);
+    ASSERT_EQ(views.size(), 2 * captures);
+    for (TagView& v : views) {
+      if (v.camera != rig[0].id) continue;
+      for (camera::Vec2d& c : v.marker.corners) c += camera::Vec2d(3.0, 1.5);
+    }
+    const WorldOrigin origin =
+        test::value_of(locate(rig, truth_solution(rig, 1), views));
+    ASSERT_TRUE(origin.tag) << origin.reason;
+    EXPECT_EQ(origin.tag->solves, 1);
+    EXPECT_NEAR(origin.tag->rms_px, 1.47, 0.05);
+    for (const TagViewFit& v : origin.tag->views) EXPECT_TRUE(v.used);
+  }
+}
+
 // A tag kicked 6 cm in one capture: every view of that capture is dropped
 // in the first round, and listed, and the frame is the still tag's.
 TEST(OriginTagFrame, DropsTheViewsOfATagMoved) {
