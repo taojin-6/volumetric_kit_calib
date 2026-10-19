@@ -109,9 +109,10 @@ TEST(AppRigMode, AnUnknownRequestIsIgnored) {
   EXPECT_TRUE(step.hint.empty());
 }
 
-// Calibrate runs once the session is ready, nothing is pending and none is
-// running; otherwise the first reason that holds is given, in every view.
-TEST(AppRigMode, CalibrateRunsOnceReadyIdleAndNothingPending) {
+// Calibrate runs once the session is ready, no capture or drop is unresolved
+// and none is running; otherwise the first reason that holds is given, in
+// every view.
+TEST(AppRigMode, CalibrateRunsOnceReadyIdleAndNothingUnresolved) {
   for (const RigView view : {RigView::Images, RigView::Scene}) {
     for (const bool calibrated : {false, true}) {
       const RigMode idle{view, calibrated, false};
@@ -127,11 +128,13 @@ TEST(AppRigMode, CalibrateRunsOnceReadyIdleAndNothingPending) {
       gate = calibrate_gate(running, false, 3);
       EXPECT_EQ(gate.reason, "already running");
 
+      // A drop queued counts as a capture does: the snapshot still holds
+      // its capture.
       gate = calibrate_gate(idle, true, 1);
       EXPECT_FALSE(gate.enabled);
-      EXPECT_EQ(gate.reason, "a capture is still being written");
+      EXPECT_EQ(gate.reason, "a capture or a drop is still being written");
       gate = calibrate_gate(idle, false, 2);
-      EXPECT_EQ(gate.reason, "a capture is still being written");
+      EXPECT_EQ(gate.reason, "a capture or a drop is still being written");
 
       gate = calibrate_gate(idle, false, 0);
       EXPECT_FALSE(gate.enabled);

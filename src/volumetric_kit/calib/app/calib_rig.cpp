@@ -272,6 +272,7 @@ struct FrameInputs {
   const std::vector<std::string>* ids = nullptr;
   std::optional<quality::SessionSummary> summary;
   std::shared_ptr<const KeptCaptures> kept;
+  std::size_t unresolved = 0;  // captures and drops; read before both above
   viz::SaverQueue saver;
   std::string directory;
   core::StageMetrics stages;
@@ -287,15 +288,22 @@ struct Workers {
 };
 
 // A press of Calibrate, its key's or a button's: the captures kept go to T4
-// once the gate lets them; otherwise why not is said.
-void press_calibrate(CalibrateWorker& calibrate, RigMode& mode,
-                     const FrameInputs& in, Notices& notices) {
-  const CalibrateGate gate = calibrate_gate(mode, in.ready(), in.saver.pending);
+// once the gate lets them; otherwise why not is said. What the gate takes is
+// read at the press, the captures and drops unresolved first, so a drop
+// pressed earlier in the frame holds it back, and the snapshot sent reflects
+// every capture and drop made before.
+void press_calibrate(const Workers& workers, RigMode& mode, Notices& notices) {
+  const CaptureWorker& captures = workers.captures;
+  const std::size_t unresolved = captures.unresolved();
+  const std::optional<quality::SessionSummary> summary = captures.summary();
+  std::shared_ptr<const KeptCaptures> kept = captures.kept();
+  const CalibrateGate gate =
+      calibrate_gate(mode, summary && summary->ready, unresolved);
   if (!gate.enabled) {
     notices.note("calibrate: " + std::string(gate.reason));
     return;
   }
-  const core::Result<bool> started = calibrate.request(in.kept);
+  const core::Result<bool> started = workers.calibrate.request(std::move(kept));
   if (!started.ok()) {
     notices.note(started.status().message());
   } else if (!started.value()) {
@@ -324,8 +332,7 @@ void show_images(RigMode& mode, View3d& v) {
 // The keys polled before this frame, mapped with its WantTextInput, each
 // done as the window's mode has it (rig_action).
 void act_on_keys(KeyQueue& keys, bool want_text_input, const Workers& workers,
-                 RigMode& mode, View3d& v, const FrameInputs& in,
-                 Notices& notices) {
+                 RigMode& mode, View3d& v, Notices& notices) {
   const core::Result<std::vector<KeyRequest>> requests =
       keys.take(want_text_input);
   if (!requests.ok()) {
@@ -343,7 +350,7 @@ void act_on_keys(KeyQueue& keys, bool want_text_input, const Workers& workers,
         drop_last(workers.captures, notices);
         break;
       case RigAction::Calibrate:
-        press_calibrate(workers.calibrate, mode, in, notices);
+        press_calibrate(workers, mode, notices);
         break;
       case RigAction::Cancel:
         cancel_calibrate(workers.calibrate, notices);
@@ -362,8 +369,9 @@ void act_on_keys(KeyQueue& keys, bool want_text_input, const Workers& workers,
 
 // Calibrate's controls: its button, held back with the gate's reason; or,
 // while it runs, its progress and Cancel.
-void calibrate_controls(CalibrateWorker& calibrate, RigMode& mode,
+void calibrate_controls(const Workers& workers, RigMode& mode,
                         const FrameInputs& in, Notices& notices) {
+  CalibrateWorker& calibrate = workers.calibrate;
   if (const std::optional<CalibrateProgress> at = calibrate.progress()) {
     const core::Result<viz::PanelLine> line = viz::calibrate_progress_line(
         to_string(at->stage), at->done, at->total, at->seconds);
@@ -371,9 +379,9 @@ void calibrate_controls(CalibrateWorker& calibrate, RigMode& mode,
     if (ImGui::Button("Cancel")) cancel_calibrate(calibrate, notices);
     return;
   }
-  const CalibrateGate gate = calibrate_gate(mode, in.ready(), in.saver.pending);
+  const CalibrateGate gate = calibrate_gate(mode, in.ready(), in.unresolved);
   ImGui::BeginDisabled(!gate.enabled);
-  if (ImGui::Button("Calibrate")) press_calibrate(calibrate, mode, in, notices);
+  if (ImGui::Button("Calibrate")) press_calibrate(workers, mode, notices);
   ImGui::EndDisabled();
   if (!gate.enabled) {
     ImGui::SameLine();
@@ -391,7 +399,7 @@ void capture_window(const Workers& workers, RigMode& mode, Notices& notices,
   if (ImGui::Button("Capture")) arm(live, notices);
   ImGui::SameLine();
   if (ImGui::Button("Drop last")) drop_last(workers.captures, notices);
-  calibrate_controls(workers.calibrate, mode, in, notices);
+  calibrate_controls(workers, mode, in, notices);
   notices.capture.decision = live.decision();
   const core::Result<std::vector<viz::PanelLine>> lines =
       viz::capture_panel(notices.capture);
@@ -487,7 +495,7 @@ void calibration_window(const Workers& workers, RigMode& mode,
   }
   ImGui::SetNextWindowPos(ImVec2(430, 10), ImGuiCond_FirstUseEver);
   if (ImGui::Begin("Calibration")) {
-    calibrate_controls(workers.calibrate, mode, in, notices);
+    calibrate_controls(workers, mode, in, notices);
     viz::draw_panel_lines("calibration", lines);
   }
   ImGui::End();
@@ -985,10 +993,11 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     gfx::windowing::Frame& frame = *next;
     retire.poll();
 
-    // Captures pending first, so a snapshot read after holds every capture
-    // written before it.
+    // The captures and drops unresolved first, so the snapshot read after
+    // reflects every one made before.
     FrameInputs in;
     in.ids = &ids;
+    in.unresolved = captures->unresolved();
     in.saver = {captures->pending(), captures->capacity(), captures->full()};
     in.summary = captures->summary();
     in.kept = captures->kept();
@@ -1000,8 +1009,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     platform->new_frame();
     overlay.new_frame();
     const ImGuiIO& io = ImGui::GetIO();
-    act_on_keys(input.keys, io.WantTextInput, workers, mode, view3d, in,
-                notices);
+    act_on_keys(input.keys, io.WantTextInput, workers, mode, view3d, notices);
     const bool view_changed = mode.view != shown;
     shown = mode.view;
     view3d.placement = scene_placement(mode);

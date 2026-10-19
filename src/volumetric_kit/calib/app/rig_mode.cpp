@@ -32,9 +32,11 @@ RigStep rig_action(const RigMode& mode, KeyRequest request) noexcept {
 }
 
 CalibrateGate calibrate_gate(const RigMode& mode, bool ready,
-                             std::size_t pending) noexcept {
+                             std::size_t unresolved) noexcept {
   if (mode.calibrating) return {false, "already running"};
-  if (pending > 0) return {false, "a capture is still being written"};
+  if (unresolved > 0) {
+    return {false, "a capture or a drop is still being written"};
+  }
   if (!ready) {
     return {false, "the session is not ready (see the Session panel)"};
   }

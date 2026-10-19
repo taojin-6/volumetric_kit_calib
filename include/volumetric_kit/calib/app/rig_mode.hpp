@@ -107,7 +107,7 @@ VC_APP_API RigStep rig_action(const RigMode& mode, KeyRequest request) noexcept;
 /// @brief Whether Calibrate may run now, and why not.
 ///
 /// @code
-/// const CalibrateGate gate = calibrate_gate(mode, ready, pending);
+/// const CalibrateGate gate = calibrate_gate(mode, ready, unresolved);
 /// ImGui::BeginDisabled(!gate.enabled);
 /// @endcode
 struct CalibrateGate {
@@ -116,26 +116,29 @@ struct CalibrateGate {
   std::string_view reason;
 };
 
-/// @brief Whether Calibrate may run: the session is ready, no capture is
-///        pending, and none is running. Its key and its buttons share it.
-/// @param mode     Where the window stands: `calibrating` holds it back.
-/// @param ready    Whether the session's checks let Calibrate run
-///                 (`quality::SessionSummary::ready`); false before the
-///                 first capture is written.
-/// @param pending  The captures queued, being detected or being written
-///                 (`CaptureWorker::pending`), which a snapshot taken now
-///                 would miss.
+/// @brief Whether Calibrate may run: the session is ready, no capture or
+///        drop is unresolved, and none is running. Its key and its buttons
+///        share it.
+/// @param mode        Where the window stands: `calibrating` holds it back.
+/// @param ready       Whether the session's checks let Calibrate run
+///                    (`quality::SessionSummary::ready`); false before the
+///                    first capture is written.
+/// @param unresolved  The captures and drops queued or in progress
+///                    (`CaptureWorker::unresolved`), which a snapshot taken
+///                    now would not reflect.
 /// @return Enabled; or not, the reason the first of "already running", "a
-///         capture is still being written" and "the session is not ready
-///         (see the Session panel)" that holds.
+///         capture or a drop is still being written" and "the session is
+///         not ready (see the Session panel)" that holds.
 ///
 /// @code
+/// const std::size_t unresolved = captures->unresolved();  // first
+/// const auto summary = captures->summary();
 /// const CalibrateGate gate =
-///     calibrate_gate(mode, summary && summary->ready, captures->pending());
+///     calibrate_gate(mode, summary && summary->ready, unresolved);
 /// if (!gate.enabled) note(gate.reason);
 /// @endcode
 VC_APP_API CalibrateGate calibrate_gate(const RigMode& mode, bool ready,
-                                        std::size_t pending) noexcept;
+                                        std::size_t unresolved) noexcept;
 
 /// @brief Where the 3D view sits in @p mode.
 /// @param mode  Where the window stands.

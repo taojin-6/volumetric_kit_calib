@@ -36,7 +36,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with its frusta and the solved boards, and V, B or `.` goes back to the
   camera images to capture more. `app::RigMode` (`app/rig_mode.hpp`) is the
   window's mode: `rig_action`, what each key does in the images and in the
-  3D view; `calibrate_gate`, when Calibrate may run and why not;
+  3D view; `calibrate_gate`, when Calibrate may run and why not, held back
+  by `CaptureWorker::unresolved`, the captures and drops not yet resolved;
   `scene_placement`, `on_result` and `frame_on_result` (`RigOrigin`).
   `KeyRequest` gains `Calibrate`, `SwitchView` and `Cancel`.
   `app::placed_cameras` places the 3D view's cameras at a result's poses.

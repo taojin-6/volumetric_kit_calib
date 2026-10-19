@@ -629,6 +629,11 @@ std::size_t CaptureWorker::pending() const {
   return state_->captures;
 }
 
+std::size_t CaptureWorker::unresolved() const {
+  const std::lock_guard<std::mutex> lock(state_->mutex);
+  return state_->captures + state_->drops;
+}
+
 std::string CaptureWorker::directory() const {
   const std::lock_guard<std::mutex> lock(state_->mutex);
   return state_->directory;
