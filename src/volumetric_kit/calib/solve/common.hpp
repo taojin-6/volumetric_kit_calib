@@ -44,9 +44,6 @@ core::Status check_one_view_each(const std::vector<Observation>& views,
 core::Status refuse_option(std::string_view prefix, const char* name,
                            const char* rule);
 
-// The median of `values`, which are not empty.
-double median(std::vector<double> values);
-
 // The residual (pixels) above which a corner is an outlier: `outlier_px`, or
 // `outlier_mads` robust deviations if more -- 1.4826 times the median
 // absolute deviation of `components`, the kept corners' residual components

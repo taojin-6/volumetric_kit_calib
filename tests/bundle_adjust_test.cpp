@@ -28,6 +28,7 @@
 #include <opencv2/calib.hpp>
 
 #include "synthetic_scene.hpp"
+#include "volumetric_kit/calib/compute/measures.hpp"
 
 namespace volumetric_kit::calib::solve {
 namespace {
@@ -1091,14 +1092,9 @@ TEST(BundleAdjust, HonoursTheCornerBounds) {
 
   // The robust deviation: 1.4826 times the median absolute deviation of the
   // residuals' components from their median.
-  const auto median = [](std::vector<double> v) {
-    std::sort(v.begin(), v.end());
-    const std::size_t n = v.size();
-    return n % 2 ? v[n / 2] : 0.5 * (v[n / 2 - 1] + v[n / 2]);
-  };
-  const double centre = median(components);
+  const double centre = compute::median(components);
   for (double& x : components) x = std::abs(x - centre);
-  const double sigma = 1.4826 * median(components);
+  const double sigma = 1.4826 * compute::median(components);
   options.outlier_px = 1e-9;
   options.outlier_mads = 2.5;
   options.outlier_rounds = 1;

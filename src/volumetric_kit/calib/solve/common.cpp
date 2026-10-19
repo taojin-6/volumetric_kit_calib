@@ -10,6 +10,8 @@
 #include <set>
 #include <utility>
 
+#include "volumetric_kit/calib/compute/measures.hpp"
+
 namespace volumetric_kit::calib::solve::detail {
 
 core::Result<RigCameras> read_rig_cameras(const std::vector<RigCamera>& cameras,
@@ -70,21 +72,15 @@ std::string number(double v) {
   return text;
 }
 
-double median(std::vector<double> values) {
-  const std::size_t n = values.size();
-  std::sort(values.begin(), values.end());
-  return n % 2 == 1 ? values[n / 2] : 0.5 * (values[n / 2 - 1] + values[n / 2]);
-}
-
 double outlier_bound(std::vector<double> components, double outlier_px,
                      double outlier_mads) {
   // 1.4826 times the median absolute deviation estimates a normal
   // distribution's standard deviation.
   constexpr double kMadToSigma = 1.4826;
-  const double centre = median(components);
+  const double centre = compute::median(components);
   for (double& c : components) c = std::abs(c - centre);
-  return std::max(outlier_px,
-                  outlier_mads * kMadToSigma * median(std::move(components)));
+  return std::max(outlier_px, outlier_mads * kMadToSigma *
+                                  compute::median(std::move(components)));
 }
 
 }  // namespace volumetric_kit::calib::solve::detail
