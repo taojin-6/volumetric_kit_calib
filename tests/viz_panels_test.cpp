@@ -860,6 +860,45 @@ TEST(WorldPanel, RefusesAWorldOfAnotherRig) {
             "world_panel: reference 0 of 3 ids, for a world of 2 cameras");
 }
 
+// A result's notices: where it was written, then each amber world line -- a
+// warned edge, a tag world refused -- and no other.
+TEST(CalibrationNotices, SayWhereAndEachWorldWarning) {
+  using Said = std::vector<std::string>;
+  quality::ResultWorld world = three_camera_world();
+  EXPECT_EQ(calibration_notices(7, "results/007_a",
+                                world_panel(kIds, 0, world).value())
+                .value(),
+            Said{"calibration 007: written to results/007_a"});
+  world.origin.tag->edge_m = 0.15521;
+  world.origin.tag->edge_error_percent = 3.4733;
+  world.origin.tag->edge_warning = true;
+  EXPECT_EQ(calibration_notices(7, "results/007_a",
+                                world_panel(kIds, 0, world).value())
+                .value(),
+            (Said{"calibration 007: written to results/007_a",
+                  "calibration 007: tag edge: 155.2 mm, +3.5 % from the "
+                  "printed 150.0 mm"}));
+
+  // A refusal is said; no camera seeing the tag, muted, is not.
+  quality::ResultWorld reference;
+  reference.origin.sought = kOriginTag;
+  reference.origin.miss = solve::TagMiss::PoorFit;
+  reference.origin.reason =
+      "the tag's corners fit its views at 26.7373 px RMS, above the 3 px a "
+      "world takes: the cameras disagree on where it is";
+  EXPECT_EQ(calibration_notices(12, "results/012_b",
+                                world_panel(kIds, 1, reference).value())
+                .value(),
+            (Said{"calibration 012: written to results/012_b",
+                  "calibration 012: tag world: " + reference.origin.reason}));
+  reference.origin.miss = solve::TagMiss::NotSeen;
+  reference.origin.reason = "no camera saw the tag";
+  EXPECT_EQ(calibration_notices(12, "results/012_b",
+                                world_panel(kIds, 1, reference).value())
+                .value(),
+            Said{"calibration 012: written to results/012_b"});
+}
+
 // The stages' rows go to gfx's panel as they are; the frame's time is their
 // host total without breakdowns.
 TEST(StageFrameMetrics, CarriesTheStagesToGfxsPanel) {

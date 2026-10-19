@@ -201,6 +201,10 @@ TEST(VizOom, CalibratePanels) {
   expect_oom_anywhere([&] { return world_panel(ids, 1, reference); });
   expect_oom_when_reporting([&] { return world_panel(ids, 2, reference); },
                             Code::InvalidArgument);
+  // The notices of a warned edge.
+  const std::vector<PanelLine> warned = world_panel(ids, 0, world).value();
+  expect_oom_anywhere(
+      [&] { return calibration_notices(7, "results/007_a", warned); });
 }
 
 // A refusal that runs out of memory reports OutOfMemory, and the editor

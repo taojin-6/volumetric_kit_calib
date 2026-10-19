@@ -67,4 +67,9 @@ bool frame_on_result(const std::optional<RigOrigin>& framed,
   return !framed || *framed != origin;
 }
 
+std::optional<recon::camera::Vec3d> world_up(const RigOrigin& origin) noexcept {
+  if (!origin.tag) return std::nullopt;
+  return recon::camera::Vec3d(0.0, 0.0, 1.0);  // out of the tag's face
+}
+
 }  // namespace volumetric_kit::calib::app

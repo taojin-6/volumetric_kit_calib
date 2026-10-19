@@ -208,5 +208,18 @@ TEST(AppRigMode, FramesAtTheFirstResultAndANewOrigin) {
   EXPECT_TRUE(tag0 != reference0);
 }
 
+// A tag world is framed with the tag's +z up, so its floor lies level; a
+// reference camera's with the cameras' mean up.
+TEST(AppRigMode, LevelsATagWorldOnly) {
+  for (const std::size_t reference : {0u, 2u}) {
+    SCOPED_TRACE(reference);
+    const std::optional<recon::camera::Vec3d> up =
+        world_up(RigOrigin{reference, true});
+    ASSERT_TRUE(up);
+    EXPECT_EQ(*up, recon::camera::Vec3d(0.0, 0.0, 1.0));
+    EXPECT_FALSE(world_up(RigOrigin{reference}));
+  }
+}
+
 }  // namespace
 }  // namespace volumetric_kit::calib::app

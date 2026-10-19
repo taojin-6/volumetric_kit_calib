@@ -8,7 +8,8 @@
 ///        arrived, what the captures kept add up to and how much of the
 ///        origin tag they hold, where a capture stands, and the stage
 ///        timings; and Calibrate's: how far it has got, what its result and
-///        its depth checks are worth, and where its world is.
+///        its depth checks are worth, where its world is, and the notices
+///        it posts.
 ///
 /// Each panel is a model -- lines of text, each in a @ref Tone -- built from
 /// host data alone (the quality tier's checks and metrics, recon's counters,
@@ -393,13 +394,30 @@ VC_VIZ_API core::Result<std::vector<PanelLine>> depth_panel(
 /// @code
 /// VKC_ASSIGN(const std::vector<PanelLine> world,
 ///            world_panel(result.ids, result.reference, result.world));
-/// for (const PanelLine& l : world) {
-///   if (l.tone == Tone::Warn) notify(l.label + ": " + l.value);
-/// }
+/// lines.insert(lines.end(), world.begin(), world.end());
 /// @endcode
 VC_VIZ_API core::Result<std::vector<PanelLine>> world_panel(
     const std::vector<std::string>& ids, std::size_t reference,
     const quality::ResultWorld& world);
+
+/// @brief The notices a Calibrate result posts: where it was written, and
+///        each amber line of its world (@ref world_panel), such as an edge
+///        warned of or a tag world refused.
+/// @param number     Its results directory's number, `RRR`.
+/// @param directory  Its results directory.
+/// @param world      Its world lines (@ref world_panel).
+/// @return `calibration RRR: written to <directory>`, then
+///         `calibration RRR: <label>: <value>` for each `Tone::Warn` line of
+///         @p world, in order; or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const std::vector<std::string> notices,
+///            calibration_notices(result.number, result.directory, world));
+/// for (const std::string& notice : notices) notify(notice);
+/// @endcode
+VC_VIZ_API core::Result<std::vector<std::string>> calibration_notices(
+    int number, const std::string& directory,
+    const std::vector<PanelLine>& world);
 
 /// @brief The live stages' timings as gfx's metrics panel takes them.
 /// @param stages  The stages timed (poll, readback, detect, tiles, ...).
