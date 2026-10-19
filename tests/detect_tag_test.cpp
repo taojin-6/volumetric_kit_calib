@@ -36,28 +36,11 @@ using Code = core::Status::Code;
 using Corners = std::array<cv::Point2d, 4>;
 
 using test::luma;
+using test::marker_placement;
 using test::Refused;
 using test::ThrowingParallelFor;
 
-constexpr double kPi = 3.14159265358979323846;
 constexpr float kBackground = 110.0f;
-
-// The print `side_px` across, centred at `centre`: squashed to `squash` of
-// that along its y axis, turned `roll_deg` (clockwise on screen, y being
-// down), and seen in `perspective` (per pixel from the centre).
-cv::Matx33d placed(const cv::Point2d& centre, double side_px, double roll_deg,
-                   double squash = 1.0, const cv::Vec2d& perspective = {}) {
-  const double c = std::cos(roll_deg * kPi / 180.0);
-  const double s = std::sin(roll_deg * kPi / 180.0);
-  const cv::Matx33d middle(1.0, 0.0, -0.5, 0.0, 1.0, -0.5, 0.0, 0.0, 1.0);
-  const cv::Matx33d size(side_px, 0.0, 0.0, 0.0, squash * side_px, 0.0, 0.0,
-                         0.0, 1.0);
-  const cv::Matx33d turn(c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0);
-  const cv::Matx33d view(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, perspective[0],
-                         perspective[1], 1.0);
-  const cv::Matx33d move(1.0, 0.0, centre.x, 0.0, 1.0, centre.y, 0.0, 0.0, 1.0);
-  return move * view * turn * size * middle;
-}
 
 cv::Mat background() {
   return cv::Mat(2160, 3840, CV_8UC1, cv::Scalar(kBackground));
@@ -145,12 +128,12 @@ std::ostream& operator<<(std::ostream& out, const Errors& e) {
 // Prints 100-160 px across, turned, squashed and in perspective, as a floor
 // tag looks to the rig's cameras 2-3 m away.
 std::vector<cv::Matx33d> placements() {
-  return {placed({612.3, 433.7}, 100.0, 0.0),
-          placed({1920.4, 1080.6}, 160.0, 37.0, 0.7, {1e-3, -5e-4}),
-          placed({3301.8, 1702.2}, 128.0, -118.0, 0.8, {-8e-4, 1e-3}),
-          placed({2650.5, 512.9}, 140.0, 90.0, 0.9, {5e-4, 5e-4}),
-          placed({1000.2, 1800.8}, 115.0, 195.0, 0.75, {-1e-3, 0.0}),
-          placed({3500.6, 300.1}, 150.0, -61.0, 0.65, {0.0, -1e-3})};
+  return {marker_placement({612.3, 433.7}, 100.0, 0.0),
+          marker_placement({1920.4, 1080.6}, 160.0, 37.0, 0.7, {1e-3, -5e-4}),
+          marker_placement({3301.8, 1702.2}, 128.0, -118.0, 0.8, {-8e-4, 1e-3}),
+          marker_placement({2650.5, 512.9}, 140.0, 90.0, 0.9, {5e-4, 5e-4}),
+          marker_placement({1000.2, 1800.8}, 115.0, 195.0, 0.75, {-1e-3, 0.0}),
+          marker_placement({3500.6, 300.1}, 150.0, -61.0, 0.65, {0.0, -1e-3})};
 }
 
 TEST(DetectTag, FindsAWarpedTagInOpenCVsCornerOrder) {
@@ -177,8 +160,8 @@ TEST(DetectTag, FindsAWarpedTagInOpenCVsCornerOrder) {
 TEST(DetectTag, FollowsThePrintedTopLeftAsThePrintTurns) {
   std::vector<DetectedMarker> turned;
   for (int quarter = 0; quarter < 4; ++quarter) {
-    const View view =
-        tag_view(placed({1500.4, 900.7}, 130.0, 12.0 + 90.0 * quarter), 20);
+    const View view = tag_view(
+        marker_placement({1500.4, 900.7}, 130.0, 12.0 + 90.0 * quarter), 20);
     const MarkerSearch found = search(view.image);
     ASSERT_TRUE(found.found.has_value()) << quarter;
     Errors errors;
@@ -219,7 +202,7 @@ TEST(DetectTag, StartsAtTheBottomRightOfAprilTagsOwnPrint) {
 
   // AprilTag's print is OpenCV's drawn through a half turn of its frame.
   const cv::Matx33d print_to_image =
-      placed({1700.2, 950.9}, 130.0, 25.0, 0.8, {5e-4, -5e-4});
+      marker_placement({1700.2, 950.9}, 130.0, 25.0, 0.8, {5e-4, -5e-4});
   const cv::Matx33d half_turn(-1.0, 0.0, 1.0, 0.0, -1.0, 1.0, 0.0, 0.0, 1.0);
   cv::Mat render = background();
   test::draw_marker(render, kOriginTag.dictionary, kOriginTag.id,
@@ -248,7 +231,7 @@ TEST(DetectTag, FindsTheTagBesideTheBoard) {
       test::board_facing_camera(board, {-0.5, 0.0, 2.5}, 20.0, 5.0), board);
   const Corners truth = test::draw_marker(
       render, kOriginTag.dictionary, 0,
-      placed({2900.3, 1400.6}, 120.0, -20.0, 0.7, {5e-4, -5e-4}));
+      marker_placement({2900.3, 1400.6}, 120.0, -20.0, 0.7, {5e-4, -5e-4}));
   const MarkerSearch found = search(picture(render, 30));
   EXPECT_EQ(found.matches, 1);
   ASSERT_TRUE(found.found.has_value());

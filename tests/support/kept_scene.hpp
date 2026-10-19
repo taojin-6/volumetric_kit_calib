@@ -86,8 +86,8 @@ inline int kept_index(std::size_t placement) {
 /// @brief @p scene's first @p captures placements as the capture worker keeps
 ///        them: each camera's view, named for its camera and numbered
 ///        @ref kept_index (a camera that does not see the board has none),
-///        an empty depth per camera, the rig's board (@ref legacy_femto_board)
-///        and default solve thresholds.
+///        an empty depth and no origin tag per camera, the rig's board
+///        (@ref legacy_femto_board) and default solve thresholds.
 /// @param scene      The scene.
 /// @param reference  The reference camera, by rig index.
 /// @param directory  The session's directory.
@@ -126,6 +126,7 @@ inline app::KeptCaptures kept_captures(const Scene& scene,
       capture->views.push_back(view);
       capture->depth.push_back(
           std::make_shared<const std::vector<std::uint16_t>>());
+      capture->tags.emplace_back();
     }
     made.push_back(std::move(capture));
   }

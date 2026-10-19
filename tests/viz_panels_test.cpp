@@ -2,10 +2,10 @@
 // Copyright (c) 2026 Tao Jin
 
 // The panels' models: each line's text and tone, from the live checks, the
-// array's counters, the session's summary, the capture rule and the capture
-// records, judged by the quality tier's thresholds; and the stage timings as
-// gfx's metrics panel takes them. No device or ImGui frame needed
-// (viz_render_test draws them).
+// array's counters, the session's summary and origin tag, the capture rule
+// and the capture records, judged by the quality tier's thresholds; and the
+// stage timings as gfx's metrics panel takes them. No device or ImGui frame
+// needed (viz_render_test draws them).
 
 #include "volumetric_kit/calib/viz/panels.hpp"
 
@@ -344,6 +344,43 @@ TEST(SessionPanel, RefusesASummaryThatDoesNotMatchItsIds) {
             Code::InvalidArgument);
 }
 
+// Green once 2 cameras see the tag, amber at 1, muted before any.
+TEST(OriginTagLine, TonesTheCamerasThatSawTheTag) {
+  PanelLine l = origin_tag_line({4, 0, 0}).value();
+  EXPECT_EQ(l.label, "origin tag");
+  EXPECT_EQ(l.value, "seen by 0 of 4 cameras");
+  EXPECT_EQ(l.tone, Tone::Muted);
+
+  l = origin_tag_line({4, 1, 1}).value();
+  EXPECT_EQ(l.value,
+            "seen by 1 of 4 cameras, 1 view: the reference camera will be the "
+            "origin unless a second camera sees it");
+  EXPECT_EQ(l.tone, Tone::Warn);
+
+  l = origin_tag_line({4, 2, 9}).value();
+  EXPECT_EQ(l.value, "seen by 2 of 4 cameras, 9 views");
+  EXPECT_EQ(l.tone, Tone::Good);
+  l = origin_tag_line({4, 4, 31}).value();
+  EXPECT_EQ(l.value, "seen by 4 of 4 cameras, 31 views");
+  EXPECT_EQ(l.tone, Tone::Good);
+
+  // A rig of one camera never sees it in two.
+  l = origin_tag_line({1, 1, 3}).value();
+  EXPECT_EQ(l.value.rfind("seen by 1 of 1 camera, 3 views: ", 0), 0u)
+      << l.value;
+  EXPECT_EQ(l.tone, Tone::Warn);
+}
+
+TEST(OriginTagLine, RefusesACoverageNoRigHas) {
+  const core::Result<PanelLine> more = origin_tag_line({2, 3, 3});
+  ASSERT_FALSE(more.ok());
+  EXPECT_EQ(more.status().domain(), Code::InvalidArgument);
+  EXPECT_EQ(more.status().message(),
+            "origin_tag_line: seen by 3 of 2 cameras in 3 views");
+  EXPECT_EQ(origin_tag_line({4, 2, 1}).status().domain(),
+            Code::InvalidArgument);
+}
+
 TEST(CapturePanel, ShowsWhereTheRuleStands) {
   CaptureStatus status;
   EXPECT_EQ(line(capture_panel(status).value(), "capture").value, "idle");
@@ -379,11 +416,13 @@ TEST(CapturePanel, ShowsTheLastCaptureAndAFailedWrite) {
   meta.live_vs_full_px = 0.42;
   status.last = meta;
   status.last_usable_views = 3;
+  status.last_tag_cameras = 2;
   status.last_flagged = true;
   status.error = "disk full";
   const std::vector<PanelLine> l = capture_panel(status).value();
   EXPECT_EQ(line(l, "last").value,
-            "#12: 3 usable views, still 0.08 px, spread 1.40 ms");
+            "#12: 3 usable views, the origin tag in 2, still 0.08 px, spread "
+            "1.40 ms");
   EXPECT_EQ(line(l, "live vs full").value, "0.42 px");
   EXPECT_EQ(line(l, "live vs full").tone, Tone::Warn);
   EXPECT_EQ(line(l, "save").value, "failed: disk full");

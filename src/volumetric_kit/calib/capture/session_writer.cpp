@@ -123,6 +123,9 @@ core::Result<ArrayCalibration> check_info(const SessionInfo& info) {
         std::string("SessionWriter: a session's board is ChArUco, not ") +
         to_string(info.board.kind));
   }
+  if (core::Status tag = check_origin_tag(info.origin_tag); !tag.ok()) {
+    return std::move(tag).with_context("SessionWriter");
+  }
   VKC_TRY(check_depth_mode(info.depth_mode));
   for (const SessionCamera& camera : info.cameras) {
     const std::string& serial = camera.info.id;
@@ -204,6 +207,18 @@ core::Status check_part(const SessionInfo& info, std::size_t i,
       if (!finite(corner)) {
         return invalid(where + "marker " + std::to_string(marker.id) +
                        " is not finite");
+      }
+    }
+  }
+  if (part.origin_tag) {
+    if (part.origin_tag->id != info.origin_tag.id) {
+      return invalid(
+          where + "origin tag " + std::to_string(part.origin_tag->id) +
+          " is not the session's " + std::to_string(info.origin_tag.id));
+    }
+    for (const recon::camera::Vec2d& corner : part.origin_tag->corners) {
+      if (!finite(corner)) {
+        return invalid(where + "the origin tag is not finite");
       }
     }
   }

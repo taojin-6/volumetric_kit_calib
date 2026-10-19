@@ -275,6 +275,32 @@ core::Result<SessionPanel> session_panel(const quality::SessionSummary& summary,
   });
 }
 
+core::Result<PanelLine> origin_tag_line(const TagCoverage& coverage) {
+  return compute::guarded("origin_tag_line", [&]() -> core::Result<PanelLine> {
+    if (coverage.seen_by > coverage.cameras ||
+        coverage.views < coverage.seen_by) {
+      return core::Status::invalid_argument(
+          "origin_tag_line: seen by " + std::to_string(coverage.seen_by) +
+          " of " + std::to_string(coverage.cameras) + " cameras in " +
+          std::to_string(coverage.views) + " views");
+    }
+    std::string seen = "seen by " + std::to_string(coverage.seen_by) + " of " +
+                       std::to_string(coverage.cameras) +
+                       (coverage.cameras == 1 ? " camera" : " cameras");
+    if (coverage.seen_by == 0) {
+      return PanelLine{"origin tag", seen, Tone::Muted};
+    }
+    seen += ", " + std::to_string(coverage.views) +
+            (coverage.views == 1 ? " view" : " views");
+    if (coverage.seen_by >= 2) return PanelLine{"origin tag", seen, Tone::Good};
+    return PanelLine{"origin tag",
+                     seen +
+                         ": the reference camera will be the origin unless a "
+                         "second camera sees it",
+                     Tone::Warn};
+  });
+}
+
 core::Result<std::vector<PanelLine>> capture_panel(
     const CaptureStatus& status) {
   return compute::guarded(
@@ -306,9 +332,11 @@ core::Result<std::vector<PanelLine>> capture_panel(
           lines.push_back({"last",
                            "#" + std::to_string(last.index) + ": " +
                                std::to_string(status.last_usable_views) +
-                               " usable views, still " +
-                               fixed(last.stillness_px, 2) + " px, spread " +
-                               fixed(last.spread_ms, 2) + " ms",
+                               " usable views, the origin tag in " +
+                               std::to_string(status.last_tag_cameras) +
+                               ", still " + fixed(last.stillness_px, 2) +
+                               " px, spread " + fixed(last.spread_ms, 2) +
+                               " ms",
                            Tone::Normal});
           lines.push_back({"live vs full",
                            last.live_vs_full_px

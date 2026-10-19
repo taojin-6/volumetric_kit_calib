@@ -285,6 +285,7 @@ void act_on_keys(KeyQueue& keys, bool want_text_input, LiveWorker& live,
 struct FrameInputs {
   const std::vector<std::string>* ids = nullptr;
   std::optional<quality::SessionSummary> summary;
+  std::shared_ptr<const KeptCaptures> kept;
   viz::SaverQueue saver;
   std::string directory;
   core::StageMetrics stages;
@@ -341,9 +342,14 @@ void rig_windows(const LiveSnapshot& snapshot, const viz::BoardEditor& editor,
   ImGui::End();
 
   if (in.summary) {
-    const core::Result<viz::SessionPanel> panel =
+    core::Result<viz::SessionPanel> panel =
         viz::session_panel(*in.summary, ids);
     if (panel.ok()) {
+      if (in.kept) {
+        core::Result<viz::PanelLine> tag =
+            viz::origin_tag_line(tag_coverage(*in.kept));
+        if (tag.ok()) panel->lines.push_back(std::move(tag).value());
+      }
       ImGui::Begin("Session");
       viz::draw_session_panel(panel.value());
       ImGui::End();
@@ -403,6 +409,7 @@ void take_reports(LiveWorker& live, CloudWorker& cloud, CaptureWorker& captures,
       case CaptureEvent::Kind::Saved:
         notices.capture.last = event.meta;
         notices.capture.last_usable_views = event.usable_views;
+        notices.capture.last_tag_cameras = event.tag_cameras;
         notices.capture.last_flagged = event.flagged;
         notices.capture.error.clear();
         notices.flash_until = Clock::now() + kFlash;
@@ -810,6 +817,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     FrameInputs in;
     in.ids = &ids;
     in.summary = captures->summary();
+    in.kept = captures->kept();
     in.saver = {captures->pending(), captures->capacity(), captures->full()};
     in.directory = captures->directory();
     if (latest) in.stages = latest->stages;

@@ -5,8 +5,9 @@
 
 /// @file panels.hpp
 /// @brief The live view's panels: what each camera sees, how the latest set
-///        arrived, what the captures kept add up to, where a capture stands,
-///        and the stage timings.
+///        arrived, what the captures kept add up to and how much of the
+///        origin tag they hold, where a capture stands, and the stage
+///        timings.
 ///
 /// Each panel is a model -- lines of text, each in a @ref Tone -- built from
 /// host data alone (the quality tier's checks, recon's counters, the capture
@@ -186,6 +187,38 @@ VC_VIZ_API core::Result<SessionPanel> session_panel(
     const quality::SessionSummary& summary, const std::vector<std::string>& ids,
     const PanelOptions& options = {});
 
+/// @brief The origin tag in the captures kept: the cameras that saw it, and
+///        how often.
+///
+/// @code
+/// TagCoverage coverage;
+/// coverage.cameras = 4;  // the rig's
+/// coverage.seen_by = 2;  // cameras that saw it in a capture kept
+/// coverage.views = 9;    // their captures kept that saw it
+/// @endcode
+struct TagCoverage {
+  std::size_t cameras = 0;  ///< The rig's cameras.
+  std::size_t seen_by = 0;  ///< Those that saw it in a capture kept.
+  /// Its views: for each camera, the captures kept that saw it, summed.
+  std::size_t views = 0;
+};
+
+/// @brief The session panel's line for the origin tag.
+///
+/// `origin tag`: `seen by <k> of <N> cameras, <V> views`, green at 2
+/// cameras or more; amber at 1, adding that the reference camera will be the
+/// origin unless a second camera sees it; `seen by 0 of <N> cameras`, muted,
+/// before any.
+/// @param coverage  The tag in the captures kept.
+/// @return The line; `InvalidArgument` for more cameras seeing it than the
+///         rig has, or fewer views than cameras seeing it; or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const PanelLine line, origin_tag_line(coverage));
+/// panel.lines.push_back(line);
+/// @endcode
+VC_VIZ_API core::Result<PanelLine> origin_tag_line(const TagCoverage& coverage);
+
 /// @brief Where a capture stands: the rule's latest answer and the last
 ///        capture written.
 ///
@@ -194,12 +227,14 @@ VC_VIZ_API core::Result<SessionPanel> session_panel(
 /// status.decision = decision;  // the rule's latest answer that is not Idle
 /// status.last = meta;          // the last capture written (CA9's record)
 /// status.last_usable_views = usable;
+/// status.last_tag_cameras = tag_cameras;
 /// status.last_flagged = quality::live_vs_full_flagged(shift);
 /// @endcode
 struct CaptureStatus {
   quality::CaptureDecision decision;  ///< The capture rule's latest answer.
   std::optional<CaptureMeta> last;    ///< The last capture written.
   int last_usable_views = 0;          ///< Its usable views.
+  int last_tag_cameras = 0;  ///< Its cameras that found the origin tag.
   /// Its live corners disagree with its full ones
   /// (@ref quality::live_vs_full_flagged).
   bool last_flagged = false;
@@ -210,8 +245,9 @@ struct CaptureStatus {
 ///
 /// Lines, in order: `capture`, the rule's state -- `idle`, `waiting: <why>`
 /// (amber), `taken` (green), with a `warning` line for its warnings, or
-/// `failed: <why>` (red); `last`, the last capture written, and its
-/// `live vs full` (amber when flagged); and `save`, a write's failure (red).
+/// `failed: <why>` (red); `last`, the last capture written, with its usable
+/// views and the cameras that found the origin tag, and its `live vs full`
+/// (amber when flagged); and `save`, a write's failure (red).
 /// @param status  Where the capture stands.
 /// @return The lines; or `OutOfMemory`.
 ///

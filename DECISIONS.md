@@ -106,6 +106,9 @@ which `detect::detect_tag` finds in each camera's image.
 
 - **The rig's print:** the one on the floor that the legacy
   `set_world_from_tag.py` anchored its world to.
+- **Found at capture.** Nothing reads a session back (the 2026-10-13 entry),
+  so the tag is searched for while the capture's full luma is at hand, in the
+  luma the board's detection already reads: no readback.
 - **OpenCV's detector, not libapriltag.** OpenCV is already every build's
   prerequisite and decodes AprilTag dictionaries; libapriltag would be a
   second detector to carry. The legacy script used OpenCV's too.
@@ -518,8 +521,8 @@ The `capture` tier writes the rig application's calibration sessions
   capture and keeps its files; no index is used twice.
 - **Written, never read.** calib reads no session back: no resume and no
   replay. A crash loses no capture already listed; a new run starts a new
-  session. Calibrate takes the kept captures' detections and raw depth from
-  memory (`CaptureWorker::kept`), not from the files.
+  session. Calibrate takes the kept captures' detections, raw depth and
+  origin tags from memory (`CaptureWorker::kept`), not from the files.
 - **Off the caller's thread.** One writer thread behind a bounded queue, which
   refuses a capture when full; the caller polls the outcomes. The writer
   encodes and writes; the full-resolution detection is the caller's, done on
