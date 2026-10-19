@@ -6,8 +6,8 @@
 /// @file depth_scene.hpp
 /// @brief Depth images rendered in double for the depth checks' tests: a
 ///        prepared depth's pinhole, the surfaces its rays meet, the depth
-///        each pixel sees, and turns to pose them. Its users link
-///        vc_synthetic_rig.
+///        each pixel sees, prepared or raw through a lens, and turns to pose
+///        them. Its users link vc_synthetic_rig.
 
 #include <algorithm>
 #include <cmath>
@@ -20,7 +20,10 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 
+#include <opencv2/core.hpp>
+
 #include "synthetic_rig.hpp"
+#include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/recon/camera/camera_model.hpp"
 #include "volumetric_kit/recon/camera/geometry.hpp"
 
@@ -139,6 +142,56 @@ inline std::vector<float> render(const Pinhole& p,
     }
   }
   return depth;
+}
+
+/// @brief Each pixel's ray through @p lens at depth 1
+///        (`compute::undistort_points` at its centre).
+/// @param lens  The lens; one `compute::cv_camera` takes.
+/// @return The rays, row-major.
+inline std::vector<recon::camera::Vec3d> lens_rays(
+    const recon::camera::CameraModel& lens) {
+  std::vector<cv::Point2d> pixels;
+  pixels.reserve(std::size_t{lens.size.width} * lens.size.height);
+  for (std::uint32_t v = 0; v < lens.size.height; ++v) {
+    for (std::uint32_t u = 0; u < lens.size.width; ++u) {
+      pixels.emplace_back(u, v);
+    }
+  }
+  const std::vector<cv::Point2d> points =
+      compute::undistort_points(compute::cv_camera(lens).value(), pixels)
+          .value();
+  std::vector<recon::camera::Vec3d> rays;
+  rays.reserve(points.size());
+  for (const cv::Point2d& p : points) rays.emplace_back(p.x, p.y, 1.0);
+  return rays;
+}
+
+/// @brief The raw depth a camera records of @p surface, as a driver hands it
+///        out: each pixel's ray through its lens (@ref lens_rays) met with
+///        the surface, the depth in units of @p metres_per_unit, rounded.
+/// @param rays             Each pixel's ray, row-major (@ref lens_rays).
+/// @param camera_to_scene  The camera in the scene; rigid.
+/// @param surface          What its rays meet.
+/// @param metres_per_unit  What a unit is (metres).
+/// @param bias_m           Added to every depth measured (metres).
+/// @return Each pixel's raw depth; 0 where it meets nothing or the depth is
+///         past what the units hold.
+inline std::vector<std::uint16_t> render_raw(
+    const std::vector<recon::camera::Vec3d>& rays,
+    const recon::camera::Mat4d& camera_to_scene, const Surface& surface,
+    double metres_per_unit, double bias_m = 0.0) {
+  const recon::camera::Vec3d origin(camera_to_scene[3]);
+  const recon::camera::Mat3d turn(camera_to_scene);
+  std::vector<std::uint16_t> raw(rays.size(), 0);
+  for (std::size_t i = 0; i < rays.size(); ++i) {
+    const double z = surface(origin, turn * rays[i]);
+    if (!(z > 0.0)) continue;
+    const double units = std::round((z + bias_m) / metres_per_unit);
+    if (units > 0.0 && units <= 65535.0) {
+      raw[i] = static_cast<std::uint16_t>(units);
+    }
+  }
+  return raw;
 }
 
 }  // namespace volumetric_kit::calib::test

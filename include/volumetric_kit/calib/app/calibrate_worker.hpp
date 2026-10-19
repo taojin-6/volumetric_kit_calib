@@ -11,14 +11,15 @@
 /// Each Calibrate works from scratch on one snapshot of the kept captures
 /// (@ref CaptureWorker::kept), never from an earlier result: @ref calibrate
 /// runs `solve::initialise`, `solve::bundle_adjust` and
-/// `quality::calibration_metrics`, all in the reference camera's gauge, and
-/// formats the results files (`quality::format_results`); @ref write_results
-/// writes them to the session's `results/<RRR>_<YYYY-MM-DD_HHMMSS>/`.
-/// @ref CalibrateWorker runs the two on a thread of its own and publishes
-/// the result only once the files are on disk.
-// TODO: CA12b's depth checks of the kept raw depth (CB6), on recon's device,
-// and the world at the origin tag (CB8, CB9), from each KeptCapture::tags,
-// join calibrate() here.
+/// `quality::calibration_metrics`, all in the reference camera's gauge, checks
+/// the kept raw depth against the solved rig on recon's device
+/// (@ref CalibrateDepth), and formats the results files
+/// (`quality::format_results`); @ref write_results writes them to the
+/// session's `results/<RRR>_<YYYY-MM-DD_HHMMSS>/`. @ref CalibrateWorker runs
+/// the two on a thread of its own and publishes the result only once the
+/// files are on disk.
+// TODO: CA12b's world at the origin tag (CB9), from each KeptCapture::tags,
+// joins calibrate() here.
 
 #include <chrono>
 #include <cstddef>
@@ -32,10 +33,16 @@
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 #include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
+#include "volumetric_kit/calib/quality/depth_checks.hpp"
 #include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/recon/camera/geometry.hpp"
+
+namespace volumetric_kit::core {
+class Allocator;
+class Device;
+}  // namespace volumetric_kit::core
 
 namespace volumetric_kit::calib::app {
 
@@ -43,13 +50,14 @@ namespace volumetric_kit::calib::app {
 enum class CalibrateStage {
   Solving,    ///< `initialise` and `bundle_adjust`.
   Measuring,  ///< `calibration_metrics`: leave one out, then the A/B test.
+  Checking,   ///< The depth checks (@ref CalibrateDepth), capture by capture.
   Writing,    ///< The results directory; a cancel no longer stops it.
 };
 
 /// @brief The name the window gives @p stage.
 /// @param stage  A stage.
-/// @return `"solving"`, `"measuring"` or `"writing"`; `"unknown"` for a value
-///         @ref CalibrateStage does not name.
+/// @return `"solving"`, `"measuring"`, `"checking depth"` or `"writing"`;
+///         `"unknown"` for a value @ref CalibrateStage does not name.
 ///
 /// @code
 /// if (auto at = calibrate->progress()) show(to_string(at->stage));
@@ -64,16 +72,19 @@ VC_APP_API const char* to_string(CalibrateStage stage) noexcept;
 /// @endcode
 struct CalibrateProgress {
   CalibrateStage stage = CalibrateStage::Solving;  ///< Where it is.
-  /// Measuring: the leave-one-out re-solves done; otherwise 0.
+  /// Measuring: the leave-one-out re-solves done; Checking: the captures
+  /// checked; otherwise 0.
   std::size_t done = 0;
-  /// Measuring: the re-solves in all, once the first is done; otherwise 0.
+  /// Measuring: the re-solves in all, once the first is done; Checking: the
+  /// captures; otherwise 0.
   std::size_t total = 0;
   double seconds = 0.0;  ///< Since it began.
 };
 
 /// @brief Called on @ref calibrate's thread as it moves on: as it begins, as
-///        it starts measuring and after each leave-one-out re-solve. A throw
-///        stops the run (@ref calibrate).
+///        it starts measuring, after each leave-one-out re-solve, and before
+///        each capture's depth checks and after the last. A throw stops the
+///        run (@ref calibrate).
 using CalibrateCallback = std::function<void(const CalibrateProgress&)>;
 
 /// @brief A solved and measured rig, and its results files.
@@ -102,25 +113,39 @@ struct CalibrateResult {
   std::vector<recon::camera::Mat4d> color_to_world;
   /// Each solved board's T_wb, in @ref solve::RigSolution::boards' order.
   std::vector<recon::camera::Mat4d> boards_to_world;
+  /// The depth checks over every kept capture (@ref CalibrateDepth), with
+  /// `quality::DepthCheckOptions{}`; empty when the depth was not checked.
+  std::optional<quality::DepthSummary> depth;
+  /// Why the depth was not checked though it was to be: the checks' failure,
+  /// which the report names (`depth_unchecked`); OK otherwise.
+  core::Status depth_failure;
   quality::ResultFiles files;  ///< The results files' text.
-  double seconds = 0.0;        ///< How long the solve and metrics took.
+  /// How long the solve, the metrics and the depth checks took.
+  double seconds = 0.0;
 };
 
-/// @brief Solve and measure the rig from @p kept, from scratch, and format
-///        its results files; writes nothing.
+class CalibrateDepth;
+
+/// @brief Solve and measure the rig from @p kept, from scratch, check its
+///        depth, and format its results files; writes nothing.
 ///
 /// Every camera's view with corners in every kept capture goes to
 /// `solve::initialise` (with `kept.solve`, from `kept.reference`), then
 /// `solve::bundle_adjust` (its defaults) and `quality::calibration_metrics`
-/// (both options, so the report records them), and
-/// `quality::format_results`. Thread-free: it runs on the calling thread and
-/// holds no state between calls, so the same snapshot gives the same result,
-/// but for the times.
+/// (both options, so the report records them); then, given @p depth, the
+/// depth checks of every kept capture's raw depth (@ref CalibrateDepth); and
+/// `quality::format_results`. A failure of the depth checks fails nothing
+/// else: the result is formatted without them, naming it
+/// (@ref CalibrateResult::depth_failure). Thread-free: it runs on the calling
+/// thread and holds no state between calls, so the same snapshot gives the
+/// same result, but for the times.
 /// @param kept      The captures and what they were taken with.
 /// @param progress  Called as the run moves on (@ref CalibrateCallback); may
 ///                  be empty. To stop the run it throws: the run then returns
 ///                  what it threw, as a `Status` (`compute::guarded`), and
 ///                  the caller tells its own stop from a failure.
+/// @param depth     The depth checks, for as many cameras as @p kept has, on
+///                  no other thread meanwhile; null checks no depth.
 /// @return The result, its @ref CalibrateResult::number -1;
 ///         `InvalidArgument` for no capture, more than `bundle_adjust` takes
 ///         (150), a null capture, one whose views are not one per camera or
@@ -131,10 +156,72 @@ struct CalibrateResult {
 ///         message starts `calibrate: `.
 ///
 /// @code
-/// VKC_ASSIGN(const CalibrateResult result, calibrate(*captures->kept()));
+/// VKC_ASSIGN(const CalibrateResult result,
+///            calibrate(*captures->kept(), {}, depth.get()));
 /// @endcode
 VC_APP_API core::Result<CalibrateResult> calibrate(
-    const KeptCaptures& kept, const CalibrateCallback& progress = {});
+    const KeptCaptures& kept, const CalibrateCallback& progress = {},
+    CalibrateDepth* depth = nullptr);
+
+/// @brief Calibrate's depth checks of the kept raw depth, on recon's device:
+///        a depth-only frame preparation per camera (recon's `GpuFramePrep`)
+///        and the checks' kernels (calib's `depth::DepthChecks`), built once,
+///        so a device that cannot run them fails as calib_rig starts.
+///
+/// @ref calibrate takes the kept captures one at a time, in index order.
+/// Each camera's raw depth, read where the capture keeps it, is prepared
+/// with the others' in one batch; each view of `quality::depth_views` gets
+/// its board's plane fitted and its corners met with it
+/// (`quality::board_depth_check`); and every ordered pair's agreement is
+/// added to the histograms pooled over every capture and to the capture's
+/// own. The capture's frames are then let go, so each preparation reuses its
+/// output. A camera without depth in a capture, or without a depth model,
+/// takes no part in it. The verdicts are `quality::summarize_depth_checks`'
+/// with `quality::DepthCheckOptions{}`. The preparations and the checks
+/// submit to one queue, recon's, and each batch's last barrier makes its
+/// writes visible to every later command there, so they need no other
+/// synchronisation.
+///
+/// @warning The device and allocator must outlive the checks.
+///
+/// @code
+/// VKC_ASSIGN(std::unique_ptr<CalibrateDepth> depth,
+///            CalibrateDepth::create(recon_device, recon_allocator, cameras));
+/// VKC_ASSIGN(std::unique_ptr<CalibrateWorker> calibrate,
+///            CalibrateWorker::create(std::move(depth)));
+/// @endcode
+class VC_APP_API CalibrateDepth final {
+ public:
+  /// @brief Build each camera's preparation, its depth EXCLUSIVE to recon's
+  ///        queue family, and the checks' kernels.
+  /// @param device     recon's device; it enabled recon's requirements and
+  ///                   `depth::DepthChecks::device_requirements`.
+  /// @param allocator  Its allocator.
+  /// @param cameras    The rig's cameras; at least one.
+  /// @return The checks; `InvalidArgument` for no camera; `Unsupported` for
+  ///         a device without the checks' requirements; a preparation's or a
+  ///         kernel's failure; or `OutOfMemory`. Each message starts
+  ///         `CalibrateDepth::create: `.
+  static core::Result<std::unique_ptr<CalibrateDepth>> create(
+      core::Device& device, core::Allocator& allocator, std::size_t cameras);
+
+  /// @brief Free the preparations and the kernels.
+  /// @pre No @ref calibrate is using them.
+  ~CalibrateDepth();
+  CalibrateDepth(const CalibrateDepth&) = delete;
+  CalibrateDepth& operator=(const CalibrateDepth&) = delete;
+  CalibrateDepth(CalibrateDepth&&) = delete;
+  CalibrateDepth& operator=(CalibrateDepth&&) = delete;
+
+ private:
+  friend core::Result<CalibrateResult> calibrate(const KeptCaptures&,
+                                                 const CalibrateCallback&,
+                                                 CalibrateDepth*);
+  struct State;
+  explicit CalibrateDepth(std::unique_ptr<State> state) noexcept;
+
+  std::unique_ptr<State> state_;
+};
 
 /// The session's subdirectory each Calibrate's results directory is in.
 inline constexpr const char* kResultsDirectory = "results";
@@ -208,14 +295,20 @@ VC_APP_API core::Result<WrittenResults> write_results(
 /// Every member may be called from any thread. A run's outcome is a result
 /// (@ref take_result), published only once its files are on disk, or a
 /// failure (@ref take_errors), after which a result not yet taken is still
-/// there to take; a cancelled run has none. A refusal, a solve failure or a
-/// cancel writes nothing; a write failure may leave its numbered directory
-/// without a calibration file (@ref write_results), and that number is not
-/// used again. The numbers go up from 0, one per directory made.
+/// there to take; a cancelled run has none. A run whose depth checks failed
+/// has both: the failure is posted, and the result is written and published
+/// without them (@ref CalibrateResult::depth_failure). A refusal, a solve
+/// failure or a cancel writes nothing; a write failure may leave its
+/// numbered directory without a calibration file (@ref write_results), and
+/// that number is not used again. The numbers go up from 0, one per
+/// directory made.
+///
+/// @warning The device and allocator of its depth checks, which it owns,
+///          must outlive the worker.
 ///
 /// @code
 /// VKC_ASSIGN(std::unique_ptr<CalibrateWorker> calibrate,
-///            CalibrateWorker::create());
+///            CalibrateWorker::create(std::move(depth)));
 /// // The Calibrate button:
 /// VKC_ASSIGN(const bool started, calibrate->request(captures->kept()));
 /// // Each frame of the window:
@@ -223,17 +316,17 @@ VC_APP_API core::Result<WrittenResults> write_results(
 /// if (auto result = calibrate->take_result()) place_cameras(*result);
 /// for (const core::Status& e : calibrate->take_errors()) show(e);
 /// @endcode
-// TODO: CB6 gives the worker recon's device for the depth checks; calib_rig
-// then stops it before that device goes.
 class VC_APP_API CalibrateWorker final {
  public:
   /// @brief Start the thread, waiting for a request.
-  /// @param sink  Writes each results file (@ref write_results); empty for
-  ///              the core's `write_file(CreateNew)`.
+  /// @param depth  The depth checks every run takes (@ref calibrate), owned
+  ///               by the worker from here; null checks no depth.
+  /// @param sink   Writes each results file (@ref write_results); empty for
+  ///               the core's `write_file(CreateNew)`.
   /// @return The worker; `IoError` if the thread cannot start; or
   ///         `OutOfMemory`.
   static core::Result<std::unique_ptr<CalibrateWorker>> create(
-      ResultSink sink = {});
+      std::unique_ptr<CalibrateDepth> depth = nullptr, ResultSink sink = {});
 
   /// @brief As @ref stop.
   ~CalibrateWorker();
@@ -276,7 +369,8 @@ class VC_APP_API CalibrateWorker final {
   std::shared_ptr<const CalibrateResult> take_result();
 
   /// @brief Take what went wrong since the last call: each run's refusal or
-  ///        failure, naming its cause, and why the thread ended.
+  ///        failure, or its depth checks' failure, naming its cause, and why
+  ///        the thread ended.
   /// @return The failures, oldest first, each in context `Calibrate`.
   std::vector<core::Status> take_errors();
 

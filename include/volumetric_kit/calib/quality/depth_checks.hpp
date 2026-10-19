@@ -13,10 +13,11 @@
 /// the view's @ref BoardRegion, and for each ordered pair of cameras it
 /// summarizes how far one camera's depth lies from the other's
 /// (@ref PairAgreement); only those few numbers come back. Here, on the host,
-/// with the solver's detections and poses: the region each fit takes
-/// (@ref board_region), the corners' rays met with the fitted plane
-/// (@ref board_depth_check), and the verdicts over every view and pair
-/// (@ref summarize_depth_checks). Any number of cameras.
+/// with the solver's detections and poses: the views a solved rig's checks
+/// fit and the region each fit takes (@ref depth_views, @ref board_region),
+/// the corners' rays met with the fitted plane (@ref board_depth_check), and
+/// the verdicts over every view and pair (@ref summarize_depth_checks). Any
+/// number of cameras.
 
 #include <cstddef>
 #include <cstdint>
@@ -27,6 +28,7 @@
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/core/observation.hpp"
 #include "volumetric_kit/calib/quality/export.hpp"
+#include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/recon/camera/geometry.hpp"
@@ -198,6 +200,52 @@ VC_QUALITY_API core::Status check_board_region(const BoardRegion& region);
 VC_QUALITY_API bool in_board_region(const BoardRegion& region,
                                     const recon::camera::Vec3d& ray) noexcept;
 
+/// @brief One view of a solved rig whose depth a plane is fitted to.
+///
+/// @code
+/// for (const DepthView& v : views) {
+///   regions.push_back({images[v.camera], v.region});  // the device's fit
+///   checked.push_back(board_depth_check(cameras, board, observations[v.view],
+///                                       v.region, planes[i]));
+/// }
+/// @endcode
+struct DepthView {
+  std::size_t camera = 0;    ///< Its camera's index in the rig.
+  std::int64_t capture = 0;  ///< Its capture, as `Observation::frame_id`.
+  /// Its observation's index among those the solve took: its record's in
+  /// `solve::InitialRig::views`.
+  std::size_t view = 0;
+  /// Its fit's region (@ref board_region): at the solution's board, its
+  /// `board_to_color` the solved `T_cw T_wb`.
+  BoardRegion region;
+};
+
+/// @brief The views a solved rig's depth checks fit a plane to: each one the
+///        adjustment adjusted (`solve::adjusts`) and did not leave out whole,
+///        on its capture's solved board.
+/// @param board           The board seen.
+/// @param start           `solve::initialise`'s rig, which @p solution
+///                        refined: a record per observation.
+/// @param solution        `solve::bundle_adjust`'s solution of it.
+/// @param depth_to_color  Each camera's depth-to-colour transform (recon's
+///                        `SensorInfo::depth_to_color`), in the rig's order.
+/// @param options         The settings; @ref board_region takes them.
+/// @return The views, by capture, then camera; `InvalidArgument` for a
+///         solution whose cameras are not as many as @p depth_to_color, a
+///         record naming a camera it does not have, or what
+///         @ref board_region refuses; or `OutOfMemory`. Each message starts
+///         `depth_views: `.
+///
+/// @code
+/// VKC_ASSIGN(const std::vector<DepthView> views,
+///            depth_views(board, start, solution, depth_to_color));
+/// @endcode
+VC_QUALITY_API core::Result<std::vector<DepthView>> depth_views(
+    const compute::Board& board, const solve::InitialRig& start,
+    const solve::RigSolution& solution,
+    const std::vector<recon::camera::Mat4d>& depth_to_color,
+    const DepthCheckOptions& options = {});
+
 /// @brief A plane fitted to one view's depth in its @ref BoardRegion, as the
 ///        device gives it, in the region's board frame.
 ///
@@ -335,6 +383,18 @@ enum class DepthVerdict {
 /// @endcode
 VC_QUALITY_API const char* to_string(DepthVerdict verdict) noexcept;
 
+/// @brief A camera's depth verdict from its scale's and its plane's.
+/// @param scale  Its board scale's verdict (@ref CameraDepth::scale).
+/// @param plane  Its plane's (@ref CameraDepth::plane).
+/// @return `Off` when either is `Off`; `Ok` when both are `Ok`; else
+///         `Insufficient`.
+///
+/// @code
+/// camera.verdict = camera_verdict(camera.scale, camera.plane);
+/// @endcode
+VC_QUALITY_API DepthVerdict camera_verdict(DepthVerdict scale,
+                                           DepthVerdict plane) noexcept;
+
 /// @brief A set of ratios' mean and spread.
 ///
 /// @code
@@ -370,6 +430,8 @@ struct CameraDepth {
   /// else `Off` when the median offset is beyond `max_offset_mm` or the
   /// median angle beyond `max_angle_deg`.
   DepthVerdict plane = DepthVerdict::Insufficient;
+  /// Its depth's: @ref camera_verdict of @ref scale and @ref plane.
+  DepthVerdict verdict = DepthVerdict::Insufficient;
 };
 
 /// @brief One ordered pair's agreement and its verdict.

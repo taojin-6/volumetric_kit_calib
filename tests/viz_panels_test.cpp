@@ -4,13 +4,14 @@
 // The panels' models: each line's text and tone, from the live checks, the
 // array's counters, the session's summary and origin tag, the capture rule
 // and the capture records, judged by the quality tier's thresholds;
-// Calibrate's progress and its result's metrics; and the stage timings as
-// gfx's metrics panel takes them. No device or ImGui frame needed
+// Calibrate's progress, its result's metrics and depth checks; and the stage
+// timings as gfx's metrics panel takes them. No device or ImGui frame needed
 // (viz_render_test draws them).
 
 #include "volumetric_kit/calib/viz/panels.hpp"
 
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -595,6 +596,176 @@ TEST(CalibrationPanel, RefusesMetricsOfAnotherRig) {
         Code::InvalidArgument)
         << part;
   }
+}
+
+// --- Depth ------------------------------------------------------------------
+
+quality::PairCheck pair_check(std::size_t from, std::size_t to,
+                              quality::DepthVerdict verdict,
+                              double signed_median_mm = 0.0,
+                              double median_abs_mm = 1.0,
+                              std::size_t overlap = 5000,
+                              std::size_t in_window = 4800) {
+  quality::PairCheck p;
+  p.agreement.from = from;
+  p.agreement.to = to;
+  p.agreement.overlap = overlap;
+  p.agreement.in_window = in_window;
+  p.agreement.signed_median_mm = signed_median_mm;
+  p.agreement.median_abs_mm = median_abs_mm;
+  p.verdict = verdict;
+  return p;
+}
+
+// N and G pass, 6G fails its plane; of the six pairs, G -> 6G fails and
+// 6G -> N has no overlap; on their own, G -> 6G fails in captures 5 and 7,
+// with N -> G in 5, and none in 9.
+quality::DepthSummary three_camera_depth() {
+  using V = quality::DepthVerdict;
+  quality::DepthSummary d;
+  d.ratio = {412, 1.00084, 0.00113};
+  d.scale = V::Ok;
+  d.cameras.resize(3);
+  d.cameras[0] = {14, {140, 1.0003, 0.001}, V::Ok, 0.42, 0.214, V::Ok, V::Ok};
+  d.cameras[1] = {1, {12, 0.99951, 0.002}, V::Ok, -1.24, 0.5, V::Ok, V::Ok};
+  d.cameras[2] = {13, {130, 1.0019, 0.001}, V::Ok, 12.5, 0.38, V::Off, V::Off};
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  d.pairs = {pair_check(0, 1, V::Ok, 0.12),
+             pair_check(0, 2, V::Ok, -1.4),
+             pair_check(1, 0, V::Ok, -0.3),
+             pair_check(1, 2, V::Off, 6.24, 7.04, 5000, 3000),
+             pair_check(2, 0, V::Insufficient, nan, nan, 0, 0),
+             pair_check(2, 1, V::Ok, 2.0)};
+  quality::CapturePairs five{5, d.pairs};
+  five.pairs[0].verdict = V::Off;
+  quality::CapturePairs seven{7, d.pairs};
+  quality::CapturePairs nine{9, d.pairs};
+  nine.pairs[3].verdict = V::Ok;
+  d.captures = {five, seven, nine};
+  return d;
+}
+
+// Each camera's verdict and figures, the board's scale, the pairs counted
+// with the largest signed median, each failing pair and each capture with a
+// pair failing on its own, each in its tone.
+TEST(DepthPanel, ShowsEachCameraAndThePairsThatFail) {
+  const quality::DepthSummary d = three_camera_depth();
+  const core::Result<std::vector<PanelLine>> lines = depth_panel(kIds, &d);
+  ASSERT_TRUE(lines.ok()) << lines.status().message();
+  const std::vector<PanelLine>& l = lines.value();
+  const std::vector<std::string> order = {
+      "depth scale", "depth N",      "depth G",   "depth 6G",
+      "depth pairs", "pair G -> 6G", "capture 5", "capture 7"};
+  ASSERT_EQ(l.size(), order.size());
+  for (std::size_t i = 0; i < order.size(); ++i) {
+    EXPECT_EQ(l[i].label, order[i]);
+  }
+  EXPECT_EQ(line(l, "depth scale").value,
+            "pass: ratio 1.0008 (sd 0.0011, 412 ratios)");
+  EXPECT_EQ(line(l, "depth scale").tone, Tone::Good);
+  EXPECT_EQ(line(l, "depth N").value,
+            "pass, 14 views: ratio 1.0003, offset +0.4 mm, angle 0.21 deg");
+  EXPECT_EQ(line(l, "depth N").tone, Tone::Good);
+  EXPECT_EQ(line(l, "depth G").value,
+            "pass, 1 view: ratio 0.9995, offset -1.2 mm, angle 0.50 deg");
+  EXPECT_EQ(line(l, "depth 6G").value,
+            "fail, 13 views: ratio 1.0019, offset +12.5 mm, angle 0.38 deg");
+  EXPECT_EQ(line(l, "depth 6G").tone, Tone::Bad);
+  EXPECT_EQ(line(l, "depth pairs").value,
+            "4 of 6 pass, 1 fail, 1 no overlap; largest signed median "
+            "+6.2 mm (G -> 6G)");
+  EXPECT_EQ(line(l, "depth pairs").tone, Tone::Bad);
+  EXPECT_EQ(line(l, "pair G -> 6G").value,
+            "fail: signed median +6.2 mm, median |d| 7.0 mm, 60 % in the "
+            "window");
+  EXPECT_EQ(line(l, "pair G -> 6G").tone, Tone::Bad);
+  EXPECT_EQ(line(l, "capture 5").value, "fail: N -> G, G -> 6G");
+  EXPECT_EQ(line(l, "capture 5").tone, Tone::Warn);
+  EXPECT_EQ(line(l, "capture 7").value, "fail: G -> 6G");
+}
+
+// Every pair passing is green; with one short of overlap and none failing,
+// plain. A camera with no view is insufficient, muted, its figures dashes.
+TEST(DepthPanel, TonesThePairsAndAnInsufficientCamera) {
+  using V = quality::DepthVerdict;
+  quality::DepthSummary d = three_camera_depth();
+  d.captures.clear();
+  d.pairs[3].verdict = V::Ok;
+  d.pairs[4] = pair_check(2, 0, V::Ok, -0.5);
+  d.cameras[2] = {};
+  d.scale = V::Insufficient;
+  d.ratio = {};
+  std::vector<PanelLine> l = depth_panel(kIds, &d).value();
+  EXPECT_EQ(line(l, "depth pairs").value,
+            "6 of 6 pass, 0 fail, 0 no overlap; largest signed median "
+            "+6.2 mm (G -> 6G)");
+  EXPECT_EQ(line(l, "depth pairs").tone, Tone::Good);
+  EXPECT_EQ(line(l, "depth 6G").value,
+            "insufficient, 0 views: ratio -, offset -, angle -");
+  EXPECT_EQ(line(l, "depth 6G").tone, Tone::Muted);
+  EXPECT_EQ(line(l, "depth scale").value,
+            "insufficient: ratio - (sd -, 0 ratios)");
+  EXPECT_EQ(line(l, "depth scale").tone, Tone::Muted);
+  EXPECT_TRUE(labelled(l, "pair G -> 6G").empty());
+
+  d.pairs[4] = pair_check(2, 0, V::Insufficient, 0.0, 1.0, 0, 0);
+  for (quality::PairCheck& p : d.pairs) p.agreement.signed_median_mm = 0.0;
+  l = depth_panel(kIds, &d).value();
+  EXPECT_EQ(line(l, "depth pairs").value,
+            "5 of 6 pass, 0 fail, 1 no overlap; largest signed median "
+            "+0.0 mm (N -> G)");
+  EXPECT_EQ(line(l, "depth pairs").tone, Tone::Normal);
+}
+
+// A pair short of overlap is not judged, so its median is not the largest,
+// however far a few samples put it; with no pair judged, none is named.
+TEST(DepthPanel, NamesTheLargestMedianOfThePairsJudged) {
+  using V = quality::DepthVerdict;
+  quality::DepthSummary d = three_camera_depth();
+  d.pairs[4] = pair_check(2, 0, V::Insufficient, 18.0, 18.0, 600, 500);
+  std::vector<PanelLine> l = depth_panel(kIds, &d).value();
+  EXPECT_EQ(line(l, "depth pairs").value,
+            "4 of 6 pass, 1 fail, 1 no overlap; largest signed median "
+            "+6.2 mm (G -> 6G)");
+
+  for (quality::PairCheck& p : d.pairs) p.verdict = V::Insufficient;
+  d.captures.clear();
+  l = depth_panel(kIds, &d).value();
+  EXPECT_EQ(line(l, "depth pairs").value, "0 of 6 pass, 0 fail, 6 no overlap");
+  EXPECT_EQ(line(l, "depth pairs").tone, Tone::Normal);
+}
+
+// Not checked: muted when not asked for, red with the failure's reason.
+TEST(DepthPanel, SaysWhyTheDepthWasNotChecked) {
+  std::vector<PanelLine> l = depth_panel(kIds, nullptr).value();
+  ASSERT_EQ(l.size(), 1u);
+  EXPECT_EQ(l[0].label, "depth");
+  EXPECT_EQ(l[0].value, "not checked");
+  EXPECT_EQ(l[0].tone, Tone::Muted);
+  l = depth_panel(kIds, nullptr,
+                  core::Status::io_error("depth checks: the device was lost"))
+          .value();
+  ASSERT_EQ(l.size(), 1u);
+  EXPECT_EQ(l[0].value, "not checked: depth checks: the device was lost");
+  EXPECT_EQ(l[0].tone, Tone::Bad);
+}
+
+TEST(DepthPanel, RefusesChecksOfAnotherRig) {
+  const quality::DepthSummary d = three_camera_depth();
+  const core::Result<std::vector<PanelLine>> two = depth_panel({"N", "G"}, &d);
+  ASSERT_FALSE(two.ok());
+  EXPECT_EQ(two.status().domain(), Code::InvalidArgument);
+  EXPECT_EQ(two.status().message(),
+            "depth_panel: depth checks of 3 cameras, or a pair outside them, "
+            "for 2 ids");
+  quality::DepthSummary stranger = d;
+  stranger.captures[1].pairs[2].agreement.to = 3;
+  EXPECT_EQ(depth_panel(kIds, &stranger).status().domain(),
+            Code::InvalidArgument);
+  stranger = d;
+  stranger.pairs[0].agreement.from = 4;
+  EXPECT_EQ(depth_panel(kIds, &stranger).status().domain(),
+            Code::InvalidArgument);
 }
 
 // The stages' rows go to gfx's panel as they are; the frame's time is their

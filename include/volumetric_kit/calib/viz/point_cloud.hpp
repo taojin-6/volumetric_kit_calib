@@ -10,9 +10,9 @@
 /// recon's `GpuFramePrep` leaves each camera's undistorted depth and colour in
 /// device buffers (`DeviceFrame`), and gfx's `DepthCloudPipeline` draws a
 /// point per depth pixel straight from them, with no copy. calib composes the
-/// two: the poses are the rig's at draw time, not the frame's, so a frozen or
-/// captured cloud follows a new solve; and the buffers are checked readable
-/// from the renderer's queue family before anything is drawn from them.
+/// two: the poses are the rig's at draw time, not the frame's, so a frozen
+/// cloud follows a new solve; and the buffers are checked readable from the
+/// renderer's queue family before anything is drawn from them.
 
 #include <cstdint>
 

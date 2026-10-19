@@ -6,26 +6,24 @@
 // reference camera's gauge; the same snapshot gives the same files, and a
 // recalibration owes nothing to the last; each results directory numbered
 // once, its calibration file written last; and the worker's runs, refusals,
-// cancels and stops. Synthetic detections, no device.
+// cancels and stops. Synthetic detections, no device, so no depth checks
+// (app_calibrate_depth_test has them).
 
 #include "volumetric_kit/calib/app/calibrate_worker.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <regex>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -34,6 +32,7 @@
 #include <nlohmann/json.hpp>
 
 #include "allocation_failure.hpp"
+#include "calibrate_worker_support.hpp"
 #include "kept_scene.hpp"
 #include "scratch_dir.hpp"
 #include "synthetic_scene.hpp"
@@ -50,46 +49,20 @@ namespace camera = recon::camera;
 using json = nlohmann::json;
 using Code = core::Status::Code;
 using SteadyClock = std::chrono::steady_clock;
+using test::entries;
+using test::Gate;
+using test::held_at_its_end;
+using test::idle;
+using test::LetGoAtTheEnd;
 using test::read;
 using test::ScratchDir;
+using test::shared;
+using test::timeless;
+using test::wait_for;
 
 // The time a Calibrate is pressed in the results tests: a fixed one.
 const std::chrono::system_clock::time_point kPressed =
     std::chrono::system_clock::from_time_t(1792346400);
-
-// The report, without the one figure that changes from run to run.
-json timeless(const std::string& report) {
-  json doc = json::parse(report);
-  doc["solver"].erase("seconds");
-  return doc;
-}
-
-// What a directory holds, by name.
-std::set<std::string> entries(const fs::path& dir) {
-  std::set<std::string> out;
-  std::error_code ec;
-  for (auto it = fs::directory_iterator(dir, ec);
-       !ec && it != fs::directory_iterator(); it.increment(ec)) {
-    out.insert(it->path().filename().string());
-  }
-  return out;
-}
-
-// Waits until `done` holds, polling; false once `limit` passes.
-template <class Done>
-bool wait_for(const Done& done,
-              std::chrono::milliseconds limit = std::chrono::minutes(5)) {
-  const SteadyClock::time_point until = SteadyClock::now() + limit;
-  while (!done()) {
-    if (SteadyClock::now() > until) return false;
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
-  }
-  return true;
-}
-
-bool idle(const CalibrateWorker& worker) {
-  return wait_for([&] { return !worker.busy(); });
-}
 
 // Whether the worker is past its first leave-one-out re-solve.
 bool measuring(const CalibrateWorker& worker) {
@@ -104,66 +77,6 @@ std::unique_ptr<CalibrateWorker> make_worker() {
       CalibrateWorker::create();
   EXPECT_TRUE(made.ok()) << made.status().message();
   return made.ok() ? std::move(made).value() : nullptr;
-}
-
-std::shared_ptr<const KeptCaptures> shared(KeptCaptures kept) {
-  return std::make_shared<const KeptCaptures>(std::move(kept));
-}
-
-// Holds the thread that reaches it until the test lets it go.
-class Gate {
- public:
-  // On the thread held: waits to be let go.
-  void hold() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    held_ = true;
-    changed_.notify_all();
-    changed_.wait(lock, [this] { return open_; });
-  }
-  // Whether a thread is held, waiting a minute for one.
-  bool held() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    return changed_.wait_for(lock, std::chrono::minutes(1),
-                             [this] { return held_; });
-  }
-  // Lets the thread held, and any after it, go.
-  void let_go() {
-    {
-      const std::lock_guard<std::mutex> lock(mutex_);
-      open_ = true;
-    }
-    changed_.notify_all();
-  }
-
- private:
-  std::mutex mutex_;
-  std::condition_variable changed_;
-  bool held_ = false;
-  bool open_ = false;
-};
-
-// Lets a gate go as the test ends, before the worker declared ahead of it is
-// stopped, whatever assertion ended the test.
-struct LetGoAtTheEnd {
-  Gate& gate;
-  ~LetGoAtTheEnd() { gate.let_go(); }
-};
-
-// `kept`, with its first capture's first depth freed only once `gate` lets
-// go: the worker frees its snapshot as its run ends, so the run is held
-// there, still busy, its outcome decided and not yet posted. The caller
-// keeps none of what it gives the worker.
-std::shared_ptr<const KeptCaptures> held_at_its_end(
-    KeptCaptures kept, const std::shared_ptr<Gate>& gate) {
-  auto first = std::make_shared<KeptCapture>(*kept.captures.front());
-  first->depth.front() = std::shared_ptr<const std::vector<std::uint16_t>>(
-      new std::vector<std::uint16_t>(),
-      [gate](const std::vector<std::uint16_t>* depth) {
-        gate->hold();
-        delete depth;
-      });
-  kept.captures.front() = std::move(first);
-  return shared(std::move(kept));
 }
 
 // `scene`'s captures with camera CL0B (rig camera 3) in none: initialise
@@ -290,8 +203,16 @@ TEST(Calibrate, ARerunEqualsTheFirstRun) {
   }
   EXPECT_STREQ(to_string(CalibrateStage::Solving), "solving");
   EXPECT_STREQ(to_string(CalibrateStage::Measuring), "measuring");
+  EXPECT_STREQ(to_string(CalibrateStage::Checking), "checking depth");
   EXPECT_STREQ(to_string(CalibrateStage::Writing), "writing");
   EXPECT_STREQ(to_string(static_cast<CalibrateStage>(9)), "unknown");
+
+  // Given no depth checks, it checks no depth, and says no more.
+  EXPECT_FALSE(first->depth.has_value());
+  EXPECT_TRUE(first->depth_failure.ok());
+  const json report = json::parse(first->files.report);
+  EXPECT_TRUE(report["depth"].is_null());
+  EXPECT_TRUE(report["depth_unchecked"].is_null());
 }
 
 // A throw from the progress stops the run, which returns it.
@@ -753,7 +674,7 @@ TEST(CalibrateWorker, WritingIsNeitherCancelledNorStopped) {
     return core::write_file(path, bytes, core::WriteMode::CreateNew);
   };
   core::Result<std::unique_ptr<CalibrateWorker>> made =
-      CalibrateWorker::create(sink);
+      CalibrateWorker::create(nullptr, sink);
   ASSERT_TRUE(made.ok()) << made.status().message();
   const std::unique_ptr<CalibrateWorker> worker = std::move(made).value();
   const LetGoAtTheEnd let_writing_go{writing};

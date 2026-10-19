@@ -37,6 +37,44 @@ std::string figure(double value, int decimals, const char* unit) {
   return fixed(value, decimals) + unit;
 }
 
+// `value` with `decimals` places, `+` signed, and `unit`, or `-` when it is
+// not a number.
+std::string signed_figure(double value, int decimals, const char* unit) {
+  if (!std::isfinite(value)) return "-";
+  return fixed(value, decimals, true) + unit;
+}
+
+// A depth verdict as the panel words it, `insufficient` as `none` says, and
+// its tone.
+std::string depth_word(quality::DepthVerdict verdict, const char* none) {
+  switch (verdict) {
+    case quality::DepthVerdict::Ok:
+      return "pass";
+    case quality::DepthVerdict::Off:
+      return "fail";
+    case quality::DepthVerdict::Insufficient:
+      break;
+  }
+  return none;
+}
+Tone depth_tone(quality::DepthVerdict verdict) noexcept {
+  switch (verdict) {
+    case quality::DepthVerdict::Ok:
+      return Tone::Good;
+    case quality::DepthVerdict::Off:
+      return Tone::Bad;
+    case quality::DepthVerdict::Insufficient:
+      break;
+  }
+  return Tone::Muted;
+}
+
+// A pair's name: `<from> -> <to>`.
+std::string pair_name(const std::vector<std::string>& ids,
+                      const quality::PairAgreement& pair) {
+  return ids[pair.from] + " -> " + ids[pair.to];
+}
+
 // The panel's name for a verdict, and its tone.
 PanelLine verdict_line(quality::PrincipalPointVerdict verdict) {
   switch (verdict) {
@@ -475,6 +513,118 @@ core::Result<std::vector<PanelLine>> calibration_panel(
                            Tone::Normal});
         }
         lines.push_back({"results", directory, Tone::Normal});
+        return lines;
+      });
+}
+
+core::Result<std::vector<PanelLine>> depth_panel(
+    const std::vector<std::string>& ids, const quality::DepthSummary* depth,
+    const core::Status& failure) {
+  return compute::guarded(
+      "depth_panel", [&]() -> core::Result<std::vector<PanelLine>> {
+        std::vector<PanelLine> lines;
+        if (depth == nullptr) {
+          if (failure.ok()) {
+            lines.push_back({"depth", "not checked", Tone::Muted});
+          } else {
+            lines.push_back(
+                {"depth", "not checked: " + failure.message(), Tone::Bad});
+          }
+          return lines;
+        }
+        const std::size_t n = ids.size();
+        bool fits = depth->cameras.size() == n;
+        const auto pairs_fit = [&](const std::vector<quality::PairCheck>& ps) {
+          for (const quality::PairCheck& p : ps) {
+            fits = fits && p.agreement.from < n && p.agreement.to < n;
+          }
+        };
+        pairs_fit(depth->pairs);
+        for (const quality::CapturePairs& c : depth->captures) {
+          pairs_fit(c.pairs);
+        }
+        if (!fits) {
+          return core::Status::invalid_argument(
+              "depth_panel: depth checks of " +
+              std::to_string(depth->cameras.size()) +
+              " cameras, or a pair outside them, for " + std::to_string(n) +
+              " ids");
+        }
+        const quality::RatioStats& ratio = depth->ratio;
+        lines.push_back({"depth scale",
+                         depth_word(depth->scale, "insufficient") + ": ratio " +
+                             figure(ratio.mean, 4, "") + " (sd " +
+                             figure(ratio.sd, 4, "") + ", " +
+                             std::to_string(ratio.count) + " ratios)",
+                         depth_tone(depth->scale)});
+        for (std::size_t c = 0; c < n; ++c) {
+          const quality::CameraDepth& cam = depth->cameras[c];
+          lines.push_back(
+              {"depth " + ids[c],
+               depth_word(cam.verdict, "insufficient") + ", " +
+                   std::to_string(cam.views) +
+                   (cam.views == 1 ? " view: ratio " : " views: ratio ") +
+                   figure(cam.ratio.mean, 4, "") + ", offset " +
+                   signed_figure(cam.offset_mm, 1, " mm") + ", angle " +
+                   figure(cam.angle_deg, 2, " deg"),
+               depth_tone(cam.verdict)});
+        }
+        std::size_t pass = 0;
+        std::size_t fail = 0;
+        const quality::PairCheck* largest = nullptr;
+        for (const quality::PairCheck& p : depth->pairs) {
+          if (p.verdict == quality::DepthVerdict::Ok) ++pass;
+          if (p.verdict == quality::DepthVerdict::Off) ++fail;
+          const double m = p.agreement.signed_median_mm;
+          if (p.verdict != quality::DepthVerdict::Insufficient &&
+              std::isfinite(m) &&
+              (largest == nullptr ||
+               std::abs(m) > std::abs(largest->agreement.signed_median_mm))) {
+            largest = &p;
+          }
+        }
+        const std::size_t all = depth->pairs.size();
+        std::string counts = std::to_string(pass) + " of " +
+                             std::to_string(all) + " pass, " +
+                             std::to_string(fail) + " fail, " +
+                             std::to_string(all - pass - fail) + " no overlap";
+        if (largest != nullptr) {
+          counts +=
+              "; largest signed median " +
+              signed_figure(largest->agreement.signed_median_mm, 1, " mm") +
+              " (" + pair_name(ids, largest->agreement) + ")";
+        }
+        lines.push_back({"depth pairs", std::move(counts),
+                         fail > 0      ? Tone::Bad
+                         : pass == all ? Tone::Good
+                                       : Tone::Normal});
+        for (const quality::PairCheck& p : depth->pairs) {
+          if (p.verdict != quality::DepthVerdict::Off) continue;
+          const quality::PairAgreement& a = p.agreement;
+          const double share = a.overlap > 0
+                                   ? 100.0 * static_cast<double>(a.in_window) /
+                                         static_cast<double>(a.overlap)
+                                   : std::nan("");
+          lines.push_back({"pair " + pair_name(ids, a),
+                           "fail: signed median " +
+                               signed_figure(a.signed_median_mm, 1, " mm") +
+                               ", median |d| " +
+                               figure(a.median_abs_mm, 1, " mm") + ", " +
+                               figure(share, 0, " %") + " in the window",
+                           Tone::Bad});
+        }
+        for (const quality::CapturePairs& c : depth->captures) {
+          std::string failed;
+          for (const quality::PairCheck& p : c.pairs) {
+            if (p.verdict != quality::DepthVerdict::Off) continue;
+            if (!failed.empty()) failed += ", ";
+            failed += pair_name(ids, p.agreement);
+          }
+          if (!failed.empty()) {
+            lines.push_back({"capture " + std::to_string(c.capture),
+                             "fail: " + failed, Tone::Warn});
+          }
+        }
         return lines;
       });
 }
