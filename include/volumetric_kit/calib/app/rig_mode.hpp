@@ -80,14 +80,15 @@ struct RigStep {
 
 /// @brief What @p request does in @p mode.
 ///
-/// | Request | Images | Scene |
-/// |---|---|---|
-/// | `Capture` | `Arm` | `ShowImages`: "press again to capture" |
-/// | `DropLast` | `DropLast` | `ShowImages`: "press again to drop the last
-/// capture" | | `Calibrate` | `Calibrate` | `Calibrate` | | `SwitchView` |
-/// `ShowScene` once calibrated, else `Ignore`: "calibrate first" | `ShowImages`
-/// | | `Cancel` | `Cancel` while calibrating, else `Ignore` | the same | |
-/// `None` | `Ignore` | `Ignore` |
+/// - `Capture`: `Arm` in the images; `ShowImages` in the 3D view, with
+///   "press again to capture".
+/// - `DropLast`: `DropLast` in the images; `ShowImages` in the 3D view, with
+///   "press again to drop the last capture".
+/// - `Calibrate`: `Calibrate` in both.
+/// - `SwitchView`: `ShowScene` in the images once calibrated, else `Ignore`
+///   with "calibrate first"; `ShowImages` in the 3D view.
+/// - `Cancel`: `Cancel` while calibrating, else `Ignore`, in both.
+/// - `None`: `Ignore`.
 ///
 /// Capturing and dropping go on while Calibrate runs: what is captured then
 /// goes into the next Calibrate.
