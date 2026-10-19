@@ -4,7 +4,8 @@
 #pragma once
 
 /// @file scratch_dir.hpp
-/// @brief A test's own directory on disk, for the tests that write files.
+/// @brief A test's own directory on disk, for the tests that write files,
+///        and what a file there holds.
 
 #include <unistd.h>
 
@@ -12,10 +13,22 @@
 #include <filesystem>
 #include <string>
 #include <system_error>
+#include <utility>
 
 #include <gtest/gtest.h>
 
+#include "volumetric_kit/core/base/file_io.hpp"
+
 namespace volumetric_kit::calib::test {
+
+/// @brief What a file holds, failing the test when it cannot be read.
+/// @param path  The file.
+/// @return Its bytes; empty when it cannot be read.
+inline std::string read(const std::filesystem::path& path) {
+  core::Result<std::string> bytes = core::read_file(path.string());
+  EXPECT_TRUE(bytes.ok()) << bytes.status().message();
+  return bytes.ok() ? std::move(bytes).value() : std::string();
+}
 
 /// @brief A fresh directory under the system's temporary one, named for the
 ///        running test, removed with what it holds when it goes.

@@ -74,6 +74,7 @@ camera::Mat4d board_pose(const compute::Board& board, std::size_t i) {
                                    15.0 + 5.0 * k, 6.0 * k - 5.0);
 }
 
+using test::read;
 using test::ScratchDir;
 
 capture::SessionCamera rig_camera(std::size_t i) {
@@ -196,12 +197,6 @@ bool submit(CaptureWorker& worker, CaptureRequest r) {
   const core::Result<bool> queued = worker.submit(std::move(r));
   EXPECT_TRUE(queued.ok()) << queued.status().message();
   return queued.ok() && queued.value();
-}
-
-std::string read(const fs::path& path) {
-  const core::Result<std::string> bytes = core::read_file(path.string());
-  EXPECT_TRUE(bytes.ok()) << bytes.status().message();
-  return bytes.ok() ? bytes.value() : std::string();
 }
 
 // OpenCV's parallel_for_ run on the calling thread, a stripe at a time, with

@@ -50,6 +50,7 @@ namespace camera = recon::camera;
 using json = nlohmann::json;
 using Code = core::Status::Code;
 using SteadyClock = std::chrono::steady_clock;
+using test::read;
 using test::ScratchDir;
 
 // The time a Calibrate is pressed in the results tests: a fixed one.
@@ -72,12 +73,6 @@ std::set<std::string> entries(const fs::path& dir) {
     out.insert(it->path().filename().string());
   }
   return out;
-}
-
-std::string read(const fs::path& path) {
-  core::Result<std::string> bytes = core::read_file(path.string());
-  EXPECT_TRUE(bytes.ok()) << bytes.status().message();
-  return bytes.ok() ? *bytes : std::string();
 }
 
 // Waits until `done` holds, polling; false once `limit` passes.
@@ -389,9 +384,8 @@ TEST(Calibrate, SolvesWithTheSessionsThresholds) {
   const core::Result<CalibrateResult> made = calibrate(other);
   ASSERT_TRUE(made.ok()) << made.status().message();
   EXPECT_EQ(made->metrics.options.initialise.max_pnp_rms_px, 4.0);
-  EXPECT_EQ(json::parse(
-                made->files.report)["settings"]["initialise"]["max_pnp_rms_px"],
-            4.0);
+  const json report = json::parse(made->files.report);
+  EXPECT_EQ(report["settings"]["initialise"]["max_pnp_rms_px"], 4.0);
 }
 
 // The name: RRR zero-padded, then the press's stamp.

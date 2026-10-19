@@ -53,13 +53,8 @@ constexpr std::uint32_t kDepthW = 16;
 constexpr std::uint32_t kDepthH = 12;
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 
+using test::read;
 using test::ScratchDir;
-
-std::string read(const std::string& path) {
-  vkc::Result<std::string> bytes = vkc::read_file(path);
-  EXPECT_TRUE(bytes.ok()) << bytes.status().message();
-  return bytes.ok() ? *bytes : std::string();
-}
 
 void write(const std::string& path, const std::string& bytes) {
   const vkc::Status written =

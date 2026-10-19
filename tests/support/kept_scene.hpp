@@ -72,15 +72,7 @@ inline std::vector<SyntheticCamera> kept_scene_rig(std::size_t count) {
 /// @return The scene, the same for the same arguments.
 inline Scene make_kept_scene(std::size_t cameras, std::size_t count = 40,
                              double noise_px = 0.3, std::uint32_t seed = 1) {
-  Scene scene{kept_scene_rig(cameras), femto_board(), {}, {}, {}};
-  PlanOptions plan;
-  plan.count = count;
-  plan.seed = seed;
-  scene.plan = synthetic_plan(scene.rig, scene.board, plan);
-  scene.views = observe(scene.rig, scene.board, scene.plan,
-                        ObserveOptions{noise_px, seed});
-  scene.cameras = rig_cameras(scene.rig);
-  return scene;
+  return make_scene(kept_scene_rig(cameras), count, noise_px, seed, seed);
 }
 
 /// @brief A kept capture's index for a placement: odd, as if every other
