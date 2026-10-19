@@ -92,7 +92,9 @@ struct TagFrameOptions {
 /// tell which is wrong, and their bound grows with the disagreement. On the
 /// synthetic rig, at 0.3 px of noise a world fits at about 0.4 px RMS; two
 /// cameras whose corners are (3, 1.5) px apart fit at 1.47 px, and
-/// (5.6, 2.8) px apart at 3.08 px.
+/// (5.6, 2.8) px apart at 3.08 px. Beyond about 13 px apart the solve stops
+/// at its iteration cap, and its last iterate's fit is the one compared:
+/// 26.7 px RMS for (44, 22) px apart.
 ///
 /// @code
 /// if (origin.miss == TagMiss::PoorFit) warn(origin.reason);  // names the RMS
@@ -111,11 +113,13 @@ enum class TagMiss {
   /// mirrored.
   CameraBelowTag,
   /// The corners could not be placed: rays that meet at no point, a corner
-  /// not in front of a camera that saw it, a solve that did not converge, or
-  /// corners that make no square.
+  /// not in front of a camera that saw it, a solve that did not converge
+  /// though its last iterate fits within @ref kMaxTagWorldRmsPx, or corners
+  /// that make no square.
   Numerical,
-  /// The corners were placed, but fit the views used worse than
-  /// @ref kMaxTagWorldRmsPx: the reason gives the RMS.
+  /// The corners, placed or where a solve that did not converge stopped,
+  /// fit the views used worse than @ref kMaxTagWorldRmsPx: the reason gives
+  /// the RMS.
   PoorFit,
 };
 
@@ -254,7 +258,8 @@ struct WorldOrigin {
 /// 5. **Guard.** Each camera that saw the tag must be above its plane
 ///    (z > 0 in its world).
 /// 6. **Fit.** The used views' corners must fit at @ref kMaxTagWorldRmsPx
-///    or better.
+///    or better; a solve that stops short of converging is judged by its
+///    last iterate's fit before it is a `Numerical` miss.
 ///
 /// @param cameras   The rig's cameras, as @ref bundle_adjust took them.
 /// @param solution  @ref bundle_adjust's solution for them.

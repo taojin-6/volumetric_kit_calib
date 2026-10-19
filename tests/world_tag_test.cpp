@@ -504,7 +504,9 @@ TEST(OriginTagFrame, PlacesTheTagBetweenTwoCamerasThatDisagree) {
 // camera 0's corners (5.4, 2.7) px off fit just under 3 px RMS and keep their
 // world; (5.6, 2.8) px off they fit at 3.08 px, and (8, 4) px off at 4.63 px,
 // and the world is refused, the reference staying the origin, its reason
-// giving the RMS.
+// giving the RMS. (16, 8) and (44, 22) px off, cv::LevMarq stops at its cap,
+// and its last iterate's fit, 9.79 and 26.7 px, refuses the world just the
+// same.
 TEST(OriginTagFrame, RefusesAWorldThatFitsWorseThanThreePixels) {
   const std::vector<SyntheticCamera> rig = test::kept_scene_rig(2);
   const RigSolution solution = truth_solution(rig, 1);
@@ -524,7 +526,8 @@ TEST(OriginTagFrame, RefusesAWorldThatFitsWorseThanThreePixels) {
     EXPECT_GT(under.rms_px, 2.9);
     EXPECT_LE(under.rms_px, kMaxTagWorldRmsPx);
     for (const auto& [dx, rms] :
-         {std::pair{5.6, "at 3.08"}, std::pair{8.0, "at 4.6"}}) {
+         {std::pair{5.6, "at 3.08"}, std::pair{8.0, "at 4.6"},
+          std::pair{16.0, "at 9.7"}, std::pair{44.0, "at 26.7"}}) {
       SCOPED_TRACE(dx);
       const WorldOrigin over = missed(apart(dx));
       EXPECT_EQ(over.miss, TagMiss::PoorFit);
@@ -532,8 +535,13 @@ TEST(OriginTagFrame, RefusesAWorldThatFitsWorseThanThreePixels) {
       EXPECT_EQ(over.reason.rfind("the tag's corners fit its views at ", 0), 0u)
           << over.reason;
       EXPECT_NE(over.reason.find(rms), std::string::npos) << over.reason;
-      EXPECT_NE(over.reason.find(" px RMS, above the 3 px a world takes"),
+      EXPECT_NE(over.reason.find(" px RMS, above the 3 px a world takes: the "
+                                 "cameras disagree on where it is"),
                 std::string::npos)
+          << over.reason;
+      EXPECT_EQ(over.reason.find(" (solve 1 stopped short of converging after "
+                                 "1000 iterations)") != std::string::npos,
+                dx > 10.0)
           << over.reason;
     }
   }

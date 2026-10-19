@@ -159,6 +159,23 @@ TEST(SolveOom, OriginTagFrame) {
     return origin_tag_frame(tagged.scene.cameras, tagged.solution, tagged.views,
                             kOriginTag, keep);
   });
+  // Two cameras 44 px apart: cv::LevMarq stops at its cap, and the world is
+  // refused for the fit there.
+  std::vector<TagView> apart(tagged.views.begin(), tagged.views.begin() + 2);
+  ASSERT_EQ(apart[1].capture, apart[0].capture);
+  for (recon::camera::Vec2d& c : apart[0].marker.corners) {
+    c += recon::camera::Vec2d(44.0, 22.0);
+  }
+  const core::Result<WorldOrigin> stopped = origin_tag_frame(
+      tagged.scene.cameras, tagged.solution, apart, kOriginTag);
+  ASSERT_TRUE(stopped.ok() && stopped->miss == TagMiss::PoorFit &&
+              stopped->reason.find("stopped short of converging") !=
+                  std::string::npos)
+      << (stopped.ok() ? stopped->reason : stopped.status().message());
+  expect_oom_anywhere([&] {
+    return origin_tag_frame(tagged.scene.cameras, tagged.solution, apart,
+                            kOriginTag);
+  });
 }
 
 TEST(SolveOom, AnchorRig) {
