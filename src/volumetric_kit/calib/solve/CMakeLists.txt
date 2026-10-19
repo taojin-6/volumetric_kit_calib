@@ -3,7 +3,8 @@
 
 # --- calib_solve: Tier 2 -----------------------------------------------------
 # The rig solve on OpenCV: each view's own pose (IPPE), the cameras' spanning
-# tree, the first rig, and the bundle adjustment that refines it (LevMarq).
+# tree, the first rig, the bundle adjustment that refines it (LevMarq), and the
+# world at the origin tag.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
@@ -13,8 +14,14 @@ add_library(calib_solve)
 add_library(volumetric_kit::calib_solve ALIAS calib_solve)
 
 target_sources(
-  calib_solve PRIVATE bundle_adjust.cpp common.cpp initialise.cpp
-                      reprojection.cpp spanning_tree.cpp view_pose.cpp)
+  calib_solve
+  PRIVATE bundle_adjust.cpp
+          common.cpp
+          initialise.cpp
+          reprojection.cpp
+          spanning_tree.cpp
+          view_pose.cpp
+          world_tag.cpp)
 
 # The tier's own export macro and guard (see calib_core).
 generate_export_header(

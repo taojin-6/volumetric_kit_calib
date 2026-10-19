@@ -6,8 +6,9 @@
 /// @file synthetic_rig.hpp
 /// @brief The one synthetic source for calib's tests: lenses like the Femto
 ///        Mega's, a four-camera rig, a plan of board placements, noisy
-///        detections of it, an exact-inverse renderer of the board, and a
-///        marker drawn through a homography.
+///        detections of it, an exact-inverse renderer of the board, a marker
+///        drawn through a homography, and the origin tag on the floor and
+///        what the rig sees of it.
 ///
 /// World: z up, the floor at z = 0. Poses are recon's `Mat4d`s, named by what
 /// they map (`world_to_camera` is OpenCV's extrinsic). Projections are exact:
@@ -24,6 +25,7 @@
 #include <opencv2/core.hpp>
 
 #include "volumetric_kit/calib/compute/board.hpp"
+#include "volumetric_kit/calib/core/detection.hpp"
 #include "volumetric_kit/calib/core/observation.hpp"
 #include "volumetric_kit/recon/camera/camera_model.hpp"
 #include "volumetric_kit/recon/camera/geometry.hpp"
@@ -129,6 +131,49 @@ std::vector<Observation> observe(const std::vector<SyntheticCamera>& rig,
                                  const compute::Board& board,
                                  const std::vector<Placement>& plan,
                                  const ObserveOptions& options = {});
+
+/// @brief A marker lying face up on the floor, as the rig's origin tag does.
+struct FloorTag {
+  double edge_m = 0.15;  ///< Its black border's edge (metres), kOriginTag's.
+  /// Its centre in the world; z = 0 lays it on the floor.
+  recon::camera::Vec3d centre{0.0};
+  double yaw_deg = 0.0;  ///< Its x axis's turn from the world's, about z.
+};
+
+/// @brief @p tag's corners in the world, in `DetectedMarker`'s order: OpenCV's
+///        marker frame, x from the first corner to the second and z out of
+///        its face, up. At the defaults that frame is the world's.
+/// @param tag  The tag.
+/// @return The corners.
+std::array<cv::Point3d, 4> floor_tag_corners(const FloorTag& tag = {});
+
+/// @brief One camera's sighting of a marker in one capture.
+struct MarkerSighting {
+  std::size_t camera = 0;    ///< The camera, by index in the rig.
+  std::int64_t capture = 0;  ///< The capture.
+  DetectedMarker marker;     ///< Its id and corners in the image.
+};
+
+/// @brief What the rig's cameras see of a marker that stays put for
+///        @p captures captures.
+///
+/// A camera sees it when it faces the camera and its corners are in front of
+/// the camera and `margin_px` inside its image; it then sees it in every
+/// capture, at its corners' projections (@ref project) plus Gaussian noise
+/// on each axis. Unlike @ref observe's, the noise is the same with every
+/// standard library (Box-Muller over `std::mt19937`).
+/// @param rig        The cameras.
+/// @param id         The marker's id.
+/// @param corners    Its corners in the world, in `DetectedMarker`'s order.
+/// @param captures   Captures 0 to `captures - 1`.
+/// @param options    The noise's sigma and seed.
+/// @param margin_px  How far inside the image each corner must be.
+/// @return The sightings by capture, then camera; the same for the same
+///         arguments.
+std::vector<MarkerSighting> observe_marker(
+    const std::vector<SyntheticCamera>& rig, int id,
+    const std::array<cv::Point3d, 4>& corners, std::size_t captures,
+    const ObserveOptions& options = {}, double margin_px = 40.0);
 
 /// @brief How @ref render_board draws.
 struct RenderOptions {

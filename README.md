@@ -70,7 +70,9 @@ renderer.
   frame: the first rig. `bundle_adjust` refines it on OpenCV's `cv::LevMarq`,
   with a Huber loss and outlier rounds, and reports each camera's covariance
   and its sensitivity to the intrinsics, and the poses as recon's
-  calibration.
+  calibration. `origin_tag_frame` then triangulates the origin tag on the
+  floor from the solved rig, and `anchor_rig` moves the outputs into its
+  world, z up from the floor.
 - **Quality:** before any solve, what each view and set is worth and which
   set a capture takes. Each view's verdict, distance, tilt, fit and cell come
   from its own pose; a capture takes the first complete set whose board is
