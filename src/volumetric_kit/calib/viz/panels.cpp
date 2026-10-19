@@ -290,7 +290,6 @@ core::Result<SessionPanel> session_panel(const quality::SessionSummary& summary,
       panel.shared_tones[i][link->parent] = tone;
       panel.shared_tones[link->parent][i] = tone;
     }
-    panel.calibrate = summary.ready;
     return panel;
   });
 }

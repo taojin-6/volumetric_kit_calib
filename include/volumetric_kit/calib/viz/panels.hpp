@@ -158,7 +158,6 @@ VC_VIZ_API core::Result<std::vector<PanelLine>> set_panel(
 ///
 /// @code
 /// VKC_ASSIGN(const SessionPanel panel, session_panel(summary, serials));
-/// calibrate_button.enabled = panel.calibrate;
 /// draw_session_panel(panel);
 /// @endcode
 struct SessionPanel {
@@ -166,7 +165,8 @@ struct SessionPanel {
   /// preview: `reference`, its link `from <parent>` with the captures shared
   /// (green when strong, amber when fair, red when weak), or `not linked`
   /// (red); then a `warning` for each repeated capture, floor-only camera and
-  /// mostly frontal camera; and `calibrate`.
+  /// mostly frontal camera; and `calibrate`, whether the session is ready
+  /// (@ref quality::SessionSummary::ready).
   std::vector<PanelLine> lines;
   std::vector<std::string> ids;  ///< The matrix's rows and columns.
   /// The captures each pair shares with a view the solve uses in both
@@ -175,14 +175,13 @@ struct SessionPanel {
   /// Each count's tone: a tree link's strength, `Muted` on the diagonal and
   /// for none, `Normal` otherwise.
   std::vector<std::vector<Tone>> shared_tones;
-  bool calibrate = false;  ///< Calibrate may run.
 };
 
 /// @brief The session's panel.
 /// @param summary  What the captures kept add up to.
 /// @param ids      Each camera's id, in the summary's order.
-/// @param options  The thresholds: `session.ready_from` names Calibrate's
-///                 rule.
+/// @param options  The thresholds: the `calibrate` line names
+///                 `session.ready_from`.
 /// @return The panel; `InvalidArgument` for ids, cameras and a matrix that
 ///         do not agree in number, or a link to a camera outside the rig; or
 ///         `OutOfMemory`.

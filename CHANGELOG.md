@@ -221,6 +221,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - calib_rig's 3D view is hidden with the camera images and fills the window
   at a result: its placement radio is gone, and the mosaic's tiles are
   recorded only while it is shown.
+- `viz::SessionPanel::calibrate` is gone: it copied
+  `quality::SessionSummary::ready`, one of the conditions `app::calibrate_gate`
+  checks before Calibrate runs.
 - `report.json` writes `solver.seconds` to the microsecond, with six
   decimals, so a report's length does not vary with its solve's time.
 - `quality::SessionOptions::ready_from` defaults to

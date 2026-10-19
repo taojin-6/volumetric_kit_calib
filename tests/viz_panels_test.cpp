@@ -289,7 +289,6 @@ TEST(SessionPanel, ShowsTheCapturesAndTheTreePreview) {
   EXPECT_EQ(line(l, "6G").tone, Tone::Bad);
   EXPECT_EQ(line(l, "calibrate").value, "ready");
   EXPECT_EQ(line(l, "calibrate").tone, Tone::Good);
-  EXPECT_TRUE(panel.value().calibrate);
   EXPECT_TRUE(labelled(l, "warning").empty());
 }
 
@@ -331,7 +330,6 @@ TEST(SessionPanel, WarnsAndHoldsCalibrateBack) {
   EXPECT_EQ(line(l, "calibrate").value,
             "not yet: every camera needs links of 4 shared captures");
   EXPECT_EQ(line(l, "calibrate").tone, Tone::Muted);
-  EXPECT_FALSE(panel.calibrate);
 }
 
 TEST(SessionPanel, RefusesASummaryThatDoesNotMatchItsIds) {
