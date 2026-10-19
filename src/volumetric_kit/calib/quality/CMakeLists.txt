@@ -5,8 +5,9 @@
 # What the views and the captures are worth, before and after the solve: the
 # live checks of each view and set, the capture rule, the session's checks, the
 # solved rig's metrics, the depth checks' geometry and verdicts over the
-# device's results, and its results files' text. Pure and geometric, on core's
-# detection records and solve's poses, view rule, tree and adjustment.
+# device's results, the boards on the origin tag's floor, and its results files'
+# text. Pure and geometric, on core's detection records and solve's poses, view
+# rule, tree, adjustment and world.
 include(GenerateExportHeader)
 include(GNUInstallDirs)
 
@@ -17,8 +18,13 @@ add_library(volumetric_kit::calib_quality ALIAS calib_quality)
 
 target_sources(
   calib_quality
-  PRIVATE calibration_metrics.cpp capture_rule.cpp depth_checks.cpp
-          live_checks.cpp results.cpp session_checks.cpp)
+  PRIVATE calibration_metrics.cpp
+          capture_rule.cpp
+          depth_checks.cpp
+          floor_boards.cpp
+          live_checks.cpp
+          results.cpp
+          session_checks.cpp)
 
 # The tier's own export macro and guard (see calib_core).
 generate_export_header(

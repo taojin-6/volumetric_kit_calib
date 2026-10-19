@@ -4,7 +4,9 @@
 // A solved rig's results files: recon's calibration file posed by each
 // camera's T_cw and read back by recon; the report parsed back with
 // nlohmann, every section, member and number as the metrics and the solution
-// hold it; the residuals CSV, every corner; and refusals.
+// hold it; the residuals CSV, every corner; the world at the origin tag in
+// both files, and the reference's for each miss, its file to the byte the
+// solution's own; and refusals.
 
 #include "volumetric_kit/calib/quality/results.hpp"
 
@@ -176,11 +178,11 @@ TEST(Results, TheReportHasItsSchema) {
   const nlohmann::ordered_json ordered =
       nlohmann::ordered_json::parse(files.report);
   EXPECT_EQ(keys_of(ordered),
-            (std::vector<std::string>{"format", "version", "settings", "solver",
-                                      "tree", "reprojection", "rejections",
-                                      "transfer", "leave_one_out", "covariance",
-                                      "sensitivity", "principal_point_ab",
-                                      "geometry", "depth", "depth_unchecked"}));
+            (std::vector<std::string>{
+                "format", "version", "settings", "solver", "tree",
+                "reprojection", "rejections", "transfer", "leave_one_out",
+                "covariance", "sensitivity", "principal_point_ab", "geometry",
+                "world", "depth", "depth_unchecked"}));
   EXPECT_EQ(doc["format"], "volumetric_kit_calib.report");
   EXPECT_EQ(doc["version"], 1);
   EXPECT_TRUE(doc["depth"].is_null());  // not checked, nor asked to be
@@ -868,6 +870,248 @@ TEST(Results, RefusesWhatDoesNotFit) {
   EXPECT_EQ(files.status().message().rfind("format_results: ", 0), 0u);
   EXPECT_NE(files.status().message().find("nobody"), std::string::npos)
       << files.status().message();
+}
+
+// --- The world
+// ----------------------------------------------------------------
+
+// The solved scene's world at the floor tag, which its cameras see in 3
+// captures at 0.3 px, the outputs anchored to it, and the boards on its floor.
+struct Tagged {
+  ResultWorld world;
+  solve::AnchoredRig rig;
+
+  Tagged() {
+    const Solved& s = solved();
+    std::vector<solve::TagView> views;
+    for (const test::MarkerSighting& m :
+         test::observe_marker(s.scene.rig, kOriginTag.id,
+                              test::floor_tag_corners(), 3, {0.3, 7})) {
+      const test::SyntheticCamera& cam = s.scene.rig[m.camera];
+      views.push_back({cam.id, m.capture, cam.model.size, m.marker});
+    }
+    world.origin = value_of(solve::origin_tag_frame(s.scene.cameras, s.solution,
+                                                    views, kOriginTag));
+    rig = value_of(solve::anchor_rig(s.solution, world.origin));
+    world.floor_boards = value_of(
+        floor_boards(s.scene.board, s.solution.boards, rig.boards_to_world));
+  }
+};
+
+const Tagged& tagged() {
+  static const Tagged once;
+  return once;
+}
+
+json rows_of(const camera::Mat4d& m) {
+  json rows = json::array();
+  for (int row = 0; row < 4; ++row) {
+    rows.push_back({m[0][row], m[1][row], m[2][row], m[3][row]});
+  }
+  return rows;
+}
+
+// The rig's tag, as the report names the tag sought.
+const json kRigsTag = json::parse(R"({"dictionary": "DICT_APRILTAG_36h11",
+    "family": "tag36h11", "id": 0, "edge_mm": 150.0})");
+
+// A tag world: the calibration file names the tag and poses each camera in
+// its world, as recon reads it back; the report's world section holds the
+// tag world's every figure, each camera's height and the boards on the floor,
+// and says its uncertainties are the reference camera's.
+TEST(Results, TheTagWorldIsTheFilesAndTheReportsWorld) {
+  const Solved& s = solved();
+  const Tagged& t = tagged();
+  ASSERT_TRUE(t.world.origin.tag) << t.world.origin.reason;
+  const solve::TagWorld& w = *t.world.origin.tag;
+  ASSERT_FALSE(t.world.floor_boards.empty());
+  const ResultFiles files = value_of(format_results(
+      s.scene.cameras, s.solution, s.metrics, nullptr, {}, t.world));
+
+  const camera::ArrayCalibration back =
+      value_of(camera::parse_array_calibration(files.array_calibration));
+  EXPECT_TRUE(back.world.sensor.empty());
+  ASSERT_TRUE(back.world.apriltag);
+  EXPECT_EQ(back.world.apriltag->family, "tag36h11");
+  EXPECT_EQ(back.world.apriltag->id, 0);
+  EXPECT_EQ(back.world.apriltag->size_m, 0.15);
+  for (std::size_t c = 0; c < s.scene.cameras.size(); ++c) {
+    const std::string& id = s.scene.cameras[c].id;
+    const camera::SensorCalibration* sensor = camera::find_sensor(back, id);
+    ASSERT_NE(sensor, nullptr) << id;
+    // T_cw in the world, as anchor_rig gives it, to the Rodrigues round-off.
+    const camera::Mat4d read = camera::rigid_inverse(*sensor->color_to_world);
+    const camera::Mat4d anchored =
+        camera::rigid_inverse(t.rig.color_to_world[c]);
+    for (int col = 0; col < 4; ++col) {
+      for (int row = 0; row < 4; ++row) {
+        EXPECT_NEAR(read[col][row], anchored[col][row], 1e-12) << id;
+      }
+    }
+  }
+
+  const json doc = json::parse(files.report);
+  const nlohmann::ordered_json ordered =
+      nlohmann::ordered_json::parse(files.report);
+  const json& world = doc["world"];
+  EXPECT_EQ(
+      keys_of(ordered["world"]),
+      (std::vector<std::string>{
+          "origin", "reference", "uncertainty_frame", "reference_to_world",
+          "tag", "miss", "miss_camera", "reason", "located", "floor_boards"}));
+  EXPECT_EQ(world["origin"], "tag");
+  EXPECT_EQ(world["reference"], s.scene.cameras[0].id);
+  EXPECT_EQ(world["uncertainty_frame"], "reference");
+  EXPECT_EQ(world["reference_to_world"], rows_of(w.reference_to_world));
+  EXPECT_EQ(world["tag"], kRigsTag);
+  EXPECT_TRUE(world["miss"].is_null());
+  EXPECT_TRUE(world["miss_camera"].is_null());
+  EXPECT_TRUE(world["reason"].is_null());
+
+  const json& located = world["located"];
+  EXPECT_EQ(keys_of(ordered["world"]["located"]),
+            (std::vector<std::string>{
+                "rms_px", "max_px", "solves", "edges_mm", "mean_edge_mm",
+                "edge_error_percent", "edge_warning", "diagonals_mm",
+                "out_of_plane_mm", "corners_m", "cameras", "views"}));
+  EXPECT_EQ(located["rms_px"].get<double>(), w.rms_px);
+  EXPECT_EQ(located["max_px"].get<double>(), w.worst_px);
+  EXPECT_EQ(located["solves"], w.solves);
+  ASSERT_EQ(located["edges_mm"].size(), 4u);
+  for (std::size_t e = 0; e < 4; ++e) {
+    EXPECT_EQ(located["edges_mm"][e].get<double>(), 1000.0 * w.edges_m[e]);
+  }
+  EXPECT_EQ(located["mean_edge_mm"].get<double>(), 1000.0 * w.edge_m);
+  EXPECT_NEAR(located["mean_edge_mm"].get<double>(), 150.0, 1.0);
+  EXPECT_EQ(located["edge_error_percent"].get<double>(), w.edge_error_percent);
+  EXPECT_EQ(located["edge_warning"], w.edge_warning);
+  ASSERT_EQ(located["diagonals_mm"].size(), 2u);
+  EXPECT_EQ(located["diagonals_mm"][1].get<double>(),
+            1000.0 * w.diagonals_m[1]);
+  EXPECT_EQ(located["out_of_plane_mm"].get<double>(),
+            1000.0 * w.out_of_plane_m);
+  ASSERT_EQ(located["corners_m"].size(), 4u);
+  EXPECT_EQ(located["corners_m"][2][0].get<double>(), w.corners_m[2].x);
+  ASSERT_EQ(located["cameras"].size(), s.scene.cameras.size());
+  for (const solve::TagCamera& c : w.cameras) {
+    EXPECT_EQ(
+        keys_of(ordered["world"]["located"]["cameras"][c.id]),
+        (std::vector<std::string>{"views", "used", "dropped", "height_m"}));
+    const json& j = located["cameras"][c.id];
+    EXPECT_EQ(j["views"], c.views);
+    EXPECT_EQ(j["used"], c.used);
+    EXPECT_EQ(j["dropped"], c.views - c.used);
+    EXPECT_EQ(j["height_m"].get<double>(), c.height_m);
+    EXPECT_GT(c.height_m, 1.0) << c.id;  // the rig's cameras are 2.5 m up
+  }
+  ASSERT_EQ(located["views"].size(), w.views.size());
+  for (std::size_t v = 0; v < w.views.size(); ++v) {
+    const solve::TagViewFit& fit = w.views[v];
+    const json& j = located["views"][v];
+    EXPECT_EQ(keys_of(ordered["world"]["located"]["views"][v]),
+              (std::vector<std::string>{"camera", "capture", "used", "rms_px",
+                                        "worst_px", "round", "bound_px"}));
+    EXPECT_EQ(j["camera"], fit.camera);
+    EXPECT_EQ(j["capture"], fit.capture);
+    EXPECT_EQ(j["used"], fit.used);
+    EXPECT_EQ(j["rms_px"].get<double>(), fit.rms_px);
+    EXPECT_EQ(j["worst_px"].get<double>(), fit.worst_px);
+    EXPECT_EQ(j["round"], fit.round);
+    EXPECT_EQ(j["bound_px"].get<double>(), fit.bound_px);
+  }
+
+  ASSERT_EQ(world["floor_boards"].size(), t.world.floor_boards.size());
+  for (std::size_t b = 0; b < t.world.floor_boards.size(); ++b) {
+    const FloorBoard& board = t.world.floor_boards[b];
+    const json& j = world["floor_boards"][b];
+    EXPECT_EQ(j.size(), 3u);
+    EXPECT_EQ(j["capture"], board.capture);
+    EXPECT_EQ(j["angle_deg"].get<double>(), board.angle_deg);
+    EXPECT_EQ(j["height_mm"].get<double>(), 1000.0 * board.height_m);
+  }
+  // The uncertainties and the centres stay in the reference's gauge.
+  EXPECT_EQ(doc["geometry"], json::parse(formatted(s).report)["geometry"]);
+  EXPECT_EQ(doc["covariance"], json::parse(formatted(s).report)["covariance"]);
+}
+
+// Without a tag world, for each miss: the reference camera is the world, the
+// report says why, and the calibration file is the solution's own, to the
+// byte, as it was before the world was named.
+TEST(Results, WithoutATagWorldTheReferenceStaysAndTheReportSaysWhy) {
+  const Solved& s = solved();
+  const std::string own =
+      value_of(camera::format_array_calibration(s.solution.calibration));
+  struct Miss {
+    solve::TagMiss miss;
+    const char* name;
+    std::string camera;
+  };
+  const std::string id = s.scene.cameras[2].id;
+  for (const Miss& m :
+       {Miss{solve::TagMiss::NotSeen, "not_seen", ""},
+        Miss{solve::TagMiss::OneCamera, "one_camera", id},
+        Miss{solve::TagMiss::FewCameras, "few_cameras", ""},
+        Miss{solve::TagMiss::CameraBelowTag, "camera_below_tag", id},
+        Miss{solve::TagMiss::Numerical, "numerical", ""},
+        Miss{solve::TagMiss::PoorFit, "poor_fit", ""}}) {
+    SCOPED_TRACE(m.name);
+    ResultWorld world;
+    world.origin.sought = kOriginTag;
+    world.origin.miss = m.miss;
+    world.origin.camera = m.camera;
+    world.origin.reason = std::string("because ") + m.name;
+    const ResultFiles files = value_of(format_results(
+        s.scene.cameras, s.solution, s.metrics, nullptr, {}, world));
+    EXPECT_EQ(files.array_calibration, own);
+    const json report = json::parse(files.report)["world"];
+    EXPECT_EQ(report["origin"], "reference");
+    EXPECT_EQ(report["reference"], s.scene.cameras[0].id);
+    EXPECT_EQ(report["uncertainty_frame"], "reference");
+    EXPECT_EQ(report["reference_to_world"], rows_of(camera::Mat4d(1.0)));
+    EXPECT_EQ(report["tag"], kRigsTag);
+    EXPECT_EQ(report["miss"], m.name);
+    if (m.camera.empty()) {
+      EXPECT_TRUE(report["miss_camera"].is_null());
+    } else {
+      EXPECT_EQ(report["miss_camera"], m.camera);
+    }
+    EXPECT_EQ(report["reason"], std::string("because ") + m.name);
+    EXPECT_TRUE(report["located"].is_null());
+    EXPECT_TRUE(report["floor_boards"].empty());
+  }
+
+  // The default world: no tag sought, and the same file.
+  const ResultFiles files = formatted(s);
+  EXPECT_EQ(files.array_calibration, own);
+  const json report = json::parse(files.report)["world"];
+  EXPECT_EQ(report["origin"], "reference");
+  EXPECT_TRUE(report["tag"].is_null());
+  EXPECT_EQ(report["miss"], "not_seen");
+  EXPECT_TRUE(report["reason"].is_null());
+}
+
+// A tag world of another rig, or one recon's file cannot name, is refused.
+TEST(Results, RefusesATagWorldThatDoesNotFit) {
+  const Solved& s = solved();
+  const auto refused = [&](const ResultWorld& world, const std::string& says) {
+    SCOPED_TRACE(says);
+    core::Result<ResultFiles> files = ResultFiles{};
+    EXPECT_NO_THROW(files = format_results(s.scene.cameras, s.solution,
+                                           s.metrics, nullptr, {}, world));
+    test::expect_refused(files.status(), "format_results", says);
+  };
+  ResultWorld fewer = tagged().world;
+  fewer.origin.tag->cameras.pop_back();
+  refused(fewer, "the tag world does not fit the rig's 4 cameras");
+  ResultWorld renamed = tagged().world;
+  renamed.origin.tag->cameras[1].id = "SYN-other";
+  refused(renamed, "the tag world does not fit the rig's 4 cameras");
+  ResultWorld stranger = tagged().world;
+  stranger.origin.tag->views[0].camera = "SYN-other";
+  refused(stranger, "the tag world does not fit the rig's 4 cameras");
+  ResultWorld aruco = tagged().world;
+  aruco.origin.sought.dictionary = MarkerDictionary::ArUco4x4_50;
+  refused(aruco, "anchor_rig: the tag world's tag sought, of DICT_4X4_50");
 }
 
 }  // namespace

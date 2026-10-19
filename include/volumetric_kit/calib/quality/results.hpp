@@ -48,8 +48,23 @@
 ///   `principal_margin_px`): `refused`, `corners`, `as_given` and `shifted`
 ///   (`rms_px`, `legacy_rmse_px`, `transfer_median_px`, `transfer_p90_px`),
 ///   `verdict` (@ref to_string(PrincipalPointVerdict)'s name);
-/// - `geometry`: `centres_m` by id, and `baselines_m`, each pair once
-///   (`a`, `b`, `m`);
+/// - `geometry`: `centres_m` by id, in the reference camera's colour frame,
+///   and `baselines_m`, each pair once (`a`, `b`, `m`);
+/// - `world` (@ref ResultWorld): `origin`, `"tag"` or `"reference"`;
+///   `reference`, the reference camera's id; `uncertainty_frame`,
+///   `"reference"`, the frame of the covariance, the sensitivities, the
+///   leave-one-out moves and `geometry`, whatever the world;
+///   `reference_to_world`, its 4 x 4 rows; `tag`, the tag sought
+///   (`dictionary`, `family` as `apriltag_family` names it, empty for none,
+///   `id`, `edge_mm`), `null` when none was; `miss`, `miss_camera` and
+///   `reason`, why there is no tag world (`solve::to_string(TagMiss)`'s name,
+///   the camera it names, its words), each `null` with one; `located`, the
+///   tag world (`solve::TagWorld`), `null` without one: `rms_px`, `max_px`,
+///   `solves`, `edges_mm`, `mean_edge_mm`, `edge_error_percent`,
+///   `edge_warning`, `diagonals_mm`, `out_of_plane_mm`, `corners_m`,
+///   `cameras` (by id: `views`, `used`, `dropped`, `height_m`) and `views`
+///   (`camera`, `capture`, `used`, `rms_px`, `worst_px`, `round`,
+///   `bound_px`); and `floor_boards` (`capture`, `angle_deg`, `height_mm`);
 /// - `depth` (@ref DepthSummary), `null` when the depth was not checked:
 ///   `settings` (its @ref DepthCheckOptions, by their names); `ratio`
 ///   (`count`, `mean`, `sd`) and its `scale` verdict; `cameras` (by id:
@@ -81,8 +96,10 @@
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
 #include "volumetric_kit/calib/quality/export.hpp"
+#include "volumetric_kit/calib/quality/floor_boards.hpp"
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
+#include "volumetric_kit/calib/solve/world_tag.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib::quality {
@@ -103,11 +120,28 @@ inline constexpr const char* kResidualsFile = "residuals.csv";
 /// @endcode
 struct ResultFiles {
   /// @ref kArrayCalibrationFile: recon's `format_array_calibration` of the
-  /// solution's calibration (@ref solve::RigSolution::calibration), whose
-  /// `pose` is each camera's T_cw.
+  /// solution's calibration in the world (`solve::anchor_rig`), whose `pose`
+  /// is each camera's T_cw there and whose `world` is the tag or the
+  /// reference camera.
   std::string array_calibration;
   std::string report;     ///< @ref kReportFile.
   std::string residuals;  ///< @ref kResidualsFile.
+};
+
+/// @brief The world a solved rig's results are in, and the boards on its
+///        floor.
+///
+/// @code
+/// ResultWorld world;
+/// VKC_ASSIGN(world.origin,
+///            solve::origin_tag_frame(cameras, solution, views, kOriginTag));
+/// @endcode
+struct ResultWorld {
+  /// Where it is (`solve::origin_tag_frame`); by default the reference
+  /// camera, no tag sought.
+  solve::WorldOrigin origin;
+  /// The boards on its floor (@ref floor_boards); empty without a tag world.
+  std::vector<FloorBoard> floor_boards;
 };
 
 /// @brief Format a solved rig's results files.
@@ -120,16 +154,19 @@ struct ResultFiles {
 ///                  be, which the report writes as `depth_unchecked`; empty,
 ///                  written `null`, when it was checked or not asked for.
 ///                  Not written with @p depth.
+/// @param world     Its world; by default the reference camera's, whose
+///                  calibration file is the solution's own.
 /// @return The files; `InvalidArgument` for no cameras, a repeated or empty
-///         id, or a @p solution, @p metrics or @p depth that names a camera
-///         the rig does not have or has another camera count, or a
+///         id, or a @p solution, @p metrics, @p depth or tag world that names
+///         a camera the rig does not have or has another camera count, or a
 ///         calibration whose sensors are not the cameras (naming what);
-///         recon's error for a calibration its writer refuses; or
-///         `OutOfMemory`. Each message starts `format_results: `.
+///         what `solve::anchor_rig` refuses; recon's error for a calibration
+///         its writer refuses; or `OutOfMemory`. Each message starts
+///         `format_results: `.
 VC_QUALITY_API core::Result<ResultFiles> format_results(
     const std::vector<solve::RigCamera>& cameras,
     const solve::RigSolution& solution, const CalibrationMetrics& metrics,
     const DepthSummary* depth = nullptr,
-    const std::string& depth_unchecked = {});
+    const std::string& depth_unchecked = {}, const ResultWorld& world = {});
 
 }  // namespace volumetric_kit::calib::quality
