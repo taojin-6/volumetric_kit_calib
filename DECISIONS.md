@@ -86,13 +86,10 @@ otherwise (anchored last, as the "Calibrate (T4)" entry has it).
   its #254 refuses a tag-world file.
 - **The report names the origin.** `report.json`'s `world` says which
   origin the poses are in and, without a tag world, why, so the report
-  alone tells where the calibration file's poses are; its
-  `uncertainty_frame` says the measures stay in the reference's gauge.
-- **At most 3 px RMS** (the user's call). With 2 cameras the outlier
-  rounds cannot tell which view of the tag is wrong, so they keep a world
-  the cameras disagree on (`solve::kMaxTagWorldRmsPx`); one that fits worse
-  is refused: the reference camera stays the origin, and the report, the
-  Calibration window and a notice say why.
+  alone tells where the calibration file's poses are.
+- **At most 3 px RMS** (the user's call; `solve::kMaxTagWorldRmsPx` says
+  why): a world that fits worse is refused, the reference camera staying
+  the origin, and the report, the Calibration window and a notice say why.
 - **The floor boards reported, not used** (the user's call). z is the
   tag's alone; the solved boards lying on its floor are listed with their
   tilt and height (`quality::floor_boards`), with no verdict, to decide on
@@ -126,9 +123,8 @@ steps, the numbering and the write order).
   user's call): `SensorArray` reads only the poses, and the session's
   factory file already has the depth models.
 - **Cancelled between steps.** `bundle_adjust` is not interruptible, so a
-  cancel takes effect before the metrics, after a leave-one-out re-solve or
-  between two captures' depth checks; the writing, a few files, is not
-  cancelled.
+  cancel takes effect at the next progress call (`app::CalibrateCallback`
+  lists them); the writing, a few files, is not cancelled.
 - **The images, then the cloud** (the user's calls). calib_rig
   shows the camera images until a result, then the live points at the solved
   poses in the whole window, and a key goes back to the images to capture
