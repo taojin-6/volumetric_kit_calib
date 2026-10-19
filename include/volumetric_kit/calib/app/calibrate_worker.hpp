@@ -171,10 +171,11 @@ struct WrittenResults {
 ///        session's.
 ///
 /// 1. `<session>/results/` is created unless it is a directory already.
-/// 2. The run's directory takes the first number from @p first_number that
-///    no entry of `results/` starts with (`RRR_`), so no number is used
-///    twice, and is created exclusively; a name taken meanwhile moves to the
-///    next number.
+/// 2. The run's directory takes @p first_number, or one past the highest
+///    number an entry of `results/` already has (`RRR_`) when that is
+///    higher, so no number is used twice and a gap is never filled; it is
+///    created exclusively, and a name taken meanwhile moves to the next
+///    number.
 /// 3. `residuals.csv`, then `report.json`, then `array_calibration.json`
 ///    last, each through @p sink: a directory left by a failure never holds a
 ///    calibration file.
@@ -205,9 +206,11 @@ VC_APP_API core::Result<WrittenResults> write_results(
 ///
 /// Every member may be called from any thread. A run's outcome is a result
 /// (@ref take_result), published only once its files are on disk, or a
-/// failure (@ref take_errors), which leaves the results written before and
-/// writes nothing, or nothing at all when it was cancelled. The numbers go up
-/// from 0, one per directory written.
+/// failure (@ref take_errors), after which a result not yet taken is still
+/// there to take; a cancelled run has none. A refusal, a solve failure or a
+/// cancel writes nothing; a write failure may leave its numbered directory
+/// without a calibration file (@ref write_results), and that number is not
+/// used again. The numbers go up from 0, one per directory made.
 ///
 /// @code
 /// VKC_ASSIGN(std::unique_ptr<CalibrateWorker> calibrate,
