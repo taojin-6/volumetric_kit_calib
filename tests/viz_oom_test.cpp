@@ -126,6 +126,41 @@ TEST(VizOom, Panels) {
   expect_oom_anywhere([&] { return stage_frame_metrics(stages, 25.0); });
 }
 
+// Calibrate's lines: its progress, and its result's every kind of line --
+// a camera moved and one not, the A/B test decided and refused.
+TEST(VizOom, CalibratePanels) {
+  // Longer than any small-string buffer, so the line allocates.
+  expect_oom_anywhere([] {
+    return calibrate_progress_line("measuring the rig without a capture", 104,
+                                   150, 1234.5);
+  });
+  quality::CalibrationMetrics metrics;
+  const std::vector<std::string> ids = {"CL2A141000N", "CL2A14100A4"};
+  for (auto* stats : {&metrics.reprojection.initial.cameras,
+                      &metrics.reprojection.solved.cameras}) {
+    stats->resize(2);
+    (*stats)[0].count = 10;
+    (*stats)[0].rms_px = 0.5;
+  }
+  metrics.transfer.median_px = 0.6;
+  metrics.transfer.p90_px = 1.4;
+  metrics.leave_one_out.cameras.resize(2);
+  metrics.leave_one_out.cameras[1] = {1.5, 7, 0.05, 3};
+  metrics.principal_point.as_given.rms_px = 0.31;
+  metrics.principal_point.shifted.rms_px = 0.30;
+  metrics.geometry.centres_m.resize(2);
+  const std::string directory =
+      "/sessions/2026-10-19_101500/results/000_2026-10-19_101500";
+  expect_oom_anywhere(
+      [&] { return calibration_panel(ids, metrics, 0, directory, 12, 3.5); });
+  metrics.principal_point.refused = "a link left short of 3 shared captures";
+  expect_oom_anywhere(
+      [&] { return calibration_panel(ids, metrics, 0, directory, 12, 3.5); });
+  expect_oom_when_reporting(
+      [&] { return calibration_panel({}, metrics, 0, directory, 12, 3.5); },
+      Code::InvalidArgument);
+}
+
 // A refusal that runs out of memory reports OutOfMemory, and the editor
 // keeps its board.
 TEST(VizOom, BoardEditorRefusals) {

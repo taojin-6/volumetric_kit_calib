@@ -7,11 +7,12 @@
 /// @brief The live view's panels: what each camera sees, how the latest set
 ///        arrived, what the captures kept add up to and how much of the
 ///        origin tag they hold, where a capture stands, and the stage
-///        timings.
+///        timings; and Calibrate's: how far it has got, and what its result
+///        is worth.
 ///
 /// Each panel is a model -- lines of text, each in a @ref Tone -- built from
-/// host data alone (the quality tier's checks, recon's counters, the capture
-/// records), and drawn with ImGui by @ref draw_panel_lines and
+/// host data alone (the quality tier's checks and metrics, recon's counters,
+/// the capture records), and drawn with ImGui by @ref draw_panel_lines and
 /// @ref draw_session_panel. The thresholds behind each tone are the quality
 /// tier's own (@ref PanelOptions).
 
@@ -19,11 +20,13 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "volumetric_kit/calib/core/capture_meta.hpp"
 #include "volumetric_kit/calib/core/target.hpp"
 #include "volumetric_kit/calib/core/view_check.hpp"
+#include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
@@ -256,6 +259,71 @@ struct CaptureStatus {
 /// @endcode
 VC_VIZ_API core::Result<std::vector<PanelLine>> capture_panel(
     const CaptureStatus& status);
+
+/// @brief The line that stands for the Calibrate button while Calibrate
+///        runs.
+///
+/// `calibrating`: `<stage> <done>/<total>, <seconds> s`, the count left out
+/// while @p total is 0.
+/// @param stage    Where it is, as the worker names it (`"measuring"`).
+/// @param done     The steps of the stage done, such as the leave-one-out
+///                 re-solves.
+/// @param total    The stage's steps in all; 0 while unknown or none.
+/// @param seconds  Since it began.
+/// @return The line; or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const PanelLine line,
+///            calibrate_progress_line(to_string(at->stage), at->done,
+///                                    at->total, at->seconds));
+/// @endcode
+VC_VIZ_API core::Result<PanelLine> calibrate_progress_line(
+    std::string_view stage, std::size_t done, std::size_t total,
+    double seconds);
+
+/// @brief The Calibration window's panel: what a Calibrate's result is
+///        worth.
+///
+/// Lines, in order; a figure that is not a number shows as `-`:
+/// - `calibration`: its results number, the captures solved and the
+///   seconds the solve and metrics took;
+/// - `RMS`: every corner's reprojection RMS at the first rig and solved
+///   (`initial -> solved`), and their legacy RMSE;
+/// - `RMS <id>` for each camera: its own, initial and solved;
+/// - `transfer`: the cross-camera transfer's median and 90th percentile;
+/// - `moves <id>` for each camera: the most its centre and its rotation
+///   moved with one capture left out, each with that capture; `-`, muted,
+///   when none moved it;
+/// - `principal point`: the A/B verdict (`as given` green, `shifted` amber,
+///   `inconclusive`), the gap (`quality::principal_point_gap`) and each
+///   side's RMS; `refused: <why>`, muted, when the shifted rig could not be
+///   solved;
+/// - `centre <id>` for each camera: its centre (metres) in the world, the
+///   reference camera's colour frame;
+/// - `results`: the results directory.
+/// @param ids        Each camera's id, in the rig's order.
+/// @param metrics    The result's metrics (`quality::calibration_metrics`).
+/// @param number     Its results directory's number, `RRR`.
+/// @param directory  Its results directory.
+/// @param captures   The kept captures it was solved from.
+/// @param seconds    How long the solve and metrics took.
+/// @return The lines; `InvalidArgument` when the metrics' cameras, per
+///         camera in the reprojection, the leave-one-out or the geometry,
+///         are not as many as @p ids; or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const std::vector<PanelLine> lines,
+///            calibration_panel(result.ids, result.metrics, result.number,
+///                              result.directory, result.captures,
+///                              result.seconds));
+/// draw_panel_lines("calibration", lines);
+/// @endcode
+// TODO: CB6 adds the depth checks' lines, and CB9 the world's line and each
+// camera's height in the origin tag's world.
+VC_VIZ_API core::Result<std::vector<PanelLine>> calibration_panel(
+    const std::vector<std::string>& ids,
+    const quality::CalibrationMetrics& metrics, int number,
+    const std::string& directory, std::size_t captures, double seconds);
 
 /// @brief The live stages' timings as gfx's metrics panel takes them.
 /// @param stages  The stages timed (poll, readback, detect, tiles, ...).
