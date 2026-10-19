@@ -66,6 +66,8 @@ struct FloorBoard {
 /// VKC_ASSIGN(const std::vector<FloorBoard> floor,
 ///            floor_boards(board, solution.boards, rig.boards_to_world));
 /// @endcode
+// TODO: level the tag world's z to the floor boards, should H5 on the rig
+// call for it; until then z is the tag's alone.
 VC_QUALITY_API core::Result<std::vector<FloorBoard>> floor_boards(
     const compute::Board& board, const std::vector<solve::SolvedBoard>& boards,
     const std::vector<recon::camera::Mat4d>& boards_to_world,

@@ -89,9 +89,10 @@ struct TagFrameOptions {
 /// Cameras that disagree on where the tag is -- a pose or a lens off, or a
 /// tag moved between captures -- leave their rays apart. With 3 cameras or
 /// more the outlier rounds drop the views that disagree; with 2 they cannot
-/// tell which is wrong, and their bound grows with the disagreement, so two
-/// cameras 44 px apart still placed a tag at about 25 px RMS. At 0.3 px of
-/// noise a world fits at about 0.4 px.
+/// tell which is wrong, and their bound grows with the disagreement. On the
+/// synthetic rig, at 0.3 px of noise a world fits at about 0.4 px RMS; two
+/// cameras whose corners are (3, 1.5) px apart fit at 1.47 px, and
+/// (5.6, 2.8) px apart at 3.08 px.
 ///
 /// @code
 /// if (origin.miss == TagMiss::PoorFit) warn(origin.reason);  // names the RMS

@@ -71,7 +71,8 @@ renderer.
   and its sensitivity to the intrinsics, and the poses as recon's
   calibration. `origin_tag_frame` then triangulates the origin tag on the
   floor from the solved rig, and `anchor_rig` moves the outputs into its
-  world, z up from the floor.
+  world, z up from the floor
+  ([DECISIONS.md](DECISIONS.md#2026-10-19--the-world-at-the-origin-tag)).
 - **Quality:** before any solve, what each view and set is worth and which
   set a capture takes. Each view's verdict, distance, tilt, fit and cell come
   from its own pose; a capture takes the first complete set whose board is
@@ -84,10 +85,10 @@ renderer.
   After the solve, what the rig is worth: the reprojection error before and
   after, what was left out, the cross-camera transfer (the legacy
   `verify_rig.py`'s check), each camera's move with one capture left out, a
-  principal-point A/B test decided by the RMS with a margin, and the
-  cameras' baselines; and the text of the results directory's files --
-  recon's calibration file, `report.json` and `residuals.csv` -- which the
-  application writes
+  principal-point A/B test decided by the RMS with a margin, the cameras'
+  baselines and the boards on the origin tag's floor; and the text of the
+  results directory's files -- recon's calibration file in the rig's world,
+  `report.json` and `residuals.csv` -- which the application writes
   ([DECISIONS.md](DECISIONS.md#2026-10-16--the-solved-rigs-metrics-and-its-results-files)).
   Over the device's depth results, for any number of cameras: the board's
   scale and plane from each view's depth, each ordered pair's depth
@@ -108,8 +109,8 @@ renderer.
   capture; the board's editor locks at the first capture
   ([DECISIONS.md](DECISIONS.md#2026-10-16--the-live-view-on-gfx)). The 3D
   view draws each camera's prepared depth as points where recon left it, at
-  the rig's poses, with the cameras' frusta, the world's axes and the solved
-  boards, turned upright
+  the rig's poses, with the cameras' frusta, the world's axes, the solved
+  boards and the origin tag, turned upright, the tag's floor level
   ([DECISIONS.md](DECISIONS.md#2026-10-17--the-live-3d-view-drawn-from-prepared-frames-in-place)).
 - **App:** `calib_rig` opens every camera of the rig's sync file, at the
   scenario's modes, and shows them live with the board found in each; Space
@@ -120,10 +121,12 @@ renderer.
   capture at full resolution, writes it and keeps it in memory for
   Calibrate, and the window draws and never waits
   ([DECISIONS.md](DECISIONS.md#2026-10-16--calib_rigs-live-view-and-capture)).
-  Calibrate's worker solves and measures the kept captures, checks their raw
-  depth against the solved rig on the GPU, pass or fail per camera and per
-  pair, and writes a results directory; each result fills the window with
-  the live points at the solved poses, and a key goes back to the images
+  Calibrate's worker solves and measures the kept captures, locates the
+  origin tag, checks their raw depth against the solved rig on the GPU,
+  pass or fail per camera and per pair, and writes a results directory in
+  the tag's world, or the reference camera's when it cannot be located;
+  each result fills the window with the live points at the solved poses,
+  and a key goes back to the images
   ([DECISIONS.md](DECISIONS.md#2026-10-18--calibrate-t4)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.

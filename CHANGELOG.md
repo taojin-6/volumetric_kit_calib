@@ -29,6 +29,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Calibrate's world at the origin tag (DECISIONS.md, 2026-10-19):
+  `app::calibrate` locates the tag from the kept captures' tags after the
+  metrics (`CalibrateStage::Locating`) and anchors the outputs last, so
+  `CalibrateResult::color_to_world` and `boards_to_world` are in the tag's
+  world, with `CalibrateResult::world` (`quality::ResultWorld`: the
+  `WorldOrigin` and the boards on its floor); without a tag world the
+  reference camera stays the origin, as before. `array_calibration.json`
+  names a tag world as recon's `world.apriltag`; a reference world's file
+  is unchanged. `report.json` gains `world`: the origin, the tag sought, why
+  there is no tag world, the tag's fit, edges and corners, each camera's
+  height, the boards on the floor and `uncertainty_frame`. In `solve`:
+  `kMaxTagWorldRmsPx` (3 px), above which `origin_tag_frame` refuses a tag
+  world as `TagMiss::PoorFit`, and `WorldOrigin::sought`; in `core`:
+  `apriltag_family`; in `quality`: `floor_boards`, each solved board within
+  5 degrees and 20 mm of the tag's floor, with its tilt and height. In
+  `viz`: `display_rotation` and `SceneView::frame` take the world's up, a
+  tag world's +z, so its floor lies level; `tag_lines` and
+  `SceneOptions::tag_edge_m`, the tag's outline at the origin; and
+  `world_panel`, the Calibration window's world lines (the origin, the
+  edge's warning, why there is no tag world, each camera's height and the
+  floor boards), whose warnings calib_rig also posts. `RigOrigin::tag`
+  frames the 3D view again when the world moves between the tag and a
+  reference camera.
 - The depth checks at Calibrate (DECISIONS.md, 2026-10-16, "Depth checks:
   the host's geometry over the device's results", amended 2026-10-19):
   `app::CalibrateDepth`, a depth-only `GpuFramePrep` per camera and calib's
@@ -240,7 +263,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `app::CalibrateWorker::create` takes the depth checks before the results
   sink, `create(depth, sink)`, and `app::calibrate` takes them after the
   progress; `quality::format_results` takes why the depth was not checked
-  after the depth checks.
+  after the depth checks, and the rig's world (`ResultWorld`) after that.
 - `viz::SessionPanel::calibrate` is gone: it copied
   `quality::SessionSummary::ready`, one of the conditions `app::calibrate_gate`
   checks before Calibrate runs.
