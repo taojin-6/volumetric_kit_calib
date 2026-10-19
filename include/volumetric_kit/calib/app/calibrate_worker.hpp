@@ -213,9 +213,6 @@ class VC_APP_API CalibrateDepth final {
   CalibrateDepth(CalibrateDepth&&) = delete;
   CalibrateDepth& operator=(CalibrateDepth&&) = delete;
 
-  /// @return The rig's cameras it checks.
-  std::size_t cameras() const noexcept;
-
  private:
   friend core::Result<CalibrateResult> calibrate(const KeptCaptures&,
                                                  const CalibrateCallback&,

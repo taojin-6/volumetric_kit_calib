@@ -276,10 +276,6 @@ CalibrateDepth::CalibrateDepth(std::unique_ptr<State> state) noexcept
 
 CalibrateDepth::~CalibrateDepth() = default;
 
-std::size_t CalibrateDepth::cameras() const noexcept {
-  return state_->preps.size();
-}
-
 core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
                                         const CalibrateCallback& progress,
                                         CalibrateDepth* depth) {
