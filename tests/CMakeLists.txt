@@ -166,6 +166,9 @@ if(TARGET calib_app)
   vc_add_test(app_preset volumetric_kit::calib_app)
   # GLFW's key codes, through gfx_glfw, whose GLFW is gfx's own find.
   vc_add_test(app_keys volumetric_kit::calib_app volumetric_kit::gfx_glfw)
+  # The window's mode: each key's action in each view, Calibrate's gate, the 3D
+  # view's placement and framing.
+  vc_add_test(app_rig_mode volumetric_kit::calib_app)
   vc_add_test(app_live volumetric_kit::calib_app vc_synthetic_rig
               volumetric_kit::core_test_support)
   vc_add_test(app_live_view volumetric_kit::calib_app vc_synthetic_rig

@@ -5,13 +5,15 @@
 
 /// @file keys.hpp
 /// @brief calib_rig's keys: a capture, and dropping the last one, from the
-///        keyboard or a presentation clicker.
+///        keyboard or a presentation clicker; Calibrate, its cancel, and the
+///        switch between the camera images and the 3D view.
 ///
 /// The window's key callback is installed before ImGui's GLFW backend, which
 /// chains to it, so the keys are seen before ImGui; they are ignored while
 /// ImGui takes text, so typing in a field captures nothing. ImGui knows that
 /// only once its next frame has begun, so the callback queues each key
-/// (@ref KeyQueue) and the frame maps them then.
+/// (@ref KeyQueue) and the frame maps them then. What a request does depends
+/// on what the window shows (`rig_action`, rig_mode.hpp).
 
 #include <cstdint>
 #include <utility>
@@ -24,16 +26,21 @@ namespace volumetric_kit::calib::app {
 
 /// @brief What a key asks of the app.
 enum class KeyRequest : std::uint8_t {
-  None,      ///< Nothing.
-  Capture,   ///< Arm a capture.
-  DropLast,  ///< Drop the last capture.
+  None,        ///< Nothing.
+  Capture,     ///< Arm a capture.
+  DropLast,    ///< Drop the last capture.
+  Calibrate,   ///< Run Calibrate.
+  SwitchView,  ///< Switch between the camera images and the 3D view.
+  Cancel,      ///< Cancel a running Calibrate.
 };
 
 /// @brief What a GLFW key event asks.
 ///
 /// A press of Space, Right, Page Down or S is a capture; a press of
 /// Backspace, Left or Page Up drops the last capture (a clicker's "next" and
-/// "back"). A repeat or release asks nothing, so a held key captures once.
+/// "back"); C or F5 is Calibrate; V, B or `.` switches the view; Escape
+/// cancels. A repeat or release asks nothing, so a held key captures once.
+/// Modifiers are not taken, so Shift+F5 is F5.
 /// @param key              The GLFW key (`GLFW_KEY_*`).
 /// @param action           The GLFW action (`GLFW_PRESS`, `GLFW_REPEAT` or
 ///                         `GLFW_RELEASE`).
