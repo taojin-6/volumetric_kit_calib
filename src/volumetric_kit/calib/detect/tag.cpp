@@ -30,6 +30,7 @@ core::Result<MarkerSearch> detect_tag(const LumaView& image,
           "origin_tag.dictionary must name the tag's dictionary");
     }
     cv::aruco::DetectorParameters parameters;
+    // kTagCornerRefinement names it.
     parameters.cornerRefinementMethod = cv::aruco::CORNER_REFINE_SUBPIX;
     const cv::aruco::ArucoDetector detector(
         cv::aruco::getPredefinedDictionary(*dictionary), parameters);

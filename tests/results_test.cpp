@@ -911,9 +911,10 @@ json rows_of(const camera::Mat4d& m) {
   return rows;
 }
 
-// The rig's tag, as the report names the tag sought.
+// The rig's tag, as the report names the tag sought, and how detect_tag
+// refines its corners.
 const json kRigsTag = json::parse(R"({"dictionary": "DICT_APRILTAG_36h11",
-    "family": "tag36h11", "id": 0, "edge_mm": 150.0})");
+    "family": "tag36h11", "id": 0, "edge_mm": 150.0, "refinement": "subpix"})");
 
 // A tag world: the calibration file names the tag and poses each camera in
 // its world, as recon reads it back; the report's world section holds the

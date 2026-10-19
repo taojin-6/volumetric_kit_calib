@@ -56,9 +56,11 @@
 ///   leave-one-out moves and `geometry`, whatever the world;
 ///   `reference_to_world`, its 4 x 4 rows; `tag`, the tag sought
 ///   (`dictionary`, `family` as `apriltag_family` names it, empty for none,
-///   `id`, `edge_mm`), `null` when none was; `miss`, `miss_camera` and
-///   `reason`, why there is no tag world (`solve::to_string(TagMiss)`'s name,
-///   the camera it names, its words), each `null` with one; `located`, the
+///   `id`, `edge_mm`, and `refinement`, its corners' as
+///   `detect::kTagCornerRefinement` names it), `null` when none was; `miss`,
+///   `miss_camera` and `reason`, why there is no tag world
+///   (`solve::to_string(TagMiss)`'s name, the camera it names, its words),
+///   each `null` with one; `located`, the
 ///   tag world (`solve::TagWorld`), `null` without one: `rms_px`, `max_px`,
 ///   `solves`, `edges_mm`, `mean_edge_mm`, `edge_error_percent`,
 ///   `edge_warning`, `diagonals_mm`, `out_of_plane_mm`, `corners_m`,

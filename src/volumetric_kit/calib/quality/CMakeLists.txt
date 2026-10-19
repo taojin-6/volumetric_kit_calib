@@ -52,8 +52,12 @@ target_include_directories(
                        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
 # The public headers name compute's board and camera and solve's rig cameras,
-# poses, options, covisibility and solution; nothing calls OpenCV directly.
-target_link_libraries(calib_quality PUBLIC calib_solve)
+# poses, options, covisibility and solution; nothing calls OpenCV directly. The
+# report names detect's tag corner refinement, privately.
+target_link_libraries(
+  calib_quality
+  PUBLIC calib_solve
+  PRIVATE calib_detect)
 # nlohmann/json writes the report, privately, through calib's JSON writer
 # (core/json_text.hpp): no public header names it.
 target_include_directories(calib_quality SYSTEM

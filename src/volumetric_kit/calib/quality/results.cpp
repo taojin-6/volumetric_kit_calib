@@ -16,6 +16,7 @@
 #include "../core/json_text.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
+#include "volumetric_kit/calib/detect/tag.hpp"
 #include "volumetric_kit/recon/camera/array_calibration.hpp"
 
 namespace volumetric_kit::calib::quality {
@@ -444,6 +445,7 @@ void world_section(Writer& w, const ResultWorld& world,
     w.key("family").value(apriltag_family(sought.dictionary));
     w.key("id").value(sought.id);
     w.key("edge_mm").value(mm(sought.edge_m));
+    w.key("refinement").value(detect::kTagCornerRefinement);
     w.close_object();
   }
   if (origin.tag) {
