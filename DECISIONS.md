@@ -96,7 +96,7 @@ steps, the numbering and the write order).
 - **Cancelled between re-solves.** `bundle_adjust` is not interruptible, so a
   cancel takes effect before the metrics or after a leave-one-out re-solve;
   the writing, a few files, is not cancelled.
-- **The images, then the cloud** (2026-10-19, the user's call). calib_rig
+- **The images, then the cloud** (the user's calls). calib_rig
   shows the camera images until a result, then the live points at the solved
   poses in the whole window, and a key goes back to the images to capture
   more and recalibrate (`app/rig_mode.hpp`). Calibrate is C or F5 and Escape
@@ -156,11 +156,11 @@ calib_rig shows the rig in 3D over its mosaic
 (`viz/scene_view.hpp`, `viz/point_cloud.hpp`, `app/cloud_worker.hpp`): each
 camera's depth as points, its frusta, the world's axes and the solved boards.
 
-- **Hidden until the rig is calibrated** (amended 2026-10-18 and 2026-10-19,
-  the user's calls). Before Calibrate only the reference is placed, and the
-  camera images, where the board is aimed and checked, matter more: the
-  mosaic has the window and T2 prepares nothing. A result gives the view the
-  whole window (the 2026-10-18 entry, "Calibrate (T4)").
+- **Hidden until the rig is calibrated** (amended 2026-10-18, the user's
+  calls). Before Calibrate only the reference is placed, and the camera
+  images, where the board is aimed and checked, matter more: the mosaic has
+  the window and T2 prepares nothing. A result gives the view the whole
+  window (the 2026-10-18 entry, "Calibrate (T4)").
 
 - **No point cloud is built.** recon prepares each camera's frame
   (`GpuFramePrep`: undistorted depth, and colour), gfx draws a point per
