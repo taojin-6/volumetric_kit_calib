@@ -194,6 +194,18 @@ TEST(AppRigMode, FramesAtTheFirstResultAndANewOrigin) {
   EXPECT_TRUE(reference0 == RigOrigin{});
   EXPECT_TRUE(reference0 != reference2);
   EXPECT_FALSE(reference0 != RigOrigin{});
+
+  // The world moving between the tag and a reference camera frames the view
+  // again; the tag's world is the same whichever camera is the reference.
+  const RigOrigin tag0{0, true};
+  const RigOrigin tag2{2, true};
+  EXPECT_TRUE(frame_on_result(reference0, tag0));
+  EXPECT_TRUE(frame_on_result(tag0, reference0));
+  EXPECT_TRUE(frame_on_result(tag2, reference2));
+  EXPECT_FALSE(frame_on_result(tag0, tag0));
+  EXPECT_FALSE(frame_on_result(tag0, tag2));
+  EXPECT_TRUE(tag0 == tag2);
+  EXPECT_TRUE(tag0 != reference0);
 }
 
 }  // namespace

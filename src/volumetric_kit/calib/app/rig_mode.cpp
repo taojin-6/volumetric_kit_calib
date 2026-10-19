@@ -55,7 +55,7 @@ RigMode on_result(RigMode mode) noexcept {
 }
 
 bool operator==(const RigOrigin& a, const RigOrigin& b) noexcept {
-  return a.reference == b.reference;
+  return a.tag == b.tag && (a.tag || a.reference == b.reference);
 }
 
 bool operator!=(const RigOrigin& a, const RigOrigin& b) noexcept {

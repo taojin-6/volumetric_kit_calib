@@ -164,18 +164,20 @@ VC_APP_API RigMode on_result(RigMode mode) noexcept;
 /// @brief Where a result's world is: what the 3D view is framed on.
 ///
 /// @code
-/// const RigOrigin origin{result->reference};
+/// const RigOrigin origin{result->reference,
+///                        result->world.origin.tag.has_value()};
 /// @endcode
-// TODO: CB9 adds the origin tag's world here (the result's
-// solve::WorldOrigin), so the view frames again, levelled with +z up, when
-// the world moves between the tag and the reference camera.
 struct RigOrigin {
   /// The reference camera, by rig index (`CalibrateResult::reference`),
-  /// whose colour frame is the world.
+  /// whose colour frame is the world without the tag.
   std::size_t reference = 0;
+  /// The world is the origin tag's, +z up from the floor, whichever camera
+  /// is the reference.
+  bool tag = false;
 };
 
-/// @return Whether @p a and @p b are the same world.
+/// @return Whether @p a and @p b are the same world: both the tag's, or the
+///         same reference camera's.
 VC_APP_API bool operator==(const RigOrigin& a, const RigOrigin& b) noexcept;
 /// @return Whether @p a and @p b are different worlds.
 VC_APP_API bool operator!=(const RigOrigin& a, const RigOrigin& b) noexcept;
