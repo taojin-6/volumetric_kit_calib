@@ -21,6 +21,7 @@
 #include "reprojection.hpp"
 #include "volumetric_kit/calib/compute/cv_pose.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
+#include "volumetric_kit/calib/compute/measures.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 
 namespace volumetric_kit::calib::solve {
@@ -429,7 +430,7 @@ core::Result<bool> drop_outliers(Problem& p, const compute::Board& board,
     rms.push_back(fit.rms);
   }
   const double view_bound =
-      std::max(options.outlier_view_ratio * detail::median(rms),
+      std::max(options.outlier_view_ratio * compute::median(rms),
                options.outlier_view_px);
 
   std::vector<bool> touched(p.views.size(), false);
