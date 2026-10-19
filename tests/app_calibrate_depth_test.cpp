@@ -8,7 +8,8 @@
 // camera's depth turned off its colour camera's axes. An aligned rig passes
 // every camera and pair; a board printed 0.3 % large, a board's depth 5 mm
 // deep, a camera's depth 3 mm far and depth in half-millimetre units each
-// read as they should; a camera without depth is insufficient; each
+// read as they should; a camera's depth 8 mm far in one capture fails that
+// capture's own pairs alone; a camera without depth is insufficient; each
 // capture's frames are let go before the next; a stop between captures stops
 // the run, and a cancel writes nothing; a failure of the checks is posted and
 // the results written without them; and the checks give the same while the 3D
@@ -133,7 +134,9 @@ struct DepthCase {
   std::size_t placements = 16;
   double board_scale = 1.0;     // the print, over the target
   double board_depth_mm = 0.0;  // how deep the depth reads the board's face
-  std::optional<std::size_t> biased;  // reads every depth 3 mm far
+  std::optional<std::size_t> biased;  // reads every depth bias_mm far
+  double bias_mm = 3.0;
+  std::optional<std::size_t> biased_capture;  // the bias in this one alone
   std::optional<std::size_t> without_depth;
   float metres_per_unit = 0.001f;
 };
@@ -169,9 +172,12 @@ KeptCaptures depth_captures(const DepthCase& c, const std::string& directory) {
       const Mat4d depth_to_world =
           camera::rigid_inverse(scene.rig[k].world_to_camera) *
           kept.sensors[k].depth_to_color;
-      capture->depth[k] = std::make_shared<const std::vector<std::uint16_t>>(
-          test::render_raw(depth_rays(), depth_to_world, surface,
-                           c.metres_per_unit, c.biased == k ? 0.003 : 0.0));
+      const bool biased =
+          c.biased == k && (!c.biased_capture || c.biased_capture == p);
+      capture->depth[k] =
+          std::make_shared<const std::vector<std::uint16_t>>(test::render_raw(
+              depth_rays(), depth_to_world, surface, c.metres_per_unit,
+              biased ? c.bias_mm / 1000.0 : 0.0));
     }
     kept.captures[p] = std::move(capture);
   }
@@ -277,55 +283,118 @@ TEST_F(CalibrateDepthTest, AnAlignedRigOfTwoToFiveCamerasPasses) {
   }
 }
 
-// A board printed 0.3 % large reads 1.003 in every camera, past the scale's
-// bound, so every camera fails.
+// A board printed 0.3 % large reads 1.003 in every camera of 2 to 5, past
+// the scale's bound, so every camera fails.
 TEST_F(CalibrateDepthTest, FindsABoardPrintedLarge) {
-  DepthCase scene;
-  scene.board_scale = 1.003;
-  const CalibrateResult r = calibrated(depth_captures(scene, "unwritten"));
-  ASSERT_TRUE(r.depth.has_value()) << r.depth_failure.message();
-  EXPECT_NEAR(r.depth->ratio.mean, 1.003, kPooledRatio);
-  EXPECT_EQ(r.depth->scale, DepthVerdict::Off);
-  for (const quality::CameraDepth& cam : r.depth->cameras) {
-    EXPECT_NEAR(cam.ratio.mean, 1.003, kCameraRatio);
-    EXPECT_EQ(cam.scale, DepthVerdict::Off);
-    EXPECT_EQ(cam.verdict, DepthVerdict::Off);
-  }
-}
-
-// The board's depth read 5 mm deep is a 5 mm offset in every camera, within
-// the plane's bound, at no angle.
-TEST_F(CalibrateDepthTest, FindsTheBoardsDepthFiveMillimetresDeep) {
-  DepthCase scene;
-  scene.board_depth_mm = 5.0;
-  const CalibrateResult r = calibrated(depth_captures(scene, "unwritten"));
-  ASSERT_TRUE(r.depth.has_value()) << r.depth_failure.message();
-  for (const quality::CameraDepth& cam : r.depth->cameras) {
-    EXPECT_NEAR(cam.offset_mm, 5.0, 0.5);
-    EXPECT_LT(cam.angle_deg, kAngleDeg);
-    EXPECT_EQ(cam.plane, DepthVerdict::Ok);
-  }
-}
-
-// A camera whose depth reads 3 mm far: every pair into it reads -3 mm, every
-// pair from it farther, and the others 0; each within the pairs' bound.
-TEST_F(CalibrateDepthTest, ReadsADepthBiasOnEveryPairIntoItsCamera) {
-  DepthCase scene;
-  scene.cameras = 4;
-  scene.biased = 2;
-  const CalibrateResult r = calibrated(depth_captures(scene, "unwritten"));
-  ASSERT_TRUE(r.depth.has_value()) << r.depth_failure.message();
-  for (const PairCheck& p : r.depth->pairs) {
-    const quality::PairAgreement& a = p.agreement;
-    SCOPED_TRACE(std::to_string(a.from) + " -> " + std::to_string(a.to));
-    if (a.to == 2) {
-      EXPECT_NEAR(a.signed_median_mm, -3.0, 0.3);
-    } else if (a.from == 2) {
-      EXPECT_GT(a.signed_median_mm, 1.0);
-    } else {
-      EXPECT_NEAR(a.signed_median_mm, 0.0, 0.3);
+  for (std::size_t n = 2; n <= test::kKeptSceneMaxCameras; ++n) {
+    SCOPED_TRACE(std::to_string(n) + " cameras");
+    DepthCase scene;
+    scene.cameras = n;
+    scene.board_scale = 1.003;
+    const CalibrateResult r = calibrated(depth_captures(scene, "unwritten"));
+    ASSERT_TRUE(r.depth.has_value()) << r.depth_failure.message();
+    EXPECT_NEAR(r.depth->ratio.mean, 1.003, kPooledRatio);
+    EXPECT_EQ(r.depth->scale, DepthVerdict::Off);
+    ASSERT_EQ(r.depth->cameras.size(), n);
+    for (const quality::CameraDepth& cam : r.depth->cameras) {
+      EXPECT_NEAR(cam.ratio.mean, 1.003, kCameraRatio);
+      EXPECT_EQ(cam.scale, DepthVerdict::Off);
+      EXPECT_EQ(cam.verdict, DepthVerdict::Off);
     }
+  }
+}
+
+// The board's depth read 5 mm deep is a 5 mm offset in every camera of 2 to
+// 5, within the plane's bound, at no angle.
+TEST_F(CalibrateDepthTest, FindsTheBoardsDepthFiveMillimetresDeep) {
+  for (std::size_t n = 2; n <= test::kKeptSceneMaxCameras; ++n) {
+    SCOPED_TRACE(std::to_string(n) + " cameras");
+    DepthCase scene;
+    scene.cameras = n;
+    scene.board_depth_mm = 5.0;
+    const CalibrateResult r = calibrated(depth_captures(scene, "unwritten"));
+    ASSERT_TRUE(r.depth.has_value()) << r.depth_failure.message();
+    ASSERT_EQ(r.depth->cameras.size(), n);
+    for (const quality::CameraDepth& cam : r.depth->cameras) {
+      EXPECT_NEAR(cam.offset_mm, 5.0, 0.5);
+      EXPECT_LT(cam.angle_deg, kAngleDeg);
+      EXPECT_EQ(cam.plane, DepthVerdict::Ok);
+    }
+  }
+}
+
+// The last of 2 to 5 cameras reads its depth 3 mm far: every pair into it
+// reads -3 mm, every pair from it about +3 mm (as far as both rays' angles to
+// the surface let it), and the others 0; each within the pairs' bound.
+TEST_F(CalibrateDepthTest, ReadsADepthBiasOnEveryPairIntoItsCamera) {
+  for (std::size_t n = 2; n <= test::kKeptSceneMaxCameras; ++n) {
+    SCOPED_TRACE(std::to_string(n) + " cameras");
+    DepthCase scene;
+    scene.cameras = n;
+    scene.biased = n - 1;
+    const CalibrateResult r = calibrated(depth_captures(scene, "unwritten"));
+    ASSERT_TRUE(r.depth.has_value()) << r.depth_failure.message();
+    ASSERT_EQ(r.depth->pairs.size(), n * (n - 1));
+    for (const PairCheck& p : r.depth->pairs) {
+      const quality::PairAgreement& a = p.agreement;
+      SCOPED_TRACE(std::to_string(a.from) + " -> " + std::to_string(a.to));
+      if (a.to == n - 1) {
+        EXPECT_NEAR(a.signed_median_mm, -3.0, 0.3);
+      } else if (a.from == n - 1) {
+        EXPECT_NEAR(a.signed_median_mm, 3.0, 0.5);
+      } else {
+        EXPECT_NEAR(a.signed_median_mm, 0.0, 0.3);
+      }
+      EXPECT_EQ(p.verdict, DepthVerdict::Ok);
+    }
+  }
+}
+
+// A camera whose depth reads 8 mm far in one capture alone: that capture's
+// own pairs into and from it fail, its pairs into it at -8 mm, and every
+// other pair of it, every pair of every other capture and every pooled pair
+// passes at 0. Each pair's overlap over the captures is its pooled overlap.
+TEST_F(CalibrateDepthTest, JudgesEachCapturesPairsOnTheirOwn) {
+  DepthCase scene;
+  scene.biased = 2;
+  scene.bias_mm = 8.0;
+  scene.biased_capture = 3;
+  const KeptCaptures kept = depth_captures(scene, "unwritten");
+  const CalibrateResult r = calibrated(kept);
+  ASSERT_TRUE(r.depth.has_value()) << r.depth_failure.message();
+  const DepthSummary& d = *r.depth;
+  for (const PairCheck& p : d.pairs) {
+    SCOPED_TRACE(std::to_string(p.agreement.from) + " -> " +
+                 std::to_string(p.agreement.to));
+    EXPECT_NEAR(p.agreement.signed_median_mm, 0.0, 0.5);
     EXPECT_EQ(p.verdict, DepthVerdict::Ok);
+  }
+  ASSERT_EQ(d.captures.size(), kept.captures.size());
+  std::vector<std::size_t> overlap(d.pairs.size(), 0);
+  for (std::size_t i = 0; i < d.captures.size(); ++i) {
+    SCOPED_TRACE("capture " + std::to_string(d.captures[i].capture));
+    EXPECT_EQ(d.captures[i].capture, kept.captures[i]->index);
+    ASSERT_EQ(d.captures[i].pairs.size(), d.pairs.size());
+    for (std::size_t j = 0; j < d.pairs.size(); ++j) {
+      const PairCheck& p = d.captures[i].pairs[j];
+      const quality::PairAgreement& a = p.agreement;
+      SCOPED_TRACE(std::to_string(a.from) + " -> " + std::to_string(a.to));
+      ASSERT_EQ(a.from, d.pairs[j].agreement.from);
+      ASSERT_EQ(a.to, d.pairs[j].agreement.to);
+      overlap[j] += a.overlap;
+      const bool biased = i == *scene.biased_capture;
+      if (biased && a.to == 2) {
+        EXPECT_NEAR(a.signed_median_mm, -8.0, 0.5);
+      } else if (!biased || a.from != 2) {
+        EXPECT_NEAR(a.signed_median_mm, 0.0, 0.5);
+      }
+      EXPECT_EQ(p.verdict, biased && (a.from == 2 || a.to == 2)
+                               ? DepthVerdict::Off
+                               : DepthVerdict::Ok);
+    }
+  }
+  for (std::size_t j = 0; j < d.pairs.size(); ++j) {
+    EXPECT_EQ(overlap[j], d.pairs[j].agreement.overlap) << j;
   }
 }
 
@@ -454,12 +523,15 @@ std::unique_ptr<CalibrateWorker> depth_worker(core::Device& device,
 }
 
 // A cancel while the worker checks the depth stops it at its next capture:
-// nothing is written, published or posted.
+// nothing is written, published or posted. The most captures a session
+// keeps, of 2 cameras, are checked from the first to the last in about 0.5 s
+// on a laptop under validation, for the 2 ms poll to see; a run that gets
+// past the checks unseen fails at once, not at the poll's limit.
 TEST_F(CalibrateDepthTest, ACancelDuringTheChecksWritesNothing) {
   const ScratchDir session;
   DepthCase scene;
   scene.cameras = 2;
-  scene.placements = 30;
+  scene.placements = 150;
   const KeptCaptures kept = depth_captures(scene, session.path().string());
   const auto gate = std::make_shared<test::Gate>();
   const std::unique_ptr<CalibrateWorker> worker =
@@ -468,12 +540,13 @@ TEST_F(CalibrateDepthTest, ACancelDuringTheChecksWritesNothing) {
   ASSERT_TRUE(*worker->request(test::held_at_its_end(kept, gate)));
   ASSERT_TRUE(test::wait_for([&] {
     const std::optional<CalibrateProgress> at = worker->progress();
-    return !at || (at->stage == CalibrateStage::Checking && at->done >= 1 &&
-                   at->done < at->total);
+    return !at || at->stage == CalibrateStage::Writing ||
+           (at->stage == CalibrateStage::Checking && at->done >= 1 &&
+            at->done < at->total);
   }));
   const std::optional<CalibrateProgress> at = worker->progress();
   ASSERT_TRUE(at.has_value());
-  EXPECT_EQ(at->stage, CalibrateStage::Checking);
+  ASSERT_EQ(at->stage, CalibrateStage::Checking);
   EXPECT_EQ(at->total, kept.captures.size());
   EXPECT_TRUE(worker->cancel());
   const std::optional<CalibrateProgress> cancelled = worker->progress();
