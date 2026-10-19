@@ -169,6 +169,7 @@ TEST(Calibrate, SolvesTwoToFiveCamerasInTheReferencesGauge) {
     EXPECT_EQ(report["format"], "volumetric_kit_calib.report");
     EXPECT_EQ(report["version"], 1);
     EXPECT_EQ(report["settings"]["reference"], ids[c.reference]);
+    EXPECT_EQ(report["world"]["reference"], ids[c.reference]);
     // No camera saw the tag: the reference stays the origin, and says why.
     EXPECT_FALSE(r.world.origin.tag);
     EXPECT_EQ(r.world.origin.miss, solve::TagMiss::NotSeen);
@@ -217,6 +218,28 @@ TEST(Calibrate, PutsTheWorldAtTheOriginTag) {
     EXPECT_EQ(file->world.apriltag->size_m, 0.15);
     const json report = json::parse(r.files.report);
     EXPECT_EQ(report["world"]["origin"], "tag");
+    EXPECT_EQ(report["world"]["reference"], scene.cameras[1].id);
+    // Each view of the tag is a kept capture's, by its camera and capture.
+    std::set<std::pair<std::string, std::int64_t>> sighted;
+    for (const std::shared_ptr<const KeptCapture>& capture : kept.captures) {
+      for (std::size_t c = 0; c < n; ++c) {
+        if (capture->tags[c]) {
+          sighted.emplace(kept.cameras[c].id, capture->index);
+        }
+      }
+    }
+    ASSERT_FALSE(sighted.empty());
+    std::set<std::pair<std::string, std::int64_t>> located;
+    for (const solve::TagViewFit& v : w.views) {
+      located.emplace(v.camera, v.capture);
+    }
+    EXPECT_EQ(located, sighted);
+    std::set<std::pair<std::string, std::int64_t>> reported;
+    for (const json& v : report["world"]["located"]["views"]) {
+      reported.emplace(v["camera"].get<std::string>(),
+                       v["capture"].get<std::int64_t>());
+    }
+    EXPECT_EQ(reported, sighted);
     for (std::size_t c = 0; c < n; ++c) {
       const std::string& id = scene.cameras[c].id;
       SCOPED_TRACE(id);
