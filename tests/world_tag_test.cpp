@@ -4,9 +4,10 @@
 // The world at the origin tag on the synthetic rig (z up, the floor at
 // z = 0), for 2 to 5 cameras whose ids sort in another order than the rig's:
 // the tag located from the rig's truth, exactly without noise and within the
-// noise at 0.3 px; its frame's axes, its size not assumed, each miss,
-// outliers and order; the refusals; the outputs moved into its world; and
-// the whole chain from the bundle adjustment to the anchored poses.
+// noise at 0.3 px; its fit, its frame's axes, its size not assumed, each
+// miss, the guard on each camera, outliers, two cameras that disagree, and
+// order; the refusals; the outputs moved into its world; and the whole
+// chain from the bundle adjustment to the anchored poses.
 
 #include "volumetric_kit/calib/solve/world_tag.hpp"
 
@@ -146,6 +147,24 @@ camera::Vec3d apply(const camera::Mat4d& m, const camera::Vec3d& p) {
   return camera::Vec3d(m * glm::dvec4(p, 1.0));
 }
 
+// The world's fit is its used views' alone: its RMS over their corners, its
+// worst their worst.
+void expect_fit_of_used_views(const TagWorld& w) {
+  double sum = 0.0;
+  double worst = 0.0;
+  int used = 0;
+  for (const TagViewFit& v : w.views) {
+    EXPECT_LE(v.rms_px, v.worst_px) << v.camera << ", capture " << v.capture;
+    if (!v.used) continue;
+    sum += v.rms_px * v.rms_px;
+    worst = std::max(worst, v.worst_px);
+    ++used;
+  }
+  ASSERT_GT(used, 0);
+  EXPECT_NEAR(w.rms_px, std::sqrt(sum / used), 1e-12);
+  EXPECT_EQ(w.worst_px, worst);
+}
+
 // Without noise the tag is where the truth puts it, to round-off: its
 // frame, corners, edges, the cameras' heights, and every view used, by
 // capture and then camera id.
@@ -230,10 +249,30 @@ TEST(OriginTagFrame, PlacesTheTagWithinTheNoise) {
         EXPECT_NEAR(edge, 0.15, two ? 0.85e-3 : 0.7e-3);
       }
       EXPECT_FALSE(w.edge_warning);
+      // 0.3 px on each axis is 0.42 px across, less what the corners take.
+      EXPECT_GT(w.rms_px, 0.3);
       EXPECT_LT(w.rms_px, 0.5);
+      expect_fit_of_used_views(w);
       for (const TagViewFit& v : w.views) EXPECT_TRUE(v.used);
     }
   }
+}
+
+// A corner 5 mm off the floor: the square fitted tilts half way to it, and
+// the corners sit off its plane by a quarter of the lift.
+TEST(OriginTagFrame, MeasuresHowFarTheCornersAreOutOfPlane) {
+  const std::vector<SyntheticCamera> rig = test::kept_scene_rig(4);
+  std::array<cv::Point3d, 4> corners = test::floor_tag_corners();
+  corners[2].z += 5e-3;
+  const TagWorld w = world_of(
+      locate(rig, truth_solution(rig, 1),
+             tag_views(rig, test::observe_marker(rig, kOriginTag.id, corners, 3,
+                                                 {0.0, 1}))));
+  EXPECT_NEAR(w.out_of_plane_m, 1.25e-3, 0.05e-3);
+  for (std::size_t k = 0; k < 4; ++k) {
+    EXPECT_NEAR(std::abs(w.corners_m[k].z), w.out_of_plane_m, 1e-6) << k;
+  }
+  EXPECT_LT(w.rms_px, 1e-6);
 }
 
 // The frame is the tag's own, wherever it lies and however it is turned: x
@@ -364,6 +403,48 @@ TEST(OriginTagFrame, NamesEachMiss) {
   EXPECT_STREQ(to_string(static_cast<TagMiss>(99)), "unknown");
 }
 
+// Each camera that saw the tag is checked, not the cameras on average: a
+// fifth below the floor, looking up at the tag's back, is named though the
+// four above it lift the average well above the tag.
+TEST(OriginTagFrame, NamesTheOneCameraBelowTheTag) {
+  std::vector<SyntheticCamera> rig = test::kept_scene_rig(4);
+  std::vector<TagView> views = see(rig, {}, 3, 0.3);
+  // Camera 0 turned 180 degrees about the world's x axis.
+  camera::Mat4d turn(1.0);
+  turn[1][1] = -1.0;
+  turn[2][2] = -1.0;
+  SyntheticCamera below = rig[0];
+  below.id = "CL7Z";
+  below.world_to_camera = rig[0].world_to_camera * camera::rigid_inverse(turn);
+  rig.push_back(below);
+  double height = 0.0;
+  for (const SyntheticCamera& c : rig) {
+    height += test::centre_of(c.world_to_camera).z / 5.0;
+  }
+  ASSERT_GT(height, 1.0);
+  ASSERT_LT(test::centre_of(below.world_to_camera).z, -1.0);
+  // Its view of the tag's back, mirrored as a real one would be.
+  const std::array<cv::Point3d, 4> corners = test::floor_tag_corners();
+  const std::vector<cv::Point2d> pixels =
+      test::project(below.model, below.world_to_camera,
+                    std::vector<cv::Point3d>(corners.begin(), corners.end()));
+  for (std::int64_t capture = 0; capture < 3; ++capture) {
+    TagView& v = views.emplace_back();
+    v.camera = below.id;
+    v.capture = capture;
+    v.image_size = below.model.size;
+    v.marker.id = kOriginTag.id;
+    for (std::size_t k = 0; k < 4; ++k) {
+      v.marker.corners[k] = camera::Vec2d(pixels[k].x, pixels[k].y);
+    }
+  }
+  const WorldOrigin origin = missed(locate(rig, truth_solution(rig, 1), views));
+  EXPECT_EQ(origin.miss, TagMiss::CameraBelowTag);
+  EXPECT_EQ(origin.camera, "CL7Z");
+  EXPECT_NE(origin.reason.find("camera CL7Z is 2.4"), std::string::npos)
+      << origin.reason;
+}
+
 // Outlier rounds that leave one camera: camera 1's one view, its corners
 // turned 20 degrees about their centre, cannot meet camera 0's rays.
 TEST(OriginTagFrame, MissesWhenOutliersLeaveOneCamera) {
@@ -427,7 +508,8 @@ TEST(OriginTagFrame, DropsTheViewsOfATagMoved) {
       if (k.camera == v.camera) v.marker = k.marker;
     }
   }
-  const TagWorld w = world_of(locate(rig, truth_solution(rig, 1), views));
+  const RigSolution solution = truth_solution(rig, 1);
+  const TagWorld w = world_of(locate(rig, solution, views));
   EXPECT_EQ(w.solves, 2);
   for (const TagViewFit& v : w.views) {
     SCOPED_TRACE(v.camera + ", capture " + std::to_string(v.capture));
@@ -446,6 +528,25 @@ TEST(OriginTagFrame, DropsTheViewsOfATagMoved) {
       frame_error(w.reference_to_world, true_reference_to_tag(rig, 1));
   EXPECT_LT(moved_m, 0.5e-3);
   EXPECT_LT(turned_deg, 0.5);
+  // The world's fit leaves the dropped views out.
+  EXPECT_LT(w.worst_px, 3.0);
+  expect_fit_of_used_views(w);
+
+  // No outlier rounds drop nothing: the kicked views stay, far off.
+  TagFrameOptions keep;
+  keep.outlier_rounds = 0;
+  const TagWorld kept = world_of(locate(rig, solution, views, keep));
+  EXPECT_EQ(kept.solves, 1);
+  for (const TagViewFit& v : kept.views) {
+    SCOPED_TRACE(v.camera + ", capture " + std::to_string(v.capture));
+    EXPECT_TRUE(v.used);
+    EXPECT_EQ(v.round, 0);
+    EXPECT_EQ(v.bound_px, 0.0);
+    if (v.capture == 2) EXPECT_GT(v.worst_px, 3.0);
+  }
+  for (const TagCamera& c : kept.cameras) EXPECT_EQ(c.used, c.views);
+  EXPECT_GT(kept.worst_px, 3.0);
+  expect_fit_of_used_views(kept);
 }
 
 // The views' order changes nothing, to the bit.
