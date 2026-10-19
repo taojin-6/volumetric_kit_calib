@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <utility>
 
@@ -28,6 +29,25 @@ std::string fixed(double value, int decimals, bool sign = false) {
   return std::string(
       buffer,
       n < 0 ? 0 : std::min(static_cast<std::size_t>(n), sizeof buffer - 1));
+}
+
+// `value` with `decimals` places and `unit`, or `-` when it is not a number.
+std::string figure(double value, int decimals, const char* unit) {
+  if (!std::isfinite(value)) return "-";
+  return fixed(value, decimals) + unit;
+}
+
+// The panel's name for a verdict, and its tone.
+PanelLine verdict_line(quality::PrincipalPointVerdict verdict) {
+  switch (verdict) {
+    case quality::PrincipalPointVerdict::AsGiven:
+      return {"principal point", "as given", Tone::Good};
+    case quality::PrincipalPointVerdict::Shifted:
+      return {"principal point", "shifted", Tone::Warn};
+    case quality::PrincipalPointVerdict::Inconclusive:
+      break;
+  }
+  return {"principal point", "inconclusive", Tone::Normal};
 }
 
 // A measure from a view's pose: its value and unit, or `-` (muted) when the
@@ -270,7 +290,6 @@ core::Result<SessionPanel> session_panel(const quality::SessionSummary& summary,
       panel.shared_tones[i][link->parent] = tone;
       panel.shared_tones[link->parent][i] = tone;
     }
-    panel.calibrate = summary.ready;
     return panel;
   });
 }
@@ -347,6 +366,115 @@ core::Result<std::vector<PanelLine>> capture_panel(
         if (!status.error.empty()) {
           lines.push_back({"save", "failed: " + status.error, Tone::Bad});
         }
+        return lines;
+      });
+}
+
+core::Result<PanelLine> calibrate_progress_line(std::string_view stage,
+                                                std::size_t done,
+                                                std::size_t total,
+                                                double seconds) {
+  return compute::guarded(
+      "calibrate_progress_line", [&]() -> core::Result<PanelLine> {
+        std::string value(stage);
+        if (total > 0) {
+          value += " " + std::to_string(done) + "/" + std::to_string(total);
+        }
+        value += ", " + fixed(seconds, 1) + " s";
+        return PanelLine{"calibrating", std::move(value), Tone::Normal};
+      });
+}
+
+core::Result<std::vector<PanelLine>> calibration_panel(
+    const std::vector<std::string>& ids,
+    const quality::CalibrationMetrics& metrics, int number,
+    const std::string& directory, std::size_t captures, double seconds) {
+  return compute::guarded(
+      "calibration_panel", [&]() -> core::Result<std::vector<PanelLine>> {
+        const quality::ReprojectionStats& initial =
+            metrics.reprojection.initial;
+        const quality::ReprojectionStats& solved = metrics.reprojection.solved;
+        const std::size_t n = ids.size();
+        if (initial.cameras.size() != n || solved.cameras.size() != n ||
+            metrics.leave_one_out.cameras.size() != n ||
+            metrics.geometry.centres_m.size() != n) {
+          return core::Status::invalid_argument(
+              "calibration_panel: " + std::to_string(n) +
+              " ids for metrics of " + std::to_string(solved.cameras.size()) +
+              " cameras");
+        }
+        std::vector<PanelLine> lines;
+        char rrr[16];
+        std::snprintf(rrr, sizeof rrr, "%03d", number);
+        lines.push_back({"calibration",
+                         std::string(rrr) + ", " + std::to_string(captures) +
+                             (captures == 1 ? " capture, " : " captures, ") +
+                             fixed(seconds, 1) + " s",
+                         Tone::Normal});
+        lines.push_back({"RMS",
+                         figure(initial.overall.rms_px, 2, "") + " -> " +
+                             figure(solved.overall.rms_px, 2, " px") +
+                             ", legacy RMSE " +
+                             figure(initial.legacy_rmse_px, 2, "") + " -> " +
+                             figure(solved.legacy_rmse_px, 2, " px"),
+                         Tone::Normal});
+        for (std::size_t c = 0; c < n; ++c) {
+          lines.push_back(
+              {"RMS " + ids[c],
+               figure(initial.cameras[c].rms_px, 2, "") + " -> " +
+                   figure(solved.cameras[c].rms_px, 2, " px"),
+               solved.cameras[c].count > 0 ? Tone::Normal : Tone::Muted});
+        }
+        const quality::Transfer& transfer = metrics.transfer;
+        lines.push_back(
+            {"transfer",
+             "median " + figure(transfer.median_px, 2, " px") + ", p90 " +
+                 figure(transfer.p90_px, 2, " px"),
+             std::isfinite(transfer.median_px) ? Tone::Normal : Tone::Muted});
+        for (std::size_t c = 0; c < n; ++c) {
+          const quality::CameraStability& most =
+              metrics.leave_one_out.cameras[c];
+          std::string moved;
+          if (most.centre_capture) {
+            moved = fixed(most.centre_mm, 2) + " mm (capture " +
+                    std::to_string(*most.centre_capture) + ")";
+          }
+          if (most.rotation_capture) {
+            if (!moved.empty()) moved += ", ";
+            moved += fixed(most.rotation_deg, 3) + " deg (capture " +
+                     std::to_string(*most.rotation_capture) + ")";
+          }
+          if (moved.empty()) {
+            lines.push_back({"moves " + ids[c], "-", Tone::Muted});
+          } else {
+            lines.push_back(
+                {"moves " + ids[c], std::move(moved), Tone::Normal});
+          }
+        }
+        const quality::PrincipalPointAB& ab = metrics.principal_point;
+        if (!ab.refused.empty()) {
+          lines.push_back(
+              {"principal point", "refused: " + ab.refused, Tone::Muted});
+        } else {
+          PanelLine verdict = verdict_line(ab.verdict);
+          verdict.value +=
+              " (gap " +
+              figure(
+                  100.0 * quality::principal_point_gap(ab.as_given, ab.shifted),
+                  1, " %") +
+              "): " + figure(ab.as_given.rms_px, 3, " px") + " as given, " +
+              figure(ab.shifted.rms_px, 3, " px") + " shifted";
+          lines.push_back(std::move(verdict));
+        }
+        for (std::size_t c = 0; c < n; ++c) {
+          const recon::camera::Vec3d& centre = metrics.geometry.centres_m[c];
+          lines.push_back({"centre " + ids[c],
+                           "(" + fixed(centre.x, 3, true) + ", " +
+                               fixed(centre.y, 3, true) + ", " +
+                               fixed(centre.z, 3, true) + ") m",
+                           Tone::Normal});
+        }
+        lines.push_back({"results", directory, Tone::Normal});
         return lines;
       });
 }

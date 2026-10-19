@@ -3,12 +3,12 @@
 
 # --- calib_app: Tier 5 -------------------------------------------------------
 # calib_rig's live view, 3D view, capture and Calibrate: the rig's preset check,
-# the key map, the acquisition and live-detection worker (T1), the 3D view's
-# frame preparation worker (T2), the capture worker (T3), the Calibrate worker
-# (T4) and the window loop (T0) on gfx's GLFW glue, ImGui overlay and the viz
-# tier's mosaic and scene. Built with VC_BUILD_APPS and the viz tier when
-# gfx_glfw (an installed GLFW) and recon's Orbbec tier (VR_WITH_ORBBEC) exist
-# (src/CMakeLists.txt). Build-tree only, as calib_viz is.
+# the key map, the window's mode, the acquisition and live-detection worker
+# (T1), the 3D view's frame preparation worker (T2), the capture worker (T3),
+# the Calibrate worker (T4) and the window loop (T0) on gfx's GLFW glue, ImGui
+# overlay and the viz tier's mosaic and scene. Built with VC_BUILD_APPS and the
+# viz tier when gfx_glfw (an installed GLFW) and recon's Orbbec tier
+# (VR_WITH_ORBBEC) exist (src/CMakeLists.txt). Build-tree only, as calib_viz is.
 include(GenerateExportHeader)
 
 # calib_rig loads its scenario as config::Application::CalibRig, which the core
@@ -64,6 +64,7 @@ target_sources(
           live_view.cpp
           live_worker.cpp
           preset.cpp
+          rig_mode.cpp
           "${_vc_software_cpp}")
 add_dependencies(calib_app calib_app_software)
 

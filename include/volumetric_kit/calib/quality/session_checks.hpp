@@ -132,7 +132,7 @@ struct Duplicate {
 ///
 /// @code
 /// VKC_ASSIGN(const SessionSummary summary, checks.summary());
-/// calibrate_button.enabled = summary.ready;
+/// show(summary.ready ? "ready" : "not yet");
 /// @endcode
 struct SessionSummary {
   int kept = 0;     ///< Captures kept.
@@ -144,8 +144,9 @@ struct SessionSummary {
   /// `used_views`.
   solve::Covisibility covisibility;
   std::vector<Duplicate> duplicates;  ///< In the order of the captures.
-  /// Calibrate may run: the rig has two cameras or more, each linked to the
-  /// reference through links of `ready_from` shared captures or more.
+  /// The session's condition for Calibrate: the rig has two cameras or more,
+  /// each linked to the reference through links of `ready_from` shared
+  /// captures or more.
   bool ready = false;
 };
 

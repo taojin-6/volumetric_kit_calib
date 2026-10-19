@@ -3,12 +3,15 @@
 
 // The panels' models: each line's text and tone, from the live checks, the
 // array's counters, the session's summary and origin tag, the capture rule
-// and the capture records, judged by the quality tier's thresholds; and the
-// stage timings as gfx's metrics panel takes them. No device or ImGui frame
-// needed (viz_render_test draws them).
+// and the capture records, judged by the quality tier's thresholds;
+// Calibrate's progress and its result's metrics; and the stage timings as
+// gfx's metrics panel takes them. No device or ImGui frame needed
+// (viz_render_test draws them).
 
 #include "volumetric_kit/calib/viz/panels.hpp"
 
+#include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -286,7 +289,6 @@ TEST(SessionPanel, ShowsTheCapturesAndTheTreePreview) {
   EXPECT_EQ(line(l, "6G").tone, Tone::Bad);
   EXPECT_EQ(line(l, "calibrate").value, "ready");
   EXPECT_EQ(line(l, "calibrate").tone, Tone::Good);
-  EXPECT_TRUE(panel.value().calibrate);
   EXPECT_TRUE(labelled(l, "warning").empty());
 }
 
@@ -328,7 +330,6 @@ TEST(SessionPanel, WarnsAndHoldsCalibrateBack) {
   EXPECT_EQ(line(l, "calibrate").value,
             "not yet: every camera needs links of 4 shared captures");
   EXPECT_EQ(line(l, "calibrate").tone, Tone::Muted);
-  EXPECT_FALSE(panel.calibrate);
 }
 
 TEST(SessionPanel, RefusesASummaryThatDoesNotMatchItsIds) {
@@ -435,6 +436,165 @@ TEST(CapturePanel, ShowsTheLastCaptureAndAFailedWrite) {
   EXPECT_EQ(line(unflagged, "live vs full").value, "-");
   EXPECT_EQ(line(unflagged, "live vs full").tone, Tone::Normal);
   EXPECT_TRUE(labelled(unflagged, "save").empty());
+}
+
+TEST(CalibrateProgressLine, ShowsTheStageItsCountAndTheSeconds) {
+  PanelLine l = calibrate_progress_line("solving", 0, 0, 1.26).value();
+  EXPECT_EQ(l.label, "calibrating");
+  EXPECT_EQ(l.value, "solving, 1.3 s");
+  EXPECT_EQ(l.tone, Tone::Normal);
+  l = calibrate_progress_line("measuring", 4, 14, 12.34).value();
+  EXPECT_EQ(l.value, "measuring 4/14, 12.3 s");
+  l = calibrate_progress_line("measuring", 0, 14, 0.0).value();
+  EXPECT_EQ(l.value, "measuring 0/14, 0.0 s");
+}
+
+quality::ErrorStats rms_of(double rms_px, std::size_t count = 100) {
+  quality::ErrorStats stats;
+  stats.count = count;
+  stats.rms_px = rms_px;
+  return stats;
+}
+
+// A solved rig of N, G and 6G: N the reference, which never moves.
+quality::CalibrationMetrics three_camera_metrics() {
+  quality::CalibrationMetrics m;
+  quality::Reprojection& r = m.reprojection;
+  r.initial.overall = rms_of(0.8412);
+  r.initial.legacy_rmse_px = 0.5948;
+  r.initial.cameras = {rms_of(0.70), rms_of(0.92), rms_of(0.88)};
+  r.solved.overall = rms_of(0.3134);
+  r.solved.legacy_rmse_px = 0.2216;
+  r.solved.cameras = {rms_of(0.29), rms_of(0.33), rms_of(0.315)};
+  m.transfer.median_px = 0.624;
+  m.transfer.p90_px = 1.396;
+  m.leave_one_out.cameras.resize(3);
+  m.leave_one_out.cameras[1] = {1.234, 7, 0.0456, 3};
+  m.leave_one_out.cameras[2] = {0.5, 9, 0.0, std::nullopt};
+  m.principal_point.shift_px = 2.5;
+  m.principal_point.as_given.rms_px = 0.312;
+  m.principal_point.shifted.rms_px = 0.3023;
+  m.principal_point.verdict = quality::PrincipalPointVerdict::Shifted;
+  m.geometry.centres_m = {
+      {0.0, 0.0, 0.0}, {1.2344, -0.0504, 0.3}, {-0.8, 0.0126, 2.25}};
+  return m;
+}
+
+TEST(CalibrationPanel, ShowsWhatTheResultIsWorth) {
+  const core::Result<std::vector<PanelLine>> lines =
+      calibration_panel(kIds, three_camera_metrics(), 2,
+                        "/s/results/002_2026-10-19_101500", 14, 3.21);
+  ASSERT_TRUE(lines.ok()) << lines.status().message();
+  const std::vector<PanelLine>& l = lines.value();
+  const std::vector<std::string> order = {
+      "calibration", "RMS",      "RMS N",     "RMS G",    "RMS 6G",
+      "transfer",    "moves N",  "moves G",   "moves 6G", "principal point",
+      "centre N",    "centre G", "centre 6G", "results"};
+  ASSERT_EQ(l.size(), order.size());
+  for (std::size_t i = 0; i < order.size(); ++i) {
+    EXPECT_EQ(l[i].label, order[i]);
+  }
+  EXPECT_EQ(line(l, "calibration").value, "002, 14 captures, 3.2 s");
+  EXPECT_EQ(line(l, "RMS").value,
+            "0.84 -> 0.31 px, legacy RMSE 0.59 -> 0.22 px");
+  EXPECT_EQ(line(l, "RMS G").value, "0.92 -> 0.33 px");
+  EXPECT_EQ(line(l, "RMS G").tone, Tone::Normal);
+  EXPECT_EQ(line(l, "transfer").value, "median 0.62 px, p90 1.40 px");
+  EXPECT_EQ(line(l, "transfer").tone, Tone::Normal);
+  EXPECT_EQ(line(l, "moves N").value, "-");
+  EXPECT_EQ(line(l, "moves N").tone, Tone::Muted);
+  EXPECT_EQ(line(l, "moves G").value,
+            "1.23 mm (capture 7), 0.046 deg (capture 3)");
+  EXPECT_EQ(line(l, "moves G").tone, Tone::Normal);
+  EXPECT_EQ(line(l, "moves 6G").value, "0.50 mm (capture 9)");
+  EXPECT_EQ(line(l, "principal point").value,
+            "shifted (gap 3.1 %): 0.312 px as given, 0.302 px shifted");
+  EXPECT_EQ(line(l, "principal point").tone, Tone::Warn);
+  EXPECT_EQ(line(l, "centre N").value, "(+0.000, +0.000, +0.000) m");
+  EXPECT_EQ(line(l, "centre G").value, "(+1.234, -0.050, +0.300) m");
+  EXPECT_EQ(line(l, "centre 6G").value, "(-0.800, +0.013, +2.250) m");
+  EXPECT_EQ(line(l, "results").value, "/s/results/002_2026-10-19_101500");
+}
+
+// The A/B verdict's three answers, each in its tone, and a refused re-solve.
+TEST(CalibrationPanel, TonesThePrincipalPointsVerdict) {
+  quality::CalibrationMetrics m = three_camera_metrics();
+  const auto principal = [&] {
+    return line(calibration_panel(kIds, m, 0, "d", 1, 0.0).value(),
+                "principal point");
+  };
+  m.principal_point.shifted.rms_px = 0.3083;
+  m.principal_point.verdict = quality::PrincipalPointVerdict::Inconclusive;
+  PanelLine l = principal();
+  EXPECT_EQ(l.value,
+            "inconclusive (gap 1.2 %): 0.312 px as given, 0.308 px shifted");
+  EXPECT_EQ(l.tone, Tone::Normal);
+
+  m.principal_point.shifted.rms_px = 0.33;
+  m.principal_point.verdict = quality::PrincipalPointVerdict::AsGiven;
+  l = principal();
+  EXPECT_EQ(l.value,
+            "as given (gap -5.5 %): 0.312 px as given, 0.330 px shifted");
+  EXPECT_EQ(l.tone, Tone::Good);
+
+  m.principal_point.refused = "a link is left short of 3 shared captures";
+  m.principal_point.as_given = {};
+  m.principal_point.shifted = {};
+  m.principal_point.verdict = quality::PrincipalPointVerdict::Inconclusive;
+  l = principal();
+  EXPECT_EQ(l.value, "refused: a link is left short of 3 shared captures");
+  EXPECT_EQ(l.tone, Tone::Muted);
+}
+
+// A figure that is not a number shows as `-`: a camera with no corner kept,
+// a transfer with no pairs, a gap of sides not measured.
+TEST(CalibrationPanel, ShowsAFigureNotMeasuredAsADash) {
+  quality::CalibrationMetrics m = three_camera_metrics();
+  m.reprojection.initial.cameras[2] = {};
+  m.reprojection.solved.cameras[2] = {};
+  m.transfer = {};
+  m.principal_point.as_given = {};
+  m.principal_point.verdict = quality::PrincipalPointVerdict::Inconclusive;
+  const std::vector<PanelLine> l =
+      calibration_panel(kIds, m, 1, "d", 1, 0.5).value();
+  EXPECT_EQ(line(l, "calibration").value, "001, 1 capture, 0.5 s");
+  EXPECT_EQ(line(l, "RMS 6G").value, "- -> -");
+  EXPECT_EQ(line(l, "RMS 6G").tone, Tone::Muted);
+  EXPECT_EQ(line(l, "transfer").value, "median -, p90 -");
+  EXPECT_EQ(line(l, "transfer").tone, Tone::Muted);
+  EXPECT_EQ(line(l, "principal point").value,
+            "inconclusive (gap -): - as given, 0.302 px shifted");
+}
+
+TEST(CalibrationPanel, RefusesMetricsOfAnotherRig) {
+  const quality::CalibrationMetrics m = three_camera_metrics();
+  const core::Result<std::vector<PanelLine>> two =
+      calibration_panel({"N", "G"}, m, 0, "d", 1, 0.0);
+  ASSERT_FALSE(two.ok());
+  EXPECT_EQ(two.status().domain(), Code::InvalidArgument);
+  EXPECT_EQ(two.status().message(),
+            "calibration_panel: 2 ids for metrics of 3 cameras");
+  for (int part = 0; part < 4; ++part) {
+    quality::CalibrationMetrics short_one = m;
+    switch (part) {
+      case 0:
+        short_one.reprojection.initial.cameras.pop_back();
+        break;
+      case 1:
+        short_one.reprojection.solved.cameras.pop_back();
+        break;
+      case 2:
+        short_one.leave_one_out.cameras.pop_back();
+        break;
+      default:
+        short_one.geometry.centres_m.pop_back();
+        break;
+    }
+    EXPECT_EQ(
+        calibration_panel(kIds, short_one, 0, "d", 1, 0.0).status().domain(),
+        Code::InvalidArgument)
+        << part;
+  }
 }
 
 // The stages' rows go to gfx's panel as they are; the frame's time is their

@@ -7,7 +7,8 @@
 // queue, requests that do not fit the rig, a missing root and the drain at
 // shutdown; the session's depth unit, the frames'; the captures kept for
 // Calibrate, each view named for its camera even when its detection failed,
-// their depth shared with the writer, and their cap; the origin tag found in
+// their depth shared with the writer, their cap, and the captures and drops
+// unresolved until a snapshot reflects them; the origin tag found in
 // each camera's luma, kept, written and counted, an image with two prints of
 // it and a failed search. Synthetic board and tag renders, a few cameras, no
 // device. Then what a session records of each camera and of the software.
@@ -825,6 +826,44 @@ TEST(AppCapture, ADropLeavesEarlierSnapshotsAndFreesTheDepth) {
   worker->flush();
   ASSERT_EQ(worker->kept()->captures.size(), 3u);
   EXPECT_EQ(worker->kept()->captures.back()->index, 3);
+}
+
+// A capture or a drop is unresolved until a snapshot reflects it, a drop
+// though no capture is pending: read first, unresolved() reaches 0 only once
+// a snapshot read after has the capture, or has let it go -- what
+// Calibrate's gate relies on. Each check holds however far the worker has
+// got.
+TEST(AppCapture, CountsACaptureOrADropUnresolvedUntilTheSnapshotHasIt) {
+  ScratchDir root;
+  std::unique_ptr<CaptureWorker> worker = make(setup(root.path(), 2));
+  ASSERT_NE(worker, nullptr);
+  EXPECT_EQ(worker->unresolved(), 0u);
+  for (int tag = 0; tag < 2; ++tag) {
+    ASSERT_TRUE(submit(*worker, request(2, 0.0, tag)));
+  }
+  worker->flush();
+  EXPECT_EQ(worker->unresolved(), 0u);
+  ASSERT_EQ(worker->kept()->captures.size(), 2u);
+
+  ASSERT_TRUE(submit(*worker, request(2, 0.0, 2)));
+  std::size_t unresolved = worker->unresolved();
+  std::shared_ptr<const KeptCaptures> kept = worker->kept();
+  EXPECT_TRUE(unresolved == 1u || kept->captures.size() == 3u)
+      << unresolved << " unresolved, " << kept->captures.size() << " kept";
+  worker->flush();
+  EXPECT_EQ(worker->unresolved(), 0u);
+  ASSERT_EQ(worker->kept()->captures.size(), 3u);
+
+  ASSERT_TRUE(worker->drop_last().ok());
+  EXPECT_EQ(worker->pending(), 0u);  // captures only
+  unresolved = worker->unresolved();
+  kept = worker->kept();
+  EXPECT_TRUE(unresolved == 1u || kept->captures.size() == 2u)
+      << unresolved << " unresolved, " << kept->captures.size() << " kept";
+  worker->flush();
+  EXPECT_EQ(worker->unresolved(), 0u);
+  EXPECT_EQ(worker->pending(), 0u);
+  EXPECT_EQ(worker->kept()->captures.size(), 2u);
 }
 
 // A capture the writer fails to write is never kept; the next one is.

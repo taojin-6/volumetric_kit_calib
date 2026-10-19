@@ -22,6 +22,15 @@ KeyRequest key_request(int key, int action, bool want_text_input) noexcept {
     case GLFW_KEY_LEFT:
     case GLFW_KEY_PAGE_UP:
       return KeyRequest::DropLast;
+    case GLFW_KEY_C:
+    case GLFW_KEY_F5:
+      return KeyRequest::Calibrate;
+    case GLFW_KEY_V:
+    case GLFW_KEY_B:
+    case GLFW_KEY_PERIOD:
+      return KeyRequest::SwitchView;
+    case GLFW_KEY_ESCAPE:
+      return KeyRequest::Cancel;
     default:
       return KeyRequest::None;
   }

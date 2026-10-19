@@ -5,24 +5,23 @@
 
 /// @file calib_rig.hpp
 /// @brief calib_rig, the live rig calibration application: a window showing
-///        every camera of the rig live, with the board found in each, and
-///        captures saved to a session on disk.
+///        every camera of the rig live, with the board found in each,
+///        captures saved to a session on disk, and Calibrate, whose result
+///        shows the live points at the solved poses.
 ///
-/// Four threads. The window's (T0) draws the rig mosaic and its marks and
-/// panels, and the 3D view, and turns the keys and buttons into requests; it
-/// never waits on a camera, a detector or the disk. The live worker (T1,
-/// @ref LiveWorker) polls the rig, reads each set's luma back, finds the
-/// board and drives the capture rule. The 3D-view worker (T2,
+/// Five threads. The window's (T0) draws the rig mosaic and its marks and
+/// panels, or the 3D view (@ref RigMode), and turns the keys and buttons into
+/// requests; it never waits on a camera, a detector, the solve or the disk.
+/// The live worker (T1, @ref LiveWorker) polls the rig, reads each set's luma
+/// back, finds the board and drives the capture rule. The 3D-view worker (T2,
 /// @ref CloudWorker) prepares each sampled set's depth and colour on the
 /// GPU. The capture worker (T3, @ref CaptureWorker) detects each capture at
-/// full resolution and queues it on the session writer. The rig's cameras
-/// decode onto the compute library's side of one `VkDevice` that gfx shares,
-/// so the window copies each decoded picture into its tile and draws each
-/// prepared depth as points on the GPU, and only the luma the detector reads
-/// crosses to the host.
-// TODO: CB5 runs Calibrate (CalibrateWorker, a fifth thread) from a
-// button and the C and F5 keys, with its progress line and Cancel, and shows
-// the rig at its result.
+/// full resolution and queues it on the session writer. Calibrate's worker
+/// (T4, @ref CalibrateWorker) solves the captures kept and writes the results
+/// directory. The rig's cameras decode onto the compute library's side of one
+/// `VkDevice` that gfx shares, so the window copies each decoded picture into
+/// its tile and draws each prepared depth as points on the GPU, and only the
+/// luma the detector reads crosses to the host.
 
 #include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/app/preset.hpp"
@@ -100,12 +99,12 @@ VC_APP_API core::Result<RigScenario> check_scenario(
 /// recon share, and every camera of the rig's sync file
 /// (`source.sync_config`) at the preset (@ref check_preset). Ctrl+C or
 /// SIGTERM closes the window while it runs; the handlers it replaced are put
-/// back when it returns. Space, Right,
-/// Page Down or S (or the Capture button) captures; Backspace, Left or Page Up
-/// (or Drop last) drops the last capture (@ref key_request). Dragging pans
-/// the mosaic and the wheel zooms it. The 3D view sits beside the mosaic, in
-/// the whole window, or hidden; over it a left drag orbits, a right drag pans
-/// and the wheel dollies. On the way out it stops the workers, lets the
+/// back when it returns. The camera images come first: there the keys
+/// (@ref key_request) or the buttons capture, drop the last capture and run
+/// Calibrate, dragging pans the mosaic and the wheel zooms it. Each result
+/// fills the window with the 3D view (@ref rig_action has what each key does
+/// there), where a left drag orbits, a right drag pans and the wheel
+/// dollies. On the way out it stops Calibrate and the other workers, lets the
 /// capture worker write what it holds, and waits for the GPU.
 /// @param config  The scenario.
 /// @return OK once the window closes; or what failed: the scenario, the

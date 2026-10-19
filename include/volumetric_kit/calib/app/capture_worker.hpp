@@ -274,6 +274,13 @@ class VC_APP_API CaptureWorker final : public CaptureSink {
 
   /// @return The captures queued, being detected, or queued on the writer.
   std::size_t pending() const;
+  /// @brief The captures and drops not yet resolved: @ref pending, and each
+  ///        drop queued until its event.
+  ///
+  /// Read before @ref kept: once it is 0, a snapshot read after reflects
+  /// every capture and drop made before.
+  /// @return Their number.
+  std::size_t unresolved() const;
   /// @return The most captures it holds at once.
   std::size_t capacity() const noexcept { return capacity_; }
 
