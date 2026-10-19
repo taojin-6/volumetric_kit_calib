@@ -629,6 +629,89 @@ core::Result<std::vector<PanelLine>> depth_panel(
       });
 }
 
+core::Result<std::vector<PanelLine>> world_panel(
+    const std::vector<std::string>& ids, std::size_t reference,
+    const quality::ResultWorld& world) {
+  return compute::guarded(
+      "world_panel", [&]() -> core::Result<std::vector<PanelLine>> {
+        const solve::WorldOrigin& origin = world.origin;
+        if (reference >= ids.size() ||
+            (origin.tag && origin.tag->cameras.size() != ids.size())) {
+          return core::Status::invalid_argument(
+              "world_panel: reference " + std::to_string(reference) + " of " +
+              std::to_string(ids.size()) + " ids, for a world of " +
+              std::to_string(origin.tag ? origin.tag->cameras.size()
+                                        : ids.size()) +
+              " cameras");
+        }
+        std::vector<PanelLine> lines;
+        if (!origin.tag) {
+          lines.push_back(
+              {"world", "reference camera " + ids[reference], Tone::Normal});
+          lines.push_back({"tag world",
+                           origin.reason.empty() ? std::string("no tag sought")
+                                                 : origin.reason,
+                           origin.miss == solve::TagMiss::NotSeen
+                               ? Tone::Muted
+                               : Tone::Warn});
+          return lines;
+        }
+        const solve::TagWorld& w = *origin.tag;
+        const OriginTag& tag = origin.sought;
+        std::string family = apriltag_family(tag.dictionary);
+        if (family.empty()) family = to_string(tag.dictionary);
+        int cameras = 0;
+        int views = 0;
+        for (const solve::TagCamera& c : w.cameras) {
+          cameras += c.used > 0 ? 1 : 0;
+          views += c.used;
+        }
+        const std::string edge = figure(1000.0 * w.edge_m, 1, " mm");
+        const std::string error = signed_figure(w.edge_error_percent, 1, " %");
+        lines.push_back({"world",
+                         "origin tag (" + family + " id " +
+                             std::to_string(tag.id) + "), edge " + edge + " (" +
+                             error + "), " + std::to_string(cameras) +
+                             (cameras == 1 ? " camera, " : " cameras, ") +
+                             std::to_string(views) +
+                             (views == 1 ? " view, " : " views, ") +
+                             figure(w.rms_px, 2, " px RMS"),
+                         Tone::Good});
+        if (w.edge_warning) {
+          lines.push_back({"tag edge",
+                           edge + ", " + error + " from the printed " +
+                               figure(1000.0 * tag.edge_m, 1, " mm"),
+                           Tone::Warn});
+        }
+        for (std::size_t c = 0; c < ids.size(); ++c) {
+          lines.push_back({"height " + ids[c],
+                           figure(w.cameras[c].height_m, 3, " m"),
+                           Tone::Normal});
+        }
+        if (world.floor_boards.empty()) {
+          lines.push_back({"floor boards", "none", Tone::Muted});
+          return lines;
+        }
+        double tilt = 0.0;
+        double most = 0.0;
+        double height = 0.0;
+        for (const quality::FloorBoard& b : world.floor_boards) {
+          tilt += b.angle_deg;
+          most = std::max(most, b.angle_deg);
+          height += b.height_m;
+        }
+        const auto n = static_cast<double>(world.floor_boards.size());
+        lines.push_back({"floor boards",
+                         std::to_string(world.floor_boards.size()) +
+                             ": tilt mean " + figure(tilt / n, 2, " deg") +
+                             ", max " + figure(most, 2, " deg") +
+                             "; height mean " +
+                             signed_figure(1000.0 * height / n, 1, " mm"),
+                         Tone::Normal});
+        return lines;
+      });
+}
+
 core::Result<gfx::FrameMetrics> stage_frame_metrics(
     const core::StageMetrics& stages, double fps) {
   return compute::guarded("stage_frame_metrics",

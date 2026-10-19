@@ -5,16 +5,18 @@
 
 /// @file scene_view.hpp
 /// @brief The 3D view of the rig: each camera's points from its prepared
-///        depth, its frusta, the world's axes and the solved boards, through
-///        an orbiting view turned so the rig stands upright.
+///        depth, its frusta, the world's axes, the solved boards and the
+///        origin tag, through an orbiting view turned so the rig stands
+///        upright.
 ///
-/// The rig's world is its reference camera's colour frame: +x right, +y down,
-/// +z forward. gfx's `OrbitCamera` keeps +Y up, so the view turns the world
-/// by a display rotation (@ref display_rotation) that takes the cameras'
-/// mean up, their -y, to +Y. Points are gfx's draws from recon's prepared
-/// frames in place (@ref cloud_draws); lines are a few KB of `ColorVertex`
-/// made on the host from the cameras' models and poses (@ref scene_lines),
-/// uploaded only when they change.
+/// The rig's world is the origin tag's, +z up from the floor, or its
+/// reference camera's colour frame: +x right, +y down, +z forward. gfx's
+/// `OrbitCamera` keeps +Y up, so the view turns the world by a display
+/// rotation (@ref display_rotation) that takes the world's up to +Y: the
+/// tag's +z, or the cameras' mean up, their -y. Points are gfx's draws from
+/// recon's prepared frames in place (@ref cloud_draws); lines are a few KB of
+/// `ColorVertex` made on the host from the cameras' models and poses
+/// (@ref scene_lines), uploaded only when they change.
 
 #include <cstddef>
 #include <cstdint>
@@ -80,6 +82,11 @@ struct SceneOptions {
   double axes_m = 0.5;
   /// The solved boards' outline colour.
   std::uint32_t board_rgba = gfx::pipelines::pack_rgba8(255, 200, 0);
+  /// The origin tag's edge (metres), whose outline @ref tag_lines draws at
+  /// the origin of a tag's world; 0 for none.
+  double tag_edge_m = 0.0;
+  /// The origin tag's outline colour.
+  std::uint32_t tag_rgba = gfx::pipelines::pack_rgba8(255, 0, 255);
 };
 
 /// @brief A camera's frustum: lines from its centre to each corner of its
@@ -133,17 +140,34 @@ VC_VIZ_API core::Result<std::vector<gfx::pipelines::ColorVertex>> board_lines(
     const compute::Board& board, const recon::camera::Mat4d& board_to_world,
     std::uint32_t rgba);
 
+/// @brief The origin tag's outline at the origin of its world: the square of
+///        its black border on z = 0, its corners where `solve/world_tag.hpp`
+///        puts them, (-s/2, s/2), (s/2, s/2), (s/2, -s/2) and (-s/2, -s/2).
+/// @param edge_m  The square's edge, s (metres); positive.
+/// @param rgba    The lines' colour.
+/// @return 4 lines, 8 vertices: corner k to corner k + 1, the last back to
+///         the first; `InvalidArgument` for an edge that is not positive and
+///         finite; or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const auto outline, tag_lines(tag_world.edge_m, rgba));
+/// @endcode
+VC_VIZ_API core::Result<std::vector<gfx::pipelines::ColorVertex>> tag_lines(
+    double edge_m, std::uint32_t rgba);
+
 /// @brief Every line of the scene: the axes, each shown and placed camera's
-///        frusta in its tint, and each solved board's outline.
+///        frusta in its tint, each solved board's outline, and the origin
+///        tag's (`SceneOptions::tag_edge_m`).
 /// @param cameras         The rig's cameras.
 /// @param board           The board the solve placed; null when
 ///                        @p boards_to_world is empty.
 /// @param boards_to_world Each solved board's T_wb; empty before a solve.
-/// @param options         The frusta's depth, the depth frusta, the axes and
-///                        the boards' colour.
+/// @param options         The frusta's depth, the depth frusta, the axes,
+///                        the boards' colour and the tag.
 /// @return The lines' vertices, in pairs; or what @ref frustum_lines,
-///         @ref axes_lines and @ref board_lines refuse, naming the camera or
-///         board; `InvalidArgument` for boards without a board.
+///         @ref axes_lines, @ref board_lines and @ref tag_lines refuse,
+///         naming the camera, board or tag; `InvalidArgument` for boards
+///         without a board.
 ///
 /// @code
 /// VKC_ASSIGN(const auto lines, scene_lines(cameras, nullptr, {}, {}));
@@ -174,24 +198,32 @@ cloud_draws(
     const std::vector<std::optional<recon::sensor::DeviceFrame>>& frames,
     const std::vector<SceneCamera>& cameras, const CloudStyle& style);
 
-/// @brief The turn from the rig's world into the view's: the placed cameras'
-///        mean up (their -y) to +Y, and their mean forward (+z), levelled, to
-///        -Z, where gfx's `OrbitCamera` looks from its default place.
+/// @brief The turn from the rig's world into the view's: the world's up to
+///        +Y, and the placed cameras' mean forward (+z), levelled, to -Z,
+///        where gfx's `OrbitCamera` looks from its default place.
 ///
-/// When the forwards cancel -- an outside-in ring looking at its middle --
-/// the first camera's levelled forward is taken, and failing that any
-/// level direction.
+/// The world's up is @p up, given -- a tag's world's +z, so its floor lies
+/// level -- or the placed cameras' mean up, their -y. When the forwards
+/// cancel -- an outside-in ring looking at its middle -- the first camera's
+/// levelled forward is taken, and failing that any level direction.
 /// @param color_to_world  Each placed camera's pose; at least one.
+/// @param up              The world's up, any length; empty for the
+///                        cameras' mean up.
 /// @return The rotation, world to view; `InvalidArgument` for no camera, a
-///         pose that is not rigid, or ups that cancel.
+///         pose that is not rigid, ups that cancel, or an @p up that is not
+///         finite or has no length.
 ///
 /// @code
 /// // The reference camera alone: a half turn about x.
 /// VKC_ASSIGN(const recon::camera::Mat3d turn,
 ///            display_rotation({recon::camera::Mat4d(1.0)}));
+/// // A tag's world: +z to +Y.
+/// VKC_ASSIGN(const recon::camera::Mat3d level,
+///            display_rotation(poses, recon::camera::Vec3d(0.0, 0.0, 1.0)));
 /// @endcode
 VC_VIZ_API core::Result<recon::camera::Mat3d> display_rotation(
-    const std::vector<recon::camera::Mat4d>& color_to_world);
+    const std::vector<recon::camera::Mat4d>& color_to_world,
+    const std::optional<recon::camera::Vec3d>& up = std::nullopt);
 
 /// @brief Where the 3D view sits in the window.
 enum class ScenePlacement : std::uint8_t {
@@ -242,8 +274,12 @@ class VC_VIZ_API SceneView {
   ///        cameras: at their mean centre, 2 m along their mean forward, from
   ///        at least 3 m away and slightly above.
   /// @param color_to_world  Each placed camera's pose; at least one.
+  /// @param up              The world's up (@ref display_rotation); empty
+  ///                        for the cameras' mean up.
   /// @return OK; or what @ref display_rotation refuses, the view unchanged.
-  core::Status frame(const std::vector<recon::camera::Mat4d>& color_to_world);
+  core::Status frame(
+      const std::vector<recon::camera::Mat4d>& color_to_world,
+      const std::optional<recon::camera::Vec3d>& up = std::nullopt);
 
   /// @return The orbiting camera, in the turned world, for pointer input.
   gfx::camera::OrbitCamera& orbit() noexcept { return orbit_; }

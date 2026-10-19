@@ -151,6 +151,24 @@ core::Result<Lines> board_lines(const compute::Board& board,
   });
 }
 
+core::Result<Lines> tag_lines(double edge_m, std::uint32_t rgba) {
+  return compute::guarded("tag_lines", [&]() -> core::Result<Lines> {
+    if (!(edge_m > 0.0) || !std::isfinite(edge_m)) {
+      return core::Status::invalid_argument(
+          "tag_lines: the edge must be positive and finite");
+    }
+    const double h = 0.5 * edge_m;
+    const std::array<Vec3d, 4> corners{Vec3d(-h, h, 0.0), Vec3d(h, h, 0.0),
+                                       Vec3d(h, -h, 0.0), Vec3d(-h, -h, 0.0)};
+    Lines out;
+    out.reserve(8);
+    for (std::size_t i = 0; i < corners.size(); ++i) {
+      line(out, corners[i], corners[(i + 1) % corners.size()], rgba);
+    }
+    return out;
+  });
+}
+
 core::Result<Lines> scene_lines(const std::vector<SceneCamera>& cameras,
                                 const compute::Board* board,
                                 const std::vector<Mat4d>& boards_to_world,
@@ -186,6 +204,10 @@ core::Result<Lines> scene_lines(const std::vector<SceneCamera>& cameras,
           out, board_lines(*board, boards_to_world[k], options.board_rgba),
           "scene_lines: board " + std::to_string(k)));
     }
+    if (options.tag_edge_m != 0.0) {
+      VKC_TRY(append(out, tag_lines(options.tag_edge_m, options.tag_rgba),
+                     "scene_lines: the origin tag"));
+    }
     return out;
   });
 }
@@ -219,7 +241,8 @@ core::Result<std::vector<pipelines::DepthCloudDraw>> cloud_draws(
       });
 }
 
-core::Result<Mat3d> display_rotation(const std::vector<Mat4d>& color_to_world) {
+core::Result<Mat3d> display_rotation(const std::vector<Mat4d>& color_to_world,
+                                     const std::optional<Vec3d>& up_given) {
   return compute::guarded("display_rotation", [&]() -> core::Result<Mat3d> {
     if (color_to_world.empty()) {
       return core::Status::invalid_argument(
@@ -233,6 +256,15 @@ core::Result<Mat3d> display_rotation(const std::vector<Mat4d>& color_to_world) {
       const Mat3d turn(pose);
       ups -= turn[1];  // the camera's -y, its image's up, in the world
       forwards += turn[2];
+    }
+    if (up_given) {
+      const double given = glm::length(*up_given);
+      if (!(given > 0.0) || !std::isfinite(given)) {
+        return core::Status::invalid_argument(
+            "display_rotation: the world's up must be finite and have a "
+            "length");
+      }
+      ups = *up_given / given;
     }
     const double length = glm::length(ups);
     if (!(length > 1e-6)) {
@@ -273,9 +305,10 @@ WindowSplit window_split(ScenePlacement placement, VkExtent2D extent) noexcept {
   return split;
 }
 
-core::Status SceneView::frame(const std::vector<Mat4d>& color_to_world) {
+core::Status SceneView::frame(const std::vector<Mat4d>& color_to_world,
+                              const std::optional<Vec3d>& up) {
   return compute::guarded("SceneView::frame", [&]() -> core::Status {
-    VKC_ASSIGN(const Mat3d turn, display_rotation(color_to_world));
+    VKC_ASSIGN(const Mat3d turn, display_rotation(color_to_world, up));
     Vec3d centre(0.0);
     Vec3d forward(0.0);
     for (const Mat4d& pose : color_to_world) {

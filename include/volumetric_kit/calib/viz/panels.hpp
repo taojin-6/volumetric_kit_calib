@@ -7,8 +7,8 @@
 /// @brief The live view's panels: what each camera sees, how the latest set
 ///        arrived, what the captures kept add up to and how much of the
 ///        origin tag they hold, where a capture stands, and the stage
-///        timings; and Calibrate's: how far it has got, and what its result
-///        and its depth checks are worth.
+///        timings; and Calibrate's: how far it has got, what its result and
+///        its depth checks are worth, and where its world is.
 ///
 /// Each panel is a model -- lines of text, each in a @ref Tone -- built from
 /// host data alone (the quality tier's checks and metrics, recon's counters,
@@ -29,6 +29,7 @@
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
+#include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
 #include "volumetric_kit/calib/viz/export.hpp"
@@ -298,8 +299,8 @@ VC_VIZ_API core::Result<PanelLine> calibrate_progress_line(
 ///   `inconclusive`), the gap (`quality::principal_point_gap`) and each
 ///   side's RMS; `refused: <why>`, muted, when the shifted rig could not be
 ///   solved;
-/// - `centre <id>` for each camera: its centre (metres) in the world, the
-///   reference camera's colour frame;
+/// - `centre <id>` for each camera: its centre (metres) in the reference
+///   camera's colour frame, whatever the world (@ref world_panel);
 /// - `results`: the results directory.
 /// @param ids        Each camera's id, in the rig's order.
 /// @param metrics    The result's metrics (`quality::calibration_metrics`).
@@ -318,8 +319,6 @@ VC_VIZ_API core::Result<PanelLine> calibrate_progress_line(
 ///                              result.seconds));
 /// draw_panel_lines("calibration", lines);
 /// @endcode
-// TODO: CB9 adds the world's line and each camera's height in the origin
-// tag's world.
 VC_VIZ_API core::Result<std::vector<PanelLine>> calibration_panel(
     const std::vector<std::string>& ids,
     const quality::CalibrationMetrics& metrics, int number,
@@ -365,6 +364,42 @@ VC_VIZ_API core::Result<std::vector<PanelLine>> calibration_panel(
 VC_VIZ_API core::Result<std::vector<PanelLine>> depth_panel(
     const std::vector<std::string>& ids, const quality::DepthSummary* depth,
     const core::Status& failure = {});
+
+/// @brief The Calibration window's world lines, after
+///        @ref calibration_panel's: where the result's world is, and, at the
+///        origin tag, each camera's height and the boards on its floor.
+///
+/// Lines, in order:
+/// - `world`: `origin tag (<family> id <id>), edge <mean> mm (<error> %),
+///   <k> cameras, <n> views, <rms> px RMS` (green), the cameras and views
+///   those the world used; or `reference camera <id>`;
+/// - `tag edge`, with a tag world whose edge is warned of
+///   (`solve::TagWorld::edge_warning`; amber): `<mean> mm, <error> % from
+///   the printed <edge> mm`;
+/// - `tag world`, without one: why (`solve::WorldOrigin::reason`), muted
+///   when no camera saw the tag, else amber;
+/// - `height <id>` for each camera, with a tag world: its colour camera's
+///   height above the tag's plane (metres);
+/// - `floor boards`, with a tag world: how many solved boards lie on its
+///   floor, their tilt from its z, mean and largest, and their mean height;
+///   `none`, muted, when none does.
+/// @param ids        Each camera's id, in the rig's order.
+/// @param reference  The reference camera, by index in @p ids.
+/// @param world      The result's world (`app::CalibrateResult::world`).
+/// @return The lines; `InvalidArgument` for a reference not in @p ids, or a
+///         tag world of another number of cameras than @p ids; or
+///         `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const std::vector<PanelLine> world,
+///            world_panel(result.ids, result.reference, result.world));
+/// for (const PanelLine& l : world) {
+///   if (l.tone == Tone::Warn) notify(l.label + ": " + l.value);
+/// }
+/// @endcode
+VC_VIZ_API core::Result<std::vector<PanelLine>> world_panel(
+    const std::vector<std::string>& ids, std::size_t reference,
+    const quality::ResultWorld& world);
 
 /// @brief The live stages' timings as gfx's metrics panel takes them.
 /// @param stages  The stages timed (poll, readback, detect, tiles, ...).
