@@ -19,8 +19,9 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > metrics; with `VC_WITH_RIG`, the `capture` tier's session writer, the `viz`
 > tier's live and 3D views and the `depth` tier's board-plane fit and
 > pairwise depth agreement; and, with GLFW and recon's Orbbec driver too, the
-> `app` tier's `calib_rig`, live view, 3D view and capture. Calibrate and the
-> color tier are not yet implemented; the legacy `camera_calibration` Python
+> `app` tier's `calib_rig`, live view, 3D view, capture and Calibrate's worker.
+> Calibrate in calib_rig's window and the color tier are not yet
+> implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain
 > the reference oracle.
 
@@ -118,6 +119,9 @@ renderer.
   detects each capture at full resolution, writes it and keeps it in memory
   for Calibrate, and the window draws and never waits
   ([DECISIONS.md](DECISIONS.md#2026-10-16--calib_rigs-live-view-and-capture)).
+  Calibrate's worker solves and measures the kept captures and writes a
+  results directory
+  ([DECISIONS.md](DECISIONS.md#2026-10-18--calibrate-t4)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
 

@@ -2,13 +2,13 @@
 # Copyright (c) 2026 Tao Jin
 
 # --- calib_app: Tier 5 -------------------------------------------------------
-# calib_rig's live view, 3D view and capture: the rig's preset check, the key
-# map, the acquisition and live-detection worker (T1), the 3D view's frame
-# preparation worker (T2), the capture worker (T3) and the window loop (T0) on
-# gfx's GLFW glue, ImGui overlay and the viz tier's mosaic and scene. Built with
-# VC_BUILD_APPS and the viz tier when gfx_glfw (an installed GLFW) and recon's
-# Orbbec tier (VR_WITH_ORBBEC) exist (src/CMakeLists.txt). Build-tree only, as
-# calib_viz is.
+# calib_rig's live view, 3D view, capture and Calibrate: the rig's preset check,
+# the key map, the acquisition and live-detection worker (T1), the 3D view's
+# frame preparation worker (T2), the capture worker (T3), the Calibrate worker
+# (T4) and the window loop (T0) on gfx's GLFW glue, ImGui overlay and the viz
+# tier's mosaic and scene. Built with VC_BUILD_APPS and the viz tier when
+# gfx_glfw (an installed GLFW) and recon's Orbbec tier (VR_WITH_ORBBEC) exist
+# (src/CMakeLists.txt). Build-tree only, as calib_viz is.
 include(GenerateExportHeader)
 
 # calib_rig loads its scenario as config::Application::CalibRig, which the core
@@ -57,6 +57,7 @@ add_library(volumetric_kit::calib_app ALIAS calib_app)
 target_sources(
   calib_app
   PRIVATE calib_rig.cpp
+          calibrate_worker.cpp
           capture_worker.cpp
           cloud_worker.cpp
           keys.cpp
@@ -90,15 +91,16 @@ endif()
 target_include_directories(calib_app
                            PUBLIC "$<BUILD_INTERFACE:${_vc_generated_inc}>")
 
-# The public headers name the viz tier's mosaic, overlays and scene, the capture
-# tier's session records, the detector's board, recon's sensor array, picture
-# readback, frame preparation and Orbbec options, gfx's retire queue and
-# depth-cloud pipeline, and the core's scenario. The window, the shared device,
-# the depth checks' requirements, OpenCV's thread pool and the threads stay
-# private.
+# The public headers name the viz tier's mosaic, overlays and scene, the quality
+# tier's metrics and results files, the capture tier's session records, the
+# detector's board, recon's sensor array, picture readback, frame preparation
+# and Orbbec options, gfx's retire queue and depth-cloud pipeline, and the
+# core's scenario. The window, the shared device, the depth checks'
+# requirements, OpenCV's thread pool and the threads stay private.
 target_link_libraries(
   calib_app
   PUBLIC calib_viz
+         calib_quality
          calib_capture
          calib_detect
          volumetric_kit::recon_sensor_array

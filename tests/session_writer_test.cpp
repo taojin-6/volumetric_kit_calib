@@ -11,7 +11,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -33,6 +32,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include "scratch_dir.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
 #include "volumetric_kit/recon/camera/array_calibration.hpp"
 #include "volumetric_kit/recon/camera/geometry.hpp"
@@ -53,49 +53,8 @@ constexpr std::uint32_t kDepthW = 16;
 constexpr std::uint32_t kDepthH = 12;
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 
-// A fresh directory under the system's temporary one, removed with what it
-// holds when the test ends.
-class ScratchDir {
- public:
-  ScratchDir() {
-    static std::atomic<int> counter{0};
-    const auto* test = ::testing::UnitTest::GetInstance()->current_test_info();
-    std::error_code ec;
-    path_ = fs::temp_directory_path(ec) /
-            ("vc_capture_" + std::to_string(::getpid()) + "_" +
-             test->test_suite_name() + "_" + test->name() + "_" +
-             std::to_string(counter++));
-    fs::remove_all(path_, ec);
-    fs::create_directories(path_, ec);
-  }
-  ~ScratchDir() {
-    std::error_code ec;
-    // A test that made a directory read-only may fail before restoring it.
-    for (auto it = fs::recursive_directory_iterator(path_, ec);
-         it != fs::recursive_directory_iterator(); it.increment(ec)) {
-      if (it->is_directory(ec)) {
-        fs::permissions(it->path(), fs::perms::owner_all, fs::perm_options::add,
-                        ec);
-      }
-    }
-    fs::remove_all(path_, ec);
-  }
-  ScratchDir(const ScratchDir&) = delete;
-  ScratchDir& operator=(const ScratchDir&) = delete;
-
-  std::string operator/(const std::string& name) const {
-    return (path_ / name).string();
-  }
-
- private:
-  fs::path path_;
-};
-
-std::string read(const std::string& path) {
-  vkc::Result<std::string> bytes = vkc::read_file(path);
-  EXPECT_TRUE(bytes.ok()) << bytes.status().message();
-  return bytes.ok() ? *bytes : std::string();
-}
+using test::read;
+using test::ScratchDir;
 
 void write(const std::string& path, const std::string& bytes) {
   const vkc::Status written =

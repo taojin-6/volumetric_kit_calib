@@ -23,6 +23,7 @@
 
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
+#include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 
 namespace volumetric_kit::calib::quality {
@@ -382,6 +383,13 @@ TEST(SessionChecks, GradesTheTreePreviewAndSaysWhenItIsReady) {
   expect_link(1, 0, 10, LinkStrength::Strong);
   expect_link(2, 1, 6, LinkStrength::Strong);
   expect_link(3, 0, 2, LinkStrength::Fair);
+}
+
+// Calibrate is enabled by the adjustment's own guard, so a session the checks
+// call ready is not one bundle_adjust refuses for too few shared captures.
+TEST(SessionChecks, IsReadyByTheAdjustmentsOwnGuard) {
+  EXPECT_EQ(SessionOptions{}.ready_from,
+            solve::BundleAdjustOptions{}.min_shared);
 }
 
 // A camera the reference's tree does not reach is unlinked, and Calibrate

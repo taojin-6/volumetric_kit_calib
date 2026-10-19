@@ -106,7 +106,7 @@ target_include_directories(vc_results_test SYSTEM
 if(VC_WITH_RIG)
   # capture: sessions on disk, read back with recon's readers and nlohmann.
   vc_add_test(session_writer volumetric_kit::calib_capture
-              volumetric_kit::recon_io Threads::Threads)
+              volumetric_kit::recon_io vc_test_support Threads::Threads)
   target_include_directories(vc_session_writer_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
   vc_add_test(capture_oom volumetric_kit::calib_capture vc_test_support
@@ -188,6 +188,12 @@ if(TARGET calib_app)
       ${CMAKE_CURRENT_SOURCE_DIR}/app_software_commit.cmake)
   set_tests_properties(app_capture.software_commit
                        PROPERTIES SKIP_REGULAR_EXPRESSION "not a git checkout")
+  # app: Calibrate on the synthetic rig's detections, its results directories
+  # read back with recon's reader and nlohmann; its out-of-memory sweep.
+  vc_add_test(app_calibrate volumetric_kit::calib_app vc_synthetic_rig)
+  target_sources(vc_app_calibrate_test PRIVATE support/allocation_failure.cpp)
+  target_include_directories(vc_app_calibrate_test SYSTEM
+                             PRIVATE "${VC_JSON_INCLUDE_DIR}")
 endif()
 
 # The core calib requires (third_party/CMakeLists.txt): calib's configure

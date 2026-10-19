@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -47,6 +48,27 @@ inline std::vector<solve::RigCamera> rig_cameras(
   return cameras;
 }
 
+/// @brief @p rig, a plan for it and what it sees.
+/// @param rig         The cameras.
+/// @param count       Placements to plan (@ref PlanOptions::count).
+/// @param noise_px    The detections' noise (@ref ObserveOptions::noise_px).
+/// @param plan_seed   The plan's seed.
+/// @param noise_seed  The noise's seed.
+/// @return The scene, the same for the same arguments.
+inline Scene make_scene(std::vector<SyntheticCamera> rig, std::size_t count,
+                        double noise_px, std::uint32_t plan_seed,
+                        std::uint32_t noise_seed) {
+  Scene scene{std::move(rig), femto_board(), {}, {}, {}};
+  PlanOptions plan_options;
+  plan_options.count = count;
+  plan_options.seed = plan_seed;
+  scene.plan = synthetic_plan(scene.rig, scene.board, plan_options);
+  scene.views = observe(scene.rig, scene.board, scene.plan,
+                        ObserveOptions{noise_px, noise_seed});
+  scene.cameras = rig_cameras(scene.rig);
+  return scene;
+}
+
 /// @brief @ref synthetic_rig, a plan for it and what it sees.
 /// @param count       Placements to plan (@ref PlanOptions::count).
 /// @param noise_px    The detections' noise (@ref ObserveOptions::noise_px).
@@ -56,15 +78,7 @@ inline std::vector<solve::RigCamera> rig_cameras(
 inline Scene make_scene(std::size_t count = 60, double noise_px = 0.3,
                         std::uint32_t plan_seed = 1,
                         std::uint32_t noise_seed = 1) {
-  Scene scene{synthetic_rig(), femto_board(), {}, {}, {}};
-  PlanOptions plan_options;
-  plan_options.count = count;
-  plan_options.seed = plan_seed;
-  scene.plan = synthetic_plan(scene.rig, scene.board, plan_options);
-  scene.views = observe(scene.rig, scene.board, scene.plan,
-                        ObserveOptions{noise_px, noise_seed});
-  scene.cameras = rig_cameras(scene.rig);
-  return scene;
+  return make_scene(synthetic_rig(), count, noise_px, plan_seed, noise_seed);
 }
 
 /// @brief The camera named @p id.

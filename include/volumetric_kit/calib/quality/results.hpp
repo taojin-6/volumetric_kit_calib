@@ -18,8 +18,8 @@
 ///   `bundle_adjust` and `metrics` options the metrics were measured with
 ///   (@ref CalibrationMetrics::options);
 /// - `solver`: `solves`, `iterations`, `initial_energy`, `final_energy`,
-///   `variance`, `seconds`; `tree`: each link's `camera`, `parent`, `shared`,
-///   `inliers` and `weak`;
+///   `variance`, `seconds` (to the microsecond, with six decimals); `tree`:
+///   each link's `camera`, `parent`, `shared`, `inliers` and `weak`;
 /// - `reprojection`: `initial` and `solved`, each `overall`,
 ///   `without_oblique`, `legacy_rmse_px`, `histogram` (the counts, in bins of
 ///   `settings.metrics.histogram_bin_px`), `cameras` (by id), `captures` and

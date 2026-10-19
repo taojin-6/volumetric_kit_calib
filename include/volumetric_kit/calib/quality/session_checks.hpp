@@ -20,6 +20,7 @@
 #include "volumetric_kit/calib/core/detection.hpp"
 #include "volumetric_kit/calib/quality/export.hpp"
 #include "volumetric_kit/calib/quality/live_checks.hpp"
+#include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
 #include "volumetric_kit/core/base/result.hpp"
@@ -59,10 +60,10 @@ struct SessionOptions {
   int warn_from = 5;
   /// A tree link sharing this many captures or more is strong.
   int strong_from = 10;
-  // TODO: default to solve::BundleAdjustOptions::min_shared once #21 merges,
-  // the adjustment's guard on the same rule.
-  /// Calibrate may run once every tree link shares this many captures.
-  int ready_from = 3;
+  /// Calibrate may run once every tree link shares this many captures: by
+  /// default the adjustment's own guard (`solve::BundleAdjustOptions`'s
+  /// `min_shared`).
+  int ready_from = solve::BundleAdjustOptions{}.min_shared;
 };
 
 /// @brief How strong a link of the tree preview is.

@@ -368,7 +368,7 @@ std::string report_text(const std::vector<std::string>& ids,
   w.key("initial_energy").value(solution.initial_energy);
   w.key("final_energy").value(solution.final_energy);
   w.key("variance").value(solution.variance);
-  w.key("seconds").value(solution.seconds);
+  w.key("seconds").value_seconds(solution.seconds);
   w.close_object();
   w.key("tree").open_array();
   for (const solve::PlacedLink& link : solution.links) {

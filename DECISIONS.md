@@ -73,6 +73,32 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-18 — Calibrate (T4)
+
+Calibrate runs on a worker of its own (`app/calibrate_worker.hpp` has the
+steps, the numbering and the write order).
+
+- **A snapshot, solved from scratch.** Capturing goes on while Calibrate
+  runs, and what is captured meanwhile goes into the next press. A result
+  depends on the captures kept alone: a dropped capture leaves no trace, and
+  a recalibration owes nothing to the last.
+- **The reference camera's gauge throughout.** A world at the floor tag is to
+  be applied last, to the outputs only, so the metrics' re-solves keep the
+  gauge they check.
+- **On disk before it is shown.** The window never shows a result whose files
+  are missing, and nothing is written until the solve and the metrics are
+  done, so a refusal or a cancel leaves nothing behind. The directory's
+  stamp is the press's, in the session's own format (the user's call).
+- **Colour lenses and poses only** in the results' calibration file (the
+  user's call): `SensorArray` reads only the poses, and the session's
+  factory file already has the depth models.
+- **Cancelled between re-solves.** `bundle_adjust` is not interruptible, so a
+  cancel takes effect before the metrics or after a leave-one-out re-solve;
+  the writing, a few files, is not cancelled.
+- **Still to come:** the depth checks of the kept raw depth (CB6), the world
+  at the origin tag (CB8, CB9), and calib_rig's button, keys and progress
+  line (CB5); each is a `TODO:` where it lands.
+
 ## 2026-10-18 — The origin tag
 
 Calibrate puts the world at an AprilTag on the floor (CA12b), `kOriginTag`,
