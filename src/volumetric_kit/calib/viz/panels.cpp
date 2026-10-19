@@ -576,7 +576,8 @@ core::Result<std::vector<PanelLine>> depth_panel(
           if (p.verdict == quality::DepthVerdict::Ok) ++pass;
           if (p.verdict == quality::DepthVerdict::Off) ++fail;
           const double m = p.agreement.signed_median_mm;
-          if (std::isfinite(m) &&
+          if (p.verdict != quality::DepthVerdict::Insufficient &&
+              std::isfinite(m) &&
               (largest == nullptr ||
                std::abs(m) > std::abs(largest->agreement.signed_median_mm))) {
             largest = &p;

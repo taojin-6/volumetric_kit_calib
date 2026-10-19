@@ -717,6 +717,24 @@ TEST(DepthPanel, TonesThePairsAndAnInsufficientCamera) {
   EXPECT_EQ(line(l, "depth pairs").tone, Tone::Normal);
 }
 
+// A pair short of overlap is not judged, so its median is not the largest,
+// however far a few samples put it; with no pair judged, none is named.
+TEST(DepthPanel, NamesTheLargestMedianOfThePairsJudged) {
+  using V = quality::DepthVerdict;
+  quality::DepthSummary d = three_camera_depth();
+  d.pairs[4] = pair_check(2, 0, V::Insufficient, 18.0, 18.0, 600, 500);
+  std::vector<PanelLine> l = depth_panel(kIds, &d).value();
+  EXPECT_EQ(line(l, "depth pairs").value,
+            "4 of 6 pass, 1 fail, 1 no overlap; largest signed median "
+            "+6.2 mm (G -> 6G)");
+
+  for (quality::PairCheck& p : d.pairs) p.verdict = V::Insufficient;
+  d.captures.clear();
+  l = depth_panel(kIds, &d).value();
+  EXPECT_EQ(line(l, "depth pairs").value, "0 of 6 pass, 0 fail, 6 no overlap");
+  EXPECT_EQ(line(l, "depth pairs").tone, Tone::Normal);
+}
+
 // Not checked: muted when not asked for, red with the failure's reason.
 TEST(DepthPanel, SaysWhyTheDepthWasNotChecked) {
   std::vector<PanelLine> l = depth_panel(kIds, nullptr).value();
