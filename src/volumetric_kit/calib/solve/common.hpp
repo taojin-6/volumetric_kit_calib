@@ -3,8 +3,9 @@
 
 #pragma once
 
-// What initialise and bundle_adjust share: private to the tier. Each message
-// starts with the caller's `prefix` ("initialise: ", "bundle_adjust: ").
+// What initialise, bundle_adjust and origin_tag_frame share: private to the
+// tier. Each message starts with the caller's `prefix` ("initialise: ",
+// "bundle_adjust: ").
 
 #include <cstddef>
 #include <map>
@@ -45,5 +46,21 @@ core::Status refuse_option(std::string_view prefix, const char* name,
 
 // The median of `values`, which are not empty.
 double median(std::vector<double> values);
+
+// The residual (pixels) above which a corner is an outlier: `outlier_px`, or
+// `outlier_mads` robust deviations if more -- 1.4826 times the median
+// absolute deviation of `components`, the kept corners' residual components
+// (x and y), about their median. `components` is not empty.
+double outlier_bound(std::vector<double> components, double outlier_px,
+                     double outlier_mads);
+
+// Huber's cost of a residual of norm s, and its IRLS weight: the cost's
+// derivative over 2 s.
+inline double huber(double s, double delta) noexcept {
+  return s <= delta ? s * s : 2.0 * delta * s - delta * delta;
+}
+inline double huber_weight(double s, double delta) noexcept {
+  return s <= delta ? 1.0 : delta / s;
+}
 
 }  // namespace volumetric_kit::calib::solve::detail
