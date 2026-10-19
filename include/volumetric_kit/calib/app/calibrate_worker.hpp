@@ -303,8 +303,8 @@ VC_APP_API core::Result<WrittenResults> write_results(
 /// that number is not used again. The numbers go up from 0, one per
 /// directory made.
 ///
-/// @warning Stop the worker (@ref stop) before its depth checks' device and
-///          allocator go.
+/// @warning The device and allocator of its depth checks, which it owns,
+///          must outlive the worker.
 ///
 /// @code
 /// VKC_ASSIGN(std::unique_ptr<CalibrateWorker> calibrate,
