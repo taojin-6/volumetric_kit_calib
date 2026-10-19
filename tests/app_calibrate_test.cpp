@@ -247,8 +247,6 @@ TEST(Calibrate, SolvesTwoToFiveCamerasInTheReferencesGauge) {
       EXPECT_EQ(r.metrics.leave_one_out.captures[i].capture,
                 kept.captures[i]->index);
     }
-    EXPECT_EQ(r.metrics.options.initialise.max_pnp_rms_px,
-              kept.solve.max_pnp_rms_px);
     EXPECT_GT(r.seconds, 0.0);
 
     core::Result<camera::ArrayCalibration> file =
@@ -371,6 +369,29 @@ TEST(Calibrate, RefusesWhatTheSolveCannotTake) {
   const std::string why = refusal(unlinked);
   EXPECT_EQ(why.rfind("calibrate: initialise: ", 0), 0u) << why;
   EXPECT_NE(why.find("CL0B"), std::string::npos) << why;
+}
+
+// The session's thresholds are the solve's: initialise judges each view by
+// them, and the metrics' re-solves and report record them.
+TEST(Calibrate, SolvesWithTheSessionsThresholds) {
+  const test::Scene scene = test::make_kept_scene(4, 20);
+  KeptCaptures strict = test::kept_captures(scene, 0, "unwritten");
+  strict.solve.max_pnp_rms_px = 1e-6;  // no noisy view passes
+  const core::Result<CalibrateResult> refused = calibrate(strict);
+  ASSERT_FALSE(refused.ok());
+  EXPECT_EQ(refused.status().message().rfind("calibrate: initialise: ", 0), 0u)
+      << refused.status().message();
+
+  KeptCaptures other = test::kept_captures(scene, 0, "unwritten");
+  other.solve.max_pnp_rms_px = 4.0;
+  ASSERT_NE(other.solve.max_pnp_rms_px,
+            solve::InitialiseOptions{}.max_pnp_rms_px);
+  const core::Result<CalibrateResult> made = calibrate(other);
+  ASSERT_TRUE(made.ok()) << made.status().message();
+  EXPECT_EQ(made->metrics.options.initialise.max_pnp_rms_px, 4.0);
+  EXPECT_EQ(json::parse(
+                made->files.report)["settings"]["initialise"]["max_pnp_rms_px"],
+            4.0);
 }
 
 // The name: RRR zero-padded, then the press's stamp.
