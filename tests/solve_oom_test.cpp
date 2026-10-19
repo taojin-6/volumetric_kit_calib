@@ -148,6 +148,17 @@ TEST(SolveOom, OriginTagFrame) {
     return origin_tag_frame(tagged.scene.cameras, tagged.solution, other,
                             kOriginTag);
   });
+  // With no outlier round the moved views stay, and the world is refused for
+  // its fit.
+  TagFrameOptions keep;
+  keep.outlier_rounds = 0;
+  const core::Result<WorldOrigin> refused = origin_tag_frame(
+      tagged.scene.cameras, tagged.solution, tagged.views, kOriginTag, keep);
+  ASSERT_TRUE(refused.ok() && refused->miss == TagMiss::PoorFit);
+  expect_oom_anywhere([&] {
+    return origin_tag_frame(tagged.scene.cameras, tagged.solution, tagged.views,
+                            kOriginTag, keep);
+  });
 }
 
 TEST(SolveOom, AnchorRig) {
@@ -160,6 +171,10 @@ TEST(SolveOom, AnchorRig) {
   expect_oom_anywhere([&] { return anchor_rig(tagged.solution, origin); });
   expect_oom_anywhere([&] { return anchor_rig(tagged.solution, {}); });
   expect_oom_anywhere([&] { return anchor_rig(RigSolution{}, origin); });
+  // A tag recon's file cannot name.
+  WorldOrigin aruco = origin;
+  aruco.sought.dictionary = MarkerDictionary::ArUco4x4_50;
+  expect_oom_anywhere([&] { return anchor_rig(tagged.solution, aruco); });
 }
 
 TEST(SolveOom, ViewResiduals) {

@@ -178,6 +178,9 @@ TEST(OriginTagFrame, IsExactWithoutNoise) {
         test::value_of(locate(rig, truth_solution(rig, 1), views));
     ASSERT_TRUE(origin.tag) << origin.reason;
     EXPECT_TRUE(origin.reason.empty());
+    EXPECT_EQ(origin.sought.dictionary, kOriginTag.dictionary);
+    EXPECT_EQ(origin.sought.id, kOriginTag.id);
+    EXPECT_EQ(origin.sought.edge_m, kOriginTag.edge_m);
     const TagWorld& w = *origin.tag;
     EXPECT_LT(
         largest_difference(w.reference_to_world, true_reference_to_tag(rig, 1)),
@@ -341,6 +344,7 @@ WorldOrigin missed(const core::Result<WorldOrigin>& result) {
   EXPECT_FALSE(origin.tag);
   EXPECT_FALSE(origin.reason.empty());
   EXPECT_EQ(origin.reference_to_world(), camera::Mat4d(1.0));
+  EXPECT_EQ(origin.sought.dictionary, kOriginTag.dictionary);
   return origin;
 }
 
@@ -400,6 +404,7 @@ TEST(OriginTagFrame, NamesEachMiss) {
   EXPECT_STREQ(to_string(TagMiss::FewCameras), "few_cameras");
   EXPECT_STREQ(to_string(TagMiss::CameraBelowTag), "camera_below_tag");
   EXPECT_STREQ(to_string(TagMiss::Numerical), "numerical");
+  EXPECT_STREQ(to_string(TagMiss::PoorFit), "poor_fit");
   EXPECT_STREQ(to_string(static_cast<TagMiss>(99)), "unknown");
 }
 
@@ -490,8 +495,49 @@ TEST(OriginTagFrame, PlacesTheTagBetweenTwoCamerasThatDisagree) {
     ASSERT_TRUE(origin.tag) << origin.reason;
     EXPECT_EQ(origin.tag->solves, 1);
     EXPECT_NEAR(origin.tag->rms_px, 1.47, 0.05);
+    EXPECT_LT(origin.tag->rms_px, kMaxTagWorldRmsPx);
     for (const TagViewFit& v : origin.tag->views) EXPECT_TRUE(v.used);
   }
+}
+
+// Two cameras that disagree by more, which no outlier round can tell apart:
+// camera 0's corners (5.4, 2.7) px off fit just under 3 px RMS and keep their
+// world; (5.6, 2.8) px off they fit at 3.08 px, and (8, 4) px off at 4.63 px,
+// and the world is refused, the reference staying the origin, its reason
+// giving the RMS.
+TEST(OriginTagFrame, RefusesAWorldThatFitsWorseThanThreePixels) {
+  const std::vector<SyntheticCamera> rig = test::kept_scene_rig(2);
+  const RigSolution solution = truth_solution(rig, 1);
+  for (const std::size_t captures : {1u, 5u, 20u}) {
+    SCOPED_TRACE(std::to_string(captures) + " captures");
+    const auto apart = [&](double dx) {
+      std::vector<TagView> views = see(rig, {}, captures, 0.0);
+      for (TagView& v : views) {
+        if (v.camera != rig[0].id) continue;
+        for (camera::Vec2d& c : v.marker.corners) {
+          c += camera::Vec2d(dx, 0.5 * dx);
+        }
+      }
+      return locate(rig, solution, views);
+    };
+    const TagWorld under = world_of(apart(5.4));
+    EXPECT_GT(under.rms_px, 2.9);
+    EXPECT_LE(under.rms_px, kMaxTagWorldRmsPx);
+    for (const auto& [dx, rms] :
+         {std::pair{5.6, "at 3.08"}, std::pair{8.0, "at 4.6"}}) {
+      SCOPED_TRACE(dx);
+      const WorldOrigin over = missed(apart(dx));
+      EXPECT_EQ(over.miss, TagMiss::PoorFit);
+      EXPECT_TRUE(over.camera.empty());
+      EXPECT_EQ(over.reason.rfind("the tag's corners fit its views at ", 0), 0u)
+          << over.reason;
+      EXPECT_NE(over.reason.find(rms), std::string::npos) << over.reason;
+      EXPECT_NE(over.reason.find(" px RMS, above the 3 px a world takes"),
+                std::string::npos)
+          << over.reason;
+    }
+  }
+  static_assert(kMaxTagWorldRmsPx == 3.0);
 }
 
 // A tag kicked 6 cm in one capture: every view of that capture is dropped
@@ -532,23 +578,14 @@ TEST(OriginTagFrame, DropsTheViewsOfATagMoved) {
   EXPECT_LT(w.worst_px, 3.0);
   expect_fit_of_used_views(w);
 
-  // No outlier rounds drop nothing: the kicked views stay, far off.
+  // No outlier rounds drop nothing: the kicked views stay, and pull the
+  // corners so far off every view that the world is refused.
   TagFrameOptions keep;
   keep.outlier_rounds = 0;
-  const TagWorld kept = world_of(locate(rig, solution, views, keep));
-  EXPECT_EQ(kept.solves, 1);
-  for (const TagViewFit& v : kept.views) {
-    SCOPED_TRACE(v.camera + ", capture " + std::to_string(v.capture));
-    EXPECT_TRUE(v.used);
-    EXPECT_EQ(v.round, 0);
-    EXPECT_EQ(v.bound_px, 0.0);
-    if (v.capture == 2) {
-      EXPECT_GT(v.worst_px, 3.0);
-    }
-  }
-  for (const TagCamera& c : kept.cameras) EXPECT_EQ(c.used, c.views);
-  EXPECT_GT(kept.worst_px, 3.0);
-  expect_fit_of_used_views(kept);
+  const WorldOrigin kept = missed(locate(rig, solution, views, keep));
+  EXPECT_EQ(kept.miss, TagMiss::PoorFit);
+  EXPECT_NE(kept.reason.find(" px RMS, above the 3 px"), std::string::npos)
+      << kept.reason;
 }
 
 // The views' order changes nothing, to the bit.
@@ -680,6 +717,7 @@ TEST(AnchorRig, LeavesTheReferencesWorldAsItIs) {
   const Solved s = solved(4, 20);
   const AnchoredRig rig = test::value_of(anchor(s.solution, WorldOrigin{}));
   EXPECT_EQ(rig.calibration.world.sensor, s.solution.calibration.world.sensor);
+  EXPECT_FALSE(rig.calibration.world.apriltag);
   ASSERT_EQ(rig.calibration.sensors.size(),
             s.solution.calibration.sensors.size());
   for (std::size_t i = 0; i < rig.calibration.sensors.size(); ++i) {
@@ -702,23 +740,36 @@ TEST(AnchorRig, LeavesTheReferencesWorldAsItIs) {
   }
 }
 
+// recon's world at the rig's tag: AprilTag 36h11 id 0, 0.15 m across.
+void expect_rigs_tag(const camera::WorldFrame& world) {
+  EXPECT_TRUE(world.sensor.empty());
+  ASSERT_TRUE(world.apriltag);
+  EXPECT_EQ(world.apriltag->family, "tag36h11");
+  EXPECT_EQ(world.apriltag->id, 0);
+  EXPECT_EQ(world.apriltag->size_m, 0.15);
+}
+
 // With a tag the outputs move into its world: every camera sees every point
 // and board where it did, each sensor is found by its id though the rig's
-// order is not the ids', and the file names no world but validates and reads
-// back.
+// order is not the ids', and the file's world is the tag, which validates
+// and reads back.
 TEST(AnchorRig, MovesTheOutputsIntoTheTagsWorld) {
   const Solved s = solved(4, 20, {0.15, {0.3, 0.1, 0.0}, -50.0});
   ASSERT_TRUE(s.origin.tag) << s.origin.reason;
   const camera::Mat4d w = s.origin.reference_to_world();
   const AnchoredRig rig = test::value_of(anchor(s.solution, s.origin));
 
-  EXPECT_TRUE(rig.calibration.world.sensor.empty());
+  expect_rigs_tag(rig.calibration.world);
   EXPECT_TRUE(camera::validate_array_calibration(rig.calibration).ok());
   const std::string text =
       test::value_of(camera::format_array_calibration(rig.calibration));
+  EXPECT_NE(
+      text.find(R"("world": {"apriltag": {"family": "tag36h11", "id": 0)"),
+      std::string::npos)
+      << text.substr(0, 200);
   const camera::ArrayCalibration back =
       test::value_of(camera::parse_array_calibration(text));
-  EXPECT_TRUE(back.world.sensor.empty());
+  expect_rigs_tag(back.world);
 
   const std::vector<camera::Vec3d> points = {
       {0.0, 0.0, 0.0}, {0.4, -0.3, 2.0}, {-1.0, 0.5, 3.5}};
@@ -779,6 +830,14 @@ TEST(AnchorRig, RefusesWhatItCannotPlace) {
   refused(adrift, s.origin,
           "the solution's board of capture " +
               std::to_string(adrift.boards[0].capture) + " is not finite");
+  // A tag world names its tag in the file: one recon cannot name is refused.
+  WorldOrigin unsought = s.origin;
+  unsought.sought = {};
+  refused(s.solution, unsought, "the tag world's tag sought: origin_tag.");
+  WorldOrigin aruco = s.origin;
+  aruco.sought.dictionary = MarkerDictionary::ArUco4x4_50;
+  refused(s.solution, aruco,
+          "the tag world's tag sought, of DICT_4X4_50, has no AprilTag family");
 }
 
 // The whole chain, for 2 to 5 cameras: the bundle adjustment of 60

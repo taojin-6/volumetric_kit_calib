@@ -169,6 +169,19 @@ VC_CORE_API const char* to_string(TargetKind kind) noexcept;
 ///         @ref MarkerDictionary.
 VC_CORE_API const char* to_string(MarkerDictionary dictionary) noexcept;
 
+/// @brief The AprilTag library's name for a dictionary's family, as recon's
+///        calibration file names a tag world's.
+/// @param dictionary  The dictionary.
+/// @return `"tag16h5"`, `"tag25h9"`, `"tag36h10"` or `"tag36h11"` for an
+///         AprilTag dictionary; empty for any other, ArUco's and `None`
+///         among them, and for a value that is not a @ref MarkerDictionary.
+///
+/// @code
+/// const std::string family = apriltag_family(kOriginTag.dictionary);
+/// // "tag36h11"
+/// @endcode
+VC_CORE_API const char* apriltag_family(MarkerDictionary dictionary) noexcept;
+
 /// @brief The rig's board, as the legacy calibration scripts print it: ChArUco,
 ///        5 x 3 squares (4 x 2 inner corners) of 0.15 m, with 0.112 m markers
 ///        from `DICT_4X4_100` numbered from 0, in the legacy layout.

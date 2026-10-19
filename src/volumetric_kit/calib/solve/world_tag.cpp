@@ -559,6 +559,12 @@ core::Result<WorldOrigin> locate(const std::vector<RigCamera>& cameras,
     world.worst_px = std::max(world.worst_px, fit.worst);
   }
   world.rms_px = std::sqrt(sum / used);
+  if (world.rms_px > kMaxTagWorldRmsPx) {
+    return miss(TagMiss::PoorFit, {},
+                "the tag's corners fit its views at " + number(world.rms_px) +
+                    " px RMS, above the " + number(kMaxTagWorldRmsPx) +
+                    " px a world takes: the cameras disagree on where it is");
+  }
   WorldOrigin origin;
   origin.tag = std::move(world);
   return origin;
@@ -578,6 +584,8 @@ const char* to_string(TagMiss miss) noexcept {
       return "camera_below_tag";
     case TagMiss::Numerical:
       return "numerical";
+    case TagMiss::PoorFit:
+      return "poor_fit";
   }
   return "unknown";
 }
@@ -586,9 +594,13 @@ core::Result<WorldOrigin> origin_tag_frame(
     const std::vector<RigCamera>& cameras, const RigSolution& solution,
     const std::vector<TagView>& views, const OriginTag& tag,
     const TagFrameOptions& options) {
-  return compute::guarded("origin_tag_frame", [&] {
-    return locate(cameras, solution, views, tag, options);
-  });
+  return compute::guarded(
+      "origin_tag_frame", [&]() -> core::Result<WorldOrigin> {
+        VKC_ASSIGN(WorldOrigin origin,
+                   locate(cameras, solution, views, tag, options));
+        origin.sought = tag;
+        return origin;
+      });
 }
 
 core::Result<AnchoredRig> anchor_rig(const RigSolution& solution,
@@ -610,9 +622,21 @@ core::Result<AnchoredRig> anchor_rig(const RigSolution& solution,
 
     AnchoredRig out;
     out.calibration = solution.calibration;
-    // TODO: CB9 names the tag's world here, recon's `world.apriltag` (RE13),
-    // once calib's recon pin has it.
-    if (moved) out.calibration.world.sensor.clear();
+    if (origin.tag) {
+      const OriginTag& tag = origin.sought;
+      VKC_TRY(check_origin_tag(tag).with_context(
+          "anchor_rig: the tag world's tag sought"));
+      const std::string family = apriltag_family(tag.dictionary);
+      if (family.empty()) {
+        return core::Status::invalid_argument(
+            std::string(kAnchor) + "the tag world's tag sought, of " +
+            to_string(tag.dictionary) +
+            ", has no AprilTag family for the calibration's world");
+      }
+      out.calibration.world.sensor.clear();
+      out.calibration.world.apriltag =
+          camera::AprilTagWorld{family, tag.id, tag.edge_m};
+    }
     for (camera::SensorCalibration& sensor : out.calibration.sensors) {
       if (!sensor.color_to_world) {
         return core::Status::invalid_argument(std::string(kAnchor) +

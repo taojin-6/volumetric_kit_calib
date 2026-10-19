@@ -232,6 +232,21 @@ const char* to_string(MarkerDictionary dictionary) noexcept {
   return "unknown";
 }
 
+const char* apriltag_family(MarkerDictionary dictionary) noexcept {
+  switch (dictionary) {
+    case MarkerDictionary::AprilTag16h5:
+      return "tag16h5";
+    case MarkerDictionary::AprilTag25h9:
+      return "tag25h9";
+    case MarkerDictionary::AprilTag36h10:
+      return "tag36h10";
+    case MarkerDictionary::AprilTag36h11:
+      return "tag36h11";
+    default:
+      return "";
+  }
+}
+
 Target legacy_femto_board() noexcept {
   Target board;
   board.kind = TargetKind::ChArUco;
