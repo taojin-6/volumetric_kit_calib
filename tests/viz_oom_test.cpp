@@ -127,7 +127,8 @@ TEST(VizOom, Panels) {
 }
 
 // Calibrate's lines: its progress, and its result's every kind of line --
-// a camera moved and one not, the A/B test decided and refused.
+// a camera moved and one not, the A/B test decided and refused, and the depth
+// checks', made and not.
 TEST(VizOom, CalibratePanels) {
   // Longer than any small-string buffer, so the line allocates.
   expect_oom_anywhere([] {
@@ -159,6 +160,26 @@ TEST(VizOom, CalibratePanels) {
   expect_oom_when_reporting(
       [&] { return calibration_panel({}, metrics, 0, directory, 12, 3.5); },
       Code::InvalidArgument);
+
+  // The depth lines: every kind, not checked, and a refusal.
+  quality::DepthSummary depth;
+  depth.cameras.resize(2);
+  depth.cameras[0].views = 12;
+  depth.cameras[0].verdict = quality::DepthVerdict::Ok;
+  quality::PairCheck failing;
+  failing.agreement = {0, 1, std::nullopt, 5000, 3000, 6.2, 7.1, 9.0};
+  failing.verdict = quality::DepthVerdict::Off;
+  quality::PairCheck passing;
+  passing.agreement = {1, 0, std::nullopt, 5000, 4900, -0.2, 1.1, 2.0};
+  passing.verdict = quality::DepthVerdict::Ok;
+  depth.pairs = {failing, passing};
+  depth.captures = {{5, depth.pairs}};
+  expect_oom_anywhere([&] { return depth_panel(ids, &depth); });
+  const core::Status lost =
+      core::Status::io_error("depth checks: capture 5: the device was lost");
+  expect_oom_anywhere([&] { return depth_panel(ids, nullptr, lost); });
+  expect_oom_when_reporting([&] { return depth_panel({}, &depth); },
+                            Code::InvalidArgument);
 }
 
 // A refusal that runs out of memory reports OutOfMemory, and the editor

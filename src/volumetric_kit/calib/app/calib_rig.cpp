@@ -755,6 +755,11 @@ core::Status show_result(const CalibrateResult& result,
              viz::calibration_panel(result.ids, result.metrics, result.number,
                                     result.directory, result.captures,
                                     result.seconds));
+  VKC_ASSIGN(
+      const std::vector<viz::PanelLine> depth,
+      viz::depth_panel(result.ids, result.depth ? &*result.depth : nullptr,
+                       result.depth_failure));
+  lines.insert(lines.end(), depth.begin(), depth.end());
   std::vector<recon::camera::Mat4d> boards = result.boards_to_world;
   VKC_TRY(placed_cameras(v.cameras, result.color_to_world));
   v.board = std::move(board);
@@ -899,9 +904,13 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
              CloudWorker::create(
                  recon_device, recon_allocator, array.size(),
                  {shared->compute_family(), shared->graphics_family()}));
-  // Calibrate's worker (T4), after the 3D view's, so it goes first.
+  // Calibrate's worker (T4), after the 3D view's, so it goes first, with its
+  // depth checks on recon's device, built now so a failure shows here.
+  VKC_ASSIGN(
+      std::unique_ptr<CalibrateDepth> depth,
+      CalibrateDepth::create(recon_device, recon_allocator, array.size()));
   VKC_ASSIGN(std::unique_ptr<CalibrateWorker> calibrate,
-             CalibrateWorker::create());
+             CalibrateWorker::create(std::move(depth)));
 
   // --- The window's side.
   VKC_ASSIGN(std::unique_ptr<viz::RigMosaic> mosaic,

@@ -175,15 +175,16 @@ TEST(Results, TheReportHasItsSchema) {
   const json doc = json::parse(files.report);
   const nlohmann::ordered_json ordered =
       nlohmann::ordered_json::parse(files.report);
-  EXPECT_EQ(
-      keys_of(ordered),
-      (std::vector<std::string>{
-          "format", "version", "settings", "solver", "tree", "reprojection",
-          "rejections", "transfer", "leave_one_out", "covariance",
-          "sensitivity", "principal_point_ab", "geometry", "depth"}));
+  EXPECT_EQ(keys_of(ordered),
+            (std::vector<std::string>{"format", "version", "settings", "solver",
+                                      "tree", "reprojection", "rejections",
+                                      "transfer", "leave_one_out", "covariance",
+                                      "sensitivity", "principal_point_ab",
+                                      "geometry", "depth", "depth_unchecked"}));
   EXPECT_EQ(doc["format"], "volumetric_kit_calib.report");
   EXPECT_EQ(doc["version"], 1);
-  EXPECT_TRUE(doc["depth"].is_null());  // not checked
+  EXPECT_TRUE(doc["depth"].is_null());  // not checked, nor asked to be
+  EXPECT_TRUE(doc["depth_unchecked"].is_null());
 
   // The settings the metrics were measured with.
   const json& settings = doc["settings"];
@@ -573,17 +574,21 @@ TEST(Results, TheReportHasItsDepthSection) {
     const json& j = depth["cameras"][cams[c].id];
     EXPECT_EQ(keys_of(ordered["cameras"][cams[c].id]),
               (std::vector<std::string>{"views", "ratio", "scale", "offset_mm",
-                                        "angle_deg", "plane"}));
+                                        "angle_deg", "plane", "verdict"}));
     EXPECT_EQ(j["views"], cam.views);
     expect_ratio(j["ratio"], cam.ratio);
     EXPECT_EQ(j["scale"], to_string(cam.scale));
     expect_number(j["offset_mm"], cam.offset_mm);
     expect_number(j["angle_deg"], cam.angle_deg);
     EXPECT_EQ(j["plane"], to_string(cam.plane));
+    EXPECT_EQ(j["verdict"], to_string(cam.verdict));
   }
   EXPECT_EQ(depth["cameras"][cams[1].id]["plane"], "off");
+  EXPECT_EQ(depth["cameras"][cams[1].id]["verdict"], "off");
   EXPECT_EQ(depth["cameras"][cams[2].id]["scale"], "ok");
   EXPECT_EQ(depth["cameras"][cams[0].id]["plane"], "insufficient");
+  EXPECT_EQ(depth["cameras"][cams[0].id]["verdict"], "insufficient");
+  EXPECT_TRUE(doc["depth_unchecked"].is_null());
   ASSERT_EQ(depth["views"].size(), d.views.size());
   for (std::size_t v = 0; v < d.views.size(); ++v) {
     const BoardDepthCheck& view = d.views[v];
@@ -620,6 +625,25 @@ TEST(Results, TheReportHasItsDepthSection) {
   EXPECT_EQ(depth["pairs"][10]["verdict"], "ok");
   EXPECT_EQ(depth["captures"][0]["pairs"][10]["verdict"], "insufficient");
   EXPECT_EQ(depth["captures"][0]["pairs"][10]["overlap"], 880);
+}
+
+// Depth not checked, though it was to be: `depth` is null and
+// `depth_unchecked` says why; a reason given with the checks is not written.
+TEST(Results, TheReportSaysWhyTheDepthWasNotChecked) {
+  const Solved& s = solved();
+  const std::string why = "depth checks: capture 3: fit_planes: lost";
+  const json unchecked =
+      json::parse(value_of(format_results(s.scene.cameras, s.solution,
+                                          s.metrics, nullptr, why))
+                      .report);
+  EXPECT_TRUE(unchecked["depth"].is_null());
+  EXPECT_EQ(unchecked["depth_unchecked"], why);
+  const DepthSummary d = depth_checks();
+  const json checked = json::parse(
+      value_of(format_results(s.scene.cameras, s.solution, s.metrics, &d, why))
+          .report);
+  EXPECT_TRUE(checked["depth"].is_object());
+  EXPECT_TRUE(checked["depth_unchecked"].is_null());
 }
 
 TEST(Results, RefusesDepthChecksThatDoNotFit) {

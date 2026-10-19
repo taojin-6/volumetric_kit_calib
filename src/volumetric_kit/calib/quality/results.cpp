@@ -235,7 +235,8 @@ void settings(Writer& w, const std::vector<std::string>& ids,
   w.close_object();
 }
 
-// A re-solve's refusal: null when it ran.
+// Why a re-solve was refused, or the depth not checked: null when there is
+// no reason.
 void refused(Writer& w, const std::string& why) {
   if (why.empty()) {
     w.null();
@@ -304,6 +305,7 @@ void depth_section(Writer& w, const DepthSummary& d,
     w.key("offset_mm").value(cam.offset_mm);
     w.key("angle_deg").value(cam.angle_deg);
     w.key("plane").value(to_string(cam.plane));
+    w.key("verdict").value(to_string(cam.verdict));
     w.close_object();
   }
   w.close_object();
@@ -354,7 +356,8 @@ void arm(Writer& w, const PrincipalPointArm& a) {
 std::string report_text(const std::vector<std::string>& ids,
                         const solve::RigSolution& solution,
                         const CalibrationMetrics& metrics,
-                        const DepthSummary* depth_checks) {
+                        const DepthSummary* depth_checks,
+                        const std::string& depth_unchecked) {
   const std::size_t k = ids.size();
   Writer w;
   w.open_object();
@@ -559,8 +562,10 @@ std::string report_text(const std::vector<std::string>& ids,
   w.close_object();
   if (depth_checks) {
     depth_section(w.key("depth"), *depth_checks, ids);
+    w.key("depth_unchecked").null();
   } else {
     w.key("depth").null();
+    refused(w.key("depth_unchecked"), depth_unchecked);
   }
   w.close_object();
   return std::move(w).text();
@@ -609,7 +614,7 @@ std::string residuals_text(const std::vector<std::string>& ids,
 core::Result<ResultFiles> format_results(
     const std::vector<solve::RigCamera>& cameras,
     const solve::RigSolution& solution, const CalibrationMetrics& metrics,
-    const DepthSummary* depth) {
+    const DepthSummary* depth, const std::string& depth_unchecked) {
   constexpr const char* kWhat = "format_results";
   return compute::guarded(kWhat, [&]() -> core::Result<ResultFiles> {
     std::vector<std::string> ids;
@@ -624,7 +629,7 @@ core::Result<ResultFiles> format_results(
     if (!calibration.ok()) return calibration.status().with_context(kWhat);
     ResultFiles files;
     files.array_calibration = *std::move(calibration);
-    files.report = report_text(ids, solution, metrics, depth);
+    files.report = report_text(ids, solution, metrics, depth, depth_unchecked);
     files.residuals = residuals_text(ids, solution);
     return files;
   });

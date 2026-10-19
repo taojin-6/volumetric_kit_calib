@@ -377,6 +377,16 @@ TEST(QualityOom, DepthChecks) {
       [&] { return summarize_depth_checks(s.cameras.size(), one, d.pairs); });
   expect_oom_anywhere(
       [&] { return summarize_depth_checks(s.cameras.size(), twice, none); });
+  // The views to fit, and a refusal of them.
+  camera::Mat4d depth_to_color(1.0);
+  depth_to_color[3] = glm::dvec4(0.032, 0.0, 0.004, 1.0);
+  const std::vector<camera::Mat4d> each(s.cameras.size(), depth_to_color);
+  ASSERT_FALSE(depth_views(s.board, s.start, s.solution, each).value().empty());
+  expect_oom_anywhere(
+      [&] { return depth_views(s.board, s.start, s.solution, each); });
+  const std::vector<camera::Mat4d> short_of(1, depth_to_color);
+  expect_oom_anywhere(
+      [&] { return depth_views(s.board, s.start, s.solution, short_of); });
 }
 
 TEST(QualityOom, FormatResults) {
@@ -395,6 +405,10 @@ TEST(QualityOom, FormatResults) {
   misfit.cameras.pop_back();
   expect_oom_anywhere([&] {
     return format_results(s.cameras, s.solution, s.metrics, &misfit);
+  });
+  const std::string why = "depth checks: capture 3: the device was lost";
+  expect_oom_anywhere([&] {
+    return format_results(s.cameras, s.solution, s.metrics, nullptr, why);
   });
 }
 

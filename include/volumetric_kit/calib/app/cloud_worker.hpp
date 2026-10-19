@@ -19,9 +19,6 @@
 /// second preparation. Its buffers are shared with the renderer's queue
 /// family, and the window's frame waits on @ref CloudSnapshot::ready before
 /// its vertices read them.
-// TODO: CA12b gives this worker the depth checks (calib_depth's DepthChecks)
-// and the captured snapshot's JPEG decode (recon's JpegDecoder), as the sole
-// owner of both, with one live set between check captures.
 
 #include <cstddef>
 #include <cstdint>

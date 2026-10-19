@@ -29,6 +29,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The depth checks at Calibrate (DECISIONS.md, 2026-10-16, "Depth checks:
+  the host's geometry over the device's results", amended 2026-10-19):
+  `app::CalibrateDepth`, a depth-only `GpuFramePrep` per camera and calib's
+  `DepthChecks` on recon's device, built as calib_rig starts and owned by
+  `CalibrateWorker` (T4), with which `app::calibrate` checks each kept
+  capture's raw depth after the metrics, one capture at a time: each solved
+  view's board plane, and every ordered pair's agreement, pooled and in each
+  capture, at the solved poses; `CalibrateStage::Checking` counts the
+  captures, and a cancel stops at the next. `CalibrateResult::depth` holds
+  the summary; a failure of the checks is posted, and the results are
+  written without them (`CalibrateResult::depth_failure`, `report.json`'s
+  new `depth_unchecked`). In `quality`: `depth_views`, the views a solved
+  rig's checks fit (`DepthView`); `CameraDepth::verdict`, from
+  `camera_verdict` (fail if the scale or the plane fails, pass if both
+  pass, else insufficient), written as `depth.cameras[id].verdict`. In
+  `viz`: `depth_panel`, the Calibration window's depth lines: each camera's
+  verdict with its ratio, offset and angle, the pairs that pass and fail,
+  each pooled pair that fails with its medians, and each capture with a
+  pair failing on its own.
 - Calibrate in calib_rig (DECISIONS.md, 2026-10-18, "Calibrate (T4)"): C,
   F5 or a Calibrate button runs `CalibrateWorker` on the captures kept, with
   a progress line and Cancel (Escape) while it runs; each result fills the
@@ -218,6 +237,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `app::CalibrateWorker::create` takes the depth checks before the results
+  sink, `create(depth, sink)`, and `app::calibrate` takes them after the
+  progress; `quality::format_results` takes why the depth was not checked
+  after the depth checks.
 - `viz::SessionPanel::calibrate` is gone: it copied
   `quality::SessionSummary::ready`, one of the conditions `app::calibrate_gate`
   checks before Calibrate runs.

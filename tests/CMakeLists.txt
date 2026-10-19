@@ -200,6 +200,13 @@ if(TARGET calib_app)
   target_sources(vc_app_calibrate_test PRIVATE support/allocation_failure.cpp)
   target_include_directories(vc_app_calibrate_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
+  # app: Calibrate's depth checks on a device, over raw depth rendered through
+  # the synthetic depth lens, beside the 3D view's worker across two queue
+  # families, through the core's Vulkan test fixtures (they skip without one).
+  vc_add_test(app_calibrate_depth volumetric_kit::calib_app vc_synthetic_rig
+              volumetric_kit::core_test_support)
+  target_include_directories(vc_app_calibrate_depth_test SYSTEM
+                             PRIVATE "${VC_JSON_INCLUDE_DIR}")
 endif()
 
 # The core calib requires (third_party/CMakeLists.txt): calib's configure

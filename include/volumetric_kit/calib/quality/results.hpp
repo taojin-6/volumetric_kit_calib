@@ -53,13 +53,16 @@
 /// - `depth` (@ref DepthSummary), `null` when the depth was not checked:
 ///   `settings` (its @ref DepthCheckOptions, by their names); `ratio`
 ///   (`count`, `mean`, `sd`) and its `scale` verdict; `cameras` (by id:
-///   `views`, `ratio`, `scale`, `offset_mm`, `angle_deg`, `plane`); `views`
-///   (`camera`, `capture`, `valid`, `members`, `out_of_range`, `inliers`,
-///   `rms_mm`, `ratios`, `offset_mm`, `angle_deg`); `pairs`, pooled, and
-///   `captures` (`capture`, `pairs`), each pair `from`, `to`, `overlap`,
-///   `in_window`, `signed_median_mm`, `median_abs_mm`, `p90_abs_mm`,
-///   `verdict`. Verdicts are @ref to_string(DepthVerdict)'s names; an
-///   invalid plane's `rms_mm` is `null`.
+///   `views`, `ratio`, `scale`, `offset_mm`, `angle_deg`, `plane`,
+///   `verdict`); `views` (`camera`, `capture`, `valid`, `members`,
+///   `out_of_range`, `inliers`, `rms_mm`, `ratios`, `offset_mm`,
+///   `angle_deg`); `pairs`, pooled, and `captures` (`capture`, `pairs`), each
+///   pair `from`, `to`, `overlap`, `in_window`, `signed_median_mm`,
+///   `median_abs_mm`, `p90_abs_mm`, `verdict`. Verdicts are
+///   @ref to_string(DepthVerdict)'s names; an invalid plane's `rms_mm` is
+///   `null`;
+/// - `depth_unchecked`: why `depth` is `null` though the depth was to be
+///   checked, such as the device's failure; `null` otherwise.
 ///
 /// Numbers are written in the shortest form that reads back to the same
 /// double; one that is not finite, or not measured, is `null`, as are a
@@ -113,6 +116,10 @@ struct ResultFiles {
 /// @param metrics   @ref calibration_metrics of it.
 /// @param depth     @ref summarize_depth_checks of its depth; null when the
 ///                  depth was not checked.
+/// @param depth_unchecked  Why the depth was not checked though it was to
+///                  be, which the report writes as `depth_unchecked`; empty,
+///                  written `null`, when it was checked or not asked for.
+///                  Not written with @p depth.
 /// @return The files; `InvalidArgument` for no cameras, a repeated or empty
 ///         id, or a @p solution, @p metrics or @p depth that names a camera
 ///         the rig does not have or has another camera count, or a
@@ -122,6 +129,7 @@ struct ResultFiles {
 VC_QUALITY_API core::Result<ResultFiles> format_results(
     const std::vector<solve::RigCamera>& cameras,
     const solve::RigSolution& solution, const CalibrationMetrics& metrics,
-    const DepthSummary* depth = nullptr);
+    const DepthSummary* depth = nullptr,
+    const std::string& depth_unchecked = {});
 
 }  // namespace volumetric_kit::calib::quality

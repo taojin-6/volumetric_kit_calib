@@ -96,8 +96,8 @@ target_include_directories(calib_app
 # tier's metrics and results files, the capture tier's session records, the
 # detector's board, recon's sensor array, picture readback, frame preparation
 # and Orbbec options, gfx's retire queue and depth-cloud pipeline, and the
-# core's scenario. The window, the shared device, the depth checks'
-# requirements, OpenCV's thread pool and the threads stay private.
+# core's scenario. The window, the shared device, the depth checks' kernels,
+# OpenCV's thread pool and the threads stay private.
 target_link_libraries(
   calib_app
   PUBLIC calib_viz

@@ -261,6 +261,69 @@ core::Result<BoardRegion> board_region(const compute::Board& board,
   });
 }
 
+core::Result<std::vector<DepthView>> depth_views(
+    const compute::Board& board, const solve::InitialRig& start,
+    const solve::RigSolution& solution,
+    const std::vector<Mat4d>& depth_to_color,
+    const DepthCheckOptions& options) {
+  constexpr const char* kWhat = "depth_views";
+  return compute::guarded(kWhat, [&]() -> core::Result<std::vector<DepthView>> {
+    const auto refuse = [&](const std::string& why) {
+      return core::Status::invalid_argument(std::string(kWhat) + ": " + why);
+    };
+    const std::size_t cameras = depth_to_color.size();
+    if (solution.world_to_camera.size() != cameras) {
+      return refuse("a solution of " +
+                    std::to_string(solution.world_to_camera.size()) +
+                    " cameras for " + std::to_string(cameras) +
+                    " depth-to-colour transforms");
+    }
+    // The views left out whole, and each capture's solved board.
+    std::set<std::pair<std::size_t, std::int64_t>> dropped;
+    for (const solve::Rejection& r : solution.rejections) {
+      if (r.corner < 0) dropped.emplace(r.camera, r.capture);
+    }
+    std::map<std::int64_t, Mat4d> boards;
+    for (const solve::SolvedBoard& solved : solution.boards) {
+      boards.emplace(solved.capture,
+                     camera::matrix_from_rodrigues(solved.board_to_world));
+    }
+    std::vector<DepthView> out;
+    for (std::size_t v = 0; v < start.views.size(); ++v) {
+      const solve::ViewRecord& record = start.views[v];
+      if (record.camera >= cameras) {
+        return refuse("view " + std::to_string(v) + " names camera " +
+                      std::to_string(record.camera) + " of " +
+                      std::to_string(cameras));
+      }
+      if (!solve::adjusts(record) ||
+          dropped.count({record.camera, record.capture}) != 0) {
+        continue;
+      }
+      const auto solved = boards.find(record.capture);
+      if (solved == boards.end()) continue;
+      DepthView view;
+      view.camera = record.camera;
+      view.capture = record.capture;
+      view.view = v;
+      const Mat4d board_to_color =
+          camera::matrix_from_rodrigues(
+              solution.world_to_camera[record.camera]) *
+          solved->second;
+      core::Result<BoardRegion> region = board_region(
+          board, board_to_color, depth_to_color[record.camera], options);
+      if (!region.ok()) return region.status().with_context(kWhat);
+      view.region = *std::move(region);
+      out.push_back(std::move(view));
+    }
+    std::stable_sort(
+        out.begin(), out.end(), [](const DepthView& a, const DepthView& b) {
+          return std::tie(a.capture, a.camera) < std::tie(b.capture, b.camera);
+        });
+    return out;
+  });
+}
+
 bool in_board_region(const BoardRegion& region, const Vec3d& ray) noexcept {
   // The ray from the depth camera's centre, in the board frame, meets z = 0.
   const Vec3d origin(region.depth_to_board[3]);
@@ -369,6 +432,16 @@ const char* to_string(DepthVerdict verdict) noexcept {
   return "unknown";
 }
 
+DepthVerdict camera_verdict(DepthVerdict scale, DepthVerdict plane) noexcept {
+  if (scale == DepthVerdict::Off || plane == DepthVerdict::Off) {
+    return DepthVerdict::Off;
+  }
+  if (scale == DepthVerdict::Ok && plane == DepthVerdict::Ok) {
+    return DepthVerdict::Ok;
+  }
+  return DepthVerdict::Insufficient;
+}
+
 core::Result<DepthSummary> summarize_depth_checks(
     std::size_t cameras, const std::vector<BoardDepthCheck>& views,
     const std::vector<PairAgreement>& pairs, const DepthCheckOptions& options) {
@@ -443,6 +516,7 @@ core::Result<DepthSummary> summarize_depth_checks(
       camera.offset_mm = compute::median(offsets[c]);
       camera.angle_deg = compute::median(angles[c]);
       camera.plane = plane_verdict(camera, options);
+      camera.verdict = camera_verdict(camera.scale, camera.plane);
     }
     out.ratio = stats_of(every_ratio);
     out.scale = scale_verdict(out.ratio, options);

@@ -2,11 +2,12 @@
 // Copyright (c) 2026 Tao Jin
 
 // The depth checks' host geometry and verdicts, on device results made here:
-// the board region and its membership rule against the inset outline, a 4K
-// colour lens's corner rays met with an exact plane (a board printed 0.3 %
-// large), a plane 5 mm off and 1 degree turned, the ratios' pairs and order
-// on boards of any size, and the summary's pooling and verdicts over rigs of
-// 1, 3, 4 and 5 cameras; and refusals.
+// the board region and its membership rule against the inset outline, the
+// views a solved rig's checks fit and their regions, a 4K colour lens's
+// corner rays met with an exact plane (a board printed 0.3 % large), a plane
+// 5 mm off and 1 degree turned, the ratios' pairs and order on boards of any
+// size, and the summary's pooling and verdicts over rigs of 1, 3, 4 and 5
+// cameras, each camera's verdict over every scale and plane; and refusals.
 
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
 
@@ -275,6 +276,124 @@ TEST(BoardRegion, MembershipIncludesTheEdges) {
       in_board_region(region, Vec3d(std::nextafter(0.25, 0.0), 0.25, 1.0)));
   EXPECT_FALSE(
       in_board_region(region, Vec3d(0.375, std::nextafter(0.375, 1.0), 1.0)));
+}
+
+// --- The views a solved rig's checks fit ------------------------------------
+
+solve::ViewRecord record_of(std::size_t camera, std::int64_t capture,
+                            solve::ViewFate fate) {
+  solve::ViewRecord record;
+  record.camera = camera;
+  record.capture = capture;
+  record.fate = fate;
+  return record;
+}
+
+// A solved rig of three cameras, the boards of captures 2 and 4 solved, and
+// its views as the solve took them, in no order.
+struct SolvedRig {
+  solve::InitialRig start;
+  solve::RigSolution solution;
+  std::vector<Mat4d> depth_to_color;
+};
+
+SolvedRig solved_rig() {
+  SolvedRig rig;
+  using solve::ViewFate;
+  rig.start.views = {
+      record_of(1, 4, ViewFate::Used),       // 0
+      record_of(0, 4, ViewFate::Ambiguous),  // 1: adjusted too
+      record_of(2, 4, ViewFate::PoorFit),    // 2: left out at the start
+      record_of(0, 2, ViewFate::Used),       // 3
+      record_of(1, 2, ViewFate::Used),       // 4: dropped whole
+      record_of(2, 2, ViewFate::Used),       // 5: a corner of it dropped
+      record_of(1, 9, ViewFate::Used),       // 6: no board solved
+  };
+  for (std::size_t c = 0; c < 3; ++c) {
+    const double k = static_cast<double>(c);
+    rig.solution.world_to_camera.push_back(
+        {Vec3d(0.1 * k, -0.2 + 0.05 * k, 0.03), Vec3d(0.4 * k, 0.1, 2.0 + k)});
+    Mat4d d2c(rotation({1.0, 0.1 * k, 0.0}, -5.0 - k));
+    d2c[3] = glm::dvec4(0.032 + 0.001 * k, -0.002, 0.004, 1.0);
+    rig.depth_to_color.push_back(d2c);
+  }
+  rig.solution.boards = {{2, {Vec3d(0.3, 0.1, -0.2), Vec3d(-0.4, 0.2, 0.0)}},
+                         {4, {Vec3d(-0.1, 0.2, 0.5), Vec3d(0.1, -0.3, 0.2)}}};
+  solve::Rejection whole;
+  whole.camera = 1;
+  whole.capture = 2;
+  whole.corner = -1;
+  whole.reason = solve::Dropped::OutlierView;
+  solve::Rejection corner;
+  corner.camera = 2;
+  corner.capture = 2;
+  corner.corner = 5;
+  rig.solution.rejections = {whole, corner};
+  return rig;
+}
+
+// Each view adjusted and not dropped whole, on a solved board, by capture
+// then camera, its region at the solution's T_cw T_wb exactly, in its own
+// camera's depth.
+TEST(DepthViews, AreTheAdjustedViewsAtTheSolvedBoards) {
+  const compute::Board board = test::femto_board();
+  const SolvedRig rig = solved_rig();
+  const std::vector<DepthView> views =
+      value_of(depth_views(board, rig.start, rig.solution, rig.depth_to_color));
+  struct Want {
+    std::int64_t capture;
+    std::size_t camera;
+    std::size_t view;
+  };
+  const std::vector<Want> want = {{2, 0, 3}, {2, 2, 5}, {4, 0, 1}, {4, 1, 0}};
+  ASSERT_EQ(views.size(), want.size());
+  for (std::size_t i = 0; i < want.size(); ++i) {
+    SCOPED_TRACE(i);
+    const DepthView& v = views[i];
+    EXPECT_EQ(v.capture, want[i].capture);
+    EXPECT_EQ(v.camera, want[i].camera);
+    EXPECT_EQ(v.view, want[i].view);
+    const camera::RodriguesTransform& b =
+        rig.solution.boards[want[i].capture == 2 ? 0 : 1].board_to_world;
+    const Mat4d board_to_color =
+        camera::matrix_from_rodrigues(
+            rig.solution.world_to_camera[want[i].camera]) *
+        camera::matrix_from_rodrigues(b);
+    EXPECT_EQ(v.region.board_to_color, board_to_color);
+    const BoardRegion region = value_of(board_region(
+        board, board_to_color, rig.depth_to_color[want[i].camera]));
+    EXPECT_EQ(v.region.depth_to_board, region.depth_to_board);
+    EXPECT_EQ(v.region.min, region.min);
+    EXPECT_EQ(v.region.max, region.max);
+  }
+  // The inset is the options'.
+  const std::vector<DepthView> inset = value_of(depth_views(
+      board, rig.start, rig.solution, rig.depth_to_color, inset_of(0.05)));
+  EXPECT_EQ(inset.front().region.min, Vec2d(0.05));
+  // Nothing adjusted, nothing to fit.
+  EXPECT_TRUE(value_of(depth_views(board, {}, rig.solution, rig.depth_to_color))
+                  .empty());
+}
+
+TEST(DepthViews, RefusesWhatDoesNotFit) {
+  const compute::Board board = test::femto_board();
+  const SolvedRig rig = solved_rig();
+  const auto refused = [&](const solve::InitialRig& start,
+                           const std::vector<Mat4d>& depth_to_color,
+                           const std::string& says) {
+    core::Result<std::vector<DepthView>> views = std::vector<DepthView>{};
+    EXPECT_NO_THROW(
+        views = depth_views(board, start, rig.solution, depth_to_color));
+    expect_refused(views.status(), "depth_views", says);
+  };
+  refused(rig.start, {rig.depth_to_color[0], rig.depth_to_color[1]},
+          "a solution of 3 cameras for 2 depth-to-colour transforms");
+  solve::InitialRig stranger = rig.start;
+  stranger.views.push_back(record_of(3, 2, solve::ViewFate::Used));
+  refused(stranger, rig.depth_to_color, "view 7 names camera 3 of 3");
+  std::vector<Mat4d> sheared = rig.depth_to_color;
+  sheared[0][1][0] += 0.1;
+  refused(rig.start, sheared, "board_region: depth_to_color");
 }
 
 // --- One view's board against its depth -------------------------------------
@@ -684,7 +803,13 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
   for (std::size_t c = 0; c < want.size(); ++c) {
     EXPECT_EQ(s.cameras[c].scale, want[c].first) << c;
     EXPECT_EQ(s.cameras[c].plane, want[c].second) << c;
+    EXPECT_EQ(s.cameras[c].verdict,
+              camera_verdict(want[c].first, want[c].second))
+        << c;
   }
+  EXPECT_EQ(s.cameras[0].verdict, DepthVerdict::Ok);
+  EXPECT_EQ(s.cameras[3].verdict, DepthVerdict::Insufficient);
+  EXPECT_EQ(s.cameras[4].verdict, DepthVerdict::Off);
   EXPECT_DOUBLE_EQ(s.cameras[0].offset_mm, -9.0);
   EXPECT_DOUBLE_EQ(s.cameras[0].angle_deg, 0.9);
   EXPECT_TRUE(std::isnan(s.cameras[4].offset_mm));
@@ -721,6 +846,26 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
   EXPECT_DOUBLE_EQ(across.cameras[0].offset_mm, 1.5);
   EXPECT_DOUBLE_EQ(across.cameras[0].angle_deg, 0.2);
   EXPECT_EQ(across.cameras[0].plane, DepthVerdict::Ok);
+}
+
+// A camera's verdict over every scale and plane: fail if either fails, pass
+// if both pass, else insufficient.
+TEST(CameraVerdict, FailsIfEitherFailsAndPassesIfBothPass) {
+  constexpr DepthVerdict ok = DepthVerdict::Ok;
+  constexpr DepthVerdict off = DepthVerdict::Off;
+  constexpr DepthVerdict none = DepthVerdict::Insufficient;
+  struct Case {
+    DepthVerdict scale;
+    DepthVerdict plane;
+    DepthVerdict verdict;
+  };
+  for (const Case& c :
+       {Case{ok, ok, ok}, Case{ok, off, off}, Case{ok, none, none},
+        Case{off, ok, off}, Case{off, off, off}, Case{off, none, off},
+        Case{none, ok, none}, Case{none, off, off}, Case{none, none, none}}) {
+    EXPECT_EQ(camera_verdict(c.scale, c.plane), c.verdict)
+        << to_string(c.scale) << ", " << to_string(c.plane);
+  }
 }
 
 // Every ordered pair, by from then to, for rigs of 1, 3, 4 and 5 cameras:

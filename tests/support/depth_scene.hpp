@@ -6,8 +6,8 @@
 /// @file depth_scene.hpp
 /// @brief Depth images rendered in double for the depth checks' tests: a
 ///        prepared depth's pinhole, the surfaces its rays meet, the depth
-///        each pixel sees, and turns to pose them. Its users link
-///        vc_synthetic_rig.
+///        each pixel sees, prepared or raw through a lens, and turns to pose
+///        them. Its users link vc_synthetic_rig.
 
 #include <algorithm>
 #include <cmath>
@@ -23,6 +23,7 @@
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/recon/camera/camera_model.hpp"
 #include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/recon/camera/projection.hpp"
 
 namespace volumetric_kit::calib::test {
 
@@ -139,6 +140,79 @@ inline std::vector<float> render(const Pinhole& p,
     }
   }
   return depth;
+}
+
+/// @brief Each pixel's ray through @p lens at depth 1: the pinhole point the
+///        lens images there, by Newton's method on recon's model
+///        (`camera::distort_rational`), to 1e-13 in normalized coordinates.
+/// @param lens  The lens.
+/// @return The rays, row-major; (0, 0, 0) where the method does not converge.
+inline std::vector<recon::camera::Vec3d> lens_rays(
+    const recon::camera::CameraModel& lens) {
+  const recon::camera::RationalDistortion& k = lens.distortion;
+  const double d[8] = {k.k1, k.k2, k.p1, k.p2, k.k3, k.k4, k.k5, k.k6};
+  const auto distort = [&](double x, double y) {
+    glm::dvec2 out;
+    recon::camera::distort_rational(d, x, y, &out.x, &out.y);
+    return out;
+  };
+  const recon::camera::PinholeIntrinsics& f = lens.intrinsics;
+  std::vector<recon::camera::Vec3d> rays(std::size_t{lens.size.width} *
+                                         lens.size.height);
+  for (std::uint32_t v = 0; v < lens.size.height; ++v) {
+    for (std::uint32_t u = 0; u < lens.size.width; ++u) {
+      const glm::dvec2 target((u - f.cx) / f.fx, (v - f.cy) / f.fy);
+      glm::dvec2 p = target;
+      bool converged = false;
+      for (int i = 0; i < 50 && !converged; ++i) {
+        const glm::dvec2 e = distort(p.x, p.y) - target;
+        if (glm::length(e) < 1e-13) {
+          converged = true;
+          break;
+        }
+        constexpr double h = 1e-7;
+        const glm::dvec2 dx =
+            (distort(p.x + h, p.y) - distort(p.x - h, p.y)) / (2.0 * h);
+        const glm::dvec2 dy =
+            (distort(p.x, p.y + h) - distort(p.x, p.y - h)) / (2.0 * h);
+        const double det = dx.x * dy.y - dy.x * dx.y;
+        if (!(std::abs(det) > 1e-12)) break;
+        p -=
+            glm::dvec2(dy.y * e.x - dy.x * e.y, -dx.y * e.x + dx.x * e.y) / det;
+      }
+      if (converged) rays[std::size_t{v} * lens.size.width + u] = {p, 1.0};
+    }
+  }
+  return rays;
+}
+
+/// @brief The raw depth a camera records of @p surface, as a driver hands it
+///        out: each pixel's ray through its lens (@ref lens_rays) met with
+///        the surface, the depth in units of @p metres_per_unit, rounded.
+/// @param rays             Each pixel's ray, row-major (@ref lens_rays).
+/// @param camera_to_scene  The camera in the scene; rigid.
+/// @param surface          What its rays meet.
+/// @param metres_per_unit  What a unit is (metres).
+/// @param bias_m           Added to every depth measured (metres).
+/// @return Each pixel's raw depth; 0 where it meets nothing, its ray is
+///         unknown, or the depth is past what the units hold.
+inline std::vector<std::uint16_t> render_raw(
+    const std::vector<recon::camera::Vec3d>& rays,
+    const recon::camera::Mat4d& camera_to_scene, const Surface& surface,
+    double metres_per_unit, double bias_m = 0.0) {
+  const recon::camera::Vec3d origin(camera_to_scene[3]);
+  const recon::camera::Mat3d turn(camera_to_scene);
+  std::vector<std::uint16_t> raw(rays.size(), 0);
+  for (std::size_t i = 0; i < rays.size(); ++i) {
+    if (rays[i].z == 0.0) continue;
+    const double z = surface(origin, turn * rays[i]);
+    if (!(z > 0.0)) continue;
+    const double units = std::round((z + bias_m) / metres_per_unit);
+    if (units > 0.0 && units <= 65535.0) {
+      raw[i] = static_cast<std::uint16_t>(units);
+    }
+  }
+  return raw;
 }
 
 }  // namespace volumetric_kit::calib::test

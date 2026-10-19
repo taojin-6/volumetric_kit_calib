@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <condition_variable>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <mutex>
@@ -15,9 +16,11 @@
 #include "volumetric_kit/calib/capture/session_writer.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
+#include "volumetric_kit/calib/depth/depth_checks.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
 #include "volumetric_kit/recon/camera/array_calibration.hpp"
+#include "volumetric_kit/recon/sensor/utils/gpu_frame_prep.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -25,6 +28,7 @@ namespace {
 
 namespace camera = recon::camera;
 namespace fs = std::filesystem;
+namespace sensor = recon::sensor;
 using Clock = std::chrono::steady_clock;
 using ResultPtr = std::shared_ptr<const CalibrateResult>;
 
@@ -81,6 +85,145 @@ core::Result<std::vector<Observation>> solve_views(const KeptCaptures& kept) {
   return views;
 }
 
+// What the depth checks share over a Calibrate's captures: the solved rig,
+// the views to fit, and what is measured so far.
+struct DepthRun {
+  const KeptCaptures& kept;
+  const compute::Board& board;
+  const std::vector<Observation>& views;  // as the solve took them
+  std::vector<quality::DepthView> fitted;
+  // Each camera's depth in the solve's world, and beside its colour camera.
+  std::vector<camera::Mat4d> depth_to_world;
+  std::vector<camera::Mat4d> depth_to_color;
+  std::unique_ptr<depth::AgreementHistograms> pooled;
+  std::vector<quality::BoardDepthCheck> checked;
+  std::vector<quality::PairAgreement> pairs;
+};
+
+// One kept capture's depth checks: its cameras' raw depth prepared in one
+// batch, its views' planes fitted and their corners met with them, and its
+// pairs added to the pooled histograms and to its own. Its frames are let go
+// as it returns.
+core::Status check_capture(std::vector<sensor::GpuFramePrep>& preps,
+                           depth::DepthChecks& checks, DepthRun& run,
+                           const KeptCapture& capture) {
+  const KeptCaptures& kept = run.kept;
+  const std::size_t n = kept.cameras.size();
+  const quality::DepthCheckOptions options;
+  if (capture.depth.size() != n) {
+    return core::Status::invalid_argument(std::to_string(capture.depth.size()) +
+                                          " depth images for " +
+                                          std::to_string(n) + " cameras");
+  }
+  std::vector<std::optional<sensor::RgbdFrame>> frames(n);
+  for (std::size_t c = 0; c < n; ++c) {
+    const std::shared_ptr<const std::vector<std::uint16_t>>& raw =
+        capture.depth[c];
+    const std::optional<camera::CameraModel>& lens = kept.sensors[c].depth;
+    if (raw == nullptr || raw->empty() || !lens) continue;
+    const std::size_t pixels =
+        std::size_t{lens->size.width} * lens->size.height;
+    if (raw->size() != pixels) {
+      return core::Status::invalid_argument(
+          "camera " + kept.cameras[c].id + "'s depth has " +
+          std::to_string(raw->size()) + " samples for its " +
+          std::to_string(lens->size.width) + " x " +
+          std::to_string(lens->size.height) + " depth camera");
+    }
+    // Read where the capture keeps it; at the colour camera's origin, as
+    // the pose comes from the solve (run.depth_to_world).
+    sensor::RgbdFrame& frame = frames[c].emplace();
+    frame.depth = raw->data();
+    frame.pixels = raw;
+    frame.metres_per_unit = kept.depth_mode.metres_per_unit;
+    frame.depth_camera = *lens;
+    frame.min_depth = kept.depth_mode.min_m;
+    frame.max_depth = kept.depth_mode.max_m;
+    frame.depth_to_color = run.depth_to_color[c];
+  }
+  VKC_ASSIGN(const std::vector<std::optional<sensor::DeviceFrame>> prepared,
+             sensor::GpuFramePrep::prepare_batch(preps, frames));
+  std::vector<std::optional<depth::DepthImage>> images(n);
+  for (std::size_t c = 0; c < n; ++c) {
+    if (!prepared[c]) continue;
+    const recon::DepthCameraParams& k = prepared[c]->depth_camera;
+    depth::DepthImage& image = images[c].emplace();
+    image.depth = prepared[c]->depth.get();
+    image.intrinsics = {k.fx, k.fy, k.cx, k.cy};
+    image.size = {k.width, k.height};
+    image.min_depth_m = k.min_depth;
+    image.max_depth_m = k.max_depth;
+    image.depth_to_world = run.depth_to_world[c];
+    image.depth_to_color = run.depth_to_color[c];
+  }
+
+  std::vector<depth::PlaneRegion> regions;
+  std::vector<const quality::DepthView*> fitted;
+  for (const quality::DepthView& view : run.fitted) {
+    if (view.capture != capture.index || !images[view.camera]) continue;
+    regions.push_back({*images[view.camera], view.region});
+    fitted.push_back(&view);
+  }
+  VKC_ASSIGN(const std::vector<quality::DepthPlane> planes,
+             checks.fit_planes(regions, options));
+  for (std::size_t i = 0; i < fitted.size(); ++i) {
+    VKC_ASSIGN(quality::BoardDepthCheck check,
+               quality::board_depth_check(kept.cameras, run.board,
+                                          run.views[fitted[i]->view],
+                                          fitted[i]->region, planes[i]));
+    run.checked.push_back(std::move(check));
+  }
+  VKC_TRY(checks.accumulate(*run.pooled, images));
+  VKC_ASSIGN(const std::unique_ptr<depth::AgreementHistograms> own,
+             checks.histograms(n, options));
+  VKC_TRY(checks.accumulate(*own, images));
+  VKC_ASSIGN(const std::vector<quality::PairAgreement> pairs,
+             checks.summarize(*own, capture.index));
+  run.pairs.insert(run.pairs.end(), pairs.begin(), pairs.end());
+  return {};
+}
+
+// The depth checks of every kept capture against the solved rig
+// (CalibrateDepth), each colour camera at `color_to_world`, in rig order.
+// `step` is called with the captures checked, before each and after the last.
+core::Result<quality::DepthSummary> check_depth(
+    std::vector<sensor::GpuFramePrep>& preps, depth::DepthChecks& checks,
+    const KeptCaptures& kept, const compute::Board& board,
+    const std::vector<Observation>& views, const solve::InitialRig& start,
+    const solve::RigSolution& solution,
+    const std::vector<camera::Mat4d>& color_to_world,
+    const std::function<void(std::size_t)>& step) {
+  const std::size_t n = kept.cameras.size();
+  const quality::DepthCheckOptions options;
+  if (preps.size() != n || kept.sensors.size() != n) {
+    return core::Status::invalid_argument(
+        "checks for " + std::to_string(preps.size()) + " cameras and " +
+        std::to_string(kept.sensors.size()) + " sensors for a rig of " +
+        std::to_string(n));
+  }
+  DepthRun run{kept, board, views, {}, {}, {}, nullptr, {}, {}};
+  for (std::size_t c = 0; c < n; ++c) {
+    const camera::Mat4d& depth_to_color = kept.sensors[c].depth_to_color;
+    run.depth_to_color.push_back(depth_to_color);
+    run.depth_to_world.push_back(color_to_world[c] * depth_to_color);
+  }
+  VKC_ASSIGN(run.fitted, quality::depth_views(board, start, solution,
+                                              run.depth_to_color, options));
+  VKC_ASSIGN(run.pooled, checks.histograms(n, options));
+  const std::size_t captures = kept.captures.size();
+  for (std::size_t k = 0; k < captures; ++k) {
+    step(k);
+    const KeptCapture& capture = *kept.captures[k];
+    VKC_TRY(check_capture(preps, checks, run, capture)
+                .with_context("capture " + std::to_string(capture.index)));
+  }
+  step(captures);
+  VKC_ASSIGN(const std::vector<quality::PairAgreement> pooled,
+             checks.summarize(*run.pooled));
+  run.pairs.insert(run.pairs.end(), pooled.begin(), pooled.end());
+  return quality::summarize_depth_checks(n, run.checked, run.pairs, options);
+}
+
 }  // namespace
 
 const char* to_string(CalibrateStage stage) noexcept {
@@ -89,14 +232,57 @@ const char* to_string(CalibrateStage stage) noexcept {
       return "solving";
     case CalibrateStage::Measuring:
       return "measuring";
+    case CalibrateStage::Checking:
+      return "checking depth";
     case CalibrateStage::Writing:
       return "writing";
   }
   return "unknown";
 }
 
+struct CalibrateDepth::State {
+  std::vector<sensor::GpuFramePrep> preps;  // one per camera
+  std::unique_ptr<depth::DepthChecks> checks;
+};
+
+core::Result<std::unique_ptr<CalibrateDepth>> CalibrateDepth::create(
+    core::Device& device, core::Allocator& allocator, std::size_t cameras) {
+  constexpr const char* kWhat = "CalibrateDepth::create";
+  return compute::guarded(
+      kWhat, [&]() -> core::Result<std::unique_ptr<CalibrateDepth>> {
+        if (cameras == 0) {
+          return core::Status::invalid_argument(std::string(kWhat) +
+                                                ": no camera");
+        }
+        auto state = std::make_unique<State>();
+        state->preps.reserve(cameras);
+        for (std::size_t c = 0; c < cameras; ++c) {
+          core::Result<sensor::GpuFramePrep> prep =
+              sensor::GpuFramePrep::create(device, allocator);
+          if (!prep.ok()) return prep.status().with_context(kWhat);
+          state->preps.push_back(*std::move(prep));
+        }
+        core::Result<std::unique_ptr<depth::DepthChecks>> checks =
+            depth::DepthChecks::create(device, allocator);
+        if (!checks.ok()) return checks.status().with_context(kWhat);
+        state->checks = *std::move(checks);
+        return std::unique_ptr<CalibrateDepth>(
+            new CalibrateDepth(std::move(state)));
+      });
+}
+
+CalibrateDepth::CalibrateDepth(std::unique_ptr<State> state) noexcept
+    : state_(std::move(state)) {}
+
+CalibrateDepth::~CalibrateDepth() = default;
+
+std::size_t CalibrateDepth::cameras() const noexcept {
+  return state_->preps.size();
+}
+
 core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
-                                        const CalibrateCallback& progress) {
+                                        const CalibrateCallback& progress,
+                                        CalibrateDepth* depth) {
   constexpr const char* kWhat = "calibrate";
   return compute::guarded(kWhat, [&]() -> core::Result<CalibrateResult> {
     const Clock::time_point began = Clock::now();
@@ -129,9 +315,6 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
               report(CalibrateStage::Measuring, done, total);
             });
     if (!metrics.ok()) return in(metrics.status());
-    core::Result<quality::ResultFiles> files =
-        quality::format_results(kept.cameras, *solution, *metrics);
-    if (!files.ok()) return in(files.status());
 
     CalibrateResult out;
     out.reference = kept.reference;
@@ -148,6 +331,36 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
       out.ids.push_back(cam.id);
       out.color_to_world.push_back(*sensor->color_to_world);
     }
+    if (depth != nullptr) {
+      // A throw from the progress (a stop) stops the run; what the checks
+      // throw is their failure.
+      std::exception_ptr stopped;
+      const auto step = [&](std::size_t done) {
+        try {
+          report(CalibrateStage::Checking, done, out.captures);
+        } catch (...) {
+          stopped = std::current_exception();
+          throw;
+        }
+      };
+      constexpr const char* kChecks = "depth checks";
+      core::Result<quality::DepthSummary> checked = compute::guarded(
+          kChecks, [&]() -> core::Result<quality::DepthSummary> {
+            return check_depth(depth->state_->preps, *depth->state_->checks,
+                               kept, *board, *views, *start, *solution,
+                               out.color_to_world, step);
+          });
+      if (stopped) std::rethrow_exception(stopped);
+      if (checked.ok()) {
+        out.depth = *std::move(checked);
+      } else {
+        out.depth_failure = checked.status().with_context(kChecks);
+      }
+    }
+    core::Result<quality::ResultFiles> files = quality::format_results(
+        kept.cameras, *solution, *metrics, out.depth ? &*out.depth : nullptr,
+        out.depth_failure.ok() ? std::string() : out.depth_failure.message());
+    if (!files.ok()) return in(files.status());
     for (const solve::SolvedBoard& solved : solution->boards) {
       out.boards_to_world.push_back(
           camera::matrix_from_rodrigues(solved.board_to_world));
@@ -264,6 +477,7 @@ struct CalibrateWorker::State {
   ResultSink sink;  // each results file's writer; empty for the default
 
   // The worker's thread's alone.
+  std::unique_ptr<CalibrateDepth> depth;  // null checks no depth
   int next_number = 0;  // the lowest results number not yet written
 
   // Shared.
@@ -293,13 +507,19 @@ struct CalibrateWorker::State {
   // none.
   core::Result<ResultPtr> run_one(const KeptCaptures& kept,
                                   std::chrono::system_clock::time_point when) {
-    core::Result<CalibrateResult> made =
-        calibrate(kept, [this](const CalibrateProgress& now) { step(now); });
+    core::Result<CalibrateResult> made = calibrate(
+        kept, [this](const CalibrateProgress& now) { step(now); }, depth.get());
     {
-      // A success is decided here: once writing, cancel() is refused.
+      // A success is decided here: once writing, cancel() is refused. Its
+      // depth checks' failure is posted, and it is written without them.
       const std::lock_guard<std::mutex> lock(mutex);
       if (cancelled) return ResultPtr();
-      if (made.ok()) at = {CalibrateStage::Writing, 0, 0, 0.0};
+      if (made.ok()) {
+        at = {CalibrateStage::Writing, 0, 0, 0.0};
+        if (!made->depth_failure.ok()) {
+          errors.push_back(made->depth_failure.with_context("Calibrate"));
+        }
+      }
     }
     if (!made.ok()) return made.status().with_context("Calibrate");
     core::Result<WrittenResults> written =
@@ -350,12 +570,13 @@ struct CalibrateWorker::State {
 };
 
 core::Result<std::unique_ptr<CalibrateWorker>> CalibrateWorker::create(
-    ResultSink sink) {
+    std::unique_ptr<CalibrateDepth> depth, ResultSink sink) {
   return compute::guarded(
       "CalibrateWorker::create",
       [&]() -> core::Result<std::unique_ptr<CalibrateWorker>> {
         auto state = std::make_unique<State>();
         state->sink = std::move(sink);
+        state->depth = std::move(depth);
         std::unique_ptr<CalibrateWorker> worker(
             new CalibrateWorker(std::move(state)));
         try {

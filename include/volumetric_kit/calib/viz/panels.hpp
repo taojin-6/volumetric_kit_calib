@@ -8,7 +8,7 @@
 ///        arrived, what the captures kept add up to and how much of the
 ///        origin tag they hold, where a capture stands, and the stage
 ///        timings; and Calibrate's: how far it has got, and what its result
-///        is worth.
+///        and its depth checks are worth.
 ///
 /// Each panel is a model -- lines of text, each in a @ref Tone -- built from
 /// host data alone (the quality tier's checks and metrics, recon's counters,
@@ -28,6 +28,7 @@
 #include "volumetric_kit/calib/core/view_check.hpp"
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
+#include "volumetric_kit/calib/quality/depth_checks.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
 #include "volumetric_kit/calib/viz/export.hpp"
@@ -317,12 +318,51 @@ VC_VIZ_API core::Result<PanelLine> calibrate_progress_line(
 ///                              result.seconds));
 /// draw_panel_lines("calibration", lines);
 /// @endcode
-// TODO: CB6 adds the depth checks' lines, and CB9 the world's line and each
-// camera's height in the origin tag's world.
+// TODO: CB9 adds the world's line and each camera's height in the origin
+// tag's world.
 VC_VIZ_API core::Result<std::vector<PanelLine>> calibration_panel(
     const std::vector<std::string>& ids,
     const quality::CalibrationMetrics& metrics, int number,
     const std::string& directory, std::size_t captures, double seconds);
+
+/// @brief The Calibration window's depth lines, after
+///        @ref calibration_panel's: what each camera's depth and each ordered
+///        pair's agreement say of the solved rig (`quality::DepthSummary`).
+///
+/// A verdict reads `pass` (green), `fail` (red) or `insufficient` (muted), a
+/// pair's `no overlap` for insufficient; a figure that is not a number shows
+/// as `-`. Lines, in order:
+/// - `depth`, `not checked` (muted), or `not checked: <why>` (red) for a
+///   failure, when the depth was not checked; else
+/// - `depth scale`: the board's scale over every camera, its verdict, mean
+///   ratio, its standard deviation and the ratios;
+/// - `depth <id>` for each camera: its verdict, its views with a plane, and
+///   its ratio, offset and angle;
+/// - `depth pairs`: of the pairs pooled over every capture, those that pass,
+///   fail and have no overlap (green when every one passes, red when one
+///   fails), and the largest signed median, naming its pair;
+/// - `pair <from> -> <to>` for each pooled pair that fails (red): its signed
+///   median, its median magnitude and its samples in the window;
+/// - `capture <k>` for each capture with pairs that fail on their own
+///   (amber): those pairs.
+/// @param ids      Each camera's id, in the rig's order.
+/// @param depth    The depth checks; null when the depth was not checked.
+/// @param failure  Why it was not checked though it was to be; OK when it
+///                 was not asked for.
+/// @return The lines; `InvalidArgument` for checks of another number of
+///         cameras than @p ids, or a pair naming a camera they do not have;
+///         or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(std::vector<PanelLine> lines, calibration_panel(...));
+/// VKC_ASSIGN(const std::vector<PanelLine> depth,
+///            depth_panel(result.ids, result.depth ? &*result.depth : nullptr,
+///                        result.depth_failure));
+/// lines.insert(lines.end(), depth.begin(), depth.end());
+/// @endcode
+VC_VIZ_API core::Result<std::vector<PanelLine>> depth_panel(
+    const std::vector<std::string>& ids, const quality::DepthSummary* depth,
+    const core::Status& failure = {});
 
 /// @brief The live stages' timings as gfx's metrics panel takes them.
 /// @param stages  The stages timed (poll, readback, detect, tiles, ...).

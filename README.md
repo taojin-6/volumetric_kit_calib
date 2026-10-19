@@ -120,9 +120,10 @@ renderer.
   capture at full resolution, writes it and keeps it in memory for
   Calibrate, and the window draws and never waits
   ([DECISIONS.md](DECISIONS.md#2026-10-16--calib_rigs-live-view-and-capture)).
-  Calibrate's worker solves and measures the kept captures and writes a
-  results directory; each result fills the window with the live points at
-  the solved poses, and a key goes back to the images
+  Calibrate's worker solves and measures the kept captures, checks their raw
+  depth against the solved rig on the GPU, pass or fail per camera and per
+  pair, and writes a results directory; each result fills the window with
+  the live points at the solved poses, and a key goes back to the images
   ([DECISIONS.md](DECISIONS.md#2026-10-18--calibrate-t4)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.

@@ -84,27 +84,33 @@ steps, the numbering and the write order).
   a recalibration owes nothing to the last.
 - **The reference camera's gauge throughout.** The world at the floor tag is
   applied last, to the outputs only (`solve::anchor_rig`), so the metrics'
-  re-solves, the leave-one-out moves and the covariance keep the gauge they
-  were measured in.
+  re-solves, the leave-one-out moves, the covariance and the depth checks
+  keep the gauge they were measured in.
+- **Depth at the solved poses, in double.** Each depth camera is placed at
+  its solved colour pose times recon's `depth_to_color`, composed in double;
+  T4 prepares the raw depth with the colour camera at the origin, as T2
+  does, and never reads the float pose recon bakes into a prepared frame.
+  The raw depth's unit and range are the session's depth mode's.
 - **On disk before it is shown.** The window never shows a result whose files
-  are missing, and nothing is written until the solve and the metrics are
-  done, so a refusal or a cancel leaves nothing behind. The directory's
-  stamp is the press's, in the session's own format (the user's call).
+  are missing, and nothing is written until the solve, the metrics and the
+  depth checks are done, so a refusal or a cancel leaves nothing behind. The
+  directory's stamp is the press's, in the session's own format (the user's
+  call).
 - **Colour lenses and poses only** in the results' calibration file (the
   user's call): `SensorArray` reads only the poses, and the session's
   factory file already has the depth models.
-- **Cancelled between re-solves.** `bundle_adjust` is not interruptible, so a
-  cancel takes effect before the metrics or after a leave-one-out re-solve;
-  the writing, a few files, is not cancelled.
+- **Cancelled between steps.** `bundle_adjust` is not interruptible, so a
+  cancel takes effect before the metrics, after a leave-one-out re-solve or
+  between two captures' depth checks; the writing, a few files, is not
+  cancelled.
 - **The images, then the cloud** (the user's calls). calib_rig
   shows the camera images until a result, then the live points at the solved
   poses in the whole window, and a key goes back to the images to capture
   more and recalibrate (`app/rig_mode.hpp`). Calibrate is C or F5 and Escape
   cancels; the keys the clicker's extra buttons send are not known, so the
   capture and drop keys stay as they were.
-- **Still to come:** the depth checks of the kept raw depth (CB6) and the
-  world at the origin tag in Calibrate's results and the 3D view (CB9, over
-  `solve/world_tag.hpp`); each is a `TODO:` where it lands.
+- **Still to come:** the world at the origin tag in Calibrate's results and
+  the 3D view (CB9, over `solve/world_tag.hpp`), a `TODO:` where it lands.
 
 ## 2026-10-18 — The origin tag
 
@@ -168,7 +174,7 @@ camera's depth as points, its frusta, the world's axes and the solved boards.
   composes the two with its poses. No pixel crosses the host; the lines are
   a few KB made on the host from the cameras' models, uploaded when they
   change.
-- **A worker of its own (T2)** alone owns the preparations, one per camera,
+- **A worker of its own (T2)** alone owns its preparations, one per camera,
   on recon's queue family. The live worker offers it each set it reads back;
   it prepares the newest, every `live_every`-th, lets the set go at once,
   and publishes a snapshot, newest wins. Frozen, hidden or minimized, it
@@ -197,10 +203,12 @@ camera's depth as points, its frusta, the world's axes and the solved boards.
   `largePoints`, merged with recon's and calib_depth's needs
   (`rig_requirements`), and is made without it, with one-pixel points, on a
   GPU that lacks it.
+- **Live sets only** (amended 2026-10-19). The depth checks are Calibrate's
+  (the 2026-10-16 entry, "Depth checks: the host's geometry over the
+  device's results"), so T2 prepares no captured set.
 - **Still to come:** the 3D view's settings in the scenario (the core's
-  CO5), the cameras' names over the view, which want a world-anchored label
-  in gfx, and the checks' and captured cloud's jobs in T2 (CA12b); each is a
-  `TODO:` where it lands.
+  CO5) and the cameras' names over the view, which want a world-anchored
+  label in gfx; each is a `TODO:` where it lands.
 
 ## 2026-10-17 — OpenCV 5 is required
 
@@ -364,11 +372,20 @@ calib measures the depth; recon only prepares it, and gfx draws it
   board, so it checks the depth against the printed board. The plane's offset
   and angle do depend on it, so they check `depth_to_color` and the depth's
   units.
+- **At Calibrate, on its worker (T4)** (amended 2026-10-19, the user's
+  calls). T4 owns a depth-only preparation per camera and the checks
+  (`app::CalibrateDepth`), built as calib_rig starts, and checks each kept
+  capture's raw depth in turn after the metrics; T2 is unchanged, so no
+  captured cloud is prepared and no JPEG decoded for the checks. A camera's
+  verdict joins its scale's and its plane's (`quality::camera_verdict`).
 - **Verdicts** rest on means and medians, pooled over every capture checked
-  (a capture's own pairs on that capture's), never on the p90, which
-  resampling inflates. The bounds are first values, to be revisited from a
-  real session (H5). The scale's 0.2 % catches a board printed 0.3 % large,
-  as the 2026-09-29 board was.
+  (a capture's own pairs on that capture's, so the panel names the capture
+  where a pair fails), never on the p90, which resampling inflates. The
+  bounds are first values, to be revisited from a real session (H5), and
+  calib_rig takes `DepthCheckOptions{}` as they are, with no setting. The
+  scale's 0.2 % catches a board printed 0.3 % large, as the 2026-09-29 board
+  was. The panel shows each figure beside its verdict, since the plane's
+  bound can fail a good camera (the `TODO:` in `depth/depth_checks.hpp`).
 - **One `DepthCheckOptions`** goes to every step, the region's inset
   included, so the settings the report records are the ones used.
 - **`report.json`** gains `depth`, which is `null` when the depth was not
