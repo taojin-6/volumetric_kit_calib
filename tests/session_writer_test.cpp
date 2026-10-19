@@ -603,12 +603,12 @@ TEST(SessionWriter, CaptureJsonHoldsWhatWasGivenExactly) {
 }
 
 // The origin tag a camera found, in numbers that read back exactly, named by
-// the session's tag; null for a camera that found none. session.json records
-// the tag it was given.
+// the session's tag, not kOriginTag; null for a camera that found none.
+// session.json records the tag it was given.
 TEST(SessionWriter, WritesEachCamerasOriginTagExactly) {
   const ScratchDir dir;
   SessionInfo info = make_info(dir);
-  info.origin_tag = {MarkerDictionary::AprilTag36h11, 5, 0.2005};
+  info.origin_tag = {MarkerDictionary::ArUco6x6_250, 5, 0.2005};
   auto writer = make_writer(info);
   ASSERT_TRUE(writer);
   CaptureJob job = make_job();
@@ -623,12 +623,12 @@ TEST(SessionWriter, WritesEachCamerasOriginTagExactly) {
   finish(*writer);
 
   EXPECT_EQ(parse(info.directory + "/session.json")["origin_tag"],
-            json::parse(R"({"dictionary": "DICT_APRILTAG_36h11", "id": 5,
+            json::parse(R"({"dictionary": "DICT_6X6_250", "id": 5,
                             "edge_m": 0.2005})"));
   const json cameras = parse(info.directory + "/captures/000.json")["cameras"];
   EXPECT_TRUE(cameras["CL2A14100A4"]["origin_tag"].is_null());
   const json& written = cameras["CL2A141000N"]["origin_tag"];
-  EXPECT_EQ(written["dictionary"], "DICT_APRILTAG_36h11");
+  EXPECT_EQ(written["dictionary"], "DICT_6X6_250");
   EXPECT_EQ(written["id"], 5);
   ASSERT_EQ(written["corners_px"].size(), 4u);
   for (std::size_t k = 0; k < 4; ++k) {
