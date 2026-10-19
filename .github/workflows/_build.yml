@@ -157,7 +157,7 @@ jobs:
       # Keep the ref at calib's recon pin (third_party/CMakeLists.txt).
       - name: Install the Orbbec SDK
         if: inputs.rig
-        uses: taojin-6/volumetric_kit_recon/.github/actions/install-orbbec-sdk@42f11ac84c0fa31f5189f6b09a1d2c63705564a4
+        uses: taojin-6/volumetric_kit_recon/.github/actions/install-orbbec-sdk@ca4b94c77a167f6176d83ebbf2dc1a11d2cae475
 
       # The installed versions of the leg's formulae and of their dependencies,
       # so the first run after a brew upgrade builds the dependency tree afresh

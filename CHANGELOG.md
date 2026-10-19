@@ -269,12 +269,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   test every OpenCV tier on it.
 - `initialise` places the board of a capture whose views are all ambiguous,
   from those views, so the adjustment takes them.
-- recon is pinned at `42f11ac` (recon main, with its #228; its #245, whose
-  exported `pinhole.glsl` the depth tier's kernels include; and its #246,
-  whose `GpuFramePrepConfig::depth_queue_families` shares a prepared frame's
-  depth with the renderer's queue family), and CI's Orbbec SDK action with
-  it. `cv_pose` now converts through recon's `rodrigues_from_matrix`, accurate
-  where `cv::Rodrigues` returns zero (below about 1e-5 rad).
+- recon is pinned at `ca4b94c` (recon main, with its #228; its #245, whose
+  exported `pinhole.glsl` the depth tier's kernels include; its #246, whose
+  `GpuFramePrepConfig::depth_queue_families` shares a prepared frame's depth
+  with the renderer's queue family; and its #254, whose
+  `WorldFrame::apriltag` names a tag world in the calibration file), and
+  CI's Orbbec SDK action with it. `cv_pose` now converts through recon's
+  `rodrigues_from_matrix`, accurate where `cv::Rodrigues` returns zero (below
+  about 1e-5 rad).
 - calib requires `volumetric_kit_core` 0.6.1 or newer (was 0.1.0), with its
   vulkan tier under `VC_WITH_RIG`, and 0.11.0, with its config tier, for
   `calib_app`, and pins core main at 0.11.0. The installed package finds the
