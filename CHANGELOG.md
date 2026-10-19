@@ -181,6 +181,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `report.json` writes `solver.seconds` to the microsecond, with six
+  decimals, so a report's length does not vary with its solve's time.
 - `quality::SessionOptions::ready_from` defaults to
   `solve::BundleAdjustOptions{}.min_shared`, the adjustment's own guard (3,
   as before).

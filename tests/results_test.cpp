@@ -232,7 +232,7 @@ TEST(Results, TheReportHasItsSchema) {
   EXPECT_EQ(solver["initial_energy"].get<double>(), solution.initial_energy);
   EXPECT_EQ(solver["final_energy"].get<double>(), solution.final_energy);
   EXPECT_EQ(solver["variance"].get<double>(), solution.variance);
-  EXPECT_EQ(solver["seconds"].get<double>(), solution.seconds);
+  EXPECT_NEAR(solver["seconds"].get<double>(), solution.seconds, 5e-7);
   ASSERT_EQ(doc["tree"].size(), solution.links.size());
   for (std::size_t l = 0; l < solution.links.size(); ++l) {
     const solve::PlacedLink& link = solution.links[l];
@@ -672,6 +672,40 @@ TEST(Results, TheReportWritesNullForANumberNotFiniteAndARefusal) {
   EXPECT_EQ(doc["principal_point_ab"]["refused"],
             "bundle_adjust: did not converge");
   EXPECT_TRUE(doc["rejections"]["views_left_out"][0]["pnp_rms_px"].is_null());
+}
+
+// The solve's time is written to the microsecond with six decimals, so a
+// report is as long however long its solve took under 10 s, and a run's
+// allocations do not depend on it (Calibrate.OutOfMemoryAnywhereFailsTheRun).
+// A time negative, not finite or of a billion seconds is null.
+TEST(Results, TheSolveTimeHasSixDecimals) {
+  const Solved& s = solved();
+  const auto report_at = [&](double seconds) {
+    solve::RigSolution solution = s.solution;
+    solution.seconds = seconds;
+    return value_of(format_results(s.scene.cameras, solution, s.metrics))
+        .report;
+  };
+  const auto written = [](const std::string& report) {
+    const std::string key = "\"seconds\": ";
+    const std::size_t at = report.find(key) + key.size();
+    return report.substr(at, report.find('\n', at) - at);
+  };
+  const std::string report = report_at(0.000233791);
+  EXPECT_EQ(written(report), "0.000234");
+  for (const double seconds : {0.0, 0.00015, 0.0000004, 1.5, 9.9999994}) {
+    SCOPED_TRACE(seconds);
+    const std::string other = report_at(seconds);
+    EXPECT_EQ(other.size(), report.size()) << written(other);
+  }
+  EXPECT_EQ(written(report_at(0.00015)), "0.000150");
+  EXPECT_EQ(written(report_at(0.0000004)), "0.000000");
+  EXPECT_EQ(written(report_at(12.25)), "12.250000");
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  for (const double bad :
+       {-0.5, nan, std::numeric_limits<double>::infinity(), 1e9}) {
+    EXPECT_EQ(written(report_at(bad)), "null") << bad;
+  }
 }
 
 std::vector<std::string> split(const std::string& line) {

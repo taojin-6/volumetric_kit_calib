@@ -9,6 +9,7 @@
 // containers, whose destructors allocate and so, out of memory, terminate
 // (DECISIONS.md, 2026-10-16).
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -80,6 +81,18 @@ class JsonWriter {
     text_ += json_quoted(v);
   }
   void value(const char* v) { value(std::string_view(v)); }
+  // A time in seconds to the microsecond, with six decimals, so its text is
+  // as long for any time under 10 s and a document's allocations do not
+  // depend on how long what it records took; `null` for one negative, not
+  // finite or of a billion seconds or more.
+  void value_seconds(double s) {
+    if (!(s >= 0.0 && s < 1e9)) return null();
+    before_value();
+    const auto us = static_cast<std::uint64_t>(std::llround(s * 1e6));
+    text_ += std::to_string(us / 1000000);
+    text_ += '.';
+    text_.append(std::to_string(1000000 + us % 1000000), 1, 6);
+  }
   void null() {
     before_value();
     text_ += "null";
