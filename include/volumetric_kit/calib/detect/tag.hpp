@@ -30,13 +30,21 @@ struct MarkerSearch {
   int matches = 0;  ///< How many markers with the tag's id the image holds.
 };
 
+/// @brief How @ref detect_tag refines the tag's corners, as calib's report
+///        names it: OpenCV's `CORNER_REFINE_SUBPIX`.
+///
+/// @code
+/// report.key("refinement").value(kTagCornerRefinement);
+/// @endcode
+inline constexpr const char* kTagCornerRefinement = "subpix";
+
 /// @brief Find @p tag in @p image.
 ///
 /// OpenCV's `ArucoDetector` on the tag's dictionary, its default parameters
-/// but for `CORNER_REFINE_SUBPIX`, with no camera model. Two prints of the
-/// tag give no corners, so neither is taken for the other. No tag is not a
-/// failure: @ref MarkerSearch::found is then empty. Calls may run on several
-/// threads at once.
+/// but for the corner refinement (@ref kTagCornerRefinement), with no camera
+/// model. Two prints of the tag give no corners, so neither is taken for the
+/// other. No tag is not a failure: @ref MarkerSearch::found is then empty.
+/// Calls may run on several threads at once.
 ///
 /// OpenCV's image of an AprilTag is AprilTag's own (apriltag-imgs) turned
 /// 180 degrees, so on a print of AprilTag's image the first corner is the

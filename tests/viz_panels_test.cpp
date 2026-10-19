@@ -4,9 +4,9 @@
 // The panels' models: each line's text and tone, from the live checks, the
 // array's counters, the session's summary and origin tag, the capture rule
 // and the capture records, judged by the quality tier's thresholds;
-// Calibrate's progress, its result's metrics and depth checks; and the stage
-// timings as gfx's metrics panel takes them. No device or ImGui frame needed
-// (viz_render_test draws them).
+// Calibrate's progress, its result's metrics, depth checks and world; and the
+// stage timings as gfx's metrics panel takes them. No device or ImGui frame
+// needed (viz_render_test draws them).
 
 #include "volumetric_kit/calib/viz/panels.hpp"
 
@@ -766,6 +766,137 @@ TEST(DepthPanel, RefusesChecksOfAnotherRig) {
   stranger.pairs[0].agreement.from = 4;
   EXPECT_EQ(depth_panel(kIds, &stranger).status().domain(),
             Code::InvalidArgument);
+}
+
+// --- World ------------------------------------------------------------------
+
+// A world at the rig's tag, located by N and 6G in 14 views, G's 2 dropped,
+// 148.3 mm across; and two boards on its floor.
+quality::ResultWorld three_camera_world() {
+  quality::ResultWorld world;
+  world.origin.sought = kOriginTag;
+  solve::TagWorld& w = world.origin.tag.emplace();
+  w.edge_m = 0.14834;
+  w.edge_error_percent = -1.1067;
+  w.rms_px = 0.6534;
+  w.cameras = {{"N", 8, 8, 2.4119}, {"G", 2, 0, 2.6051}, {"6G", 6, 6, 2.3871}};
+  world.floor_boards = {{3, 1.10, 0.0020}, {9, 1.44, 0.0042}};
+  return world;
+}
+
+// The origin line, each camera's height and the floor boards, in their
+// tones; and a warned edge, also amber.
+TEST(WorldPanel, ShowsTheTagsWorldTheHeightsAndTheFloor) {
+  quality::ResultWorld world = three_camera_world();
+  std::vector<PanelLine> l = world_panel(kIds, 0, world).value();
+  const std::vector<std::string> order = {"world", "height N", "height G",
+                                          "height 6G", "floor boards"};
+  ASSERT_EQ(l.size(), order.size());
+  for (std::size_t i = 0; i < order.size(); ++i) {
+    EXPECT_EQ(l[i].label, order[i]);
+  }
+  EXPECT_EQ(line(l, "world").value,
+            "origin tag (tag36h11 id 0), edge 148.3 mm (-1.1 %), 2 cameras, "
+            "14 views, 0.65 px RMS");
+  EXPECT_EQ(line(l, "world").tone, Tone::Good);
+  EXPECT_EQ(line(l, "height G").value, "2.605 m");
+  EXPECT_EQ(line(l, "height G").tone, Tone::Normal);
+  EXPECT_EQ(line(l, "floor boards").value,
+            "2: tilt mean 1.27 deg, max 1.44 deg; height mean +3.1 mm");
+  EXPECT_EQ(line(l, "floor boards").tone, Tone::Normal);
+
+  world.origin.tag->edge_m = 0.15521;
+  world.origin.tag->edge_error_percent = 3.4733;
+  world.origin.tag->edge_warning = true;
+  world.floor_boards.clear();
+  l = world_panel(kIds, 0, world).value();
+  ASSERT_EQ(l.size(), 6u);
+  EXPECT_EQ(l[1].label, "tag edge");
+  EXPECT_EQ(l[1].value, "155.2 mm, +3.5 % from the printed 150.0 mm");
+  EXPECT_EQ(l[1].tone, Tone::Warn);
+  EXPECT_EQ(line(l, "floor boards").value, "none");
+  EXPECT_EQ(line(l, "floor boards").tone, Tone::Muted);
+}
+
+// Without a tag world the reference camera is the world, and the panel says
+// why: muted when no camera saw the tag, amber for a world refused.
+TEST(WorldPanel, SaysWhyTheReferenceStaysTheOrigin) {
+  quality::ResultWorld world;
+  world.origin.sought = kOriginTag;
+  world.origin.reason = "no camera saw the tag";
+  std::vector<PanelLine> l = world_panel(kIds, 1, world).value();
+  ASSERT_EQ(l.size(), 2u);
+  EXPECT_EQ(l[0].label, "world");
+  EXPECT_EQ(l[0].value, "reference camera G");
+  EXPECT_EQ(l[0].tone, Tone::Normal);
+  EXPECT_EQ(l[1].label, "tag world");
+  EXPECT_EQ(l[1].value, "no camera saw the tag");
+  EXPECT_EQ(l[1].tone, Tone::Muted);
+
+  world.origin.miss = solve::TagMiss::PoorFit;
+  world.origin.reason =
+      "the tag's corners fit its views at 4.62582 px RMS, above the 3 px a "
+      "world takes: the cameras disagree on where it is";
+  l = world_panel(kIds, 1, world).value();
+  ASSERT_EQ(l.size(), 2u);
+  EXPECT_EQ(l[1].value, world.origin.reason);
+  EXPECT_EQ(l[1].tone, Tone::Warn);
+  world.origin.miss = solve::TagMiss::OneCamera;
+  EXPECT_EQ(world_panel(kIds, 1, world).value()[1].tone, Tone::Warn);
+
+  // No tag sought.
+  l = world_panel(kIds, 1, {}).value();
+  EXPECT_EQ(l[1].value, "no tag sought");
+  EXPECT_EQ(l[1].tone, Tone::Muted);
+}
+
+TEST(WorldPanel, RefusesAWorldOfAnotherRig) {
+  EXPECT_EQ(world_panel(kIds, 3, {}).status().domain(), Code::InvalidArgument);
+  quality::ResultWorld world = three_camera_world();
+  world.origin.tag->cameras.pop_back();
+  const core::Status refused = world_panel(kIds, 0, world).status();
+  EXPECT_EQ(refused.domain(), Code::InvalidArgument);
+  EXPECT_EQ(refused.message(),
+            "world_panel: reference 0 of 3 ids, for a world of 2 cameras");
+}
+
+// A result's notices: where it was written, then each amber world line -- a
+// warned edge, a tag world refused -- and no other.
+TEST(CalibrationNotices, SayWhereAndEachWorldWarning) {
+  using Said = std::vector<std::string>;
+  quality::ResultWorld world = three_camera_world();
+  EXPECT_EQ(calibration_notices(7, "results/007_a",
+                                world_panel(kIds, 0, world).value())
+                .value(),
+            Said{"calibration 007: written to results/007_a"});
+  world.origin.tag->edge_m = 0.15521;
+  world.origin.tag->edge_error_percent = 3.4733;
+  world.origin.tag->edge_warning = true;
+  EXPECT_EQ(calibration_notices(7, "results/007_a",
+                                world_panel(kIds, 0, world).value())
+                .value(),
+            (Said{"calibration 007: written to results/007_a",
+                  "calibration 007: tag edge: 155.2 mm, +3.5 % from the "
+                  "printed 150.0 mm"}));
+
+  // A refusal is said; no camera seeing the tag, muted, is not.
+  quality::ResultWorld reference;
+  reference.origin.sought = kOriginTag;
+  reference.origin.miss = solve::TagMiss::PoorFit;
+  reference.origin.reason =
+      "the tag's corners fit its views at 26.7373 px RMS, above the 3 px a "
+      "world takes: the cameras disagree on where it is";
+  EXPECT_EQ(calibration_notices(12, "results/012_b",
+                                world_panel(kIds, 1, reference).value())
+                .value(),
+            (Said{"calibration 012: written to results/012_b",
+                  "calibration 012: tag world: " + reference.origin.reason}));
+  reference.origin.miss = solve::TagMiss::NotSeen;
+  reference.origin.reason = "no camera saw the tag";
+  EXPECT_EQ(calibration_notices(12, "results/012_b",
+                                world_panel(kIds, 1, reference).value())
+                .value(),
+            Said{"calibration 012: written to results/012_b"});
 }
 
 // The stages' rows go to gfx's panel as they are; the frame's time is their

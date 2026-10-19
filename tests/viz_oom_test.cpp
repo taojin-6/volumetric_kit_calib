@@ -180,6 +180,31 @@ TEST(VizOom, CalibratePanels) {
   expect_oom_anywhere([&] { return depth_panel(ids, nullptr, lost); });
   expect_oom_when_reporting([&] { return depth_panel({}, &depth); },
                             Code::InvalidArgument);
+
+  // The world lines: a tag world with its edge warned of and boards on its
+  // floor, the reference with a reason, and a refusal.
+  quality::ResultWorld world;
+  world.origin.sought = kOriginTag;
+  solve::TagWorld& tag = world.origin.tag.emplace();
+  tag.edge_m = 0.1552;
+  tag.edge_error_percent = 3.47;
+  tag.edge_warning = true;
+  tag.cameras = {{ids[0], 6, 6, 2.41}, {ids[1], 6, 5, 2.6}};
+  world.floor_boards = {{3, 1.1, 0.002}};
+  expect_oom_anywhere([&] { return world_panel(ids, 0, world); });
+  quality::ResultWorld reference;
+  reference.origin.sought = kOriginTag;
+  reference.origin.miss = solve::TagMiss::PoorFit;
+  reference.origin.reason =
+      "the tag's corners fit its views at 4.62582 px RMS, above the 3 px a "
+      "world takes: the cameras disagree on where it is";
+  expect_oom_anywhere([&] { return world_panel(ids, 1, reference); });
+  expect_oom_when_reporting([&] { return world_panel(ids, 2, reference); },
+                            Code::InvalidArgument);
+  // The notices of a warned edge.
+  const std::vector<PanelLine> warned = world_panel(ids, 0, world).value();
+  expect_oom_anywhere(
+      [&] { return calibration_notices(7, "results/007_a", warned); });
 }
 
 // A refusal that runs out of memory reports OutOfMemory, and the editor
@@ -229,6 +254,7 @@ TEST(VizOom, SceneLinesAndTurn) {
   cameras[0].color_to_world = recon::camera::Mat4d(1.0);
   SceneOptions options;
   options.depth_frusta = true;
+  options.tag_edge_m = 0.15;
   const compute::Board board =
       compute::Board::create(legacy_femto_board()).value();
   const std::vector<recon::camera::Mat4d> boards(2, recon::camera::Mat4d(1.0));
@@ -240,10 +266,17 @@ TEST(VizOom, SceneLinesAndTurn) {
   expect_oom_when_reporting(
       [&] { return frustum_lines(lens, recon::camera::Mat4d(1.0), 0.0, 0); },
       Code::InvalidArgument);
+  expect_oom_anywhere([] { return tag_lines(0.15, 0); });
+  expect_oom_when_reporting([] { return tag_lines(0.0, 0); },
+                            Code::InvalidArgument);
   // A turn allocates nothing but its refusal.
   const std::vector<recon::camera::Mat4d> none;
   expect_oom_when_reporting([&] { return display_rotation(none); },
                             Code::InvalidArgument);
+  const std::vector<recon::camera::Mat4d> one(1, recon::camera::Mat4d(1.0));
+  expect_oom_when_reporting(
+      [&] { return display_rotation(one, recon::camera::Vec3d(0.0)); },
+      Code::InvalidArgument);
 }
 
 // The points' draws, and their refusals, from frames with no buffer.

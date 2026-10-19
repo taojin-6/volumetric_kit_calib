@@ -186,6 +186,7 @@ struct View3d {
   std::vector<viz::SceneCamera> cameras;     // in the rig's order
   std::optional<compute::Board> board;       // the solved boards'
   std::vector<recon::camera::Mat4d> boards;  // each solved board's T_wb
+  std::optional<recon::camera::Vec3d> up;    // the world's (world_up)
   viz::SceneView view;
   std::shared_ptr<const CloudSnapshot> latest;  // released before the worker
   std::shared_ptr<core::Buffer> lines;          // the scene's lines, uploaded
@@ -602,7 +603,7 @@ void view_window(View3d& v, const std::vector<std::string>& ids,
     v.lines_stale = true;
   }
   if (ImGui::Button("reset view")) {
-    const core::Status framed = v.view.frame(v.placed());
+    const core::Status framed = v.view.frame(v.placed(), v.up);
     if (!framed.ok()) notices.note(framed.message());
   }
   // TODO: name each placed camera over the 3D view once gfx has a
@@ -742,10 +743,11 @@ core::Status draw_scene(View3d& v, gfx::pipelines::DepthCloudPipeline& clouds,
   return {};
 }
 
-// A Calibrate result in the 3D view: every camera at its pose, the solved
-// boards drawn, the view framed on the result's origin when it is new
-// (frame_on_result), its panel's lines, and the 3D view in the window.
-// Nothing changes when the result cannot be shown.
+// A Calibrate result in the 3D view: every camera at its pose in the result's
+// world, the solved boards and the origin tag drawn, the view framed on the
+// world's origin when it is new (frame_on_result), up as world_up has it, its
+// panel's lines, its notices (calibration_notices), and the 3D view in the
+// window. Nothing changes when the result cannot be shown.
 core::Status show_result(const CalibrateResult& result,
                          const KeptCaptures& kept, RigMode& mode, View3d& v,
                          std::optional<RigOrigin>& framed,
@@ -759,19 +761,24 @@ core::Status show_result(const CalibrateResult& result,
       const std::vector<viz::PanelLine> depth,
       viz::depth_panel(result.ids, result.depth ? &*result.depth : nullptr,
                        result.depth_failure));
+  VKC_ASSIGN(const std::vector<viz::PanelLine> world,
+             viz::world_panel(result.ids, result.reference, result.world));
   lines.insert(lines.end(), depth.begin(), depth.end());
+  lines.insert(lines.end(), world.begin(), world.end());
+  VKC_ASSIGN(const std::vector<std::string> said,
+             viz::calibration_notices(result.number, result.directory, world));
   std::vector<recon::camera::Mat4d> boards = result.boards_to_world;
   VKC_TRY(placed_cameras(v.cameras, result.color_to_world));
+  const std::optional<solve::TagWorld>& tag = result.world.origin.tag;
+  const RigOrigin origin{result.reference, tag.has_value()};
   v.board = std::move(board);
   v.boards = std::move(boards);
+  v.up = world_up(origin);
+  v.options.tag_edge_m = tag ? tag->edge_m : 0.0;
   v.lines_stale = true;
   panel = std::move(lines);
-  // TODO: CB9 takes the origin tag's world from the result: the origin, the
-  // view levelled +z up, the tag's and world's lines and the cameras'
-  // heights.
-  const RigOrigin origin{result.reference};
   if (frame_on_result(framed, origin)) {
-    const core::Status aimed = v.view.frame(v.placed());
+    const core::Status aimed = v.view.frame(v.placed(), v.up);
     if (aimed.ok()) {
       framed = origin;
     } else {
@@ -779,10 +786,7 @@ core::Status show_result(const CalibrateResult& result,
     }
   }
   mode = on_result(mode);
-  char rrr[16];
-  std::snprintf(rrr, sizeof rrr, "%03d", result.number);
-  notices.note("calibration " + std::string(rrr) + ": written to " +
-               result.directory);
+  for (const std::string& notice : said) notices.note(notice);
   return {};
 }
 

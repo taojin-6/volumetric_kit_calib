@@ -3,6 +3,7 @@
 
 #include "volumetric_kit/calib/quality/results.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -15,6 +16,7 @@
 #include "../core/json_text.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
+#include "volumetric_kit/calib/detect/tag.hpp"
 #include "volumetric_kit/recon/camera/array_calibration.hpp"
 
 namespace volumetric_kit::calib::quality {
@@ -116,6 +118,25 @@ core::Status check_depth_fits(std::size_t k, const DepthSummary& d) {
   if (fits) return {};
   return core::Status::invalid_argument(
       "the depth checks do not fit the rig's " + std::to_string(k) +
+      " cameras");
+}
+
+// Refuses a tag world whose cameras are not the rig's, in its order, or
+// whose views name another camera.
+core::Status check_world_fits(const std::vector<std::string>& ids,
+                              const solve::WorldOrigin& origin) {
+  if (!origin.tag) return {};
+  const solve::TagWorld& w = *origin.tag;
+  bool fits = w.cameras.size() == ids.size();
+  for (std::size_t c = 0; fits && c < ids.size(); ++c) {
+    fits = w.cameras[c].id == ids[c];
+  }
+  for (const solve::TagViewFit& view : w.views) {
+    fits = fits && std::find(ids.begin(), ids.end(), view.camera) != ids.end();
+  }
+  if (fits) return {};
+  return core::Status::invalid_argument(
+      "the tag world does not fit the rig's " + std::to_string(ids.size()) +
       " cameras");
 }
 
@@ -353,11 +374,109 @@ void arm(Writer& w, const PrincipalPointArm& a) {
   w.close_object();
 }
 
+// Metres as the report's millimetres.
+double mm(double metres) { return 1000.0 * metres; }
+
+void located(Writer& w, const solve::TagWorld& t) {
+  w.open_object();
+  w.key("rms_px").value(t.rms_px);
+  w.key("max_px").value(t.worst_px);
+  w.key("solves").value(t.solves);
+  w.key("edges_mm").open_array(true);
+  for (const double edge : t.edges_m) w.value(mm(edge));
+  w.close_array();
+  w.key("mean_edge_mm").value(mm(t.edge_m));
+  w.key("edge_error_percent").value(t.edge_error_percent);
+  w.key("edge_warning").value(t.edge_warning);
+  w.key("diagonals_mm").open_array(true);
+  for (const double diagonal : t.diagonals_m) w.value(mm(diagonal));
+  w.close_array();
+  w.key("out_of_plane_mm").value(mm(t.out_of_plane_m));
+  w.key("corners_m").open_array();
+  for (const camera::Vec3d& corner : t.corners_m) triple(w, corner);
+  w.close_array();
+  w.key("cameras").open_object();
+  for (const solve::TagCamera& c : t.cameras) {
+    w.key(c.id).open_object();
+    w.key("views").value(c.views);
+    w.key("used").value(c.used);
+    w.key("dropped").value(c.views - c.used);
+    w.key("height_m").value(c.height_m);
+    w.close_object();
+  }
+  w.close_object();
+  w.key("views").open_array();
+  for (const solve::TagViewFit& v : t.views) {
+    w.open_object();
+    w.key("camera").value(v.camera);
+    w.key("capture").value(v.capture);
+    w.key("used").value(v.used);
+    w.key("rms_px").value(v.rms_px);
+    w.key("worst_px").value(v.worst_px);
+    w.key("round").value(v.round);
+    w.key("bound_px").value(v.bound_px);
+    w.close_object();
+  }
+  w.close_array();
+  w.close_object();
+}
+
+void world_section(Writer& w, const ResultWorld& world,
+                   const std::vector<std::string>& ids, std::size_t reference) {
+  const solve::WorldOrigin& origin = world.origin;
+  w.open_object();
+  w.key("origin").value(origin.tag ? "tag" : "reference");
+  w.key("reference").value(ids[reference]);
+  w.key("uncertainty_frame").value("reference");
+  const camera::Mat4d m = origin.reference_to_world();
+  w.key("reference_to_world").open_array();
+  for (int row = 0; row < 4; ++row) {
+    w.open_array(true);
+    for (int col = 0; col < 4; ++col) w.value(m[col][row]);
+    w.close_array();
+  }
+  w.close_array();
+  const OriginTag& sought = origin.sought;
+  if (sought.dictionary == MarkerDictionary::None) {
+    w.key("tag").null();
+  } else {
+    w.key("tag").open_object();
+    w.key("dictionary").value(to_string(sought.dictionary));
+    w.key("family").value(apriltag_family(sought.dictionary));
+    w.key("id").value(sought.id);
+    w.key("edge_mm").value(mm(sought.edge_m));
+    w.key("refinement").value(detect::kTagCornerRefinement);
+    w.close_object();
+  }
+  if (origin.tag) {
+    w.key("miss").null();
+    w.key("miss_camera").null();
+    w.key("reason").null();
+    located(w.key("located"), *origin.tag);
+  } else {
+    w.key("miss").value(solve::to_string(origin.miss));
+    refused(w.key("miss_camera"), origin.camera);
+    refused(w.key("reason"), origin.reason);
+    w.key("located").null();
+  }
+  w.key("floor_boards").open_array();
+  for (const FloorBoard& board : world.floor_boards) {
+    w.open_object();
+    w.key("capture").value(board.capture);
+    w.key("angle_deg").value(board.angle_deg);
+    w.key("height_mm").value(mm(board.height_m));
+    w.close_object();
+  }
+  w.close_array();
+  w.close_object();
+}
+
 std::string report_text(const std::vector<std::string>& ids,
                         const solve::RigSolution& solution,
                         const CalibrationMetrics& metrics,
                         const DepthSummary* depth_checks,
-                        const std::string& depth_unchecked) {
+                        const std::string& depth_unchecked,
+                        const ResultWorld& world) {
   const std::size_t k = ids.size();
   Writer w;
   w.open_object();
@@ -560,6 +679,7 @@ std::string report_text(const std::vector<std::string>& ids,
   }
   w.close_array();
   w.close_object();
+  world_section(w.key("world"), world, ids, solution.reference);
   if (depth_checks) {
     depth_section(w.key("depth"), *depth_checks, ids);
     w.key("depth_unchecked").null();
@@ -614,7 +734,8 @@ std::string residuals_text(const std::vector<std::string>& ids,
 core::Result<ResultFiles> format_results(
     const std::vector<solve::RigCamera>& cameras,
     const solve::RigSolution& solution, const CalibrationMetrics& metrics,
-    const DepthSummary* depth, const std::string& depth_unchecked) {
+    const DepthSummary* depth, const std::string& depth_unchecked,
+    const ResultWorld& world) {
   constexpr const char* kWhat = "format_results";
   return compute::guarded(kWhat, [&]() -> core::Result<ResultFiles> {
     std::vector<std::string> ids;
@@ -623,13 +744,18 @@ core::Result<ResultFiles> format_results(
     core::Status checked = solve::check_camera_ids(ids);
     if (checked.ok()) checked = check_fits(ids, solution, metrics);
     if (checked.ok() && depth) checked = check_depth_fits(ids.size(), *depth);
+    if (checked.ok()) checked = check_world_fits(ids, world.origin);
     if (!checked.ok()) return std::move(checked).with_context(kWhat);
+    core::Result<solve::AnchoredRig> anchored =
+        solve::anchor_rig(solution, world.origin);
+    if (!anchored.ok()) return anchored.status().with_context(kWhat);
     core::Result<std::string> calibration =
-        camera::format_array_calibration(solution.calibration);
+        camera::format_array_calibration(anchored->calibration);
     if (!calibration.ok()) return calibration.status().with_context(kWhat);
     ResultFiles files;
     files.array_calibration = *std::move(calibration);
-    files.report = report_text(ids, solution, metrics, depth, depth_unchecked);
+    files.report =
+        report_text(ids, solution, metrics, depth, depth_unchecked, world);
     files.residuals = residuals_text(ids, solution);
     return files;
   });

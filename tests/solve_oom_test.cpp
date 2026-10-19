@@ -148,6 +148,34 @@ TEST(SolveOom, OriginTagFrame) {
     return origin_tag_frame(tagged.scene.cameras, tagged.solution, other,
                             kOriginTag);
   });
+  // With no outlier round the moved views stay, and the world is refused for
+  // its fit.
+  TagFrameOptions keep;
+  keep.outlier_rounds = 0;
+  const core::Result<WorldOrigin> refused = origin_tag_frame(
+      tagged.scene.cameras, tagged.solution, tagged.views, kOriginTag, keep);
+  ASSERT_TRUE(refused.ok() && refused->miss == TagMiss::PoorFit);
+  expect_oom_anywhere([&] {
+    return origin_tag_frame(tagged.scene.cameras, tagged.solution, tagged.views,
+                            kOriginTag, keep);
+  });
+  // Two cameras 44 px apart: cv::LevMarq stops at its cap, and the world is
+  // refused for the fit there.
+  std::vector<TagView> apart(tagged.views.begin(), tagged.views.begin() + 2);
+  ASSERT_EQ(apart[1].capture, apart[0].capture);
+  for (recon::camera::Vec2d& c : apart[0].marker.corners) {
+    c += recon::camera::Vec2d(44.0, 22.0);
+  }
+  const core::Result<WorldOrigin> stopped = origin_tag_frame(
+      tagged.scene.cameras, tagged.solution, apart, kOriginTag);
+  ASSERT_TRUE(stopped.ok() && stopped->miss == TagMiss::PoorFit &&
+              stopped->reason.find("stopped short of converging") !=
+                  std::string::npos)
+      << (stopped.ok() ? stopped->reason : stopped.status().message());
+  expect_oom_anywhere([&] {
+    return origin_tag_frame(tagged.scene.cameras, tagged.solution, apart,
+                            kOriginTag);
+  });
 }
 
 TEST(SolveOom, AnchorRig) {
@@ -160,6 +188,10 @@ TEST(SolveOom, AnchorRig) {
   expect_oom_anywhere([&] { return anchor_rig(tagged.solution, origin); });
   expect_oom_anywhere([&] { return anchor_rig(tagged.solution, {}); });
   expect_oom_anywhere([&] { return anchor_rig(RigSolution{}, origin); });
+  // A tag recon's file cannot name.
+  WorldOrigin aruco = origin;
+  aruco.sought.dictionary = MarkerDictionary::ArUco4x4_50;
+  expect_oom_anywhere([&] { return anchor_rig(tagged.solution, aruco); });
 }
 
 TEST(SolveOom, ViewResiduals) {

@@ -412,5 +412,48 @@ TEST(QualityOom, FormatResults) {
   });
 }
 
+// The world at the floor tag, seen by every camera in 2 captures: the
+// results in it, a miss, and a refusal; and the boards on its floor.
+TEST(QualityOom, TheTagWorld) {
+  const Solved s;
+  std::vector<solve::TagView> views;
+  for (const test::MarkerSighting& m : test::observe_marker(
+           s.rig, kOriginTag.id, test::floor_tag_corners(), 2, {0.3, 3})) {
+    views.push_back(
+        {s.rig[m.camera].id, m.capture, s.rig[m.camera].model.size, m.marker});
+  }
+  ResultWorld world;
+  world.origin =
+      solve::origin_tag_frame(s.cameras, s.solution, views, kOriginTag).value();
+  ASSERT_TRUE(world.origin.tag) << world.origin.reason;
+  const std::vector<camera::Mat4d> boards =
+      solve::anchor_rig(s.solution, world.origin).value().boards_to_world;
+  world.floor_boards = floor_boards(s.board, s.solution.boards, boards).value();
+  expect_oom_anywhere(
+      [&] { return floor_boards(s.board, s.solution.boards, boards); });
+  const std::vector<camera::Mat4d> none;
+  expect_oom_anywhere(
+      [&] { return floor_boards(s.board, s.solution.boards, none); });
+  expect_oom_anywhere([&] {
+    return format_results(s.cameras, s.solution, s.metrics, nullptr, {}, world);
+  });
+  ResultWorld missed;
+  missed.origin.sought = kOriginTag;
+  missed.origin.miss = solve::TagMiss::PoorFit;
+  missed.origin.reason =
+      "the tag's corners fit its views at 4.62582 px RMS, above the 3 px a "
+      "world takes: the cameras disagree on where it is";
+  expect_oom_anywhere([&] {
+    return format_results(s.cameras, s.solution, s.metrics, nullptr, {},
+                          missed);
+  });
+  ResultWorld misfit = world;
+  misfit.origin.tag->cameras.pop_back();
+  expect_oom_anywhere([&] {
+    return format_results(s.cameras, s.solution, s.metrics, nullptr, {},
+                          misfit);
+  });
+}
+
 }  // namespace
 }  // namespace volumetric_kit::calib::quality

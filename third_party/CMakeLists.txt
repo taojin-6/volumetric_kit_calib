@@ -75,14 +75,15 @@ endif()
 # targets link recon_camera. It leaves an application's VR_CAMERA_ONLY as set,
 # so an application that turns it off keeps the rest of recon.
 #
-# The pin is recon main at PR #246 (42f11ac): its recon_core exports
-# pinhole.glsl under its VR_SHADER_INCLUDE_DIR for calib_depth's kernels (PR
-# #245), and GpuFramePrep shares a prepared frame's depth with another queue
-# family (depth_queue_families), which the 3D view draws in place.
+# The pin is recon main at PR #254 (ca4b94c): its calibration file names a world
+# at a floor AprilTag (WorldFrame::apriltag), which Calibrate's results write;
+# with PR #246's GpuFramePrep, which shares a prepared frame's depth with
+# another queue family (depth_queue_families) for the 3D view, and PR #245's
+# pinhole.glsl under VR_SHADER_INCLUDE_DIR for calib_depth's kernels.
 FetchContent_Declare(
   volumetric_kit_recon
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_recon.git
-  GIT_TAG 42f11ac84c0fa31f5189f6b09a1d2c63705564a4)
+  GIT_TAG ca4b94c77a167f6176d83ebbf2dc1a11d2cae475)
 # VC_WITH_RIG takes all of recon: the capture tier links its sensor and io
 # tiers. An application's own VR_WITH_ORBBEC / VR_WITH_FFMPEG still apply.
 if(VC_WITH_RIG)

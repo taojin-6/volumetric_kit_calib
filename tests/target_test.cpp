@@ -259,6 +259,34 @@ TEST(Target, NamesItsPatternAndDictionary) {
   EXPECT_STREQ(to_string(static_cast<MarkerDictionary>(99)), "unknown");
 }
 
+// The AprilTag library's family names for its four dictionaries, and none
+// for every other dictionary.
+TEST(Target, NamesEachAprilTagFamily) {
+  for (int d = 0; d <= static_cast<int>(MarkerDictionary::ArUcoMip36h12); ++d) {
+    const auto dictionary = static_cast<MarkerDictionary>(d);
+    SCOPED_TRACE(to_string(dictionary));
+    switch (dictionary) {
+      case MarkerDictionary::AprilTag16h5:
+        EXPECT_STREQ(apriltag_family(dictionary), "tag16h5");
+        break;
+      case MarkerDictionary::AprilTag25h9:
+        EXPECT_STREQ(apriltag_family(dictionary), "tag25h9");
+        break;
+      case MarkerDictionary::AprilTag36h10:
+        EXPECT_STREQ(apriltag_family(dictionary), "tag36h10");
+        break;
+      case MarkerDictionary::AprilTag36h11:
+        EXPECT_STREQ(apriltag_family(dictionary), "tag36h11");
+        break;
+      default:
+        EXPECT_STREQ(apriltag_family(dictionary), "");
+        break;
+    }
+  }
+  EXPECT_STREQ(apriltag_family(kOriginTag.dictionary), "tag36h11");
+  EXPECT_STREQ(apriltag_family(static_cast<MarkerDictionary>(99)), "");
+}
+
 TEST(Target, AprilGridCarriesOneTagPerFeature) {
   Target grid;
   grid.kind = TargetKind::AprilGrid;

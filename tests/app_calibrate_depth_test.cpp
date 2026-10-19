@@ -12,8 +12,9 @@
 // capture's own pairs alone; a camera without depth is insufficient; each
 // capture's frames are let go before the next; a stop between captures stops
 // the run, and a cancel writes nothing; a failure of the checks is posted and
-// the results written without them; and the checks give the same while the 3D
-// view's worker prepares on the same device. Under synchronization validation;
+// the results written without them; a tag world's checks are the same as the
+// reference's; and the checks give the same while the 3D view's worker
+// prepares on the same device. Under synchronization validation;
 // skips without a Vulkan device, and the last case also with one queue family.
 
 #include <gtest/gtest.h>
@@ -599,6 +600,24 @@ TEST_F(CalibrateDepthTest, AFailureOfTheChecksIsPostedAndTheResultsWritten) {
   const json report = json::parse(test::read(dir / quality::kReportFile));
   EXPECT_TRUE(report["depth"].is_null());
   EXPECT_EQ(report["depth_unchecked"], why);
+}
+
+// With the origin tag seen, the poses are in its world, and the depth
+// section is the one the same captures without the tag give, to the bit.
+TEST_F(CalibrateDepthTest, ChecksTheSameDepthInATagWorld) {
+  DepthCase c;
+  c.reference = 1;
+  const KeptCaptures plain = depth_captures(c, "unwritten");
+  const KeptCaptures tagged = test::with_origin_tag(
+      plain, test::make_kept_scene(c.cameras, c.placements, 0.0));
+  const CalibrateResult without = calibrated(plain);
+  const CalibrateResult with = calibrated(tagged);
+  ASSERT_FALSE(without.world.origin.tag);
+  ASSERT_TRUE(with.world.origin.tag) << with.world.origin.reason;
+  ASSERT_TRUE(with.depth.has_value()) << with.depth_failure.message();
+  EXPECT_NE(with.color_to_world, without.color_to_world);
+  EXPECT_EQ(json::parse(with.files.report)["depth"],
+            json::parse(without.files.report)["depth"]);
 }
 
 // --- Beside the 3D view's worker ------------------------------------------

@@ -3,10 +3,11 @@
 
 // calib_rig's Calibrate: the rig solved and measured from the captures kept,
 // for 2 to 5 cameras whose ids sort in another order than the rig's, in the
-// reference camera's gauge; the same snapshot gives the same files, and a
-// recalibration owes nothing to the last; each results directory numbered
-// once, its calibration file written last; and the worker's runs, refusals,
-// cancels and stops. Synthetic detections, no device, so no depth checks
+// reference camera's gauge, and its world at the origin tag when the cameras
+// see it; the same snapshot gives the same files, and a recalibration owes
+// nothing to the last; each results directory numbered once, its calibration
+// file written last; and the worker's runs, refusals, cancels and stops.
+// Synthetic detections, no device, so no depth checks
 // (app_calibrate_depth_test has them).
 
 #include "volumetric_kit/calib/app/calibrate_worker.hpp"
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -34,6 +36,7 @@
 #include "allocation_failure.hpp"
 #include "calibrate_worker_support.hpp"
 #include "kept_scene.hpp"
+#include "result_checks.hpp"
 #include "scratch_dir.hpp"
 #include "synthetic_scene.hpp"
 #include "volumetric_kit/calib/capture/session_writer.hpp"
@@ -161,13 +164,143 @@ TEST(Calibrate, SolvesTwoToFiveCamerasInTheReferencesGauge) {
         camera::parse_array_calibration(r.files.array_calibration);
     ASSERT_TRUE(file.ok()) << file.status().message();
     EXPECT_EQ(file->world.sensor, ids[c.reference]);
+    EXPECT_FALSE(file->world.apriltag);
     const json report = json::parse(r.files.report);
     EXPECT_EQ(report["format"], "volumetric_kit_calib.report");
     EXPECT_EQ(report["version"], 1);
     EXPECT_EQ(report["settings"]["reference"], ids[c.reference]);
+    EXPECT_EQ(report["world"]["reference"], ids[c.reference]);
+    // No camera saw the tag: the reference stays the origin, and says why.
+    EXPECT_FALSE(r.world.origin.tag);
+    EXPECT_EQ(r.world.origin.miss, solve::TagMiss::NotSeen);
+    EXPECT_TRUE(r.world.floor_boards.empty());
+    EXPECT_EQ(report["world"]["origin"], "reference");
+    EXPECT_EQ(report["world"]["miss"], "not_seen");
+    EXPECT_EQ(report["world"]["reason"], "no camera saw the tag");
     EXPECT_EQ(r.files.residuals.rfind(
                   "capture,serial,corner_id,u,v,du,dv,weight,dropped\n", 0),
               0u);
+  }
+}
+
+// With the origin tag seen, the world is the tag's: every camera within
+// 5 mm and 0.1 degrees of the truth (the tag lies at the synthetic world's
+// origin), the poses and boards anchor_rig's, the file naming the tag and
+// reading back as posed, the report naming the origin, each camera's height,
+// and the boards the plan laid on the floor. The solve, the metrics and the
+// residuals are those of the same captures without the tag, to the bit.
+TEST(Calibrate, PutsTheWorldAtTheOriginTag) {
+  for (const std::size_t n : {3u, 5u}) {
+    SCOPED_TRACE(std::to_string(n) + " cameras");
+    const test::Scene scene = test::make_kept_scene(n, 30);
+    const KeptCaptures plain = test::kept_captures(scene, 1, "unwritten");
+    const KeptCaptures kept = test::with_origin_tag(plain, scene);
+    core::Result<CalibrateResult> made = calibrate(kept);
+    ASSERT_TRUE(made.ok()) << made.status().message();
+    const CalibrateResult& r = *made;
+    ASSERT_TRUE(r.world.origin.tag) << r.world.origin.reason;
+    const solve::TagWorld& w = *r.world.origin.tag;
+    EXPECT_EQ(r.world.origin.sought.dictionary, kOriginTag.dictionary);
+    EXPECT_LT(w.rms_px, 0.5);
+
+    const solve::AnchoredRig rig =
+        test::value_of(solve::anchor_rig(r.solution, r.world.origin));
+    EXPECT_EQ(r.color_to_world, rig.color_to_world);
+    EXPECT_EQ(r.boards_to_world, rig.boards_to_world);
+    EXPECT_NE(r.color_to_world[1], camera::Mat4d(1.0));
+    const core::Result<camera::ArrayCalibration> file =
+        camera::parse_array_calibration(r.files.array_calibration);
+    ASSERT_TRUE(file.ok()) << file.status().message();
+    EXPECT_TRUE(file->world.sensor.empty());
+    ASSERT_TRUE(file->world.apriltag);
+    EXPECT_EQ(file->world.apriltag->family, "tag36h11");
+    EXPECT_EQ(file->world.apriltag->id, 0);
+    EXPECT_EQ(file->world.apriltag->size_m, 0.15);
+    const json report = json::parse(r.files.report);
+    EXPECT_EQ(report["world"]["origin"], "tag");
+    EXPECT_EQ(report["world"]["reference"], scene.cameras[1].id);
+    // Each view of the tag is a kept capture's, by its camera and capture.
+    std::set<std::pair<std::string, std::int64_t>> sighted;
+    for (const std::shared_ptr<const KeptCapture>& capture : kept.captures) {
+      for (std::size_t c = 0; c < n; ++c) {
+        if (capture->tags[c]) {
+          sighted.emplace(kept.cameras[c].id, capture->index);
+        }
+      }
+    }
+    ASSERT_FALSE(sighted.empty());
+    std::set<std::pair<std::string, std::int64_t>> located;
+    for (const solve::TagViewFit& v : w.views) {
+      located.emplace(v.camera, v.capture);
+    }
+    EXPECT_EQ(located, sighted);
+    std::set<std::pair<std::string, std::int64_t>> reported;
+    for (const json& v : report["world"]["located"]["views"]) {
+      reported.emplace(v["camera"].get<std::string>(),
+                       v["capture"].get<std::int64_t>());
+    }
+    EXPECT_EQ(reported, sighted);
+    for (std::size_t c = 0; c < n; ++c) {
+      const std::string& id = scene.cameras[c].id;
+      SCOPED_TRACE(id);
+      const camera::Mat4d truth =
+          camera::rigid_inverse(scene.rig[c].world_to_camera);
+      EXPECT_LT(glm::length(camera::Vec3d(r.color_to_world[c][3]) -
+                            camera::Vec3d(truth[3])),
+                5e-3);
+      EXPECT_LT(test::angle_deg(r.color_to_world[c], truth), 0.1);
+      const camera::SensorCalibration* sensor = camera::find_sensor(*file, id);
+      ASSERT_NE(sensor, nullptr);
+      const camera::Mat4d read = camera::rigid_inverse(*sensor->color_to_world);
+      const camera::Mat4d posed = camera::rigid_inverse(r.color_to_world[c]);
+      for (int col = 0; col < 4; ++col) {
+        for (int row = 0; row < 4; ++row) {
+          EXPECT_NEAR(read[col][row], posed[col][row], 1e-12);
+        }
+      }
+      EXPECT_EQ(w.cameras[c].id, id);
+      EXPECT_NEAR(w.cameras[c].height_m, r.color_to_world[c][3].z, 1e-9);
+      EXPECT_EQ(
+          report["world"]["located"]["cameras"][id]["height_m"].get<double>(),
+          w.cameras[c].height_m);
+    }
+
+    // The boards the plan laid on the floor, each solved, and no other.
+    std::set<std::int64_t> laid;
+    for (std::size_t p = 0; p < scene.plan.size(); ++p) {
+      if (std::abs(
+              compute::centre_in(scene.board, scene.plan[p].board_to_world).z) <
+          1e-9) {
+        laid.insert(test::kept_index(p));
+      }
+    }
+    ASSERT_FALSE(laid.empty());
+    std::set<std::int64_t> found;
+    for (const quality::FloorBoard& b : r.world.floor_boards) {
+      found.insert(b.capture);
+      EXPECT_LT(b.angle_deg, 0.5) << b.capture;
+      EXPECT_LT(std::abs(b.height_m), 5e-3) << b.capture;
+    }
+    EXPECT_EQ(found, laid);
+    EXPECT_EQ(report["world"]["floor_boards"].size(), laid.size());
+
+    const core::Result<CalibrateResult> without = calibrate(plain);
+    ASSERT_TRUE(without.ok()) << without.status().message();
+    EXPECT_FALSE(without->world.origin.tag);
+    for (std::size_t c = 0; c < n; ++c) {
+      EXPECT_EQ(without->solution.world_to_camera[c].rvec,
+                r.solution.world_to_camera[c].rvec);
+      EXPECT_EQ(without->solution.world_to_camera[c].tvec,
+                r.solution.world_to_camera[c].tvec);
+    }
+    EXPECT_EQ(without->metrics.geometry.centres_m,
+              r.metrics.geometry.centres_m);
+    EXPECT_EQ(without->files.residuals, r.files.residuals);
+    json other = timeless(without->files.report);
+    json same = timeless(r.files.report);
+    other.erase("world");
+    same.erase("world");
+    EXPECT_EQ(other, same);
   }
 }
 
@@ -187,9 +320,9 @@ TEST(Calibrate, ARerunEqualsTheFirstRun) {
   EXPECT_EQ(first->files.residuals, again->files.residuals);
   EXPECT_EQ(first->color_to_world, again->color_to_world);
 
-  // Solving, measuring, then each re-solve counted to the captures.
+  // Solving, measuring, each re-solve counted to the captures, then the tag.
   const std::size_t k = kept.captures.size();
-  ASSERT_EQ(steps.size(), 2 + k);
+  ASSERT_EQ(steps.size(), 3 + k);
   EXPECT_EQ(steps[0].stage, CalibrateStage::Solving);
   EXPECT_EQ(steps[1].stage, CalibrateStage::Measuring);
   EXPECT_EQ(steps[1].total, 0u);
@@ -198,11 +331,14 @@ TEST(Calibrate, ARerunEqualsTheFirstRun) {
     EXPECT_EQ(steps[2 + i].done, i + 1);
     EXPECT_EQ(steps[2 + i].total, k);
   }
+  EXPECT_EQ(steps[2 + k].stage, CalibrateStage::Locating);
+  EXPECT_EQ(steps[2 + k].total, 0u);
   for (std::size_t i = 1; i < steps.size(); ++i) {
     EXPECT_GE(steps[i].seconds, steps[i - 1].seconds);
   }
   EXPECT_STREQ(to_string(CalibrateStage::Solving), "solving");
   EXPECT_STREQ(to_string(CalibrateStage::Measuring), "measuring");
+  EXPECT_STREQ(to_string(CalibrateStage::Locating), "locating the tag");
   EXPECT_STREQ(to_string(CalibrateStage::Checking), "checking depth");
   EXPECT_STREQ(to_string(CalibrateStage::Writing), "writing");
   EXPECT_STREQ(to_string(static_cast<CalibrateStage>(9)), "unknown");
@@ -262,6 +398,12 @@ TEST(Calibrate, RefusesWhatTheSolveCannotTake) {
   short_of.captures[2] = fewer;
   EXPECT_EQ(refusal(short_of),
             "calibrate: capture 5 has 3 views for 4 cameras");
+
+  KeptCaptures untagged = base;
+  auto tagless = std::make_shared<KeptCapture>(*base.captures[2]);
+  tagless->tags.pop_back();
+  untagged.captures[2] = tagless;
+  EXPECT_EQ(refusal(untagged), "calibrate: capture 5 has 3 tags for 4 cameras");
 
   KeptCaptures renamed = base;
   auto other = std::make_shared<KeptCapture>(*base.captures[0]);
@@ -774,11 +916,13 @@ TEST(CalibrateWorker, StopsWithARunUnderWay) {
 }
 
 // Out of memory anywhere in a run fails it whole: a small rig of exact
-// detections, so each re-solve takes few iterations.
+// detections, so each re-solve takes few iterations, in the tag's world.
 TEST(Calibrate, OutOfMemoryAnywhereFailsTheRun) {
   const test::Scene scene = test::make_kept_scene(2, 4, 0.0);
-  const KeptCaptures kept = test::kept_captures(scene, 0, "unwritten");
-  ASSERT_TRUE(calibrate(kept).ok());
+  const KeptCaptures kept = test::with_origin_tag(
+      test::kept_captures(scene, 0, "unwritten"), scene, 0.0);
+  const core::Result<CalibrateResult> made = calibrate(kept);
+  ASSERT_TRUE(made.ok() && made->world.origin.tag);
   test::expect_oom_anywhere(
       [&] { return calibrate(kept); },
       [](const core::Result<CalibrateResult>& r) {

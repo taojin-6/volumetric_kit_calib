@@ -85,6 +85,28 @@ core::Result<std::vector<Observation>> solve_views(const KeptCaptures& kept) {
   return views;
 }
 
+// Every camera's origin tag in every kept capture, as the tag's location
+// takes them; refuses a capture whose tags are not one per camera. The
+// captures were checked by solve_views.
+core::Result<std::vector<solve::TagView>> tag_views(const KeptCaptures& kept) {
+  std::vector<solve::TagView> views;
+  for (const std::shared_ptr<const KeptCapture>& capture : kept.captures) {
+    if (capture->tags.size() != kept.cameras.size()) {
+      return core::Status::invalid_argument(
+          "capture " + std::to_string(capture->index) + " has " +
+          std::to_string(capture->tags.size()) + " tags for " +
+          std::to_string(kept.cameras.size()) + " cameras");
+    }
+    for (std::size_t c = 0; c < kept.cameras.size(); ++c) {
+      const std::optional<DetectedMarker>& tag = capture->tags[c];
+      if (!tag) continue;
+      const solve::RigCamera& cam = kept.cameras[c];
+      views.push_back({cam.id, capture->index, cam.model.size, *tag});
+    }
+  }
+  return views;
+}
+
 // What the depth checks share over a Calibrate's captures: the solved rig,
 // the views to fit, and what is measured so far.
 struct DepthRun {
@@ -232,6 +254,8 @@ const char* to_string(CalibrateStage stage) noexcept {
       return "solving";
     case CalibrateStage::Measuring:
       return "measuring";
+    case CalibrateStage::Locating:
+      return "locating the tag";
     case CalibrateStage::Checking:
       return "checking depth";
     case CalibrateStage::Writing:
@@ -312,9 +336,18 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
             });
     if (!metrics.ok()) return in(metrics.status());
 
+    report(CalibrateStage::Locating, 0, 0);
+    core::Result<std::vector<solve::TagView>> tags = tag_views(kept);
+    if (!tags.ok()) return in(tags.status());
+    core::Result<solve::WorldOrigin> origin =
+        solve::origin_tag_frame(kept.cameras, *solution, *tags, kOriginTag);
+    if (!origin.ok()) return in(origin.status());
+
     CalibrateResult out;
     out.reference = kept.reference;
     out.captures = kept.captures.size();
+    // The poses in the reference's gauge, which the depth checks take.
+    std::vector<camera::Mat4d> gauge;
     for (const solve::RigCamera& cam : kept.cameras) {
       const camera::SensorCalibration* sensor =
           camera::find_sensor(solution->calibration, cam.id);
@@ -325,7 +358,7 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
             cam.id);
       }
       out.ids.push_back(cam.id);
-      out.color_to_world.push_back(*sensor->color_to_world);
+      gauge.push_back(*sensor->color_to_world);
     }
     if (depth != nullptr) {
       // A throw from the progress (a stop) stops the run; what the checks
@@ -343,8 +376,8 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
       core::Result<quality::DepthSummary> checked = compute::guarded(
           kChecks, [&]() -> core::Result<quality::DepthSummary> {
             return check_depth(depth->state_->preps, *depth->state_->checks,
-                               kept, *board, *views, *start, *solution,
-                               out.color_to_world, step);
+                               kept, *board, *views, *start, *solution, gauge,
+                               step);
           });
       if (stopped) std::rethrow_exception(stopped);
       if (checked.ok()) {
@@ -353,14 +386,24 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
         out.depth_failure = checked.status().with_context(kChecks);
       }
     }
+    // The world last, on the outputs alone.
+    core::Result<solve::AnchoredRig> rig =
+        solve::anchor_rig(*solution, *origin);
+    if (!rig.ok()) return in(rig.status());
+    if (origin->tag) {
+      core::Result<std::vector<quality::FloorBoard>> floor =
+          quality::floor_boards(*board, solution->boards, rig->boards_to_world);
+      if (!floor.ok()) return in(floor.status());
+      out.world.floor_boards = *std::move(floor);
+    }
+    out.world.origin = *std::move(origin);
     core::Result<quality::ResultFiles> files = quality::format_results(
         kept.cameras, *solution, *metrics, out.depth ? &*out.depth : nullptr,
-        out.depth_failure.ok() ? std::string() : out.depth_failure.message());
+        out.depth_failure.ok() ? std::string() : out.depth_failure.message(),
+        out.world);
     if (!files.ok()) return in(files.status());
-    for (const solve::SolvedBoard& solved : solution->boards) {
-      out.boards_to_world.push_back(
-          camera::matrix_from_rodrigues(solved.board_to_world));
-    }
+    out.color_to_world = std::move(rig->color_to_world);
+    out.boards_to_world = std::move(rig->boards_to_world);
     out.solution = *std::move(solution);
     out.metrics = *std::move(metrics);
     out.files = *std::move(files);

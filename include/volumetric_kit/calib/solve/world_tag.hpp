@@ -82,6 +82,25 @@ struct TagFrameOptions {
   double edge_warn_fraction = 0.02;
 };
 
+/// @brief The RMS of a tag world's corner residuals (@ref TagWorld::rms_px)
+///        above which @ref origin_tag_frame refuses it (pixels): a
+///        @ref TagMiss::PoorFit, the reference camera staying the origin.
+///
+/// Cameras that disagree on where the tag is -- a pose or a lens off, or a
+/// tag moved between captures -- leave their rays apart. With 3 cameras or
+/// more the outlier rounds drop the views that disagree; with 2 they cannot
+/// tell which is wrong, and their bound grows with the disagreement. On the
+/// synthetic rig, at 0.3 px of noise a world fits at about 0.4 px RMS; two
+/// cameras whose corners are (3, 1.5) px apart fit at 1.47 px, and
+/// (5.6, 2.8) px apart at 3.08 px. Beyond about 13 px apart the solve stops
+/// at its iteration cap, and its last iterate's fit is the one compared:
+/// 26.7 px RMS for (44, 22) px apart.
+///
+/// @code
+/// if (origin.miss == TagMiss::PoorFit) warn(origin.reason);  // names the RMS
+/// @endcode
+inline constexpr double kMaxTagWorldRmsPx = 3.0;
+
 /// @brief Why @ref origin_tag_frame gave no tag world.
 enum class TagMiss {
   NotSeen,    ///< No camera saw the tag.
@@ -94,16 +113,21 @@ enum class TagMiss {
   /// mirrored.
   CameraBelowTag,
   /// The corners could not be placed: rays that meet at no point, a corner
-  /// not in front of a camera that saw it, a solve that did not converge, or
-  /// corners that make no square.
+  /// not in front of a camera that saw it, a solve that did not converge
+  /// though its last iterate fits within @ref kMaxTagWorldRmsPx, or corners
+  /// that make no square.
   Numerical,
+  /// The corners, placed or where a solve that did not converge stopped,
+  /// fit the views used worse than @ref kMaxTagWorldRmsPx: the reason gives
+  /// the RMS.
+  PoorFit,
 };
 
 /// @brief The name calib's results files give @p miss.
 /// @param miss  A miss.
 /// @return `"not_seen"`, `"one_camera"`, `"few_cameras"`,
-///         `"camera_below_tag"` or `"numerical"`; `"unknown"` for a value
-///         @ref TagMiss does not name.
+///         `"camera_below_tag"`, `"numerical"` or `"poor_fit"`; `"unknown"`
+///         for a value @ref TagMiss does not name.
 ///
 /// @code
 /// if (!origin.tag) log(to_string(origin.miss), origin.reason);
@@ -188,13 +212,17 @@ struct TagWorld {
 /// const recon::camera::Mat4d w = origin.reference_to_world();
 /// @endcode
 struct WorldOrigin {
+  /// The tag sought, as @ref origin_tag_frame took it; its dictionary `None`
+  /// when none was sought.
+  OriginTag sought;
   /// The tag's world; empty when the reference camera stays the origin.
   std::optional<TagWorld> tag;
   /// Why there is no tag world; set only when @ref tag is empty.
   TagMiss miss = TagMiss::NotSeen;
   /// The camera a `OneCamera` or `CameraBelowTag` miss names; else empty.
   std::string camera;
-  /// The miss in words, for a report; empty with a tag world.
+  /// The miss in words, for a report; empty with a tag world, and when no
+  /// tag was sought.
   std::string reason;
 
   /// @return The reference camera's frame to the world: @ref tag's
@@ -229,6 +257,9 @@ struct WorldOrigin {
 ///    compared with the mean edge.
 /// 5. **Guard.** Each camera that saw the tag must be above its plane
 ///    (z > 0 in its world).
+/// 6. **Fit.** The used views' corners must fit at @ref kMaxTagWorldRmsPx
+///    or better; a solve that stops short of converging is judged by its
+///    last iterate's fit before it is a `Numerical` miss.
 ///
 /// @param cameras   The rig's cameras, as @ref bundle_adjust took them.
 /// @param solution  @ref bundle_adjust's solution for them.
@@ -237,7 +268,8 @@ struct WorldOrigin {
 /// @param tag       The tag sought, as `check_origin_tag` accepts it: its id
 ///                  must be each view's, and its edge is the one compared.
 /// @param options   The thresholds.
-/// @return The world's origin: a tag world, or the reference with the miss;
+/// @return The world's origin, @p tag as its @ref WorldOrigin::sought: a tag
+///         world, or the reference with the miss;
 ///         or `InvalidArgument` for an option out of range (naming it), a
 ///         @p tag `check_origin_tag` refuses, cameras @ref initialise would
 ///         refuse, a @p solution that does not fit them, or a view naming
@@ -282,13 +314,16 @@ struct AnchoredRig {
 /// Every camera sees every point where it did: `T_cw W^-1` of `W X` is
 /// `T_cw X`. Without a tag world W is the identity and the outputs are the
 /// solution's own, its calibration's world the reference's id. With one the
-/// calibration names no world, since recon's file names only a sensor.
+/// calibration's world is the tag, recon's `world.apriltag`: the
+/// @ref apriltag_family of the tag sought's dictionary, its id, and its
+/// printed edge as `size_m`.
 /// @param solution  @ref bundle_adjust's solution.
 /// @param origin    Its world's origin, as @ref origin_tag_frame gave it.
 /// @return The outputs; `InvalidArgument` for a solution with no camera, a
-///         pose or board not finite, or a sensor not posed, or a
-///         `reference_to_world` that is not rigid; or `OutOfMemory`. Each
-///         message starts `anchor_rig: `.
+///         pose or board not finite, or a sensor not posed, a
+///         `reference_to_world` that is not rigid, or a tag world whose tag
+///         sought `check_origin_tag` refuses or is of no AprilTag family; or
+///         `OutOfMemory`. Each message starts `anchor_rig: `.
 ///
 /// @code
 /// VKC_ASSIGN(const AnchoredRig rig, anchor_rig(solution, origin));

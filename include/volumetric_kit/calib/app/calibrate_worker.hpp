@@ -11,15 +11,14 @@
 /// Each Calibrate works from scratch on one snapshot of the kept captures
 /// (@ref CaptureWorker::kept), never from an earlier result: @ref calibrate
 /// runs `solve::initialise`, `solve::bundle_adjust` and
-/// `quality::calibration_metrics`, all in the reference camera's gauge, checks
-/// the kept raw depth against the solved rig on recon's device
-/// (@ref CalibrateDepth), and formats the results files
-/// (`quality::format_results`); @ref write_results writes them to the
-/// session's `results/<RRR>_<YYYY-MM-DD_HHMMSS>/`. @ref CalibrateWorker runs
-/// the two on a thread of its own and publishes the result only once the
-/// files are on disk.
-// TODO: CA12b's world at the origin tag (CB9), from each KeptCapture::tags,
-// joins calibrate() here.
+/// `quality::calibration_metrics`, all in the reference camera's gauge,
+/// locates the origin tag (`solve::origin_tag_frame`), checks the kept raw
+/// depth against the solved rig on recon's device (@ref CalibrateDepth),
+/// moves the outputs into the tag's world (`solve::anchor_rig`), and formats
+/// the results files (`quality::format_results`); @ref write_results writes
+/// them to the session's `results/<RRR>_<YYYY-MM-DD_HHMMSS>/`.
+/// @ref CalibrateWorker runs the two on a thread of its own and publishes the
+/// result only once the files are on disk.
 
 #include <chrono>
 #include <cstddef>
@@ -36,6 +35,7 @@
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
 #include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
+#include "volumetric_kit/calib/solve/world_tag.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/recon/camera/geometry.hpp"
 
@@ -50,14 +50,16 @@ namespace volumetric_kit::calib::app {
 enum class CalibrateStage {
   Solving,    ///< `initialise` and `bundle_adjust`.
   Measuring,  ///< `calibration_metrics`: leave one out, then the A/B test.
+  Locating,   ///< `origin_tag_frame`: the origin tag from the solved rig.
   Checking,   ///< The depth checks (@ref CalibrateDepth), capture by capture.
   Writing,    ///< The results directory; a cancel no longer stops it.
 };
 
 /// @brief The name the window gives @p stage.
 /// @param stage  A stage.
-/// @return `"solving"`, `"measuring"`, `"checking depth"` or `"writing"`;
-///         `"unknown"` for a value @ref CalibrateStage does not name.
+/// @return `"solving"`, `"measuring"`, `"locating the tag"`,
+///         `"checking depth"` or `"writing"`; `"unknown"` for a value
+///         @ref CalibrateStage does not name.
 ///
 /// @code
 /// if (auto at = calibrate->progress()) show(to_string(at->stage));
@@ -82,15 +84,17 @@ struct CalibrateProgress {
 };
 
 /// @brief Called on @ref calibrate's thread as it moves on: as it begins, as
-///        it starts measuring, after each leave-one-out re-solve, and before
-///        each capture's depth checks and after the last. A throw stops the
-///        run (@ref calibrate).
+///        it starts measuring, after each leave-one-out re-solve, as it
+///        locates the tag, and before each capture's depth checks and after
+///        the last. A throw stops the run (@ref calibrate).
 using CalibrateCallback = std::function<void(const CalibrateProgress&)>;
 
 /// @brief A solved and measured rig, and its results files.
 ///
-/// Poses are in the reference camera's gauge: the world is its colour frame,
-/// and its `color_to_world` is exactly the identity.
+/// Its poses are in its world (@ref world): the origin tag's, or, without
+/// one, the reference camera's colour frame, whose `color_to_world` is then
+/// exactly the identity. The solution, the metrics and the depth checks stay
+/// in the reference camera's gauge.
 ///
 /// @code
 /// VKC_ASSIGN(CalibrateResult result, calibrate(*kept));
@@ -108,10 +112,15 @@ struct CalibrateResult {
   std::size_t captures = 0;      ///< The kept captures it was solved from.
   solve::RigSolution solution;   ///< The adjustment's solution.
   quality::CalibrationMetrics metrics;  ///< Its metrics.
+  /// Its world: the origin tag's, located from every kept capture's
+  /// `KeptCapture::tags` (`kOriginTag`), or why the reference camera stays
+  /// the origin; and the solved boards on the tag's floor.
+  quality::ResultWorld world;
   /// Each camera's colour frame to the world, the inverse of its T_cw, in
   /// rig order: as recon and the 3D view take a pose.
   std::vector<recon::camera::Mat4d> color_to_world;
-  /// Each solved board's T_wb, in @ref solve::RigSolution::boards' order.
+  /// Each solved board's T_wb in the world, in
+  /// @ref solve::RigSolution::boards' order.
   std::vector<recon::camera::Mat4d> boards_to_world;
   /// The depth checks over every kept capture (@ref CalibrateDepth), with
   /// `quality::DepthCheckOptions{}`; empty when the depth was not checked.
@@ -132,13 +141,15 @@ class CalibrateDepth;
 /// Every camera's view with corners in every kept capture goes to
 /// `solve::initialise` (with `kept.solve`, from `kept.reference`), then
 /// `solve::bundle_adjust` (its defaults) and `quality::calibration_metrics`
-/// (both options, so the report records them); then, given @p depth, the
-/// depth checks of every kept capture's raw depth (@ref CalibrateDepth); and
-/// `quality::format_results`. A failure of the depth checks fails nothing
-/// else: the result is formatted without them, naming it
-/// (@ref CalibrateResult::depth_failure). Thread-free: it runs on the calling
-/// thread and holds no state between calls, so the same snapshot gives the
-/// same result, but for the times.
+/// (both options, so the report records them); every camera's origin tag in
+/// every kept capture to `solve::origin_tag_frame` (`kOriginTag`, its
+/// defaults); then, given @p depth, the depth checks of every kept capture's
+/// raw depth (@ref CalibrateDepth); then `solve::anchor_rig` and, in a tag
+/// world, `quality::floor_boards`; and `quality::format_results`. A failure
+/// of the depth checks fails nothing else: the result is formatted without
+/// them, naming it (@ref CalibrateResult::depth_failure). Thread-free: it runs
+/// on the calling thread and holds no state between calls, so the same
+/// snapshot gives the same result, but for the times.
 /// @param kept      The captures and what they were taken with.
 /// @param progress  Called as the run moves on (@ref CalibrateCallback); may
 ///                  be empty. To stop the run it throws: the run then returns
@@ -148,12 +159,12 @@ class CalibrateDepth;
 ///                  no other thread meanwhile; null checks no depth.
 /// @return The result, its @ref CalibrateResult::number -1;
 ///         `InvalidArgument` for no capture, more than `bundle_adjust` takes
-///         (150), a null capture, one whose views are not one per camera or
-///         name another camera or capture, or a refusal of the solve's (a
-///         camera outside the tree, a link short of `min_shared`, naming them);
-///         `Numerical` for a solve that fails; or another error of the
-///         solve's, the metrics', the formatter's or @p progress's. Each
-///         message starts `calibrate: `.
+///         (150), a null capture, one whose views or tags are not one per
+///         camera or whose views name another camera or capture, or a
+///         refusal of the solve's (a camera outside the tree, a link short of
+///         `min_shared`, naming them); `Numerical` for a solve that fails;
+///         or another error of the solve's, the metrics', the tag's, the
+///         formatter's or @p progress's. Each message starts `calibrate: `.
 ///
 /// @code
 /// VKC_ASSIGN(const CalibrateResult result,

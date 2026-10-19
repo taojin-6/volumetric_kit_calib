@@ -10,8 +10,9 @@
 ///
 /// The window (T0) keeps a @ref RigMode and asks these pure functions what
 /// to do: @ref rig_action for each key, @ref calibrate_gate whether
-/// Calibrate may run, @ref scene_placement where the 3D view sits, and
-/// @ref frame_on_result whether a result's view is framed afresh.
+/// Calibrate may run, @ref scene_placement where the 3D view sits,
+/// @ref frame_on_result whether a result's view is framed afresh, and
+/// @ref world_up which way is up in it.
 ///
 /// - **Images**, at the start and after V, B or `.`: the rig mosaic fills
 ///   the window, with the board found in each tile; the 3D view is hidden,
@@ -164,18 +165,20 @@ VC_APP_API RigMode on_result(RigMode mode) noexcept;
 /// @brief Where a result's world is: what the 3D view is framed on.
 ///
 /// @code
-/// const RigOrigin origin{result->reference};
+/// const RigOrigin origin{result->reference,
+///                        result->world.origin.tag.has_value()};
 /// @endcode
-// TODO: CB9 adds the origin tag's world here (the result's
-// solve::WorldOrigin), so the view frames again, levelled with +z up, when
-// the world moves between the tag and the reference camera.
 struct RigOrigin {
   /// The reference camera, by rig index (`CalibrateResult::reference`),
-  /// whose colour frame is the world.
+  /// whose colour frame is the world without the tag.
   std::size_t reference = 0;
+  /// The world is the origin tag's, +z up from the floor, whichever camera
+  /// is the reference.
+  bool tag = false;
 };
 
-/// @return Whether @p a and @p b are the same world.
+/// @return Whether @p a and @p b are the same world: both the tag's, or the
+///         same reference camera's.
 VC_APP_API bool operator==(const RigOrigin& a, const RigOrigin& b) noexcept;
 /// @return Whether @p a and @p b are different worlds.
 VC_APP_API bool operator!=(const RigOrigin& a, const RigOrigin& b) noexcept;
@@ -190,11 +193,22 @@ VC_APP_API bool operator!=(const RigOrigin& a, const RigOrigin& b) noexcept;
 ///
 /// @code
 /// if (frame_on_result(framed, origin)) {
-///   VKC_TRY(view.frame(poses));
+///   VKC_TRY(view.frame(poses, world_up(origin)));
 ///   framed = origin;
 /// }
 /// @endcode
 VC_APP_API bool frame_on_result(const std::optional<RigOrigin>& framed,
                                 const RigOrigin& origin) noexcept;
+
+/// @brief The up the 3D view takes for @p origin's world (`SceneView::frame`).
+/// @param origin  The result's world.
+/// @return The tag's +z, so its floor lies level, in a tag world; empty in a
+///         reference camera's, for the cameras' mean up.
+///
+/// @code
+/// VKC_TRY(view.frame(poses, world_up(origin)));
+/// @endcode
+VC_APP_API std::optional<recon::camera::Vec3d> world_up(
+    const RigOrigin& origin) noexcept;
 
 }  // namespace volumetric_kit::calib::app

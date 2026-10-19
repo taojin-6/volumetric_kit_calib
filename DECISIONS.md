@@ -73,6 +73,29 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-19 — The world at the origin tag
+
+Calibrate's results and its 3D view are in the origin tag's world when
+`solve::origin_tag_frame` gives one, and in the reference camera's
+otherwise (anchored last, as the "Calibrate (T4)" entry has it).
+
+- **The file names the tag** (the user's call): a tag world's
+  `array_calibration.json` is recon's `world.apriltag`, with the tag's
+  printed edge, not the edge measured, so a reader can find the print
+  again. A reference world's file is as it was, to the byte. recon before
+  its #254 refuses a tag-world file.
+- **The report names the origin.** `report.json`'s `world` says which
+  origin the poses are in and, without a tag world, why, so the report
+  alone tells where the calibration file's poses are.
+- **At most 3 px RMS** (the user's call; `solve::kMaxTagWorldRmsPx` says
+  why): a world that fits worse is refused, the reference camera staying
+  the origin, and the report, the Calibration window and a notice say why.
+- **The floor boards reported, not used** (the user's call). z is the
+  tag's alone; the solved boards lying on its floor are listed with their
+  tilt and height (`quality::floor_boards`), with no verdict, to decide on
+  levelling after H5. On 2026-09-29 the tag's z was 1.1-1.4 degrees off
+  them, about 20 mm at 1 m.
+
 ## 2026-10-18 — Calibrate (T4)
 
 Calibrate runs on a worker of its own (`app/calibrate_worker.hpp` has the
@@ -100,17 +123,14 @@ steps, the numbering and the write order).
   user's call): `SensorArray` reads only the poses, and the session's
   factory file already has the depth models.
 - **Cancelled between steps.** `bundle_adjust` is not interruptible, so a
-  cancel takes effect before the metrics, after a leave-one-out re-solve or
-  between two captures' depth checks; the writing, a few files, is not
-  cancelled.
+  cancel takes effect at the next progress call (`app::CalibrateCallback`
+  lists them); the writing, a few files, is not cancelled.
 - **The images, then the cloud** (the user's calls). calib_rig
   shows the camera images until a result, then the live points at the solved
   poses in the whole window, and a key goes back to the images to capture
   more and recalibrate (`app/rig_mode.hpp`). Calibrate is C or F5 and Escape
   cancels; the keys the clicker's extra buttons send are not known, so the
   capture and drop keys stay as they were.
-- **Still to come:** the world at the origin tag in Calibrate's results and
-  the 3D view (CB9, over `solve/world_tag.hpp`), a `TODO:` where it lands.
 
 ## 2026-10-18 — The origin tag
 
@@ -195,10 +215,11 @@ camera's depth as points, its frusta, the world's axes and the solved boards.
   another queue, so the worker then sets a timeline value on recon's queue,
   and each frame that draws the snapshot waits for it at the vertex stage,
   as gfx's contract asks.
-- **Upright.** gfx's `OrbitCamera` keeps +Y up, and the rig's world has +y
-  down, so the view turns the world: the placed cameras' mean up (-y) to +Y,
-  their mean forward, levelled, to -Z. An outside-in ring's forwards cancel,
-  so the first camera's is taken.
+- **Upright** (amended 2026-10-19). gfx's `OrbitCamera` keeps +Y up, so
+  the view turns the world's up to +Y: the origin tag's +z, so its floor
+  lies level, or, in the reference camera's world, whose +y is down, the
+  placed cameras' mean up (-y). Their mean forward, levelled, goes to -Z;
+  an outside-in ring's forwards cancel, so the first camera's is taken.
 - **Wide points where the GPU has them.** calib_rig's device asks for
   `largePoints`, merged with recon's and calib_depth's needs
   (`rig_requirements`), and is made without it, with one-pixel points, on a

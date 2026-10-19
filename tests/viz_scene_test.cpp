@@ -309,6 +309,99 @@ TEST(VizScene, TheDisplayRotationRefusesNoCameraAndUpsThatCancel) {
   EXPECT_EQ(
       display_rotation({glm::scale(Mat4d(1.0), Vec3d(2.0))}).status().domain(),
       Code::InvalidArgument);
+  // A world's up given must be a direction.
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  for (const Vec3d& up : {Vec3d(0.0), Vec3d(0.0, nan, 1.0)}) {
+    const core::Status refused = display_rotation({Mat4d(1.0)}, up).status();
+    EXPECT_EQ(refused.domain(), Code::InvalidArgument);
+    EXPECT_NE(refused.message().find("the world's up"), std::string::npos)
+        << refused.message();
+  }
+}
+
+// The synthetic rig in its world, the tag's, +z up from the floor at z = 0:
+// given +z, the turn takes it to +Y and every floor direction to a level
+// one, whatever the cameras' ups; the cameras' levelled forward to -Z as
+// without it.
+TEST(VizScene, ATagsWorldTurnsItsZToPlusYWithTheFloorLevel) {
+  std::vector<Mat4d> poses;
+  Vec3d forward(0.0);
+  for (const test::SyntheticCamera& c : test::synthetic_rig()) {
+    poses.push_back(camera::rigid_inverse(c.world_to_camera));
+    forward += Mat3d(poses.back())[2];
+  }
+  // A camera rolled 40 degrees about its axis turns the mean up of the
+  // cameras off the world's +z, not the tag's world's.
+  poses[2] = poses[2] * pose(40.0, {0.0, 0.0, 1.0}, Vec3d(0.0));
+  const Vec3d z(0.0, 0.0, 1.0);
+  for (const double length : {1.0, 2.5}) {
+    const core::Result<Mat3d> turn = display_rotation(poses, length * z);
+    ASSERT_TRUE(turn.ok()) << turn.status().message();
+    expect_rotation(turn.value());
+    const Vec3d up = turn.value() * z;
+    EXPECT_NEAR(up.x, 0.0, 1e-12);
+    EXPECT_NEAR(up.y, 1.0, 1e-12);
+    EXPECT_NEAR(up.z, 0.0, 1e-12);
+    for (const Vec3d& floor :
+         {Vec3d(1.0, 0.0, 0.0), Vec3d(0.0, 1.0, 0.0), Vec3d(0.6, -0.8, 0.0)}) {
+      EXPECT_NEAR((turn.value() * floor).y, 0.0, 1e-12);
+    }
+    const Vec3d level = glm::normalize(forward - glm::dot(forward, z) * z);
+    expect_near(turn.value() * level, Vec3d(0.0, 0.0, -1.0), 1e-9,
+                "the levelled forward");
+  }
+  // Without it, the cameras' mean up is not the world's +z.
+  const Vec3d mean_up = display_rotation(poses).value() * z;
+  EXPECT_GT(std::abs(mean_up.x) + std::abs(mean_up.z), 1e-3);
+
+  // The view framed on them in the tag's world keeps that turn.
+  SceneView view;
+  ASSERT_TRUE(view.frame(poses, z).ok());
+  expect_near(view.rotation() * z, Vec3d(0.0, 1.0, 0.0), 1e-12, "framed up");
+}
+
+// The origin tag's outline: its 4 edges at the origin on z = 0, from its
+// first corner (-s/2, s/2) to its second (s/2, s/2) and around, in its
+// colour; the scene's lines gain it when asked.
+TEST(VizScene, TheTagsOutlineIsItsSquareAtTheOrigin) {
+  constexpr std::uint32_t kMagenta = pipelines::pack_rgba8(255, 0, 255);
+  const core::Result<std::vector<pipelines::ColorVertex>> lines =
+      tag_lines(0.15, kMagenta);
+  ASSERT_TRUE(lines.ok()) << lines.status().message();
+  ASSERT_EQ(lines.value().size(), 8u);
+  const std::vector<Vec3d> corners = {{-0.075, 0.075, 0.0},
+                                      {0.075, 0.075, 0.0},
+                                      {0.075, -0.075, 0.0},
+                                      {-0.075, -0.075, 0.0}};
+  for (std::size_t k = 0; k < 4; ++k) {
+    const std::string edge = "edge " + std::to_string(k);
+    expect_near(point(lines.value()[2 * k]), corners[k], 1e-7, edge);
+    expect_near(point(lines.value()[2 * k + 1]), corners[(k + 1) % 4], 1e-7,
+                edge);
+    EXPECT_EQ(lines.value()[2 * k].rgba, kMagenta);
+    EXPECT_EQ(lines.value()[2 * k + 1].rgba, kMagenta);
+  }
+  for (const double bad : {0.0, -0.15, std::numeric_limits<double>::infinity(),
+                           std::numeric_limits<double>::quiet_NaN()}) {
+    EXPECT_EQ(tag_lines(bad, kMagenta).status().domain(), Code::InvalidArgument)
+        << bad;
+  }
+
+  SceneOptions options;
+  const std::size_t without =
+      scene_lines({}, nullptr, {}, options).value().size();
+  options.tag_edge_m = 0.148;
+  const std::vector<pipelines::ColorVertex> with =
+      scene_lines({}, nullptr, {}, options).value();
+  ASSERT_EQ(with.size(), without + 8);
+  expect_near(point(with[without]), Vec3d(-0.074, 0.074, 0.0), 1e-7,
+              "the scene's tag");
+  EXPECT_EQ(with[without].rgba, options.tag_rgba);
+  options.tag_edge_m = -1.0;
+  const core::Status refused = scene_lines({}, nullptr, {}, options).status();
+  EXPECT_EQ(refused.domain(), Code::InvalidArgument);
+  EXPECT_NE(refused.message().find("the origin tag"), std::string::npos)
+      << refused.message();
 }
 
 // Clip space of a world point through a view.

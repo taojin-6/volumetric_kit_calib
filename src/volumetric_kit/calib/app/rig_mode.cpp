@@ -55,7 +55,7 @@ RigMode on_result(RigMode mode) noexcept {
 }
 
 bool operator==(const RigOrigin& a, const RigOrigin& b) noexcept {
-  return a.reference == b.reference;
+  return a.tag == b.tag && (a.tag || a.reference == b.reference);
 }
 
 bool operator!=(const RigOrigin& a, const RigOrigin& b) noexcept {
@@ -65,6 +65,11 @@ bool operator!=(const RigOrigin& a, const RigOrigin& b) noexcept {
 bool frame_on_result(const std::optional<RigOrigin>& framed,
                      const RigOrigin& origin) noexcept {
   return !framed || *framed != origin;
+}
+
+std::optional<recon::camera::Vec3d> world_up(const RigOrigin& origin) noexcept {
+  if (!origin.tag) return std::nullopt;
+  return recon::camera::Vec3d(0.0, 0.0, 1.0);  // out of the tag's face
 }
 
 }  // namespace volumetric_kit::calib::app
