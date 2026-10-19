@@ -17,8 +17,7 @@
 /// @ref CalibrateWorker runs the two on a thread of its own and publishes
 /// the result only once the files are on disk.
 // TODO: CA12b's depth checks of the kept raw depth (CB6), on recon's device,
-// and the world at the origin tag (CB9: solve::origin_tag_frame, then
-// solve::anchor_rig) join calibrate() here.
+// and the world at the origin tag (CB8, CB9) join calibrate() here.
 
 #include <chrono>
 #include <cstddef>
