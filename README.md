@@ -48,7 +48,7 @@ renderer.
 - **Capture:** the `capture` tier writes a calibration session to disk on a
   thread of its own and never overwrites: each camera's JPEG as the camera
   coded it, raw 16-bit depth, the factory models in recon's calibration file,
-  and the detections and checks
+  and the detections of the board and the origin tag, and the checks
   ([DECISIONS.md](DECISIONS.md#2026-10-13--sessions-on-disk)). It takes
   recon's sensor and io tiers, so `VC_WITH_RIG` fetches all of recon.
 - **Compute:** a CPU backend is the correctness oracle: OpenCV, behind
@@ -116,8 +116,9 @@ renderer.
   the last. A worker thread owns the rig and finds the board in each set's
   luma, another prepares sets on the GPU for the 3D view (hidden until the
   rig is calibrated, then beside the mosaic or in the whole window), another
-  detects each capture at full resolution, writes it and keeps it in memory
-  for Calibrate, and the window draws and never waits
+  finds the board and the origin tag in each capture at full resolution,
+  writes it and keeps it in memory for Calibrate, and the window draws and
+  never waits
   ([DECISIONS.md](DECISIONS.md#2026-10-16--calib_rigs-live-view-and-capture)).
   Calibrate's worker solves and measures the kept captures and writes a
   results directory

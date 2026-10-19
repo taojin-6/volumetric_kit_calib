@@ -106,6 +106,13 @@ TEST(VizOom, Panels) {
   expect_oom_anywhere([&] { return session_panel(summary, ids); });
   expect_oom_when_reporting([&] { return session_panel(summary, {}); },
                             Code::InvalidArgument);
+  // A rig of 1000 cameras, so even the shortest line is too long for any
+  // small-string buffer.
+  for (std::size_t seen_by = 0; seen_by <= 2; ++seen_by) {
+    expect_oom_anywhere([&] { return origin_tag_line({1000, seen_by, 5}); });
+  }
+  expect_oom_when_reporting([] { return origin_tag_line({2, 3, 5}); },
+                            Code::InvalidArgument);
 
   CaptureStatus status;
   status.decision.state = quality::CaptureState::Waiting;

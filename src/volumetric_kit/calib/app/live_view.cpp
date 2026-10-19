@@ -95,6 +95,22 @@ core::Result<std::vector<viz::CameraLive>> camera_lives(
       });
 }
 
+viz::TagCoverage tag_coverage(const KeptCaptures& kept) noexcept {
+  viz::TagCoverage coverage;
+  coverage.cameras = kept.cameras.size();
+  for (std::size_t c = 0; c < coverage.cameras; ++c) {
+    std::size_t views = 0;
+    for (const std::shared_ptr<const KeptCapture>& capture : kept.captures) {
+      if (capture != nullptr && c < capture->tags.size() && capture->tags[c]) {
+        ++views;
+      }
+    }
+    if (views > 0) ++coverage.seen_by;
+    coverage.views += views;
+  }
+  return coverage;
+}
+
 core::Result<std::optional<core::TimelinePoint>> record_cloud(
     gfx::pipelines::DepthCloudPipeline& pipeline, gfx::RetireQueue& retire,
     VkCommandBuffer cmd, VkExtent2D extent, std::uint64_t frame_number,

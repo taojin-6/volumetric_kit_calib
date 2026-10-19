@@ -21,6 +21,7 @@
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/detect/charuco.hpp"
+#include "volumetric_kit/calib/detect/tag.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/recon/sensor/orbbec/orbbec_sensor.hpp"
 
@@ -35,13 +36,36 @@ namespace sensor = recon::sensor;
 constexpr std::chrono::milliseconds kCollectEvery{20};
 
 using DepthSamples = std::shared_ptr<const std::vector<std::uint16_t>>;
+using Tag = std::optional<DetectedMarker>;
 
 // A capture on the writer, awaiting its outcome.
 struct Written {
   std::vector<Detection> full;      // each camera's, for the session's checks
   std::vector<DepthSamples> depth;  // each camera's, shared with the writer
+  std::vector<Tag> tags;            // each camera's origin tag
   CaptureEvent event;               // Saved, once its index is known
 };
+
+// The origin tag's search in one camera's luma.
+struct TagSearch {
+  Tag found;  // when the luma holds exactly one print of it
+  int matches = 0;
+  core::Status error;
+};
+
+TagSearch search_tag(const CameraFrameCopy& part) {
+  TagSearch out;
+  out.error = compute::guarded("origin tag search", [&]() -> core::Status {
+    const detect::LumaView luma{part.width, part.height, part.width,
+                                part.luma.data()};
+    VKC_ASSIGN(const detect::MarkerSearch search,
+               detect::detect_tag(luma, kOriginTag));
+    out.found = search.found;
+    out.matches = search.matches;
+    return {};
+  });
+  return out;
+}
 
 // A capture, or a drop of the last one.
 struct Job {
@@ -192,7 +216,8 @@ struct CaptureWorker::State {
     return {};
   }
 
-  // One capture: detected at full resolution, checked, queued on the writer.
+  // One capture: its board detected at full resolution and checked, and the
+  // origin tag searched for, in each camera's luma; queued on the writer.
   void capture(CaptureRequest request) {
     if (writer == nullptr) {
       const core::Status opened = open_session(request);
@@ -211,12 +236,14 @@ struct CaptureWorker::State {
     std::vector<ViewCheck> views(n);
     std::vector<core::Status> detect_errors(n);
     std::vector<core::Status> check_errors(n);
+    std::vector<TagSearch> searches(n);
     cv::parallel_for_(cv::Range(0, static_cast<int>(n)),
                       [&](const cv::Range& range) {
                         for (int c = range.start; c < range.end; ++c) {
                           const auto i = static_cast<std::size_t>(c);
                           detect_one(i, request.cameras[i], full[i], views[i],
                                      detect_errors[i], check_errors[i]);
+                          searches[i] = search_tag(request.cameras[i]);
                         }
                       });
     std::vector<core::Status> failures;
@@ -226,6 +253,13 @@ struct CaptureWorker::State {
         failures.push_back(detect_errors[i].with_context(who));
       } else if (!check_errors[i].ok()) {
         failures.push_back(check_errors[i].with_context(who));
+      }
+      if (!searches[i].error.ok()) {
+        failures.push_back(searches[i].error.with_context(who));
+      } else if (searches[i].matches > 1) {
+        failures.push_back(core::Status::invalid_argument(
+            who + ": " + std::to_string(searches[i].matches) +
+            " prints of the origin tag in view: none is kept"));
       }
     }
 
@@ -243,6 +277,11 @@ struct CaptureWorker::State {
     }
     for (const ViewCheck& view : views) {
       if (is_usable(view.verdict)) ++event.usable_views;
+    }
+    std::vector<Tag> tags(n);
+    for (std::size_t i = 0; i < n; ++i) {
+      tags[i] = searches[i].found;
+      if (tags[i]) ++event.tag_cameras;
     }
 
     capture::CaptureJob job;
@@ -262,6 +301,7 @@ struct CaptureWorker::State {
       out.sequence = part.sequence;
       out.detection = full[i];
       out.check = views[i];
+      out.origin_tag = tags[i];
     }
     if (!failures.empty()) resolve({}, 0, 0, std::move(failures));
     const core::Result<bool> queued = writer->submit(std::move(job));
@@ -275,7 +315,8 @@ struct CaptureWorker::State {
                        "capture refused: the session writer is full"));
       return;
     }
-    written.push_back({std::move(full), std::move(depth), std::move(event)});
+    written.push_back(
+        {std::move(full), std::move(depth), std::move(tags), std::move(event)});
   }
 
   void detect_one(std::size_t i, const CameraFrameCopy& part, Detection& found,
@@ -356,6 +397,7 @@ struct CaptureWorker::State {
           kept_capture->index = result.index;
           kept_capture->views = std::move(done.full);
           kept_capture->depth = std::move(done.depth);
+          kept_capture->tags = std::move(done.tags);
           now.push_back(std::move(kept_capture));
           kept_changed = true;
         }

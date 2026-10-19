@@ -8,7 +8,8 @@
 // held. Then the app's device split: the live worker reads a camera's picture
 // back on the compute library's queue family while the window copies the same
 // images into the mosaic on the renderer's. Then the marks and panels a
-// snapshot gives each camera. The GPU cases run under the validation layer
+// snapshot gives each camera, and the origin tag's coverage of the captures
+// kept. The GPU cases run under the validation layer
 // when the environment asks (VKC_TEST_VALIDATION) and skip without a Vulkan
 // device, the cross-family case also with one family.
 
@@ -413,6 +414,31 @@ TEST(AppLiveViewModels, GivesEachCameraItsLiveState) {
   EXPECT_FALSE(cameras.value()[0].lost.has_value());
   EXPECT_EQ(cameras.value()[1].lost, 7u);
   EXPECT_EQ(cameras.value()[1].frames.received, 42u);
+}
+
+// The session panel's origin tag: each camera that found it in a capture
+// kept, and every such view; a null capture, or one with no tags, adds none.
+TEST(AppLiveViewModels, CountsTheCamerasAndViewsOfTheOriginTag) {
+  const DetectedMarker tag{0, {}};
+  const auto capture = [](std::vector<std::optional<DetectedMarker>> tags) {
+    auto kept = std::make_shared<KeptCapture>();
+    kept->tags = std::move(tags);
+    return std::shared_ptr<const KeptCapture>(std::move(kept));
+  };
+  KeptCaptures kept;
+  kept.cameras.resize(3);
+  viz::TagCoverage coverage = tag_coverage(kept);
+  EXPECT_EQ(coverage.cameras, 3u);
+  EXPECT_EQ(coverage.seen_by, 0u);
+  EXPECT_EQ(coverage.views, 0u);
+
+  kept.captures = {capture({tag, std::nullopt, std::nullopt}),
+                   capture({tag, std::nullopt, tag}), nullptr, capture({}),
+                   capture({std::nullopt, std::nullopt, tag})};
+  coverage = tag_coverage(kept);
+  EXPECT_EQ(coverage.cameras, 3u);
+  EXPECT_EQ(coverage.seen_by, 2u);  // camera 1 never saw it
+  EXPECT_EQ(coverage.views, 4u);
 }
 
 // Before Calibrate only the reference is placed, at the world's origin, and

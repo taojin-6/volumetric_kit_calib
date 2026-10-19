@@ -7,15 +7,17 @@
 // queue, requests that do not fit the rig, a missing root and the drain at
 // shutdown; the session's depth unit, the frames'; the captures kept for
 // Calibrate, each view named for its camera even when its detection failed,
-// their depth shared with the writer, and their cap. Synthetic board renders,
-// a few cameras, no device. Then what a session records of each camera and of
-// the software.
+// their depth shared with the writer, and their cap; the origin tag found in
+// each camera's luma, kept, written and counted, and an image with two prints
+// of it. Synthetic board and tag renders, a few cameras, no device. Then what
+// a session records of each camera and of the software.
 
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -39,6 +41,7 @@
 #include "fake_sensor.hpp"
 #include "scratch_dir.hpp"
 #include "synthetic_rig.hpp"
+#include "volumetric_kit/calib/app/live_view.hpp"
 #include "volumetric_kit/calib/app/preset.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/detect/charuco.hpp"
@@ -184,6 +187,35 @@ CaptureRequest request(std::size_t cameras, double live_shift_px, int tag = 0,
     out.cameras.push_back(std::move(part));
   }
   return out;
+}
+
+using Corners = std::array<cv::Point2d, 4>;
+
+// The origin tag drawn into camera `i`'s luma in `r`, clear of its board
+// (synthetic_rig.hpp's draw_marker): a print about 90 px across, turned, by
+// the top-left corner, and with `prints` 2 another by the bottom-right.
+// Returns the first print's corners, where the detector should find them.
+Corners draw_origin_tag(CaptureRequest& r, std::size_t i, int prints = 1) {
+  const auto at = [](const cv::Point2d& centre, double side_px,
+                     double roll_deg) {
+    const double a = roll_deg * 3.14159265358979323846 / 180.0;
+    const double c = side_px * std::cos(a);
+    const double s = side_px * std::sin(a);
+    // The print's frame, (0, 0) to (1, 1), turned about its centre.
+    return cv::Matx33d(c, -s, centre.x - 0.5 * (c - s), s, c,
+                       centre.y - 0.5 * (s + c), 0.0, 0.0, 1.0);
+  };
+  CameraFrameCopy& part = r.cameras[i];
+  cv::Mat luma(static_cast<int>(part.height), static_cast<int>(part.width),
+               CV_8UC1, part.luma.data());
+  const Corners first =
+      test::draw_marker(luma, kOriginTag.dictionary, kOriginTag.id,
+                        at({130.4, 118.7}, 92.0, 12.0));
+  if (prints > 1) {
+    test::draw_marker(luma, kOriginTag.dictionary, kOriginTag.id,
+                      at({826.3, 431.2}, 88.0, -20.0));
+  }
+  return first;
 }
 
 std::unique_ptr<CaptureWorker> make(CaptureSetup s) {
@@ -865,6 +897,133 @@ TEST(AppCapture, RefusesACaptureBeyondWhatOneCalibrateAdjusts) {
   EXPECT_EQ(events[1].kind, CaptureEvent::Kind::Saved);
   ASSERT_EQ(worker->kept()->captures.size(), 2u);
   EXPECT_EQ(worker->kept()->captures[1]->index, 2);
+}
+
+// The origin tag is searched for in each camera's full luma: the camera that
+// sees it keeps its corners, which its capture's file holds as kept, and the
+// event counts it; the cameras that see none keep none. The board beside it
+// is found as ever.
+TEST(AppCapture, KeepsAndWritesTheOriginTagEachCameraFinds) {
+  ScratchDir root;
+  std::unique_ptr<CaptureWorker> worker = make(setup(root.path(), 3));
+  ASSERT_NE(worker, nullptr);
+  CaptureRequest r = request(3, 0.0);
+  const Corners truth = draw_origin_tag(r, 1);
+  ASSERT_TRUE(submit(*worker, std::move(r)));
+  worker->flush();
+  EXPECT_TRUE(worker->take_errors().empty());
+  const std::vector<CaptureEvent> events = worker->take_events();
+  ASSERT_EQ(events.size(), 1u);
+  ASSERT_EQ(events[0].kind, CaptureEvent::Kind::Saved)
+      << events[0].status.message();
+  EXPECT_EQ(events[0].tag_cameras, 1);
+  EXPECT_EQ(events[0].usable_views, 3);
+
+  const std::shared_ptr<const KeptCaptures> kept = worker->kept();
+  ASSERT_NE(kept, nullptr);
+  ASSERT_EQ(kept->captures.size(), 1u);
+  const std::vector<std::optional<DetectedMarker>>& tags =
+      kept->captures[0]->tags;
+  ASSERT_EQ(tags.size(), 3u);
+  EXPECT_FALSE(tags[0].has_value());
+  EXPECT_FALSE(tags[2].has_value());
+  ASSERT_TRUE(tags[1].has_value());
+  EXPECT_EQ(tags[1]->id, kOriginTag.id);
+  // In order, each corner where it was drawn, but for SUBPIX's pull of up to
+  // 0.3 px in along its bisector (DECISIONS.md, "The origin tag"), which
+  // leaves their centre in place.
+  cv::Point2d centre(0.0, 0.0);
+  for (std::size_t k = 0; k < 4; ++k) {
+    const cv::Point2d found(tags[1]->corners[k].x, tags[1]->corners[k].y);
+    EXPECT_LT(cv::norm(found - truth[k]), 0.35) << "corner " << k;
+    centre += 0.25 * (found - truth[k]);
+  }
+  EXPECT_LT(cv::norm(centre), 0.1);
+
+  const fs::path dir = worker->directory();
+  const json capture = json::parse(read(dir / "captures" / "000.json"));
+  const json& cameras = capture["cameras"];
+  EXPECT_TRUE(cameras["SYN0"]["origin_tag"].is_null());
+  EXPECT_TRUE(cameras["SYN2"]["origin_tag"].is_null());
+  const json& written = cameras["SYN1"]["origin_tag"];
+  EXPECT_EQ(written["dictionary"], "DICT_APRILTAG_36h11");
+  EXPECT_EQ(written["id"], kOriginTag.id);
+  ASSERT_EQ(written["corners_px"].size(), 4u);
+  for (std::size_t k = 0; k < 4; ++k) {
+    EXPECT_EQ(written["corners_px"][k][0].get<double>(), tags[1]->corners[k].x);
+    EXPECT_EQ(written["corners_px"][k][1].get<double>(), tags[1]->corners[k].y);
+  }
+  EXPECT_EQ(cameras["SYN1"]["check"]["corners"], 8);
+  const json session = json::parse(read(dir / "session.json"));
+  EXPECT_EQ(session["origin_tag"]["id"], kOriginTag.id);
+  EXPECT_EQ(session["origin_tag"]["edge_m"].get<double>(), kOriginTag.edge_m);
+}
+
+// Two prints of the tag in a camera's image: neither is taken for the tag,
+// which the worker says, and the capture is saved all the same, with another
+// camera's tag.
+TEST(AppCapture, KeepsNoTagFromAnImageWithTwoAndSaysSo) {
+  ScratchDir root;
+  std::unique_ptr<CaptureWorker> worker = make(setup(root.path(), 2));
+  ASSERT_NE(worker, nullptr);
+  CaptureRequest r = request(2, 0.0);
+  draw_origin_tag(r, 0, 2);
+  draw_origin_tag(r, 1);
+  ASSERT_TRUE(submit(*worker, std::move(r)));
+  worker->flush();
+  const std::vector<core::Status> errors = worker->take_errors();
+  ASSERT_EQ(errors.size(), 1u);
+  EXPECT_EQ(errors[0].domain(), Code::InvalidArgument);
+  EXPECT_EQ(errors[0].message(),
+            "capture: camera SYN0: 2 prints of the origin tag in view: none is "
+            "kept");
+  const std::vector<CaptureEvent> events = worker->take_events();
+  ASSERT_EQ(events.size(), 1u);
+  ASSERT_EQ(events[0].kind, CaptureEvent::Kind::Saved)
+      << events[0].status.message();
+  EXPECT_EQ(events[0].tag_cameras, 1);
+  EXPECT_EQ(events[0].usable_views, 2);
+  const std::vector<std::optional<DetectedMarker>>& tags =
+      worker->kept()->captures[0]->tags;
+  ASSERT_EQ(tags.size(), 2u);
+  EXPECT_FALSE(tags[0].has_value());
+  EXPECT_TRUE(tags[1].has_value());
+  const json capture = json::parse(
+      read(fs::path(worker->directory()) / "captures" / "000.json"));
+  EXPECT_TRUE(capture["cameras"]["SYN0"]["origin_tag"].is_null());
+  EXPECT_FALSE(capture["cameras"]["SYN1"]["origin_tag"].is_null());
+}
+
+// The tag's coverage counts the captures kept: a drop takes its views of the
+// tag with it.
+TEST(AppCapture, ADroppedCaptureTakesItsViewsOfTheTag) {
+  ScratchDir root;
+  std::unique_ptr<CaptureWorker> worker = make(setup(root.path(), 2));
+  ASSERT_NE(worker, nullptr);
+  CaptureRequest first = request(2, 0.0, 0);
+  draw_origin_tag(first, 0);
+  CaptureRequest second = request(2, 0.0, 1);
+  draw_origin_tag(second, 0);
+  draw_origin_tag(second, 1);
+  ASSERT_TRUE(submit(*worker, std::move(first)));
+  ASSERT_TRUE(submit(*worker, std::move(second)));
+  ASSERT_TRUE(submit(*worker, request(2, 0.0, 2)));  // sees no tag
+  worker->flush();
+  const auto coverage = [&worker] {
+    const viz::TagCoverage c = tag_coverage(*worker->kept());
+    return std::vector<std::size_t>{c.cameras, c.seen_by, c.views};
+  };
+  EXPECT_EQ(coverage(), (std::vector<std::size_t>{2, 2, 3}));
+  ASSERT_TRUE(worker->drop_last().ok());  // the third, which saw none
+  worker->flush();
+  EXPECT_EQ(coverage(), (std::vector<std::size_t>{2, 2, 3}));
+  ASSERT_TRUE(worker->drop_last().ok());  // the second
+  worker->flush();
+  EXPECT_EQ(coverage(), (std::vector<std::size_t>{2, 1, 1}));
+  ASSERT_TRUE(worker->drop_last().ok());
+  worker->flush();
+  EXPECT_EQ(coverage(), (std::vector<std::size_t>{2, 0, 0}));
+  EXPECT_TRUE(worker->take_errors().empty());
 }
 
 TEST(AppCapture, RecordsEachCameraAndItsDepthDelay) {

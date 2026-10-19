@@ -6,8 +6,9 @@
 /// @file live_view.hpp
 /// @brief What the window (calib_rig's T0 thread) makes of a live snapshot:
 ///        its pictures copied into the rig mosaic, and the marks and panels
-///        the viz tier draws over and beside it; and of a 3D-view snapshot:
-///        each camera's points, drawn in place at the rig's poses.
+///        the viz tier draws over and beside it; of the captures kept: the
+///        origin tag's coverage; and of a 3D-view snapshot: each camera's
+///        points, drawn in place at the rig's poses.
 
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "volumetric_kit/calib/app/capture_worker.hpp"
 #include "volumetric_kit/calib/app/cloud_worker.hpp"
 #include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/app/live_worker.hpp"
@@ -96,6 +98,21 @@ VC_APP_API core::Result<std::vector<viz::TileOverlay>> tile_overlays(
 /// @endcode
 VC_APP_API core::Result<std::vector<viz::CameraLive>> camera_lives(
     const LiveSnapshot& snapshot);
+
+/// @brief How much of the origin tag the captures kept hold, as the session
+///        panel shows it (`viz::origin_tag_line`).
+/// @param kept  The captures kept (@ref CaptureWorker::kept): a dropped one
+///              is not among them.
+/// @return The rig's cameras, those that found the tag in a capture kept, and
+///         their views of it (@ref KeptCapture::tags).
+///
+/// @code
+/// if (auto kept = captures->kept()) {
+///   VKC_ASSIGN(const viz::PanelLine line,
+///              viz::origin_tag_line(tag_coverage(*kept)));
+/// }
+/// @endcode
+VC_APP_API viz::TagCoverage tag_coverage(const KeptCaptures& kept) noexcept;
 
 /// @brief Record @p snapshot's points, each shown and placed camera's at its
 ///        pose now (`viz::cloud_draws`), and hold the snapshot in @p retire

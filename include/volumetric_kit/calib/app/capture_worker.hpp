@@ -11,8 +11,9 @@
 /// The live view finds the board by the faster hybrid; the solver takes full-
 /// resolution corners, so each capture's luma is searched again here (Full
 /// mode) and its views checked, the two detections compared
-/// (`quality::live_vs_full_flagged`), and the capture queued on the capture
-/// tier's `SessionWriter`, which writes it on a thread of its own. The
+/// (`quality::live_vs_full_flagged`), the origin tag searched for in the same
+/// luma (`detect::detect_tag`, `kOriginTag`), and the capture queued on the
+/// capture tier's `SessionWriter`, which writes it on a thread of its own. The
 /// session's directory is created at the first capture, under the scenario's
 /// `output.path`. Captures and drops are carried out in the order they come,
 /// and each one's outcome is reported (@ref take_events), with the session's
@@ -112,14 +113,15 @@ struct CaptureSetup {
   std::size_t max_kept = solve::BundleAdjustOptions{}.max_captures;
 };
 
-/// @brief A capture kept for Calibrate: each camera's full detection and raw
-///        depth, as the session wrote them.
+/// @brief A capture kept for Calibrate: each camera's full detection, raw
+///        depth and origin tag, as the session wrote them.
 ///
 /// @code
 /// for (std::size_t c = 0; c < capture.views.size(); ++c) {
 ///   const Observation& view = capture.views[c].observation;
 ///   if (!view.empty()) observations.push_back(view);  // the solve's input
 ///   const std::vector<std::uint16_t>& depth = *capture.depth[c];
+///   if (capture.tags[c]) tag_views.push_back(*capture.tags[c]);
 /// }
 /// @endcode
 struct KeptCapture {
@@ -132,6 +134,10 @@ struct KeptCapture {
   /// Each camera's raw depth, in rig order, not null: the very samples the
   /// session wrote as its PNG, shared with the writer, never copied.
   std::vector<std::shared_ptr<const std::vector<std::uint16_t>>> depth;
+  /// Each camera's origin tag (`kOriginTag`), in rig order, in its colour
+  /// image's pixels: the corners its file holds; empty where the camera
+  /// found none, more than one print of it, or its search failed.
+  std::vector<std::optional<DetectedMarker>> tags;
 };
 
 /// @brief What Calibrate works on: the session's kept captures and what they
@@ -188,6 +194,8 @@ struct CaptureEvent {
   int usable_views = 0;  ///< Saved: its usable views at full resolution.
   /// Saved: its live corners disagree with its full ones.
   bool flagged = false;
+  /// Saved: its cameras that found the origin tag (@ref KeptCapture::tags).
+  int tag_cameras = 0;
 };
 
 /// @brief The capture worker: a thread that detects each capture at full
@@ -272,8 +280,11 @@ class VC_APP_API CaptureWorker final : public CaptureSink {
   /// @return The session's directory; empty before the first capture.
   std::string directory() const;
 
-  /// @brief Take what went wrong beyond a capture's own outcome: a session
-  ///        check that failed, and why the thread ended.
+  /// @brief Take what went wrong beyond a capture's own outcome: a camera's
+  ///        full detection, check or origin-tag search that failed, or its
+  ///        image holding more than one print of the origin tag
+  ///        (`InvalidArgument`, none of them kept), none of which fails the
+  ///        capture; a session check that failed; and why the thread ended.
   /// @return The failures, oldest first.
   std::vector<core::Status> take_errors();
 

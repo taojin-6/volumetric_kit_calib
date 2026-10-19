@@ -53,6 +53,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with the session's board, cameras, sensors, depth mode and solve
   thresholds. A capture that would make the captures kept and pending exceed
   `CaptureSetup::max_kept`, by default `bundle_adjust`'s 150, is refused.
+- The origin tag at capture (DECISIONS.md, 2026-10-18): the capture worker
+  searches each camera's full luma for `kOriginTag` beside the board, and
+  keeps the corners in `KeptCapture::tags`; a camera with two prints of it
+  keeps neither, and a failed search or two prints is posted, never failing
+  the capture. `CaptureEvent::tag_cameras` counts the cameras that found it,
+  which the capture panel's `last` line shows. The capture tier writes the
+  corners as each camera's `origin_tag` in `captures/<NNN>.json` (`null` for
+  none) and the tag searched for, `SessionInfo::origin_tag`, in
+  `session.json`; both stay at version 1. The session panel's `origin tag`
+  line (`viz::origin_tag_line`, from `app::tag_coverage`) counts the cameras
+  and views of it in the captures kept, green at 2 cameras, amber at 1.
 - calib_rig's live 3D view (DECISIONS.md, 2026-10-17): beside the mosaic, in
   the whole window or hidden, frozen or live, solid, tinted-luma or true
   colour, each camera shown or not in its tint, at first gfx's categorical
