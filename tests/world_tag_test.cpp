@@ -542,7 +542,9 @@ TEST(OriginTagFrame, DropsTheViewsOfATagMoved) {
     EXPECT_TRUE(v.used);
     EXPECT_EQ(v.round, 0);
     EXPECT_EQ(v.bound_px, 0.0);
-    if (v.capture == 2) EXPECT_GT(v.worst_px, 3.0);
+    if (v.capture == 2) {
+      EXPECT_GT(v.worst_px, 3.0);
+    }
   }
   for (const TagCamera& c : kept.cameras) EXPECT_EQ(c.used, c.views);
   EXPECT_GT(kept.worst_px, 3.0);
