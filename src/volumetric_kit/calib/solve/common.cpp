@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <set>
 #include <utility>
 
@@ -61,6 +62,12 @@ core::Status refuse_option(std::string_view prefix, const char* name,
                            const char* rule) {
   return core::Status::invalid_argument(std::string(prefix) + name +
                                         " must be " + rule);
+}
+
+std::string number(double v) {
+  char text[32];
+  std::snprintf(text, sizeof text, "%.6g", v);
+  return text;
 }
 
 double median(std::vector<double> values) {

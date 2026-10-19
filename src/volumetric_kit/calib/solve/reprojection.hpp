@@ -21,6 +21,11 @@ namespace volumetric_kit::calib::solve::detail {
 // translation.
 using Pose = cv::Vec6d;
 
+// `t` as a Pose.
+inline Pose pose_of(const recon::camera::RodriguesTransform& t) noexcept {
+  return {t.rvec.x, t.rvec.y, t.rvec.z, t.tvec.x, t.tvec.y, t.tvec.z};
+}
+
 // What `project` differentiates the residuals by.
 enum class Derivatives {
   None,

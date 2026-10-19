@@ -28,6 +28,7 @@ namespace volumetric_kit::calib::quality {
 namespace {
 
 namespace camera = recon::camera;
+using compute::finite;
 using Code = core::Status::Code;
 
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
@@ -96,13 +97,6 @@ camera::Vec3d centre_of(const camera::Mat4d& world_to_camera) {
 
 camera::Vec3d centre_of(const camera::RodriguesTransform& world_to_camera) {
   return centre_of(camera::matrix_from_rodrigues(world_to_camera));
-}
-
-bool finite(const camera::RodriguesTransform& t) noexcept {
-  for (int i = 0; i < 3; ++i) {
-    if (!std::isfinite(t.rvec[i]) || !std::isfinite(t.tvec[i])) return false;
-  }
-  return true;
 }
 
 std::string capture_name(std::int64_t capture) {

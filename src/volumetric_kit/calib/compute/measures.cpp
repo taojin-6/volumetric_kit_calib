@@ -49,4 +49,14 @@ double rotation_angle_deg(const recon::camera::Mat3d& a,
       recon::camera::rodrigues_from_rotation(glm::transpose(a) * b)));
 }
 
+bool finite(const recon::camera::RodriguesTransform& transform) noexcept {
+  for (int i = 0; i < 3; ++i) {
+    if (!std::isfinite(transform.rvec[i]) ||
+        !std::isfinite(transform.tvec[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace volumetric_kit::calib::compute

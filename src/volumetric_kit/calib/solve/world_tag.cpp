@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <cstdio>
 #include <limits>
 #include <map>
 #include <set>
@@ -21,40 +20,30 @@
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/cv_pose.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
+#include "volumetric_kit/calib/compute/measures.hpp"
 
 namespace volumetric_kit::calib::solve {
 namespace {
 
 namespace camera = recon::camera;
+using compute::finite;
 using detail::Derivatives;
+using detail::kLevMarqTolerance;
+using detail::number;
 using detail::Pose;
+using detail::pose_of;
 using detail::Projection;
 
 constexpr const char* kWhat = "origin_tag_frame: ";
 constexpr double kInfinity = std::numeric_limits<double>::infinity();
-// cv::LevMarq's iterations in one solve, at most, and its stopping rule (as
-// bundle_adjust's): the energy's relative change, or the step's squared
-// norm, below kTolerance. Two cameras whose rays disagree by more than twice
-// huber_px leave Huber's cost nearly flat between them, and cv::LevMarq
-// crawls: on the synthetic rig up to 80 iterations a pixel of disagreement,
-// so 1000 places a tag the two see 13 px apart. An iteration is cheap.
+// cv::LevMarq's iterations in one solve, at most. Two cameras whose rays
+// disagree by more than twice huber_px leave Huber's cost nearly flat
+// between them, and cv::LevMarq crawls: on the synthetic rig up to 80
+// iterations a pixel of disagreement, so 1000 places a tag the two see
+// 13 px apart. An iteration is cheap.
 constexpr int kMaxIterations = 1000;
-constexpr double kTolerance = 1e-12;
 // The corners, 4 of 3 coordinates, as cv::LevMarq's parameters.
 constexpr int kParameters = 12;
-
-std::string number(double v) {
-  char text[32];
-  std::snprintf(text, sizeof text, "%.6g", v);
-  return text;
-}
-
-bool finite(const camera::RodriguesTransform& t) noexcept {
-  for (int i = 0; i < 3; ++i) {
-    if (!std::isfinite(t.rvec[i]) || !std::isfinite(t.tvec[i])) return false;
-  }
-  return true;
-}
 
 // One view of the tag.
 struct View {
@@ -138,8 +127,7 @@ core::Result<Problem> read_problem(const std::vector<RigCamera>& cameras,
                                             "the solution's pose of camera " +
                                             p.rig.ids[c] + " is not finite");
     }
-    p.poses.push_back(
-        {t.rvec.x, t.rvec.y, t.rvec.z, t.tvec.x, t.tvec.y, t.tvec.z});
+    p.poses.push_back(pose_of(t));
     const camera::Mat4d m = camera::matrix_from_rodrigues(t);
     cv::Matx34d e;
     for (int row = 0; row < 3; ++row) {
@@ -350,8 +338,8 @@ std::string solve_once(const Problem& p, const TagFrameOptions& options,
   cv::LevMarq solver(x, callback,
                      cv::LevMarq::Settings()
                          .setMaxIterations(kMaxIterations)
-                         .setRelEnergyDeltaTolerance(kTolerance)
-                         .setStepNormTolerance(kTolerance)
+                         .setRelEnergyDeltaTolerance(kLevMarqTolerance)
+                         .setStepNormTolerance(kLevMarqTolerance)
                          .setCheckMinGradient(false),
                      cv::noArray(), cv::MatrixType::DENSE,
                      cv::VariableType::LINEAR, false, cv::DECOMP_CHOLESKY);

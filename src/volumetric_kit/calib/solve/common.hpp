@@ -54,6 +54,13 @@ double median(std::vector<double> values);
 double outlier_bound(std::vector<double> components, double outlier_px,
                      double outlier_mads);
 
+// cv::LevMarq stops when the energy's relative change, or the step's squared
+// norm, falls below this.
+inline constexpr double kLevMarqTolerance = 1e-12;
+
+// `v` in a message: "%.6g".
+std::string number(double v);
+
 // Huber's cost of a residual of norm s, and its IRLS weight: the cost's
 // derivative over 2 s.
 inline double huber(double s, double delta) noexcept {
