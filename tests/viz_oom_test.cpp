@@ -126,6 +126,32 @@ TEST(VizOom, Panels) {
   expect_oom_anywhere([&] { return stage_frame_metrics(stages, 25.0); });
 }
 
+// Holding a stage's rows and adding them to the frame's.
+TEST(VizOom, HoldStages) {
+  core::StageMetrics ran;
+  ran.add_cpu("tiles", 4.0);
+  std::size_t oom = 0;
+  test::sweep_allocations([&](std::size_t after) {
+    core::StageMetrics held;
+    core::StageMetrics stages;
+    stages.add_cpu("poll", 1.0);
+    std::optional<core::Status> status;
+    EXPECT_NO_THROW({
+      const test::FailAllocation failure(after);
+      status.emplace(hold_stages(ran, true, held, stages));
+    });
+    ASSERT_TRUE(status.has_value());
+    if (!test::allocation_failure.injected) {
+      EXPECT_TRUE(status->ok());
+      EXPECT_EQ(stages.rows().size(), 2u);
+      return;
+    }
+    EXPECT_EQ(status->domain(), Code::OutOfMemory);
+    ++oom;
+  });
+  EXPECT_GT(oom, 0u);
+}
+
 // Calibrate's lines: its progress, and its result's every kind of line --
 // a camera moved and one not, the A/B test decided and refused, and the depth
 // checks', made and not.

@@ -434,6 +434,35 @@ VC_VIZ_API core::Result<std::vector<std::string>> calibration_notices(
 VC_VIZ_API core::Result<gfx::FrameMetrics> stage_frame_metrics(
     const core::StageMetrics& stages, double fps);
 
+/// @brief Hold a stage run only on some frames -- the mosaic's `"tiles"`,
+///        recorded as a live set arrives, more slowly than the window
+///        redraws -- for the frames between, so the Stages panel's rows,
+///        their order and its total stay put.
+///
+/// @p held keeps the last run across frames: it takes @p ran's rows on a
+/// frame that ran the stage, keeps its own on the frames between, and is
+/// cleared while the stage's view is hidden, so no stale time shows there and
+/// the rows return with the stage's next run. @p held's rows are then merged
+/// into @p stages, after those already there.
+/// @param ran     This frame's run of the stage; empty on a frame that did
+///                not run it.
+/// @param shown   Whether the stage's view is shown this frame.
+/// @param held    The rows held across frames, updated as above.
+/// @param stages  The frame's stages, which gain @p held's rows.
+/// @return OK, or `OutOfMemory`.
+///
+/// @code
+/// core::StageMetrics ran;
+/// if (fresh && mosaic_shown) {
+///   core::StageScope scope(ran, "tiles");
+///   VKC_TRY(record_snapshot(mosaic, retire, cmd, latest, frame_number));
+/// }
+/// VKC_TRY(hold_stages(ran, mosaic_shown, tiles, frame_stages));
+/// @endcode
+VC_VIZ_API core::Status hold_stages(const core::StageMetrics& ran, bool shown,
+                                    core::StageMetrics& held,
+                                    core::StageMetrics& stages);
+
 /// @brief Draw lines as a two-column ImGui table, each value in its tone.
 /// @param id     The table's ImGui id, unique in its window.
 /// @param lines  The lines.
