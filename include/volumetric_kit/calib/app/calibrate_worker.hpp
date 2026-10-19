@@ -224,9 +224,12 @@ VC_APP_API core::Result<WrittenResults> write_results(
 class VC_APP_API CalibrateWorker final {
  public:
   /// @brief Start the thread, waiting for a request.
+  /// @param sink  Writes each results file (@ref write_results); empty for
+  ///              the core's `write_file(CreateNew)`.
   /// @return The worker; `IoError` if the thread cannot start; or
   ///         `OutOfMemory`.
-  static core::Result<std::unique_ptr<CalibrateWorker>> create();
+  static core::Result<std::unique_ptr<CalibrateWorker>> create(
+      ResultSink sink = {});
 
   /// @brief As @ref stop.
   ~CalibrateWorker();
@@ -235,14 +238,18 @@ class VC_APP_API CalibrateWorker final {
   CalibrateWorker(CalibrateWorker&&) = delete;
   CalibrateWorker& operator=(CalibrateWorker&&) = delete;
 
-  /// @brief Calibrate from @p kept, stamped now: the press's time names its
-  ///        results directory.
-  /// @param kept  The snapshot (@ref CaptureWorker::kept), held until the run
-  ///              ends.
+  /// @brief Calibrate from @p kept: the press's time names its results
+  ///        directory.
+  /// @param kept     The snapshot (@ref CaptureWorker::kept), held until the
+  ///                 run ends.
+  /// @param pressed  When Calibrate was pressed (@ref results_directory); by
+  ///                 default, now.
   /// @return `true` once the run is started; `false`, starting nothing,
   ///         while a run is @ref busy or the worker is stopped;
   ///         `InvalidArgument` for a null snapshot; or `OutOfMemory`.
-  core::Result<bool> request(std::shared_ptr<const KeptCaptures> kept);
+  core::Result<bool> request(std::shared_ptr<const KeptCaptures> kept,
+                             std::chrono::system_clock::time_point pressed =
+                                 std::chrono::system_clock::now());
 
   /// @return Whether a run is under way; once it is not, its outcome is
   ///         there to take.
@@ -270,7 +277,8 @@ class VC_APP_API CalibrateWorker final {
   std::vector<core::Status> take_errors();
 
   /// @brief Cancel the run (@ref cancel), wait for it, and stop the thread.
-  ///        A run already writing finishes first. Idempotent.
+  ///        A run already writing finishes first, its outcome there to
+  ///        take. Idempotent.
   void stop() noexcept;
 
  private:

@@ -11,6 +11,7 @@
 #include "volumetric_kit/calib/app/calibrate_worker.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -519,8 +520,8 @@ TEST(WriteResults, RefusesAMissingSessionOrAResultsFile) {
 }
 
 // A run's result is published once its three files are on disk, as it
-// formatted them; the numbers go up from 0; a request while busy, or a null
-// one, starts nothing.
+// formatted them, in a directory named for the press; the numbers go up
+// from 0; a request while busy, or a null one, starts nothing.
 TEST(CalibrateWorker, PublishesEachResultOnceItsFilesAreWritten) {
   const ScratchDir session;
   const test::Scene scene = test::make_kept_scene(3, 20);
@@ -536,7 +537,7 @@ TEST(CalibrateWorker, PublishesEachResultOnceItsFilesAreWritten) {
 
   for (int number = 0; number < 2; ++number) {
     SCOPED_TRACE(number);
-    core::Result<bool> started = worker->request(kept);
+    core::Result<bool> started = worker->request(kept, kPressed);
     ASSERT_TRUE(started.ok()) << started.status().message();
     ASSERT_TRUE(*started);
     EXPECT_TRUE(worker->busy());
@@ -547,11 +548,9 @@ TEST(CalibrateWorker, PublishesEachResultOnceItsFilesAreWritten) {
     EXPECT_EQ(worker->take_result(), nullptr);
     EXPECT_TRUE(worker->take_errors().empty());
     EXPECT_EQ(result->number, number);
+    EXPECT_EQ(result->directory,
+              *results_directory(session.path().string(), number, kPressed));
     const fs::path dir(result->directory);
-    EXPECT_EQ(dir.parent_path(), session.path() / kResultsDirectory);
-    EXPECT_TRUE(std::regex_match(dir.filename().string(),
-                                 std::regex("00" + std::to_string(number) +
-                                            R"(_\d{4}-\d{2}-\d{2}_\d{6})")));
     EXPECT_EQ(read(dir / quality::kResidualsFile), result->files.residuals);
     EXPECT_EQ(read(dir / quality::kReportFile), result->files.report);
     EXPECT_EQ(read(dir / quality::kArrayCalibrationFile),
@@ -566,17 +565,26 @@ TEST(CalibrateWorker, PublishesEachResultOnceItsFilesAreWritten) {
 }
 
 // A recalibration with more captures writes the next directory, and equals a
-// fresh run on those captures: nothing of the last run carries over.
+// fresh run on those captures: nothing of the last run carries over. A
+// request given no press time is pressed as it is made.
 TEST(CalibrateWorker, ARecalibrationEqualsAFreshRun) {
   const ScratchDir session;
   const test::Scene scene = test::make_kept_scene(4, 30);
   const std::unique_ptr<CalibrateWorker> worker = make_worker();
   ASSERT_NE(worker, nullptr);
+  const std::chrono::system_clock::time_point before =
+      std::chrono::system_clock::now();
   ASSERT_TRUE(*worker->request(
       shared(test::kept_captures(scene, 0, session.path().string(), 20))));
+  const std::chrono::system_clock::time_point after =
+      std::chrono::system_clock::now();
   ASSERT_TRUE(idle(*worker));
   const std::shared_ptr<const CalibrateResult> first = worker->take_result();
   ASSERT_NE(first, nullptr);
+  const std::string name = fs::path(first->directory).filename().string();
+  EXPECT_TRUE(name == "000_" + *capture::session_stamp(before) ||
+              name == "000_" + *capture::session_stamp(after))
+      << name;
   const KeptCaptures all =
       test::kept_captures(scene, 0, session.path().string());
   ASSERT_TRUE(*worker->request(shared(all)));
@@ -597,14 +605,16 @@ TEST(CalibrateWorker, ARecalibrationEqualsAFreshRun) {
 }
 
 // A refusal is posted, naming its cause, and nothing is written or
-// published; the next run takes number 0.
+// published: the next run takes number 0, and a refusal after it leaves
+// that result to take. A results/ that is a file fails the write.
 TEST(CalibrateWorker, PostsARefusalAndWritesNothing) {
   const ScratchDir session;
   const test::Scene scene = test::make_kept_scene(4, 20);
+  const auto unlinked =
+      shared(unlinked_captures(scene, session.path().string()));
   const std::unique_ptr<CalibrateWorker> worker = make_worker();
   ASSERT_NE(worker, nullptr);
-  ASSERT_TRUE(*worker->request(
-      shared(unlinked_captures(scene, session.path().string()))));
+  ASSERT_TRUE(*worker->request(unlinked));
   ASSERT_TRUE(idle(*worker));
   EXPECT_EQ(worker->take_result(), nullptr);
   const std::vector<core::Status> errors = worker->take_errors();
@@ -616,12 +626,26 @@ TEST(CalibrateWorker, PostsARefusalAndWritesNothing) {
   EXPECT_NE(errors[0].message().find("CL0B"), std::string::npos);
   EXPECT_TRUE(entries(session.path()).empty());
 
+  // The next run takes 0; refused after it, untaken, its result stands.
+  ASSERT_TRUE(*worker->request(
+      shared(test::kept_captures(scene, 0, session.path().string()))));
+  ASSERT_TRUE(idle(*worker));
+  EXPECT_TRUE(worker->take_errors().empty());
+  ASSERT_TRUE(*worker->request(unlinked));
+  ASSERT_TRUE(idle(*worker));
+  EXPECT_EQ(worker->take_errors().size(), 1u);
+  const std::shared_ptr<const CalibrateResult> stands = worker->take_result();
+  ASSERT_NE(stands, nullptr);
+  EXPECT_EQ(stands->number, 0);
+  EXPECT_EQ(entries(session.path() / kResultsDirectory).size(), 1u);
+
   // A results/ that is a file: the write fails, and nothing is published.
-  ASSERT_TRUE(core::write_file(session / kResultsDirectory, "a file",
+  const ScratchDir other;
+  ASSERT_TRUE(core::write_file(other / kResultsDirectory, "a file",
                                core::WriteMode::CreateNew)
                   .ok());
   ASSERT_TRUE(*worker->request(
-      shared(test::kept_captures(scene, 0, session.path().string()))));
+      shared(test::kept_captures(scene, 0, other.path().string()))));
   ASSERT_TRUE(idle(*worker));
   EXPECT_EQ(worker->take_result(), nullptr);
   const std::vector<core::Status> failed = worker->take_errors();
@@ -688,6 +712,80 @@ TEST(CalibrateWorker, ACancelAsAFailedRunEndsPostsNothing) {
   EXPECT_TRUE(worker->take_errors().empty());
   EXPECT_EQ(worker->take_result(), nullptr);
   EXPECT_TRUE(entries(session.path()).empty());
+}
+
+// A run writing is not cancelled: cancel() is refused, and the result is
+// published. stop() waits for a run writing, whose failure is posted and
+// leaves its directory with no calibration file; the next run, on another
+// worker, does not take its number.
+TEST(CalibrateWorker, WritingIsNeitherCancelledNorStopped) {
+  const ScratchDir session;
+  const test::Scene scene = test::make_kept_scene(3, 20);
+  const auto kept =
+      shared(test::kept_captures(scene, 0, session.path().string()));
+  Gate writing;  // run 000's residuals
+  Gate failing;  // run 001's report, which then fails
+  const ResultSink sink = [&](const std::string& path,
+                              std::string_view bytes) -> core::Status {
+    const fs::path file(path);
+    const std::string run = file.parent_path().filename().string().substr(0, 4);
+    const std::string name = file.filename().string();
+    if (run == "000_" && name == quality::kResidualsFile) writing.hold();
+    if (run == "001_" && name == quality::kReportFile) {
+      failing.hold();
+      return core::Status::io_error("the disk is full");
+    }
+    return core::write_file(path, bytes, core::WriteMode::CreateNew);
+  };
+  core::Result<std::unique_ptr<CalibrateWorker>> made =
+      CalibrateWorker::create(sink);
+  ASSERT_TRUE(made.ok()) << made.status().message();
+  const std::unique_ptr<CalibrateWorker> worker = std::move(made).value();
+  const LetGoAtTheEnd let_writing_go{writing};
+  const LetGoAtTheEnd let_failing_go{failing};
+
+  ASSERT_TRUE(*worker->request(kept, kPressed));
+  ASSERT_TRUE(writing.held());
+  const std::optional<CalibrateProgress> at = worker->progress();
+  ASSERT_TRUE(at.has_value());
+  EXPECT_EQ(at->stage, CalibrateStage::Writing);
+  EXPECT_FALSE(worker->cancel());
+  writing.let_go();
+  ASSERT_TRUE(idle(*worker));
+  EXPECT_TRUE(worker->take_errors().empty());
+  const std::shared_ptr<const CalibrateResult> written = worker->take_result();
+  ASSERT_NE(written, nullptr);
+  EXPECT_EQ(written->number, 0);
+  EXPECT_EQ(read(fs::path(written->directory) / quality::kArrayCalibrationFile),
+            written->files.array_calibration);
+
+  // stop() while the next run writes, let go as it is called.
+  ASSERT_TRUE(*worker->request(kept, kPressed));
+  ASSERT_TRUE(failing.held());
+  std::atomic<bool> stopping{false};
+  std::thread opener([&] {
+    while (!stopping) std::this_thread::yield();
+    failing.let_go();
+  });
+  stopping = true;
+  worker->stop();
+  opener.join();
+  EXPECT_EQ(worker->take_result(), nullptr);
+  const std::vector<core::Status> failed = worker->take_errors();
+  ASSERT_EQ(failed.size(), 1u);
+  EXPECT_EQ(failed[0].domain(), Code::IoError);
+  EXPECT_EQ(failed[0].message(), "Calibrate: write_results: the disk is full");
+  const std::string stamp = *capture::session_stamp(kPressed);
+  EXPECT_EQ(entries(session.path() / kResultsDirectory / ("001_" + stamp)),
+            std::set<std::string>{quality::kResidualsFile});
+
+  const std::unique_ptr<CalibrateWorker> next = make_worker();
+  ASSERT_NE(next, nullptr);
+  ASSERT_TRUE(*next->request(kept, kPressed));
+  ASSERT_TRUE(idle(*next));
+  const std::shared_ptr<const CalibrateResult> after = next->take_result();
+  ASSERT_NE(after, nullptr);
+  EXPECT_EQ(after->number, 2);
 }
 
 // stop() cancels a run at its next re-solve, short of the last, and returns

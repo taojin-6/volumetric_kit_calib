@@ -260,6 +260,9 @@ core::Result<WrittenResults> write_results(
 }
 
 struct CalibrateWorker::State {
+  // Set before the thread starts.
+  ResultSink sink;  // each results file's writer; empty for the default
+
   // The worker's thread's alone.
   int next_number = 0;  // the lowest results number not yet written
 
@@ -300,7 +303,7 @@ struct CalibrateWorker::State {
     }
     if (!made.ok()) return made.status().with_context("Calibrate");
     core::Result<WrittenResults> written =
-        write_results(kept.directory, next_number, when, made->files);
+        write_results(kept.directory, next_number, when, made->files, sink);
     if (!written.ok()) return written.status().with_context("Calibrate");
     // After 999, the next run finds every number taken.
     next_number = std::min(written->number + 1, kMaxNumber);
@@ -346,12 +349,15 @@ struct CalibrateWorker::State {
   }
 };
 
-core::Result<std::unique_ptr<CalibrateWorker>> CalibrateWorker::create() {
+core::Result<std::unique_ptr<CalibrateWorker>> CalibrateWorker::create(
+    ResultSink sink) {
   return compute::guarded(
       "CalibrateWorker::create",
       [&]() -> core::Result<std::unique_ptr<CalibrateWorker>> {
+        auto state = std::make_unique<State>();
+        state->sink = std::move(sink);
         std::unique_ptr<CalibrateWorker> worker(
-            new CalibrateWorker(std::make_unique<State>()));
+            new CalibrateWorker(std::move(state)));
         try {
           worker->state_->thread =
               std::thread([w = worker.get()] { w->run(); });
@@ -379,7 +385,8 @@ void CalibrateWorker::run() noexcept {
 }
 
 core::Result<bool> CalibrateWorker::request(
-    std::shared_ptr<const KeptCaptures> kept) {
+    std::shared_ptr<const KeptCaptures> kept,
+    std::chrono::system_clock::time_point pressed) {
   return compute::guarded(
       "CalibrateWorker::request", [&]() -> core::Result<bool> {
         if (kept == nullptr) {
@@ -390,7 +397,7 @@ core::Result<bool> CalibrateWorker::request(
           const std::lock_guard<std::mutex> lock(state_->mutex);
           if (state_->busy || state_->stopping) return false;
           state_->pending = std::move(kept);
-          state_->pressed = std::chrono::system_clock::now();
+          state_->pressed = pressed;
           state_->began = Clock::now();
           state_->at = CalibrateProgress{};
           state_->cancelled = false;
