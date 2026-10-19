@@ -917,5 +917,73 @@ TEST(StageFrameMetrics, CarriesTheStagesToGfxsPanel) {
   EXPECT_EQ(metrics.fps, 24.5);
 }
 
+// One window frame's stages as calib_rig builds them: the live snapshot's,
+// then the tiles, recorded (`recorded_ms`) only on the frames a set arrives.
+class HoldStages : public ::testing::Test {
+ protected:
+  core::StageMetrics frame(std::optional<double> recorded_ms, bool shown) {
+    core::StageMetrics stages = live;
+    core::StageMetrics ran;
+    if (recorded_ms) ran.add_cpu("tiles", *recorded_ms);
+    EXPECT_TRUE(hold_stages(ran, shown, held, stages).ok());
+    return stages;
+  }
+
+  static std::vector<std::string> names(const core::StageMetrics& stages) {
+    std::vector<std::string> out;
+    for (const core::StageRow& row : stages.rows()) out.emplace_back(row.name);
+    return out;
+  }
+
+  // The tiles row's time, or none without the row.
+  static std::optional<double> tiles_ms(const core::StageMetrics& stages) {
+    for (const core::StageRow& row : stages.rows()) {
+      if (std::string(row.name) == "tiles") return row.cpu_ms;
+    }
+    return std::nullopt;
+  }
+
+  core::StageMetrics live = [] {
+    core::StageMetrics stages;
+    stages.add_cpu("poll", 1.0);
+    stages.add_cpu("readback", 2.0);
+    stages.add_cpu("detect", 9.0);
+    return stages;
+  }();
+  core::StageMetrics held;  // across frames, as the window holds it
+};
+
+// The frames between two recordings show the same rows, in the same order,
+// with the last recording's time, as the frame that recorded it does.
+TEST_F(HoldStages, KeepsTheLastRecordingBetweenSets) {
+  const std::vector<std::string> rows = {"poll", "readback", "detect", "tiles"};
+  const core::StageMetrics recorded = frame(4.0, true);
+  EXPECT_EQ(names(recorded), rows);
+  for (int between = 0; between < 3; ++between) {
+    const core::StageMetrics stages = frame(std::nullopt, true);
+    EXPECT_EQ(names(stages), rows);
+    EXPECT_EQ(tiles_ms(stages), 4.0);
+    EXPECT_EQ(stages.total_cpu_ms(), recorded.total_cpu_ms());
+  }
+  const core::StageMetrics next = frame(6.0, true);
+  EXPECT_EQ(names(next), rows);
+  EXPECT_EQ(tiles_ms(next), 6.0);  // the latest's, not a sum
+  EXPECT_EQ(tiles_ms(frame(std::nullopt, true)), 6.0);
+}
+
+// While the mosaic is hidden no tiles row shows, and none is kept for its
+// return: the row comes back with the next recording.
+TEST_F(HoldStages, ShowsNoTilesWhileTheMosaicIsHidden) {
+  (void)frame(4.0, true);
+  const std::vector<std::string> live_rows = {"poll", "readback", "detect"};
+  EXPECT_EQ(names(frame(std::nullopt, false)), live_rows);
+  EXPECT_TRUE(held.empty());
+  EXPECT_EQ(names(frame(std::nullopt, true)), live_rows);  // nothing stale
+  const core::StageMetrics back = frame(5.0, true);
+  EXPECT_EQ(names(back),
+            (std::vector<std::string>{"poll", "readback", "detect", "tiles"}));
+  EXPECT_EQ(tiles_ms(back), 5.0);
+}
+
 }  // namespace
 }  // namespace volumetric_kit::calib::viz

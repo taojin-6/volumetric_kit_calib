@@ -747,6 +747,19 @@ core::Result<gfx::FrameMetrics> stage_frame_metrics(
                           });
 }
 
+core::Status hold_stages(const core::StageMetrics& ran, bool shown,
+                         core::StageMetrics& held, core::StageMetrics& stages) {
+  return compute::guarded("hold_stages", [&]() -> core::Status {
+    if (!shown) {
+      held.clear();
+    } else if (!ran.empty()) {
+      held = ran;
+    }
+    stages.merge(held);
+    return {};
+  });
+}
+
 void draw_panel_lines(const char* id, const std::vector<PanelLine>& lines) {
   if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingFixedFit)) return;
   for (const PanelLine& line : lines) {

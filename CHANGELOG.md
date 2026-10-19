@@ -8,6 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- calib_rig's Stages panel no longer flickers: its `tiles` row, recorded
+  only as a live set arrives, came and went with the total as the window
+  redrew between sets. `viz::hold_stages` holds the last recording's time on
+  every frame the mosaic is shown, and none while it is hidden.
 - `solve::view_pose` poses a board tilted exactly about its own x or y axis,
   which OpenCV 5.0.0's IPPE leaves with no pose on GCC's builds, in the
   board's frame and the quarter-turned one alike: it then solves the board

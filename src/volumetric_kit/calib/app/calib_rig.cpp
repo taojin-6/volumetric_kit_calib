@@ -968,6 +968,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   std::optional<RigOrigin> framed;  // the 3D view's, once framed on a result
   std::vector<viz::PanelLine> calibration;  // the result's panel
   bool fresh = false;
+  core::StageMetrics tiles;  // the last recording's, held between live sets
   bool fitted = false;
   Pointer pointer;
   while (glfwWindowShouldClose(window) == GLFW_FALSE && !g_interrupted.load()) {
@@ -1043,8 +1044,9 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     }
     // The tiles only while the mosaic is shown: a snapshot taken meanwhile
     // stays fresh for the images' return.
+    core::StageMetrics recorded;
     if (fresh && latest && mosaic_shown) {
-      core::StageScope scope(in.stages, "tiles");
+      core::StageScope scope(recorded, "tiles");
       VKC_TRY(
           record_snapshot(*mosaic, retire, frame.cmd, latest, frame.number));
       for (const viz::TileRefusal& refusal : mosaic->refused()) {
@@ -1053,6 +1055,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       }
       fresh = false;
     }
+    VKC_TRY(viz::hold_stages(recorded, mosaic_shown, tiles, in.stages));
     steer(window, input, pointer, io.WantCaptureMouse, split, view,
           view3d.view);
 
