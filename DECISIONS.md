@@ -243,8 +243,8 @@ camera's depth as points, its frusta, the world's axes and the solved boards.
 
 calib has one dependency set on every platform: OpenCV 5 is a prerequisite of
 every build, as GLM is, and `VC_WITH_OPENCV` is gone. `compute`, `detect`,
-`solve` and `quality` always build. `VC_WITH_RIG` stays optional, for the Vulkan SDK, and alone builds
-`capture`, `depth` and `viz`.
+`solve` and `quality` always build. `VC_WITH_RIG` stays optional, for the
+Vulkan SDK, and alone builds `capture`, `depth` and `viz`.
 
 - **Why.** With the OpenCV tiers optional, the Ubuntu legs, whose packages are
   OpenCV 4, built the core tier alone: calib's real code was built and tested
