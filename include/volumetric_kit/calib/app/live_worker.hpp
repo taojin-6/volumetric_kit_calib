@@ -17,11 +17,9 @@
 /// window skips sets rather than queueing them, and the worker holds at most
 /// the set it is on and the one published. A capture the rule takes is copied
 /// out of its set and handed to a @ref CaptureSink, so the set's frames go
-/// back to the driver at once. Each set read back is also offered, before
-/// the board is searched for, to a @ref SetSink: the 3D view's worker, which
-/// prepares its depth. While the window shows no camera image
-/// (@ref LiveWorker::set_detecting) and no capture is armed, each set is
-/// offered and published with nothing read back or searched.
+/// back to the driver at once. Each set is also offered, before it is
+/// searched (@ref LiveWorker::set_detecting), to a @ref SetSink: the 3D
+/// view's worker, which prepares its depth.
 
 #include <chrono>
 #include <cstddef>
@@ -135,10 +133,9 @@ class VC_APP_API CaptureSink {
   CaptureSink& operator=(const CaptureSink&) = default;
 };
 
-/// @brief Where a @ref LiveWorker offers every set it reads back -- every
-///        set it polls, while it does not search them -- before it searches
-///        the set for the board: the 3D view's worker (@ref CloudWorker), or
-///        a test's stand-in.
+/// @brief Where a @ref LiveWorker offers each set, before it searches it
+///        (@ref LiveWorker::set_detecting): the 3D view's worker
+///        (@ref CloudWorker), or a test's stand-in.
 ///
 /// Called from the live worker's thread while the window's thread may call
 /// the sink's own members: an implementation is thread-safe, and returns at

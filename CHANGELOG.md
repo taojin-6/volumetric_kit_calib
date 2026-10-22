@@ -289,7 +289,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   at 60 and 150 captures.
 - `depth::DepthChecks::fit_planes` walks only the pixels round each region's
   projected rectangle (a pixel wider, clamped to the image), not the whole
-  depth image, in both rounds; the counts and planes are unchanged.
+  depth image, in both rounds; the counts are unchanged and the planes the
+  same to float rounding.
 - `depth::DepthChecks::accumulate` takes a capture's own histograms to count
   in the same pass (`alone`), emptying them first: Calibrate's depth checks
   run the agreement kernel once a capture rather than twice, and make no
