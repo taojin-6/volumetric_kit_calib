@@ -90,7 +90,8 @@ jobs:
           # The core's test policy: a GPU test fails, rather than skips,
           # without a device.
           VKC_REQUIRE_VULKAN_DEVICE: '1'
+          # ctest runs a test binary as one test, so a case is left out here.
+          GTEST_FILTER: '-AgreementTest.RefusesACaptureThatCouldPassACountsLimit'
         run: |
           ctest --test-dir build --output-on-failure -LE package \
-            -E 'AgreementTest\.RefusesACaptureThatCouldPassACountsLimit' \
             --parallel "$(nproc)"

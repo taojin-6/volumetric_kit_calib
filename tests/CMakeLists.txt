@@ -3,16 +3,18 @@
 
 include(GoogleTest)
 
-# vc_<name>_test from <name>_test.cpp, linking the given targets. A case that
-# hangs fails after a minute, two under the sanitizers, rather than holding a CI
-# job to its limit; a test's own waits give up sooner (support/), so it says
-# what it waited for. Under the sanitizers, LeakSanitizer reads lsan.supp, which
-# spares OpenCV's own leak when an out-of-memory test fails an allocation inside
-# it. Under ThreadSanitizer, OpenCV runs each loop on its caller's thread
-# (support/opencv_sequential.cpp).
-set(_vc_test_properties TIMEOUT 60)
+# vc_<name>_test from <name>_test.cpp, linking the given targets, run as one
+# test, `<name>`: a binary linking OpenCV takes about 0.1 s to start on macOS,
+# and a suite's fixture (FullViews' four 4K views) is built once per process. An
+# out-of-memory binary (<name>_oom) runs each case in a process of its own, so
+# an allocation failed in one leaves nothing to the next. A test that hangs
+# fails after 5 minutes rather than holding a CI job to its limit; a test's own
+# waits give up sooner (support/), so it says what it waited for. Under the
+# sanitizers, LeakSanitizer reads lsan.supp, which spares OpenCV's own leak when
+# an out-of-memory test fails an allocation inside it. Under ThreadSanitizer,
+# OpenCV runs each loop on its caller's thread (support/opencv_sequential.cpp).
+set(_vc_test_properties TIMEOUT 300)
 if(VC_SANITIZE)
-  set(_vc_test_properties TIMEOUT 120)
   list(APPEND _vc_test_properties ENVIRONMENT
        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
 endif()
@@ -24,7 +26,12 @@ function(vc_add_test name)
     target_link_libraries(vc_${name}_test PRIVATE opencv_core)
   endif()
   vc_target_warnings(vc_${name}_test)
-  gtest_discover_tests(vc_${name}_test PROPERTIES ${_vc_test_properties})
+  if(name MATCHES "_oom$")
+    gtest_discover_tests(vc_${name}_test PROPERTIES ${_vc_test_properties})
+  else()
+    add_test(NAME ${name} COMMAND vc_${name}_test)
+    set_tests_properties(${name} PROPERTIES ${_vc_test_properties})
+  endif()
 endfunction()
 
 # The tests' header-only helpers (support/); allocation_failure.cpp, which an
