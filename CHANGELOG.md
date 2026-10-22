@@ -286,8 +286,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   corners the solution kept, in one solve each, with no outlier rounds or
   uncertainty step (DECISIONS.md, 2026-10-16, amended 2026-10-22): when the
   solve dropped outliers, Calibrate's metrics take about 2.5 times less CPU
-  at 60 and 150 captures, and agree with the full re-solves far below the
-  digits shown.
+  at 60 and 150 captures.
 - `depth::DepthChecks::fit_planes` walks only the pixels round each region's
   projected rectangle (a pixel wider, clamped to the image), not the whole
   depth image, in both rounds; the counts and planes are unchanged.
