@@ -3,8 +3,9 @@ name: build (reusable)
 # Build and test for one leg. ci.yml calls this once per entry in its build
 # matrix, on a GitHub-hosted runner (pass just `os`) or a self-hosted one
 # (`runner`), in an OS-matched container on Linux (`container`), as recon's
-# _build.yml runs its legs. Debug and Release are both exercised across the
-# legs, so an NDEBUG-only or optimizer-exposed break is caught.
+# _build.yml runs its legs. Release here and Debug in the sanitizer job
+# (sanitizers.yml) are both exercised, so an NDEBUG-only or optimizer-exposed
+# break is caught.
 on:
   workflow_call:
     inputs:
