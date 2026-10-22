@@ -163,7 +163,7 @@ Kept kept_of(const Scene& scene, const InitialRig& start,
 }
 
 // The options the re-solves take: one solve, with no uncertainty step.
-BundleAdjustOptions once(BundleAdjustOptions options = {}) {
+BundleAdjustOptions once(BundleAdjustOptions options) {
   options.outlier_rounds = 0;
   options.uncertainty = false;
   return options;
