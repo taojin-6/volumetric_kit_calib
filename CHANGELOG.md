@@ -12,6 +12,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   changes (`app::refusals_to_say`), instead of at every set: on Linux, where
   every tile is refused, 100 lines a second pushed every other message out of
   the Messages window.
+- `LiveWorker` documents what recon's Orbbec driver does: a camera that
+  disconnects fails every poll, so the live view ends, saying why once. The
+  "the sets go on without it" message, which that driver never let run, is
+  gone, and the tests' fake camera fails its drains once disconnected.
 - calib_rig's Stages panel no longer flickers: its `tiles` row, recorded
   only as a live set arrives, came and went with the total as the window
   redrew between sets. `viz::hold_stages` holds the last recording's time on

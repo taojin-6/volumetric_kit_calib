@@ -10,10 +10,10 @@
 // a full writer refuses it; the board locks. What the rule is told of a set:
 // a camera missing, the frames' spread; a taken set the worker cannot copy
 // out. The window takes the newest snapshot, once, and the set sink every set
-// read back. Then the thread's end: a
-// sensor that throws posts why, a camera gone is said once, and stopping
-// releases every frame. Runs under the validation layer when the environment
-// asks (VKC_TEST_VALIDATION); skips without a Vulkan device.
+// read back. Then the thread's end: a sensor that throws, or a camera
+// disconnected, ends it, saying why, and stopping releases every frame. Runs
+// under the validation layer when the environment asks (VKC_TEST_VALIDATION);
+// skips without a Vulkan device.
 
 #include <gtest/gtest.h>
 
@@ -498,56 +498,29 @@ TEST_F(AppLive, AThrowingSensorEndsTheThreadWithAStatus) {
   EXPECT_FALSE(live->arm());  // nothing left to take a capture
 }
 
-// A camera that is gone is said once, and the live view goes on without it.
-TEST_F(AppLive, ACameraGoneIsSaidOnceAndTheOthersGoOn) {
+// A camera disconnected fails every poll after it, as recon's Orbbec driver
+// does: the thread ends, saying why once, with the rig stopped.
+TEST_F(AppLive, ACameraDisconnectedEndsTheThread) {
   make_rig(3);
   test::FakeSensor* gone = cameras_[2].fake;
-  std::unique_ptr<LiveWorker> live = start();
+  CollectSink sink;
+  std::unique_ptr<LiveWorker> live = start(&sink);
   ASSERT_NE(live, nullptr);
   push(1);
-  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
-  ASSERT_NE(first, nullptr);
+  ASSERT_NE(next(*live, 0), nullptr);
   gone->disconnect();
-  Push without;
-  without.missing = {2};
-  push(2, without);
-  std::vector<core::Status> errors;
-  const std::shared_ptr<const LiveSnapshot> s =
-      next(*live, first->number, &errors);
-  ASSERT_NE(s, nullptr);
-  EXPECT_FALSE(s->set->frames[2].has_value());
-  EXPECT_EQ(s->detections[0].observation.points.size(), 8u);
-  EXPECT_EQ(s->detections[1].observation.points.size(), 8u);
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));  // more polls
-  push(3, without);
-  ASSERT_NE(next(*live, s->number, &errors), nullptr);
-  for (core::Status& error : live->take_errors()) {
-    errors.push_back(std::move(error));
+  const auto give_up = std::chrono::steady_clock::now() + kPatience;
+  while (live->running()) {
+    ASSERT_LT(std::chrono::steady_clock::now(), give_up);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
+  const std::vector<core::Status> errors = live->take_errors();
   ASSERT_EQ(errors.size(), 1u);
   EXPECT_EQ(errors[0].domain(), Code::IoError);
   EXPECT_EQ(errors[0].message(),
-            "camera SYN2 is gone: the sets go on without it");
-  EXPECT_TRUE(live->running());
-}
-
-// The primary gone, no set comes, and that is said; the worker stays up.
-TEST_F(AppLive, ThePrimaryGoneIsSaid) {
-  make_rig(2);
-  std::unique_ptr<LiveWorker> live = start();
-  ASSERT_NE(live, nullptr);
-  cameras_[0].fake->disconnect();
-  const auto give_up = std::chrono::steady_clock::now() + kPatience;
-  std::vector<core::Status> said;
-  while (said.empty()) {
-    ASSERT_LT(std::chrono::steady_clock::now(), give_up);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    said = live->take_errors();
-  }
-  ASSERT_EQ(said.size(), 1u);
-  EXPECT_EQ(said[0].message(),
-            "camera SYN0 is gone: it was the primary, so no set comes");
-  EXPECT_TRUE(live->running());
+            "camera SYN2 disconnected; reopen it to use it again");
+  EXPECT_FALSE(cameras_[0].fake->started());
+  EXPECT_FALSE(live->arm());  // nothing left to take a capture
 }
 
 // The window takes the newest snapshot, once: those published while it was

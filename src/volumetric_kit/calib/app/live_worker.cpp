@@ -307,23 +307,8 @@ struct LiveWorker::State {
     }
   }
 
-  // Each camera that is gone (disconnected) since the last look, posted once.
-  // A set may miss a secondary, so the live view goes on without it.
-  void report_gone(const std::vector<std::string>& ids,
-                   std::vector<bool>& gone) {
-    for (std::size_t i = 0; i < ids.size(); ++i) {
-      if (gone[i] || !array.sensor(i).exhausted()) continue;
-      gone[i] = true;
-      post(core::Status::io_error("camera " + ids[i] + " is gone" +
-                                  (i == array.primary()
-                                       ? ": it was the primary, so no set comes"
-                                       : ": the sets go on without it")));
-    }
-  }
-
   core::Status loop(const std::vector<std::string>& ids) {
     VKC_TRY(array.start());
-    std::vector<bool> gone(ids.size(), false);
     while (!stopping.load()) {
       VKC_TRY(apply_requests());
       core::StageMetrics stages;
@@ -332,7 +317,6 @@ struct LiveWorker::State {
         core::StageScope scope(stages, "poll");
         VKC_ASSIGN(set, array.poll_set());
       }
-      report_gone(ids, gone);
       if (set) {
         VKC_TRY(process(std::move(*set), std::move(stages), ids));
         continue;
