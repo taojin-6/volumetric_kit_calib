@@ -36,13 +36,6 @@ using detail::Projection;
 
 constexpr const char* kWhat = "origin_tag_frame: ";
 constexpr double kInfinity = std::numeric_limits<double>::infinity();
-// cv::LevMarq's iterations in one solve, at most. Two cameras whose rays
-// disagree by more than twice huber_px leave Huber's cost nearly flat
-// between them, and cv::LevMarq crawls: on the synthetic rig up to 80
-// iterations a pixel of disagreement, so 1000 places a tag the two see
-// 13 px apart; farther apart, the fit at the last iterate refuses the world
-// (PoorFit). An iteration is cheap.
-constexpr int kMaxIterations = 1000;
 // The corners, 4 of 3 coordinates, as cv::LevMarq's parameters.
 constexpr int kParameters = 12;
 
@@ -83,8 +76,7 @@ core::Status check_options(const TagFrameOptions& o) {
   const struct {
     const char* name;
     double value;
-  } positives[] = {{"huber_px", o.huber_px},
-                   {"outlier_px", o.outlier_px},
+  } positives[] = {{"outlier_px", o.outlier_px},
                    {"outlier_mads", o.outlier_mads},
                    {"edge_warn_fraction", o.edge_warn_fraction}};
   for (const auto& option : positives) {
@@ -192,14 +184,12 @@ core::Result<Problem> read_problem(const std::vector<RigCamera>& cameras,
 
 enum class Outcome { Ok, Behind, NotFinite };
 
-// The energy, sum huber(|e|), over the used views' corners at `corners`;
-// and, given `jtj` and `jte` (zeroed, 12 square and long), J^T W J and
-// J^T W e, W each corner's Huber weight. Each corner's residual depends on
-// that corner alone: dp/dX_w is the board block's translation part, the
-// board at the identity.
+// The energy, sum |e|^2, over the used views' corners at `corners`; and,
+// given `jtj` and `jte` (zeroed, 12 square and long), J^T J and J^T e. Each
+// corner's residual depends on that corner alone: dp/dX_w is the board
+// block's translation part, the board at the identity.
 Outcome evaluate(const Problem& p, const std::vector<cv::Point3d>& corners,
-                 double huber_px, double& energy, cv::Mat_<double>* jtj,
-                 cv::Mat_<double>* jte) {
+                 double& energy, cv::Mat_<double>* jtj, cv::Mat_<double>* jte) {
   energy = 0.0;
   Projection at;
   for (const View& v : p.views) {
@@ -213,14 +203,13 @@ Outcome evaluate(const Problem& p, const std::vector<cv::Point3d>& corners,
         return std::isnan(at.depths[k]) ? Outcome::NotFinite : Outcome::Behind;
       }
       const cv::Vec2d& e = at.residuals[k];
-      const double s = std::sqrt(e.dot(e));
-      if (!std::isfinite(s)) return Outcome::NotFinite;
-      energy += detail::huber(s, huber_px);
+      const double s2 = e.dot(e);
+      if (!std::isfinite(s2)) return Outcome::NotFinite;
+      energy += s2;
       if (jtj == nullptr) continue;
-      const double w = detail::huber_weight(s, huber_px);
       const cv::Matx23d j = at.by_board[k].get_minor<2, 3>(0, 3);
-      const cv::Matx33d h = w * (j.t() * j);
-      const cv::Vec3d g = w * (j.t() * e);
+      const cv::Matx33d h = j.t() * j;
+      const cv::Vec3d g = j.t() * e;
       const int o = 3 * static_cast<int>(k);
       for (int a = 0; a < 3; ++a) {
         for (int b = 0; b < 3; ++b) (*jtj)(o + a, o + b) += h(a, b);
@@ -275,26 +264,15 @@ std::string triangulate(const Problem& p, std::vector<cv::Point3d>& corners) {
   return {};
 }
 
-// How a solve of the corners ended.
-struct Solved {
-  // Empty when the corners were placed; else why not (a Numerical miss).
-  std::string why;
-  // cv::LevMarq stopped short of converging, at kMaxIterations or with its
-  // trust region gone, at a finite energy: the corners hold its last
-  // iterate, whose fit says how far apart the cameras are.
-  bool stopped = false;
-  int iterations = 0;  // cv::LevMarq's
-};
-
-// Places the corners from the used views: the DLT, then cv::LevMarq.
-Solved solve_once(const Problem& p, const TagFrameOptions& options,
-                  std::vector<cv::Point3d>& corners) {
+// Places the corners from the used views: the DLT, then least squares on
+// cv::LevMarq, a few steps from it. Empty, or why it failed (a Numerical
+// miss).
+std::string solve_once(const Problem& p, std::vector<cv::Point3d>& corners) {
   std::string why = triangulate(p, corners);
-  if (!why.empty()) return {std::move(why)};
+  if (!why.empty()) return why;
   double energy = 0.0;
-  if (evaluate(p, corners, options.huber_px, energy, nullptr, nullptr) !=
-      Outcome::Ok) {
-    return {"the energy at the linear corners is not finite"};
+  if (evaluate(p, corners, energy, nullptr, nullptr) != Outcome::Ok) {
+    return "the energy at the linear corners is not finite";
   }
 
   Outcome failure = Outcome::Ok;
@@ -328,8 +306,8 @@ Solved solve_once(const Problem& p, const TagFrameOptions& options,
       jtj.setTo(0.0);
     }
     const Outcome outcome =
-        evaluate(p, probe, options.huber_px, errnorm,
-                 linearise ? &jtj : nullptr, linearise ? &jte : nullptr);
+        evaluate(p, probe, errnorm, linearise ? &jtj : nullptr,
+                 linearise ? &jte : nullptr);
     if (outcome == Outcome::Ok) return true;
     if (linearise) {
       failure = outcome;
@@ -348,7 +326,6 @@ Solved solve_once(const Problem& p, const TagFrameOptions& options,
   }
   cv::LevMarq solver(x, callback,
                      cv::LevMarq::Settings()
-                         .setMaxIterations(kMaxIterations)
                          .setRelEnergyDeltaTolerance(kLevMarqTolerance)
                          .setStepNormTolerance(kLevMarqTolerance)
                          .setCheckMinGradient(false),
@@ -356,19 +333,16 @@ Solved solve_once(const Problem& p, const TagFrameOptions& options,
                      cv::VariableType::LINEAR, false, cv::DECOMP_CHOLESKY);
   const cv::LevMarq::Report report = solver.optimize();
   if (failure != Outcome::Ok || !unpack(x)) {
-    return {"a corner went behind a camera or out of range after " +
-            std::to_string(report.iters) + " iterations"};
+    return "a corner went behind a camera or out of range after " +
+           std::to_string(report.iters) + " iterations";
   }
   if (!report.found || !std::isfinite(report.energy)) {
-    const bool stopped = std::isfinite(report.energy);
-    if (stopped) corners = probe;
-    return {"cv::LevMarq did not converge in " + std::to_string(report.iters) +
-                " iterations (energy " + number(energy) + " to " +
-                number(report.energy) + ")",
-            stopped, report.iters};
+    return "cv::LevMarq did not converge in " + std::to_string(report.iters) +
+           " iterations (energy " + number(energy) + " to " +
+           number(report.energy) + ")";
   }
   corners = probe;
-  return {{}, false, report.iters};
+  return {};
 }
 
 // Each view's residuals at `corners`: its RMS and worst (pixels), and the
@@ -399,19 +373,6 @@ Fit fit_of(const Problem& p, const View& v,
   return fit;
 }
 
-// The RMS of the used views' corners' residuals at `corners` (pixels).
-double used_rms(const Problem& p, const std::vector<cv::Point3d>& corners) {
-  double sum = 0.0;
-  int used = 0;
-  for (const View& v : p.views) {
-    if (!v.used) continue;
-    const double rms = fit_of(p, v, corners, nullptr).rms;
-    sum += rms * rms;
-    ++used;
-  }
-  return std::sqrt(sum / used);
-}
-
 camera::Vec3d vec(const cv::Point3d& p) noexcept { return {p.x, p.y, p.z}; }
 
 WorldOrigin miss(TagMiss why, std::string camera_id, std::string reason) {
@@ -420,16 +381,6 @@ WorldOrigin miss(TagMiss why, std::string camera_id, std::string reason) {
   origin.camera = std::move(camera_id);
   origin.reason = std::move(reason);
   return origin;
-}
-
-// A world refused for fitting its used views at `rms_px`, above
-// kMaxTagWorldRmsPx; `after` follows the reason.
-WorldOrigin poor_fit(double rms_px, const std::string& after) {
-  return miss(TagMiss::PoorFit, {},
-              "the tag's corners fit its views at " + number(rms_px) +
-                  " px RMS, above the " + number(kMaxTagWorldRmsPx) +
-                  " px a world takes: the cameras disagree on where it is" +
-                  after);
 }
 
 core::Result<WorldOrigin> locate(const std::vector<RigCamera>& cameras,
@@ -464,22 +415,11 @@ core::Result<WorldOrigin> locate(const std::vector<RigCamera>& cameras,
   std::vector<cv::Point3d> corners;
   int solves = 0;
   for (int round = 0;; ++round) {
-    const Solved solved = solve_once(p, options, corners);
+    const std::string why = solve_once(p, corners);
     ++solves;
-    if (!solved.why.empty()) {
-      // Cameras far apart leave cv::LevMarq crawling to its cap, at an
-      // iterate that already fits too poorly for a world.
-      if (solved.stopped) {
-        const double rms = used_rms(p, corners);
-        if (rms > kMaxTagWorldRmsPx) {
-          return poor_fit(rms, " (solve " + std::to_string(solves) +
-                                   " stopped short of converging after " +
-                                   std::to_string(solved.iterations) +
-                                   " iterations)");
-        }
-      }
+    if (!why.empty()) {
       return miss(TagMiss::Numerical, {},
-                  "solve " + std::to_string(solves) + ": " + solved.why);
+                  "solve " + std::to_string(solves) + ": " + why);
     }
     if (round == options.outlier_rounds) break;
     std::vector<double> components;
@@ -491,25 +431,26 @@ core::Result<WorldOrigin> locate(const std::vector<RigCamera>& cameras,
     }
     const double bound = detail::outlier_bound(
         std::move(components), options.outlier_px, options.outlier_mads);
-    bool dropped = false;
+    bool outliers = false;
+    std::set<std::size_t> left;  // the cameras with a view within the bound
+    for (std::size_t i = 0; i < p.views.size(); ++i) {
+      if (!p.views[i].used) continue;
+      if (worst[i] > bound) {
+        outliers = true;
+      } else {
+        left.insert(p.views[i].camera);
+      }
+    }
+    // Dropping them would leave too few cameras to tell the wrong views by,
+    // as with two cameras that disagree: none is dropped, and the fit
+    // decides.
+    if (!outliers || left.size() < min_cameras) break;
     for (std::size_t i = 0; i < p.views.size(); ++i) {
       View& v = p.views[i];
       if (!v.used || !(worst[i] > bound)) continue;
       v.used = false;
       v.round = solves;
       v.bound = bound;
-      dropped = true;
-    }
-    if (!dropped) break;
-    const std::size_t left = cameras_used(p);
-    if (left < min_cameras) {
-      return miss(TagMiss::FewCameras, {},
-                  std::to_string(left) +
-                      (left == 1 ? " camera keeps" : " cameras keep") +
-                      " a view after " + std::to_string(solves) +
-                      (solves == 1 ? " solve" : " solves") +
-                      " and its outliers, fewer than min_cameras (" +
-                      std::to_string(min_cameras) + ")");
     }
   }
 
@@ -595,14 +536,24 @@ core::Result<WorldOrigin> locate(const std::vector<RigCamera>& cameras,
   }
 
   // The fit.
+  double sum = 0.0;
+  int used = 0;
   for (const View& v : p.views) {
     const Fit fit = fit_of(p, v, corners, nullptr);
     world.views.push_back({p.rig.ids[v.camera], v.capture, fit.rms, fit.worst,
                            v.used, v.round, v.bound});
-    if (v.used) world.worst_px = std::max(world.worst_px, fit.worst);
+    if (!v.used) continue;
+    sum += fit.rms * fit.rms;
+    ++used;
+    world.worst_px = std::max(world.worst_px, fit.worst);
   }
-  world.rms_px = used_rms(p, corners);
-  if (world.rms_px > kMaxTagWorldRmsPx) return poor_fit(world.rms_px, {});
+  world.rms_px = std::sqrt(sum / used);
+  if (world.rms_px > kMaxTagWorldRmsPx) {
+    return miss(TagMiss::PoorFit, {},
+                "the tag's corners fit its views at " + number(world.rms_px) +
+                    " px RMS, above the " + number(kMaxTagWorldRmsPx) +
+                    " px a world takes: the cameras disagree on where it is");
+  }
   WorldOrigin origin;
   origin.tag = std::move(world);
   return origin;

@@ -64,8 +64,6 @@ struct TagView {
 /// options.min_cameras = 3;  // a world only from 3 cameras or more
 /// @endcode
 struct TagFrameOptions {
-  /// Huber's delta on each corner's Euclidean residual (pixels).
-  double huber_px = 1.0;
   /// Solves after outlier views are dropped, at most; 0 drops none.
   int outlier_rounds = 3;
   /// A view whose worst corner's residual is above this (pixels), and above
@@ -88,13 +86,11 @@ struct TagFrameOptions {
 ///
 /// Cameras that disagree on where the tag is -- a pose or a lens off, or a
 /// tag moved between captures -- leave their rays apart. With 3 cameras or
-/// more the outlier rounds drop the views that disagree; with 2 they cannot
-/// tell which is wrong, and their bound grows with the disagreement. On the
+/// more the outlier rounds drop the few views that disagree with the rest;
+/// with 2 they cannot tell which is wrong, and the fit decides. On the
 /// synthetic rig, at 0.3 px of noise a world fits at about 0.4 px RMS; two
-/// cameras whose corners are (3, 1.5) px apart fit at 1.47 px, and
-/// (5.6, 2.8) px apart at 3.08 px. Beyond about 13 px apart the solve stops
-/// at its iteration cap, and its last iterate's fit is the one compared:
-/// 26.7 px RMS for (44, 22) px apart.
+/// cameras whose corners are (3, 1.5) px apart fit at 1.41 px,
+/// (6.5, 3.25) px apart at 3.06 px, and (44, 22) px apart at 20.7 px.
 ///
 /// @code
 /// if (origin.miss == TagMiss::PoorFit) warn(origin.reason);  // names the RMS
@@ -103,23 +99,19 @@ inline constexpr double kMaxTagWorldRmsPx = 3.0;
 
 /// @brief Why @ref origin_tag_frame gave no tag world.
 enum class TagMiss {
-  NotSeen,    ///< No camera saw the tag.
-  OneCamera,  ///< One camera alone saw it (@ref WorldOrigin::camera).
-  /// Fewer than `min_cameras` cameras saw it, or keep a view after the
-  /// outlier rounds.
-  FewCameras,
+  NotSeen,     ///< No camera saw the tag.
+  OneCamera,   ///< One camera alone saw it (@ref WorldOrigin::camera).
+  FewCameras,  ///< Fewer than `min_cameras` cameras saw it.
   /// A camera that saw it is not above its face (@ref WorldOrigin::camera,
   /// the first such by id): the tag lies face down, or its corners are
   /// mirrored.
   CameraBelowTag,
   /// The corners could not be placed: rays that meet at no point, a corner
-  /// not in front of a camera that saw it, a solve that did not converge
-  /// though its last iterate fits within @ref kMaxTagWorldRmsPx, or corners
-  /// that make no square.
+  /// not in front of a camera that saw it, a solve that did not converge,
+  /// or corners that make no square.
   Numerical,
-  /// The corners, placed or where a solve that did not converge stopped,
-  /// fit the views used worse than @ref kMaxTagWorldRmsPx: the reason gives
-  /// the RMS.
+  /// The corners placed fit the views used worse than
+  /// @ref kMaxTagWorldRmsPx: the reason gives the RMS.
   PoorFit,
 };
 
@@ -242,15 +234,18 @@ struct WorldOrigin {
 /// 1. **Rays.** Each corner's pixel is undistorted
 ///    (`compute::undistort_points`, converged).
 /// 2. **Corners.** Each corner is triangulated from every view kept by a
-///    linear N-view DLT (`cv::SVD`), then the 12 corner coordinates are
-///    refined together on `cv::LevMarq`, minimising Huber's cost of each
-///    corner's reprojection through its camera's whole lens.
+///    linear N-view DLT (`cv::SVD`), then refined by least squares on
+///    `cv::LevMarq`: the point minimising the sum of its squared
+///    reprojection errors through each camera's whole lens, a few steps from
+///    the DLT's.
 /// 3. **Outlier rounds.** After each solve, up to `outlier_rounds` times, the
 ///    views whose worst corner is above `bundle_adjust`'s corner bound
 ///    (`outlier_px`, or `outlier_mads` robust deviations if more) are
 ///    dropped, and the corners are solved again from the views left. The
-///    rounds stop when none is dropped; fewer than `min_cameras` cameras
-///    left is a miss.
+///    rounds stop when no view is above the bound, or when dropping those
+///    that are would leave fewer than `min_cameras` cameras, as with two
+///    cameras that disagree, which no round can tell apart: the fit then
+///    decides.
 /// 4. **Frame.** A square of the corners' mean edge, the model above, is
 ///    fitted to them by SVD (Procrustes), a proper rotation and a
 ///    translation: no tag size is assumed. The tag's printed edge is only
@@ -258,8 +253,7 @@ struct WorldOrigin {
 /// 5. **Guard.** Each camera that saw the tag must be above its plane
 ///    (z > 0 in its world).
 /// 6. **Fit.** The used views' corners must fit at @ref kMaxTagWorldRmsPx
-///    or better; a solve that stops short of converging is judged by its
-///    last iterate's fit before it is a `Numerical` miss.
+///    or better.
 ///
 /// @param cameras   The rig's cameras, as @ref bundle_adjust took them.
 /// @param solution  @ref bundle_adjust's solution for them.

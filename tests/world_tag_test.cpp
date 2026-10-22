@@ -450,9 +450,11 @@ TEST(OriginTagFrame, NamesTheOneCameraBelowTheTag) {
       << origin.reason;
 }
 
-// Outlier rounds that leave one camera: camera 1's one view, its corners
-// turned 20 degrees about their centre, cannot meet camera 0's rays.
-TEST(OriginTagFrame, MissesWhenOutliersLeaveOneCamera) {
+// No outlier round leaves one camera: camera 1's one view, its corners
+// turned 20 degrees about their centre, cannot meet camera 0's rays, but
+// dropping it would leave camera 0 alone, so it is kept and the world is
+// refused for its fit.
+TEST(OriginTagFrame, JudgesByTheFitWhatOutliersWouldLeaveToOneCamera) {
   const std::vector<SyntheticCamera> rig = test::kept_scene_rig(2);
   std::vector<TagView> views;
   for (const TagView& v : see(rig, {}, 5, 0.0)) {
@@ -471,15 +473,14 @@ TEST(OriginTagFrame, MissesWhenOutliersLeaveOneCamera) {
     }
   }
   const WorldOrigin origin = missed(locate(rig, truth_solution(rig, 1), views));
-  EXPECT_EQ(origin.miss, TagMiss::FewCameras);
-  EXPECT_NE(origin.reason.find("1 camera keeps a view"), std::string::npos)
-      << origin.reason;
+  EXPECT_EQ(origin.miss, TagMiss::PoorFit);
+  EXPECT_NE(origin.reason.find("at 6.72"), std::string::npos) << origin.reason;
 }
 
 // Two cameras whose rays disagree by a few pixels, as a small pose or lens
-// error makes them: camera 0's corners 3.4 px off in every view put both in
-// Huber's linear region, where cv::LevMarq crawls, and the tag is still
-// placed between them.
+// error makes them: camera 0's corners (3, 1.5) px off in every view. No
+// outlier round can tell which is wrong, and the tag is placed at the
+// least-squares point between them, whatever the captures.
 TEST(OriginTagFrame, PlacesTheTagBetweenTwoCamerasThatDisagree) {
   const std::vector<SyntheticCamera> rig = test::kept_scene_rig(2);
   for (const std::size_t captures : {1u, 5u, 20u}) {
@@ -494,19 +495,15 @@ TEST(OriginTagFrame, PlacesTheTagBetweenTwoCamerasThatDisagree) {
         test::value_of(locate(rig, truth_solution(rig, 1), views));
     ASSERT_TRUE(origin.tag) << origin.reason;
     EXPECT_EQ(origin.tag->solves, 1);
-    EXPECT_NEAR(origin.tag->rms_px, 1.47, 0.05);
-    EXPECT_LT(origin.tag->rms_px, kMaxTagWorldRmsPx);
+    EXPECT_NEAR(origin.tag->rms_px, 1.411, 0.001);
     for (const TagViewFit& v : origin.tag->views) EXPECT_TRUE(v.used);
   }
 }
 
 // Two cameras that disagree by more, which no outlier round can tell apart:
-// camera 0's corners (5.4, 2.7) px off fit just under 3 px RMS and keep their
-// world; (5.6, 2.8) px off they fit at 3.08 px, and (8, 4) px off at 4.63 px,
-// and the world is refused, the reference staying the origin, its reason
-// giving the RMS. (16, 8) and (44, 22) px off, cv::LevMarq stops at its cap,
-// and its last iterate's fit, 9.79 and 26.7 px, refuses the world just the
-// same.
+// camera 0's corners (6.3, 3.15) px off fit just under 3 px RMS and keep
+// their world; from (6.5, 3.25) px off the world is refused for its fit,
+// the reference staying the origin, its reason giving the RMS.
 TEST(OriginTagFrame, RefusesAWorldThatFitsWorseThanThreePixels) {
   const std::vector<SyntheticCamera> rig = test::kept_scene_rig(2);
   const RigSolution solution = truth_solution(rig, 1);
@@ -522,12 +519,12 @@ TEST(OriginTagFrame, RefusesAWorldThatFitsWorseThanThreePixels) {
       }
       return locate(rig, solution, views);
     };
-    const TagWorld under = world_of(apart(5.4));
+    const TagWorld under = world_of(apart(6.3));
     EXPECT_GT(under.rms_px, 2.9);
     EXPECT_LE(under.rms_px, kMaxTagWorldRmsPx);
     for (const auto& [dx, rms] :
-         {std::pair{5.6, "at 3.08"}, std::pair{8.0, "at 4.6"},
-          std::pair{16.0, "at 9.7"}, std::pair{44.0, "at 26.7"}}) {
+         {std::pair{6.5, "at 3.057"}, std::pair{8.0, "at 3.76"},
+          std::pair{16.0, "at 7.53"}, std::pair{44.0, "at 20.7"}}) {
       SCOPED_TRACE(dx);
       const WorldOrigin over = missed(apart(dx));
       EXPECT_EQ(over.miss, TagMiss::PoorFit);
@@ -539,17 +536,14 @@ TEST(OriginTagFrame, RefusesAWorldThatFitsWorseThanThreePixels) {
                                  "cameras disagree on where it is"),
                 std::string::npos)
           << over.reason;
-      EXPECT_EQ(over.reason.find(" (solve 1 stopped short of converging after "
-                                 "1000 iterations)") != std::string::npos,
-                dx > 10.0)
-          << over.reason;
     }
   }
   static_assert(kMaxTagWorldRmsPx == 3.0);
 }
 
-// A tag kicked 6 cm in one capture: every view of that capture is dropped
-// in the first round, and listed, and the frame is the still tag's.
+// A tag kicked 6 cm in one capture of 5: least squares spreads its views'
+// pull over the others, and two rounds drop every view of that capture,
+// listed, and the frame is the still tag's.
 TEST(OriginTagFrame, DropsTheViewsOfATagMoved) {
   const std::vector<SyntheticCamera> rig = test::kept_scene_rig(4);
   std::vector<TagView> views = see(rig, {}, 5, 0.3);
@@ -564,11 +558,11 @@ TEST(OriginTagFrame, DropsTheViewsOfATagMoved) {
   }
   const RigSolution solution = truth_solution(rig, 1);
   const TagWorld w = world_of(locate(rig, solution, views));
-  EXPECT_EQ(w.solves, 2);
+  EXPECT_EQ(w.solves, 3);
   for (const TagViewFit& v : w.views) {
     SCOPED_TRACE(v.camera + ", capture " + std::to_string(v.capture));
     EXPECT_EQ(v.used, v.capture != 2);
-    EXPECT_EQ(v.round, v.capture == 2 ? 1 : 0);
+    EXPECT_EQ(v.round > 0, v.capture == 2);
     if (v.capture == 2) {
       EXPECT_GE(v.bound_px, 3.0);
       EXPECT_GT(v.worst_px, v.bound_px);
@@ -634,8 +628,6 @@ TEST(OriginTagFrame, RefusesWhatItCannotTake) {
     change(options);
     refused(rig, solution, views, options, kOriginTag, says);
   };
-  with([](TagFrameOptions& o) { o.huber_px = 0.0; },
-       "options.huber_px must be positive and finite");
   with([&](TagFrameOptions& o) { o.outlier_px = nan; },
        "options.outlier_px must be positive and finite");
   with([](TagFrameOptions& o) { o.outlier_mads = -1.0; },
