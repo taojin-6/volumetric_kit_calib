@@ -8,6 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- calib_rig says a camera's mosaic tile refusal once, until its reason
+  changes (`app::refusals_to_say`), instead of at every set: on Linux, where
+  every tile is refused, 100 lines a second pushed every other message out of
+  the Messages window.
 - calib_rig's Stages panel no longer flickers: its `tiles` row, recorded
   only as a live set arrives, came and went with the total as the window
   redrew between sets. `viz::hold_stages` holds the last recording's time on

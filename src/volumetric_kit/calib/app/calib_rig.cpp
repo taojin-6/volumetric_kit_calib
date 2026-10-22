@@ -969,6 +969,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   std::vector<viz::PanelLine> calibration;  // the result's panel
   bool fresh = false;
   core::StageMetrics tiles;  // the last recording's, held between live sets
+  std::vector<std::string> refusals_said;  // each tile's, said once
   bool fitted = false;
   Pointer pointer;
   while (glfwWindowShouldClose(window) == GLFW_FALSE && !g_interrupted.load()) {
@@ -1049,7 +1050,9 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       core::StageScope scope(recorded, "tiles");
       VKC_TRY(
           record_snapshot(*mosaic, retire, frame.cmd, latest, frame.number));
-      for (const viz::TileRefusal& refusal : mosaic->refused()) {
+      VKC_ASSIGN(const std::vector<viz::TileRefusal> unsaid,
+                 refusals_to_say(mosaic->refused(), refusals_said));
+      for (const viz::TileRefusal& refusal : unsaid) {
         notices.note("camera " + ids[refusal.camera] + ": " +
                      refusal.status.message());
       }
