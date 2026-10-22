@@ -11,7 +11,8 @@
 // percentiles of known histograms, and of
 // counts past float's 24 bits; empty slots; the stride; a pair with nothing
 // in its window; a capture that could overflow a count; and refusals. Skips
-// where no device is present.
+// where no device is present. And the kernel's shared memory, read from its
+// SPIR-V, which needs none.
 //
 // Most tests pose every camera alike (same_pose): each sample then meets its
 // own pixel, and its difference is the two images' difference there, exact in
@@ -26,7 +27,9 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -37,6 +40,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 
+#include "agreement_comp.spv.hpp"
 #include "depth_fixture.hpp"
 #include "depth_scene.hpp"
 #include "volumetric_kit/calib/depth/depth_checks.hpp"
@@ -1224,6 +1228,55 @@ TEST_F(AgreementTest, RefusesWhatItCannotTake) {
       value_of(checks_->summarize(*histograms));
   EXPECT_EQ(twice[0].overlap, 2 * before[0].overlap);
   EXPECT_FALSE(twice[0].capture.has_value());
+}
+
+// The bytes of a SPIR-V module's Workgroup variables, each a scalar or an
+// array of scalars.
+std::size_t workgroup_bytes(const unsigned char* spv, std::size_t size) {
+  std::vector<std::uint32_t> words(size / 4);
+  std::memcpy(words.data(), spv, words.size() * 4);
+  std::map<std::uint32_t, std::size_t> type_bytes;
+  std::map<std::uint32_t, std::uint32_t> constants;
+  std::map<std::uint32_t, std::uint32_t> pointees;  // Workgroup pointers'
+  constexpr std::uint32_t kWorkgroup = 4;
+  std::size_t total = 0;
+  for (std::size_t at = 5; at < words.size();) {
+    const std::uint32_t* w = &words[at];
+    const std::uint32_t length = w[0] >> 16;
+    if (length == 0) return 0;
+    switch (w[0] & 0xffffu) {
+      case 21:  // OpTypeInt
+      case 22:  // OpTypeFloat
+        type_bytes[w[1]] = w[2] / 8;
+        break;
+      case 28:  // OpTypeArray
+        type_bytes[w[1]] = type_bytes.at(w[2]) * constants.at(w[3]);
+        break;
+      case 32:  // OpTypePointer
+        if (w[2] == kWorkgroup) pointees[w[1]] = w[3];
+        break;
+      case 43:  // OpConstant
+        constants[w[2]] = w[3];
+        break;
+      case 59:  // OpVariable
+        if (w[3] == kWorkgroup) total += type_bytes.at(pointees.at(w[1]));
+        break;
+      default:
+        break;
+    }
+    at += length;
+  }
+  return total;
+}
+
+// The kernel's shared memory is its bins alone: 16 KiB, the least
+// maxComputeSharedMemorySize Vulkan allows, so the depth checks ask no more
+// of a device. No device here has as little, so the module is read, not run.
+TEST(AgreementKernel, TakesNoMoreSharedMemoryThanEveryDeviceHas) {
+  const std::size_t bytes = workgroup_bytes(vc_test_agreement_comp_spv,
+                                            vc_test_agreement_comp_spv_size);
+  EXPECT_EQ(bytes, sizeof(std::uint32_t) * quality::kMaxAgreementBins);
+  EXPECT_LE(bytes, 16384u);
 }
 
 }  // namespace

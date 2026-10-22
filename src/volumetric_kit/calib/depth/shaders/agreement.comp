@@ -17,19 +17,19 @@
 // floor(difference / bin) + half_bins, and is counted when that bin is one of
 // the 2 half_bins: the window, [-half_bins bin, half_bins bin).
 //
-// Each workgroup counts into a histogram and an overlap in shared memory,
-// then adds each bin it filled to the pair's in the Bins buffer with an
-// integer atomicAdd, and its overlap likewise -- and into the capture's own
-// histograms too, when asked: integers, so the sums come out the same in any
-// order, over workgroups, dispatches and captures alike.
+// Each workgroup counts into a histogram in shared memory, then adds each
+// bin it filled to the pair's in the Bins buffer with an integer atomicAdd,
+// and each thread its overlap likewise -- into the capture's own histograms
+// too, when asked: integers, so the sums come out the same in any order, over
+// workgroups, dispatches and captures alike.
 
 #extension GL_GOOGLE_include_directive : require
 #include "volumetric_kit/calib/depth/shaders/depth_range.glsl"
 #include "volumetric_kit/recon/core/shaders/pinhole.glsl"
 
 #define VC_AGREEMENT_LOCAL_SIZE 256
-// The most bins a histogram has (quality::kMaxAgreementBins): the shared
-// memory this kernel takes.
+// The most bins a histogram has (quality::kMaxAgreementBins): all the shared
+// memory this kernel takes, the 16 KiB every Vulkan device has.
 #define VC_AGREEMENT_MAX_BINS 4096
 
 layout(local_size_x = VC_AGREEMENT_LOCAL_SIZE) in;
@@ -76,7 +76,6 @@ layout(push_constant, std430) uniform Params {
 } pc;
 
 shared uint vc_bins[VC_AGREEMENT_MAX_BINS];
-shared uint vc_overlap;
 
 // The depth at index `i` of to's image, or from's.
 float depth_at(bool to, uint i) {
@@ -111,9 +110,6 @@ void main() {
   for (uint b = lid; b < count; b += VC_AGREEMENT_LOCAL_SIZE) {
     vc_bins[b] = 0u;
   }
-  if (lid == 0u) {
-    vc_overlap = 0u;
-  }
   barrier();
 
   float half_bins = float(pc.half_bins);
@@ -146,9 +142,6 @@ void main() {
     }
     atomicAdd(vc_bins[uint(at + half_bins)], 1u);
   }
-  if (overlap != 0u) {
-    atomicAdd(vc_overlap, overlap);
-  }
   barrier();
 
   uint first = p.histogram * count;
@@ -161,10 +154,10 @@ void main() {
       }
     }
   }
-  if (lid == 0u && vc_overlap != 0u) {
-    atomicAdd(overlaps[p.histogram], vc_overlap);
+  if (overlap != 0u) {
+    atomicAdd(overlaps[p.histogram], overlap);
     if (pc.alone != 0u) {
-      atomicAdd(alone_overlaps[p.histogram], vc_overlap);
+      atomicAdd(alone_overlaps[p.histogram], overlap);
     }
   }
 }

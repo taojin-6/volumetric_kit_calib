@@ -137,6 +137,16 @@ if(VC_WITH_RIG)
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/board_member_cases.comp")
   vc_add_test(depth_agreement volumetric_kit::calib_depth
               volumetric_kit::core_test_support vc_synthetic_rig)
+  # The agreement kernel's SPIR-V too, whose shared memory the test sums.
+  vkc_embed_shaders(
+    vc_depth_agreement_test
+    SYMBOL_PREFIX
+    vc_test_
+    INCLUDE_DIRS
+    ${_vc_glsl_roots}
+    SHADERS
+    "${PROJECT_SOURCE_DIR}/src/volumetric_kit/calib/depth/shaders/agreement.comp"
+  )
   vc_add_test(depth_oom volumetric_kit::calib_depth
               volumetric_kit::core_test_support vc_test_support)
   target_sources(vc_depth_oom_test PRIVATE support/allocation_failure.cpp)
