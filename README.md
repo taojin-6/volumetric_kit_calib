@@ -243,11 +243,10 @@ calib needs `volumetric_kit_core` 0.6.1 or newer, with its vulkan tier for
 `VC_WITH_RIG`, and 0.11.0, with its config tier, for `calib_app`. An
 application that declares the core before calib, to share it with `recon` or
 `gfx`, pins at least that: on an older core, calib's configure fails at
-`vkc_require_core`. Without
-`VC_WITH_RIG`, calib makes recon available camera-only, so an application that
-uses recon beyond its camera tier makes recon available, with its options,
-before calib; with it, an application that makes recon available first makes
-all of it.
+`vkc_require_core`. Without `VC_WITH_RIG`, calib makes recon available
+camera-only, so an application that uses recon beyond its camera tier makes
+recon available, with its options, before calib; with it, an application that
+makes recon available first makes all of it.
 
 ## Development
 

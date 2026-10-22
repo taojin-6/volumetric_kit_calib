@@ -108,8 +108,7 @@ endif()
 # (ImageView2D, OrbitCamera) and the 3D view (DepthCloudPipeline's points from
 # depth buffers, PrimitivePipeline's lines). Pinned by commit, never main, and
 # declared after the core, so gfx's own core pin yields to calib's. gfx's tests,
-# examples, install and -Werror stay off in a subproject; its ui tier is
-# build-tree only, so calib_viz is too (src/CMakeLists.txt).
+# examples, install and -Werror stay off in a subproject.
 #
 # The pin is gfx main after PR #142 (76d0655): categorical_rgba8, the cameras'
 # default tints, beside #141's 0 x 0 framebuffer while iconified, #138's
