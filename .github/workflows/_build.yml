@@ -66,6 +66,12 @@ jobs:
     # fromJSON is never handed the empty string.
     container: ${{ inputs.container != '' && fromJSON(inputs.container) || null }}
     timeout-minutes: 30
+    env:
+      # With `tsan`, the test binaries the Build step builds and the Test step
+      # runs: those of calib's threads.
+      VC_TSAN_TESTS: >-
+        session_writer app_live app_live_view app_cloud app_capture
+        app_calibrate app_calibrate_depth
     defaults:
       run:
         # A container runs `run:` steps under `sh` (dash) by default.
@@ -235,16 +241,14 @@ jobs:
       # They are passed explicitly: a bare `--parallel` runs make with no job
       # limit, ignoring CMAKE_BUILD_PARALLEL_LEVEL. calib_rig needs GLFW and
       # the Orbbec tier; a rig build without it would skip the app's tests
-      # silently. Under ThreadSanitizer only the threaded tests' targets are
-      # built, the Test step's.
+      # silently. Under ThreadSanitizer only VC_TSAN_TESTS' targets are built.
       - name: Build
         run: |
           if [ "${{ inputs.tsan }}" = "true" ]; then
+            # shellcheck disable=SC2046,SC2086  # intentional: one per test
             cmake --build build \
               --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}" \
-              --target vc_session_writer_test vc_app_live_test \
-                vc_app_live_view_test vc_app_cloud_test vc_app_capture_test \
-                vc_app_calibrate_test vc_app_calibrate_depth_test
+              --target $(printf 'vc_%s_test ' ${VC_TSAN_TESTS})
             exit 0
           fi
           cmake --build build \
@@ -282,9 +286,7 @@ jobs:
             GTEST_FILTER+=':CalibrateDepthTest.LetsEachCapturesFramesGo'
             GTEST_FILTER+=':CalibrateDepthTest.AFailureOfTheChecksIsPostedAndTheResultsWritten'
             export GTEST_FILTER
-            binaries='^(session_writer|app_live|app_live_view|app_cloud'
-            binaries+='|app_capture|app_calibrate|app_calibrate_depth)$'
-            select=(--no-tests=error -R "${binaries}")
+            select=(--no-tests=error -R "^(${VC_TSAN_TESTS// /|})$")
           elif [ "${{ inputs.rig }}" = "true" ]; then
             select=()
           fi
