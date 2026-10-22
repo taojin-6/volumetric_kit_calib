@@ -5,8 +5,8 @@
 // legacy RMSE, the groups of errors, the transfer against verify_rig.py's
 // definition, leave one out against re-solves run here, flagging a bad
 // capture and recording refused ones, the principal-point A/B test both ways
-// and against a re-solve run here, its verdict, the geometry, the views left
-// out, the rejections, and refusals.
+// and against a re-solve run here, both against full re-solves, its verdict,
+// the geometry, the views left out, the rejections, and refusals.
 
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 
@@ -128,6 +128,95 @@ InitialRig warm_from(const InitialRig& start, const RigSolution& solution) {
   warm.links = start.links;
   warm.views = start.views;
   return warm;
+}
+
+// The re-solves' input as leave_one_out describes it: warm_from's start, and
+// each view with only the corners the solution kept, and its record; a view
+// with none kept is left out.
+struct Kept {
+  std::vector<Observation> views;
+  InitialRig start;
+};
+
+Kept kept_of(const Scene& scene, const InitialRig& start,
+             const RigSolution& solution) {
+  std::set<std::tuple<std::size_t, std::int64_t, int>> corners;
+  for (const solve::CornerResidual& r : solution.residuals) {
+    if (!r.dropped) corners.insert({r.camera, r.capture, r.corner});
+  }
+  Kept kept;
+  kept.start = warm_from(start, solution);
+  kept.start.views.clear();
+  for (std::size_t i = 0; i < scene.views.size(); ++i) {
+    const Observation& view = scene.views[i];
+    Observation less{view.camera_id, view.frame_id, {}};
+    for (const DetectedPoint& p : view.points) {
+      if (corners.count({start.views[i].camera, view.frame_id, p.id}) > 0) {
+        less.points.push_back(p);
+      }
+    }
+    if (less.points.empty()) continue;
+    kept.views.push_back(std::move(less));
+    kept.start.views.push_back(start.views[i]);
+  }
+  return kept;
+}
+
+// The options the re-solves take: one solve, with no uncertainty step.
+BundleAdjustOptions once(BundleAdjustOptions options = {}) {
+  options.outlier_rounds = 0;
+  options.uncertainty = false;
+  return options;
+}
+
+// Outlier bounds strict enough that outlier rounds drop many corners of a
+// scene at 0.3 px of noise.
+BundleAdjustOptions strict_outliers() {
+  BundleAdjustOptions strict;
+  strict.outlier_px = 0.01;
+  strict.outlier_mads = 2.5;
+  return strict;
+}
+
+// `scene` with every 50th corner 8 px off, each in its own direction: the
+// outlier rounds drop them.
+Scene with_outliers(Scene scene) {
+  std::size_t n = 0;
+  for (Observation& view : scene.views) {
+    for (DetectedPoint& p : view.points) {
+      if (++n % 50 != 0) continue;
+      const double a = 0.7 * static_cast<double>(n);
+      p.pixel += camera::Vec2d(8.0 * std::cos(a), 8.0 * std::sin(a));
+    }
+  }
+  return scene;
+}
+
+// `views` and `start` without `capture`.
+std::pair<std::vector<Observation>, InitialRig> without(
+    const std::vector<Observation>& views, const InitialRig& start,
+    std::int64_t capture) {
+  std::pair<std::vector<Observation>, InitialRig> less{{}, start};
+  less.second.views.clear();
+  less.second.boards.clear();
+  for (std::size_t i = 0; i < views.size(); ++i) {
+    if (views[i].frame_id == capture) continue;
+    less.first.push_back(views[i]);
+    less.second.views.push_back(start.views[i]);
+  }
+  for (const solve::BoardPose& b : start.boards) {
+    if (b.capture != capture) less.second.boards.push_back(b);
+  }
+  return less;
+}
+
+// A camera's move from `before` to `after`.
+PoseChange change_of(const camera::RodriguesTransform& before,
+                     const camera::RodriguesTransform& after) {
+  const camera::Mat4d a = camera::matrix_from_rodrigues(before);
+  const camera::Mat4d b = camera::matrix_from_rodrigues(after);
+  return {1000.0 * glm::length(test::centre_of(b) - test::centre_of(a)),
+          test::angle_deg(a, b)};
 }
 
 TEST(CalibrationMetrics, ExactDataGivesZeroRmsTransferAndLeaveOneOut) {
@@ -625,17 +714,21 @@ TEST(LeaveOneOut, FlagsABadCapture) {
   }
 }
 
-// Each re-solve, run here as leave_one_out describes it, moves each camera's
-// centre, -R^T t, by the millimetres reported, turns it by the degrees
-// reported, and fits its kept corners by the RMS reported. On this rig a
-// camera's centre and its translation move by clearly different amounts.
+// Each re-solve, run here as leave_one_out describes it -- one solve of the
+// corners the solution kept, without its outliers, though the options' outlier
+// bounds would drop many more -- moves each camera's centre, -R^T t, by the
+// millimetres reported, turns it by the degrees reported, and fits its kept
+// corners by the RMS reported. On this rig a camera's centre and its
+// translation move by clearly different amounts.
 TEST(LeaveOneOut, EachMoveIsTheCentresAndTheRotations) {
-  const Scene scene = make_scene(10);
+  const Scene scene = with_outliers(make_scene(10));
   const InitialRig start = first_rig(scene);
   const RigSolution solution = solved(scene, start);
-  const LeaveOneOut loo = value_of(
-      leave_one_out(scene.cameras, scene.board, scene.views, start, solution));
-  const InitialRig warm = warm_from(start, solution);
+  ASSERT_FALSE(solution.rejections.empty());
+  const BundleAdjustOptions strict = strict_outliers();
+  const LeaveOneOut loo = value_of(leave_one_out(
+      scene.cameras, scene.board, scene.views, start, solution, strict));
+  const Kept kept = kept_of(scene, start, solution);
   const std::size_t k = scene.cameras.size();
   ASSERT_EQ(loo.captures.size(), solution.boards.size());
   double apart = 0.0;  // the most a translation's move and a centre's differ
@@ -643,38 +736,25 @@ TEST(LeaveOneOut, EachMoveIsTheCentresAndTheRotations) {
     SCOPED_TRACE(left.capture);
     ASSERT_TRUE(left.refused.empty()) << left.refused;
     ASSERT_EQ(left.cameras.size(), k);
-    std::vector<Observation> views;
-    InitialRig less = warm;
-    less.views.clear();
-    less.boards.clear();
-    for (std::size_t i = 0; i < scene.views.size(); ++i) {
-      if (scene.views[i].frame_id == left.capture) continue;
-      views.push_back(scene.views[i]);
-      less.views.push_back(warm.views[i]);
-    }
-    for (const solve::BoardPose& b : warm.boards) {
-      if (b.capture != left.capture) less.boards.push_back(b);
-    }
-    const RigSolution again =
-        value_of(solve::bundle_adjust(scene.cameras, scene.board, views, less));
+    const auto [views, less] = without(kept.views, kept.start, left.capture);
+    const RigSolution again = value_of(solve::bundle_adjust(
+        scene.cameras, scene.board, views, less, once(strict)));
     EXPECT_NEAR(left.rms_px, rms_of(kept_residuals(again)), 1e-12);
     EXPECT_NEAR(left.legacy_rmse_px, left.rms_px / std::sqrt(2.0), 1e-12);
     for (std::size_t c = 0; c < k; ++c) {
+      const PoseChange moved =
+          change_of(solution.world_to_camera[c], again.world_to_camera[c]);
+      EXPECT_NEAR(left.cameras[c].centre_mm, moved.centre_mm, 1e-9) << c;
+      EXPECT_NEAR(left.cameras[c].rotation_deg, moved.rotation_deg, 1e-9) << c;
       const camera::Mat4d before =
           camera::matrix_from_rodrigues(solution.world_to_camera[c]);
       const camera::Mat4d after =
           camera::matrix_from_rodrigues(again.world_to_camera[c]);
-      const double centre_mm = 1000.0 * glm::length(test::centre_of(after) -
-                                                    test::centre_of(before));
-      EXPECT_NEAR(left.cameras[c].centre_mm, centre_mm, 1e-9) << c;
-      EXPECT_NEAR(left.cameras[c].rotation_deg, test::angle_deg(before, after),
-                  1e-9)
-          << c;
       const double translation_mm =
           1000.0 * glm::length(camera::Vec3d(after[3] - before[3]));
-      if (centre_mm > 0.01) {
-        apart =
-            std::max(apart, std::abs(translation_mm - centre_mm) / centre_mm);
+      if (moved.centre_mm > 0.01) {
+        apart = std::max(apart, std::abs(translation_mm - moved.centre_mm) /
+                                    moved.centre_mm);
       }
     }
   }
@@ -836,16 +916,14 @@ TEST(PrincipalPointAB, MidwayTruthIsInconclusive) {
   EXPECT_LE(decisive, 1u);
 }
 
-// The sides' RMS is over the corners both adjustments kept: re-solved here
-// as principal_point_ab describes it, with outlier rounds strict enough that
-// the shifted solve drops corners the solution kept.
-TEST(PrincipalPointAB, ComparesTheCornersBothKeep) {
-  const Scene scene = make_scene(12);
+// The sides' RMS is over the corners the solution kept, without its
+// outliers, though the options' outlier bounds would drop many more:
+// re-solved here as principal_point_ab describes it.
+TEST(PrincipalPointAB, ComparesTheCornersTheSolutionKept) {
+  const Scene scene = with_outliers(make_scene(12));
   const InitialRig start = first_rig(scene);
   const RigSolution solution = solved(scene, start);
-  BundleAdjustOptions strict;
-  strict.outlier_px = 0.01;
-  strict.outlier_mads = 2.5;
+  const BundleAdjustOptions strict = strict_outliers();
   core::Result<PrincipalPointAB> ab = PrincipalPointAB{};
   EXPECT_NO_THROW(ab =
                       principal_point_ab(scene.cameras, scene.board,
@@ -858,19 +936,13 @@ TEST(PrincipalPointAB, ComparesTheCornersBothKeep) {
     cam.model.intrinsics.cx += 2.5;
     cam.model.intrinsics.cy += 2.5;
   }
+  const Kept kept = kept_of(scene, start, solution);
   const RigSolution again = value_of(solve::bundle_adjust(
-      shifted, scene.board, scene.views, warm_from(start, solution), strict));
-  ASSERT_EQ(again.residuals.size(), solution.residuals.size());
-  std::vector<camera::Vec2d> given;
-  std::vector<camera::Vec2d> moved;
-  std::size_t kept = 0;
-  for (std::size_t j = 0; j < solution.residuals.size(); ++j) {
-    kept += solution.residuals[j].dropped ? 0 : 1;
-    if (solution.residuals[j].dropped || again.residuals[j].dropped) continue;
-    given.push_back(solution.residuals[j].residual);
-    moved.push_back(again.residuals[j].residual);
-  }
-  EXPECT_LT(given.size(), kept);  // the shifted solve dropped some
+      shifted, scene.board, kept.views, kept.start, once(strict)));
+  const std::vector<camera::Vec2d> given = kept_residuals(solution);
+  const std::vector<camera::Vec2d> moved = kept_residuals(again);
+  ASSERT_EQ(moved.size(), given.size());
+  EXPECT_LT(given.size(), solution.residuals.size());  // the outliers went
   EXPECT_EQ(ab->corners, given.size());
   EXPECT_NEAR(ab->as_given.rms_px, rms_of(given), 1e-12);
   EXPECT_NEAR(ab->shifted.rms_px, rms_of(moved), 1e-12);
@@ -878,6 +950,59 @@ TEST(PrincipalPointAB, ComparesTheCornersBothKeep) {
       shifted, scene.board, scene.views, again.world_to_camera));
   EXPECT_EQ(ab->shifted.transfer_median_px, t.median_px);
   EXPECT_EQ(ab->shifted.transfer_p90_px, t.p90_px);
+}
+
+// With outliers, the re-solves of the kept corners agree with full ones --
+// every corner, outlier rounds and the uncertainty step -- to within half
+// the last digit the Calibration panel shows of each: 0.01 mm and 0.001 deg
+// for a move, 0.001 px for an A/B side's RMS; and the verdict is the same.
+TEST(CalibrationMetrics, ReSolvesAgreeWithFullOnesToTheDigitsShown) {
+  const Scene scene = with_outliers(make_scene(20));
+  const InitialRig start = first_rig(scene);
+  const RigSolution solution = solved(scene, start);
+  ASSERT_FALSE(solution.rejections.empty());
+  const CalibrationMetrics m = measured(scene, start, solution);
+  const InitialRig warm = warm_from(start, solution);
+  ASSERT_EQ(m.leave_one_out.captures.size(), solution.boards.size());
+  for (const LeftOut& left : m.leave_one_out.captures) {
+    SCOPED_TRACE(left.capture);
+    ASSERT_TRUE(left.refused.empty()) << left.refused;
+    const auto [views, less] = without(scene.views, warm, left.capture);
+    const RigSolution full =
+        value_of(solve::bundle_adjust(scene.cameras, scene.board, views, less));
+    for (std::size_t c = 0; c < scene.cameras.size(); ++c) {
+      const PoseChange moved =
+          change_of(solution.world_to_camera[c], full.world_to_camera[c]);
+      EXPECT_NEAR(left.cameras[c].centre_mm, moved.centre_mm, 0.005) << c;
+      EXPECT_NEAR(left.cameras[c].rotation_deg, moved.rotation_deg, 0.0005)
+          << c;
+    }
+  }
+
+  std::vector<solve::RigCamera> shifted = scene.cameras;
+  for (solve::RigCamera& cam : shifted) {
+    cam.model.intrinsics.cx += kPrincipalShiftPx;
+    cam.model.intrinsics.cy += kPrincipalShiftPx;
+  }
+  const RigSolution full =
+      value_of(solve::bundle_adjust(shifted, scene.board, scene.views, warm));
+  ASSERT_EQ(full.residuals.size(), solution.residuals.size());
+  std::vector<camera::Vec2d> given;
+  std::vector<camera::Vec2d> moved;
+  for (std::size_t j = 0; j < solution.residuals.size(); ++j) {
+    if (solution.residuals[j].dropped || full.residuals[j].dropped) continue;
+    given.push_back(solution.residuals[j].residual);
+    moved.push_back(full.residuals[j].residual);
+  }
+  const PrincipalPointAB& ab = m.principal_point;
+  ASSERT_TRUE(ab.refused.empty()) << ab.refused;
+  EXPECT_NEAR(ab.as_given.rms_px, rms_of(given), 0.0005);
+  EXPECT_NEAR(ab.shifted.rms_px, rms_of(moved), 0.0005);
+  PrincipalPointArm full_given;
+  full_given.rms_px = rms_of(given);
+  PrincipalPointArm full_shifted;
+  full_shifted.rms_px = rms_of(moved);
+  EXPECT_EQ(ab.verdict, principal_point_verdict(full_given, full_shifted));
 }
 
 // A shifted re-solve bundle_adjust refuses -- here one that does not

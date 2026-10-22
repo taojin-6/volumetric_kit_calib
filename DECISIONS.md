@@ -429,8 +429,14 @@ definitions and the schemas).
   of the adjustment: each view's own pose carried into every other camera
   that poses the capture. A view counts when it fixes a pose, not when it has
   4 corners.
-- **Re-solves are warm.** Leave one out and the principal-point A/B test run
-  `bundle_adjust` from the solution. A re-solve `bundle_adjust` refuses
+- **Re-solves are warm** (amended 2026-10-22). Leave one out and the
+  principal-point A/B test run `bundle_adjust` from the solution: its poses
+  and the corners it kept, as one solve with no outlier rounds and no
+  covariance or sensitivity. Outliers are not decided again per trial, which
+  cost a second solve whenever the solve dropped any, so a move is its
+  capture's alone and the A/B sides are paired by construction; on the
+  synthetic rig with outliers both agree with full re-solves far below the
+  digits shown. A re-solve `bundle_adjust` refuses
   (`InvalidArgument` or `Numerical`, e.g. a link short of `min_shared`) is
   recorded as refused, not an error, so it costs no other metric.
 - **The A/B verdict is the RMS alone, by a margin** (amended 2026-10-18, the

@@ -473,14 +473,16 @@ VC_QUALITY_API core::Result<Transfer> cross_camera_transfer(
     const std::vector<recon::camera::RodriguesTransform>& world_to_camera);
 
 /// @brief The rig re-solved without each capture the adjustment took, in
-///        turn, warm: from @p solution's poses, with @p start's tree and view
-///        records less the capture's.
+///        turn, warm: from @p solution's poses and the corners it kept, with
+///        @p start's tree and view records less the capture's.
 ///
-/// Each camera's move is its centre's and its rotation's from
-/// @p solution's, and each re-solve's RMS is over the corners it kept. A
-/// re-solve @ref solve::bundle_adjust refuses as `InvalidArgument` or
-/// `Numerical` -- a link left short of `min_shared` captures, say -- is
-/// recorded as refused, and moves nothing.
+/// Each re-solve is one solve: @p options with no outlier rounds and no
+/// uncertainty step (@ref solve::BundleAdjustOptions::uncertainty). Each
+/// camera's move is its centre's and its rotation's from @p solution's, and
+/// each re-solve's RMS is over the corners it kept. A re-solve
+/// @ref solve::bundle_adjust refuses as `InvalidArgument` or `Numerical` --
+/// a link left short of `min_shared` captures, say -- is recorded as
+/// refused, and moves nothing.
 /// @param cameras   The rig's cameras, as the solve took them.
 /// @param board     The board seen.
 /// @param views     The observations, as the solve took them.
@@ -506,7 +508,9 @@ VC_QUALITY_API core::Result<LeaveOneOut> leave_one_out(
 ///        and both sides' RMS and cross-camera transfer
 ///        (@ref cross_camera_transfer).
 ///
-/// A re-solve @ref solve::bundle_adjust refuses as `InvalidArgument` or
+/// The re-solve is one solve of the corners @p solution kept, as
+/// @ref leave_one_out's are, so both sides' RMS is over the same corners. A
+/// re-solve @ref solve::bundle_adjust refuses as `InvalidArgument` or
 /// `Numerical` is recorded as refused (@ref PrincipalPointAB::refused), as
 /// @ref leave_one_out records one.
 /// @param cameras   The rig's cameras, as the solve took them.
