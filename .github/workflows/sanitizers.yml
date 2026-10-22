@@ -80,11 +80,12 @@ jobs:
       - name: Build
         run: cmake --build build --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
 
-      # The `package` tests run on _build.yml's rig leg: their nested builds
-      # are not sanitized. AgreementTest's case of 64 captures of two
-      # 8192 x 8192 depths, 2^32 samples a pair, runs on the Mac's GPU alone,
-      # not on a CPU's lavapipe (where today one binding cannot hold such a
-      # depth, and it skips).
+      # The `slow` and `package` tests run on _build.yml's Release rig leg:
+      # repeating a sweep's solves adds nothing under the sanitizers, and the
+      # nested builds are not sanitized. AgreementTest's case of 64 captures
+      # of two 8192 x 8192 depths, 2^32 samples a pair, runs on the Mac's GPU
+      # alone, not on a CPU's lavapipe (where today one binding cannot hold
+      # such a depth, and it skips).
       - name: Test
         env:
           # The core's test policy: a GPU test fails, rather than skips,
@@ -93,5 +94,5 @@ jobs:
           # ctest runs a test binary as one test, so a case is left out here.
           GTEST_FILTER: '-AgreementTest.RefusesACaptureThatCouldPassACountsLimit'
         run: |
-          ctest --test-dir build --output-on-failure -LE package \
+          ctest --test-dir build --output-on-failure -LE "slow|package" \
             --parallel "$(nproc)"

@@ -262,18 +262,19 @@ jobs:
           VKC_TEST_VALIDATION: ${{ inputs.rig && '1' || '' }}
           TSAN_OPTIONS: ${{ inputs.tsan && 'halt_on_error=1' || '' }}
         # Exported here, as macOS strips DYLD_* from a step's env when it
-        # starts the system's bash. The `package` tests, nested configures of
-        # calib (tests/CMakeLists.txt), run on the rig leg alone, the one leg
-        # that registers them all. Under ThreadSanitizer, the Build step's
-        # binaries run the tests of the session writer's and the app's threads
-        # (GTEST_FILTER; ctest runs a binary as one test), but not the solve's
-        # and the depth checks' numerics, which run on the test's own thread
-        # and take minutes there.
+        # starts the system's bash. The `slow` tests, the full statistical
+        # sweeps, and the `package` tests, nested configures of calib
+        # (tests/CMakeLists.txt), run on the Release rig leg alone, the one
+        # leg that registers every `package` test. Under ThreadSanitizer, the
+        # Build step's binaries run the tests of the session writer's and the
+        # app's threads (GTEST_FILTER; ctest runs a binary as one test), but
+        # not the solve's and the depth checks' numerics, which run on the
+        # test's own thread and take minutes there.
         run: |
           if [ -n "${VC_LAYER_LIBRARY_PATH:-}" ]; then
             export DYLD_FALLBACK_LIBRARY_PATH="${VC_LAYER_LIBRARY_PATH}"
           fi
-          select=(-LE package)
+          select=(-LE "slow|package")
           if [ "${{ inputs.tsan }}" = "true" ]; then
             GTEST_FILTER='SessionWriter.*:AppLive*:AppCloud*:AppCapture.*'
             GTEST_FILTER+=':CalibrateWorker.*:CalibrateDepthBesideTheCloud.*'

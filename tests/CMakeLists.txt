@@ -34,6 +34,21 @@ function(vc_add_test name)
   endif()
 endfunction()
 
+# vc_<name>_test's statistical sweeps, its suites named *Sweep, in full: the
+# evidence DECISIONS.md records, as `<name>.sweeps`, labelled `slow`, where
+# `<name>` draws a few scenes of each (VC_TEST_SWEEPS,
+# support/synthetic_scene.hpp).
+function(vc_add_sweeps name)
+  set(sweeps ${name}.sweeps)
+  add_test(NAME ${sweeps} COMMAND vc_${name}_test --gtest_filter=*Sweep.*)
+  set_tests_properties(${sweeps} PROPERTIES ${_vc_test_properties})
+  set_property(TEST ${sweeps} PROPERTY LABELS slow)
+  set_property(
+    TEST ${sweeps}
+    APPEND
+    PROPERTY ENVIRONMENT VC_TEST_SWEEPS=1)
+endfunction()
+
 # The tests' header-only helpers (support/); allocation_failure.cpp, which an
 # out-of-memory test adds, walks the stack with backtrace and dladdr.
 add_library(vc_test_support INTERFACE)
@@ -95,6 +110,7 @@ vc_add_test(spanning_tree volumetric_kit::calib_solve)
 vc_add_test(initialise volumetric_kit::calib_solve vc_synthetic_rig)
 vc_add_test(bundle_adjust volumetric_kit::calib_solve vc_synthetic_rig
             opencv_calib opencv_geometry)
+vc_add_sweeps(bundle_adjust)
 # solve: the world at the origin tag on the synthetic rig, and the outputs moved
 # into it, read back with recon's calibration file.
 vc_add_test(world_tag volumetric_kit::calib_solve vc_synthetic_rig)
@@ -114,6 +130,7 @@ target_sources(vc_quality_oom_test PRIVATE support/allocation_failure.cpp)
 # recon's reader.
 vc_add_test(calibration_metrics volumetric_kit::calib_quality vc_synthetic_rig
             opencv_geometry)
+vc_add_sweeps(calibration_metrics)
 # quality: the depth checks' geometry against planes and corners made here, and
 # their verdicts, on rigs of 1, 3, 4 and 5 cameras.
 vc_add_test(depth_checks volumetric_kit::calib_quality vc_synthetic_rig)

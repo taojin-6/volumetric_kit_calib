@@ -308,6 +308,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`detect_charuco`), so a suite's fixture is built once and OpenCV loads
   once; the out-of-memory binaries still run each case in its own process.
   `GTEST_FILTER` picks cases.
+- The default tests draw a few seeds of each statistical claim; the full
+  sweeps, DECISIONS.md's evidence, carry the ctest label `slow`.
 - `app::CalibrateWorker::create` takes the depth checks before the results
   sink, `create(depth, sink)`, and `app::calibrate` takes them after the
   progress; `quality::format_results` takes why the depth was not checked
