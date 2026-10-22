@@ -4,8 +4,8 @@
 // The bundle adjustment on the synthetic rig: accuracy over seeds, outliers,
 // the Jacobian at rotations near 0 and pi, rotations brought within pi, the
 // covariance against Monte Carlo and the dense inverse, the sensitivity
-// against a re-solve, the reference, recon's calibration, failures, OpenCV's
-// calibrateMultiview, order, and each option.
+// against a re-solve, the solution without them, the reference, recon's
+// calibration, failures, OpenCV's calibrateMultiview, order, and each option.
 
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 
@@ -1300,6 +1300,40 @@ TEST(BundleAdjust, HonoursTheSensitivityAmounts) {
     }
     EXPECT_EQ(base.sensitivity[j].focal[0].rotation_deg, 0.0);  // reference
   }
+}
+
+// Without the uncertainty step the solution is the same, but for no
+// covariance or sensitivity, and the guards still run.
+TEST(BundleAdjust, WithoutUncertaintyKeepsTheSolutionAndTheGuards) {
+  const Scene scene = make_scene(20);
+  const InitialRig start = first_rig(scene);
+  const RigSolution full = solved(scene, start);
+  BundleAdjustOptions options;
+  options.uncertainty = false;
+  const RigSolution bare = solved(scene, start, options);
+  ASSERT_EQ(bare.world_to_camera.size(), full.world_to_camera.size());
+  for (std::size_t c = 0; c < full.world_to_camera.size(); ++c) {
+    EXPECT_TRUE(bare.world_to_camera[c].rvec == full.world_to_camera[c].rvec);
+    EXPECT_TRUE(bare.world_to_camera[c].tvec == full.world_to_camera[c].tvec);
+  }
+  ASSERT_EQ(bare.residuals.size(), full.residuals.size());
+  for (std::size_t i = 0; i < full.residuals.size(); ++i) {
+    EXPECT_TRUE(bare.residuals[i].residual == full.residuals[i].residual);
+  }
+  EXPECT_EQ(bare.variance, full.variance);
+  EXPECT_EQ(full.covariance.size(), 4u);
+  EXPECT_TRUE(bare.covariance.empty());
+  EXPECT_TRUE(bare.sensitivity.empty());
+  // Amounts whose sensitivity overflows (NonFiniteSensitivityIsNumerical)
+  // are not used.
+  options.focal_fraction = 1e308;
+  EXPECT_TRUE(adjust(scene, start, options).ok());
+  options.max_condition = 1.0 + 1e-9;
+  const core::Result<RigSolution> guarded = adjust(scene, start, options);
+  EXPECT_EQ(guarded.status().domain(), Code::Numerical);
+  EXPECT_NE(guarded.status().message().find("poorly constrained"),
+            std::string::npos)
+      << guarded.status().message();
 }
 
 // Finite sensitivity amounts may overflow the linear prediction or its

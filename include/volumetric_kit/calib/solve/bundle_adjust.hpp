@@ -132,6 +132,10 @@ struct BundleAdjustOptions {
   /// The principal point's error (pixels) whose effect
   /// @ref IntrinsicsSensitivity predicts.
   double principal_px = 2.0;
+  /// Whether to run @ref bundle_adjust's step 5; without it
+  /// @ref RigSolution::covariance and @ref RigSolution::sensitivity are
+  /// empty. The guards (step 4) run either way.
+  bool uncertainty = true;
 };
 
 /// @brief Refuse options @ref bundle_adjust cannot take.

@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -102,6 +103,52 @@ std::uint32_t ceil_div(std::uint32_t a, std::uint32_t b) noexcept {
   return a / b + (a % b != 0 ? 1 : 0);
 }
 
+// The pixels plane_moments walks for `region` in an image of `size` and
+// pinhole `k`: the box round the inset rectangle's corners projected, a pixel
+// wider each side for float's rounding, clamped to the image -- none when it
+// lies outside -- or the whole image when a corner is not in front of the
+// camera. Every member's ray meets the rectangle in front of the camera, so
+// projects inside it.
+std::pair<glm::uvec2, glm::uvec2> region_pixels(
+    const quality::BoardRegion& region, const camera::PinholeIntrinsics& k,
+    const camera::ImageSize& size) {
+  const glm::uvec2 whole(size.width, size.height);
+  const camera::Mat4d board_to_depth =
+      camera::rigid_inverse(region.depth_to_board);
+  camera::Vec2d lo(std::numeric_limits<double>::infinity());
+  camera::Vec2d hi(-std::numeric_limits<double>::infinity());
+  for (const camera::Vec2d& corner :
+       {region.min, camera::Vec2d(region.max.x, region.min.y), region.max,
+        camera::Vec2d(region.min.x, region.max.y)}) {
+    const glm::dvec4 p = board_to_depth * glm::dvec4(corner, 0.0, 1.0);
+    if (!(p.z > 0.0)) return {glm::uvec2(0u), whole};
+    const camera::Vec2d at(k.fx * p.x / p.z + k.cx, k.fy * p.y / p.z + k.cy);
+    lo = glm::min(lo, at);
+    hi = glm::max(hi, at);
+  }
+  glm::uvec2 origin(0u);
+  glm::uvec2 extent(0u);
+  for (int i = 0; i < 2; ++i) {
+    const double last = static_cast<double>(whole[i]) - 1.0;
+    const double first = std::max(std::floor(lo[i]) - 1.0, 0.0);
+    const double end = std::min(std::ceil(hi[i]) + 1.0, last);
+    // Written so a NaN fails it.
+    if (!(first <= end)) return {glm::uvec2(0u), glm::uvec2(0u)};
+    origin[i] = static_cast<std::uint32_t>(first);
+    extent[i] = static_cast<std::uint32_t>(end - first) + 1u;
+  }
+  return {origin, extent};
+}
+
+// Whether two histograms' counts are binned alike: the same window, bins,
+// edge gate and stride.
+bool binned_alike(const quality::DepthCheckOptions& a,
+                  const quality::DepthCheckOptions& b) noexcept {
+  return a.window_mm == b.window_mm && a.bin_mm == b.bin_mm &&
+         a.edge_ratio == b.edge_ratio &&
+         a.agreement_stride == b.agreement_stride;
+}
+
 quality::DepthPlane plane_of(const FitBlock& fit) noexcept {
   quality::DepthPlane plane;
   plane.valid = fit.valid != 0;
@@ -159,11 +206,11 @@ core::Result<std::unique_ptr<DepthChecks>> DepthChecks::create(
         VKC_TRY(in_create(
             builder.add(checks->solve_, "plane_solve", vc_plane_solve_comp_spv,
                         vc_plane_solve_comp_spv_size, 3, &solve_push)));
-        // From's depth, to's, pairs, bins, overlaps; then bins, overlaps,
-        // statistics.
+        // From's depth, to's, pairs, bins, overlaps, a capture's own bins and
+        // overlaps; then bins, overlaps, statistics.
         VKC_TRY(in_create(
             builder.add(checks->agreement_, "agreement", vc_agreement_comp_spv,
-                        vc_agreement_comp_spv_size, 5, &agreement_push)));
+                        vc_agreement_comp_spv_size, 7, &agreement_push)));
         VKC_TRY(in_create(builder.add(
             checks->stats_, "agreement_stats", vc_agreement_stats_comp_spv,
             vc_agreement_stats_comp_spv_size, 3, &stats_push)));
@@ -217,11 +264,13 @@ core::Result<std::vector<quality::DepthPlane>> DepthChecks::fit_planes(
           block.size = glm::uvec2(image.size.width, image.size.height);
           block.range = glm::vec2(image.min_depth_m, image.max_depth_m);
           block.first_partial = slots;
-          // The binding range bounds the pixels below 2^30.
-          block.groups =
-              std::min(core::group_count(image.size.width * image.size.height,
-                                         kLocalSize),
-                       kMaxRegionGroups);
+          std::tie(block.origin, block.extent) =
+              region_pixels(view.region, k, image.size);
+          // The binding range bounds the pixels below 2^30. A slot at least,
+          // which a rectangle of none leaves empty.
+          block.groups = std::clamp(
+              core::group_count(block.extent.x * block.extent.y, kLocalSize),
+              1u, kMaxRegionGroups);
           slots += block.groups;
         }
         const VkDeviceSize region_bytes =
@@ -346,7 +395,8 @@ core::Result<std::unique_ptr<AgreementHistograms>> DepthChecks::histograms(
 
 core::Status DepthChecks::accumulate(
     AgreementHistograms& histograms,
-    const std::vector<std::optional<DepthImage>>& images) {
+    const std::vector<std::optional<DepthImage>>& images,
+    AgreementHistograms* alone) {
   return compute::guarded(kAccumulate, [&]() -> core::Status {
     const auto in_accumulate = [](core::Status status) {
       return std::move(status).with_context(kAccumulate);
@@ -356,6 +406,15 @@ core::Status DepthChecks::accumulate(
           std::string(kAccumulate) + ": the histograms are of another device");
     }
     const std::size_t cameras = histograms.cameras_;
+    if (alone != nullptr &&
+        (alone == &histograms || alone->device_ != device_ ||
+         alone->cameras_ != cameras ||
+         !binned_alike(alone->options_, histograms.options_))) {
+      return core::Status::invalid_argument(
+          std::string(kAccumulate) +
+          ": the capture's own histograms must be others of this device, "
+          "with the same cameras, window, bins, edge gate and stride");
+    }
     if (images.size() != cameras) {
       return core::Status::invalid_argument(
           std::string(kAccumulate) + ": " + std::to_string(images.size()) +
@@ -409,10 +468,30 @@ core::Status DepthChecks::accumulate(
         measured.emplace_back(from, to);
       }
     }
-    if (blocks.empty()) return core::Status{};
+    const core::Device& device = *device_;
+    core::CommandBatch batch(device, *allocator_);
+    if (alone != nullptr && alone->bins_.size() > 0) {
+      VKC_TRY(
+          in_accumulate(batch.fill(alone->bins_, 0, alone->bins_.size(), 0)));
+      VKC_TRY(in_accumulate(
+          batch.fill(alone->overlaps_, 0, alone->overlaps_.size(), 0)));
+    }
+    // Each pair's bound on the capture's own counts, once they are emptied
+    // and this capture counted.
+    const auto count_alone = [&] {
+      if (alone == nullptr) return;
+      std::fill(alone->samples_.begin(), alone->samples_.end(), 0);
+      for (const PairBlock& block : blocks) {
+        alone->samples_[block.histogram] = block.samples;
+      }
+    };
+    if (blocks.empty()) {
+      VKC_TRY(in_accumulate(batch.submit()));
+      count_alone();
+      return core::Status{};
+    }
     const auto count = static_cast<std::uint32_t>(blocks.size());
 
-    const core::Device& device = *device_;
     const VkDeviceSize pair_bytes = VkDeviceSize{count} * sizeof(PairBlock);
     const VkDeviceSize bin_bytes = histograms.bins_.size();
     const VkDeviceSize overlap_bytes = histograms.overlaps_.size();
@@ -420,6 +499,9 @@ core::Status DepthChecks::accumulate(
         core::ensure_device_scratch(device, *allocator_, pairs_, pair_bytes,
                                     max_range_, "calib.depth_pairs")));
     VKC_TRY(in_accumulate(pair_sets_.reserve(device, agreement_, count)));
+    // Without a capture's own histograms, the pooled ones are bound in their
+    // place, and not written there.
+    const AgreementHistograms& own = alone != nullptr ? *alone : histograms;
     for (std::uint32_t i = 0; i < count; ++i) {
       const auto [from, to] = measured[i];
       const core::DescriptorSet& set = pair_sets_[i];
@@ -431,15 +513,17 @@ core::Status DepthChecks::accumulate(
       set.write_storage_buffer(3, histograms.bins_.handle(), 0, bin_bytes);
       set.write_storage_buffer(4, histograms.overlaps_.handle(), 0,
                                overlap_bytes);
+      set.write_storage_buffer(5, own.bins_.handle(), 0, bin_bytes);
+      set.write_storage_buffer(6, own.overlaps_.handle(), 0, overlap_bytes);
     }
 
-    core::CommandBatch batch(device, *allocator_);
     VKC_TRY(in_accumulate(batch.upload(pairs_, 0, blocks.data(), pair_bytes)));
     AgreementParams params;
     params.half_bins = histograms.half_bins_;
     params.stride = stride;
     params.bin = static_cast<float>(options.bin_mm / 1000.0);
     params.edge_ratio = static_cast<float>(options.edge_ratio);
+    params.alone = alone != nullptr ? 1u : 0u;
     for (std::uint32_t i = 0; i < count; ++i) {
       params.pair = i;
       VKC_TRY(in_accumulate(batch.dispatch(agreement_, pair_sets_[i], &params,
@@ -450,8 +534,11 @@ core::Status DepthChecks::accumulate(
     // whatever the device added.
     for (const PairBlock& block : blocks) {
       histograms.samples_[block.histogram] += block.samples;
+      if (alone != nullptr) alone->samples_[block.histogram] += block.samples;
     }
-    return in_accumulate(batch.submit());
+    VKC_TRY(in_accumulate(batch.submit()));
+    count_alone();
+    return core::Status{};
   });
 }
 

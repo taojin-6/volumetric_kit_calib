@@ -47,6 +47,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `solve::BundleAdjustOptions::uncertainty`: off, `bundle_adjust` skips the
+  covariance and the intrinsics sensitivity; its guards still run.
 - Calibrate's world at the origin tag (DECISIONS.md, 2026-10-19):
   `app::calibrate` locates the tag from the kept captures' tags after the
   metrics (`CalibrateStage::Locating`) and anchors the outputs last, so
@@ -280,6 +282,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `quality::leave_one_out` and `principal_point_ab` re-solve only the
+  corners the solution kept, in one solve each, with no outlier rounds or
+  uncertainty step (DECISIONS.md, 2026-10-16, amended 2026-10-22): when the
+  solve dropped outliers, Calibrate's metrics take about 2.5 times less CPU
+  at 60 and 150 captures.
+- `depth::DepthChecks::fit_planes` walks only the pixels round each region's
+  projected rectangle (a pixel wider, clamped to the image), not the whole
+  depth image, in both rounds; the counts are unchanged and the planes the
+  same to float rounding.
+- `depth::DepthChecks::accumulate` takes a capture's own histograms to count
+  in the same pass (`alone`), emptying them first: Calibrate's depth checks
+  run the agreement kernel once a capture rather than twice, and make no
+  histograms per capture.
+- calib_rig's live worker reads no luma back and searches no set for the
+  board while the 3D view fills the window (`LiveWorker::set_detecting`),
+  unless a capture is armed: each set's readback (8.3 MB a 4K camera) and
+  detections are saved there.
 - `app::CalibrateWorker::create` takes the depth checks before the results
   sink, `create(depth, sink)`, and `app::calibrate` takes them after the
   progress; `quality::format_results` takes why the depth was not checked

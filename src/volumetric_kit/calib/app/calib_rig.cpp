@@ -1028,6 +1028,8 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     const bool view_changed = mode.view != shown;
     shown = mode.view;
     view3d.placement = scene_placement(mode);
+    // The board is searched for only where the images show it.
+    live->set_detecting(mode.view == RigView::Images);
 
     const VkExtent2D extent = frame.target->extent();
     const viz::WindowSplit split = viz::window_split(view3d.placement, extent);

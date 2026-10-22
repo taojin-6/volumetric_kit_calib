@@ -10,10 +10,11 @@
 // a full writer refuses it; the board locks. What the rule is told of a set:
 // a camera missing, the frames' spread; a taken set the worker cannot copy
 // out. The window takes the newest snapshot, once, and the set sink every set
-// read back. Then the thread's end: a sensor that throws, or a camera
-// disconnected, ends it, saying why, and stopping releases every frame. Runs
-// under the validation layer when the environment asks (VKC_TEST_VALIDATION);
-// skips without a Vulkan device.
+// read back; while the window shows no image, every set, with nothing read
+// back or searched unless a capture is armed. Then the thread's end: a sensor
+// that throws, or a camera disconnected, ends it, saying why, and stopping
+// releases every frame. Runs under the validation layer when the environment
+// asks (VKC_TEST_VALIDATION); skips without a Vulkan device.
 
 #include <gtest/gtest.h>
 
@@ -635,6 +636,79 @@ TEST_F(AppLive, OffersEachSetItReadsBackToItsSetSink) {
   EXPECT_EQ(taken[0], first->set);
   EXPECT_EQ(taken[1], second->set);
   EXPECT_EQ(taken[1]->frames.size(), 3u);
+  live->stop();
+  sets.release();
+}
+
+// Not detecting, as while the window shows the 3D view alone, each set is
+// offered and published with the rig's counters, but nothing is read back,
+// detected or ruled on. Detecting again, the next set is searched, with no
+// stillness against the set searched before the pause; and a capture armed
+// is searched for, and taken, with detection off.
+TEST_F(AppLive, SearchesNoSetWhileNotDetectingUnlessACaptureIsArmed) {
+  const auto stages_of = [](const LiveSnapshot& s) {
+    std::vector<std::string> names;
+    for (const core::StageRow& row : s.stages.rows()) {
+      names.emplace_back(row.name);
+    }
+    return names;
+  };
+  const std::vector<std::string> searched = {"poll", "readback", "detect"};
+  make_rig(2);
+  CollectSink sink;
+  KeepSets sets;
+  std::unique_ptr<LiveWorker> live = start(&sink, &sets);
+  ASSERT_NE(live, nullptr);
+  push(1);
+  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(stages_of(*first), searched);
+
+  live->set_detecting(false);
+  push(2);
+  const std::shared_ptr<const LiveSnapshot> off = next(*live, first->number);
+  ASSERT_NE(off, nullptr);
+  EXPECT_EQ(stages_of(*off), std::vector<std::string>{"poll"});
+  ASSERT_EQ(off->detections.size(), 2u);
+  ASSERT_EQ(off->checks.size(), 2u);
+  ASSERT_EQ(off->errors.size(), 2u);
+  ASSERT_EQ(off->stillness_px.size(), 2u);
+  for (std::size_t i = 0; i < 2; ++i) {
+    EXPECT_TRUE(off->detections[i].observation.points.empty());
+    EXPECT_EQ(off->checks[i].verdict, ViewVerdict::None);
+    EXPECT_TRUE(off->errors[i].ok());
+    EXPECT_FALSE(off->stillness_px[i].has_value());
+  }
+  EXPECT_EQ(off->decision.state, quality::CaptureState::Idle);
+  EXPECT_EQ(off->stats.sets, 2u);
+  ASSERT_EQ(sets.taken().size(), 2u);
+  EXPECT_EQ(sets.taken()[1], off->set);
+
+  live->set_detecting(true);
+  push(3);
+  const std::shared_ptr<const LiveSnapshot> on = next(*live, off->number);
+  ASSERT_NE(on, nullptr);
+  EXPECT_EQ(stages_of(*on), searched);
+  for (std::size_t i = 0; i < 2; ++i) {
+    EXPECT_EQ(on->detections[i].observation.points.size(), 8u);
+    EXPECT_FALSE(on->stillness_px[i].has_value());
+  }
+
+  ASSERT_TRUE(live->arm());
+  wait_armed(*live);
+  live->set_detecting(false);
+  push(4);
+  const std::shared_ptr<const LiveSnapshot> armed = next(*live, on->number);
+  ASSERT_NE(armed, nullptr);
+  EXPECT_EQ(stages_of(*armed), searched);
+  EXPECT_EQ(armed->decision.state, quality::CaptureState::Take);
+  EXPECT_EQ(sink.taken().size(), 1u);
+  // The take disarmed the rule: the next set is not searched.
+  push(5);
+  const std::shared_ptr<const LiveSnapshot> after = next(*live, armed->number);
+  ASSERT_NE(after, nullptr);
+  EXPECT_EQ(stages_of(*after), std::vector<std::string>{"poll"});
+  EXPECT_EQ(sets.taken().size(), 5u);
   live->stop();
   sets.release();
 }

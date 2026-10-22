@@ -102,7 +102,8 @@ class DepthChecks;
 ///        on the device and summed over each capture given to
 ///        @ref DepthChecks::accumulate, which @ref DepthChecks::summarize
 ///        reads. Made empty by @ref DepthChecks::histograms, with the
-///        settings every later call takes.
+///        settings every later call takes, and emptied by an accumulate that
+///        counts one capture alone into them.
 ///
 /// The counts are integers, added by integer atomics, so they come out the
 /// same in any order: two captures accumulated one after the other leave the
@@ -110,22 +111,21 @@ class DepthChecks;
 /// 2^32 - 1 samples, about 11,000 captures of 640 x 576 depth at stride 1.
 ///
 /// @code
-/// // Every capture pooled, and the chosen capture on its own.
+/// // Every capture pooled, and each on its own, in one pass a capture.
 /// VKC_ASSIGN(std::unique_ptr<AgreementHistograms> pooled,
 ///            checks->histograms(cameras, options));
-/// VKC_ASSIGN(std::unique_ptr<AgreementHistograms> chosen,
+/// VKC_ASSIGN(std::unique_ptr<AgreementHistograms> own,
 ///            checks->histograms(cameras, options));
+/// std::vector<quality::PairAgreement> pairs;
 /// for (const Capture& capture : captures) {
-///   VKC_TRY(checks->accumulate(*pooled, capture.images));
-///   if (capture.id == chosen_id) {
-///     VKC_TRY(checks->accumulate(*chosen, capture.images));
-///   }
+///   VKC_TRY(checks->accumulate(*pooled, capture.images, own.get()));
+///   VKC_ASSIGN(std::vector<quality::PairAgreement> its,
+///              checks->summarize(*own, capture.id));
+///   pairs.insert(pairs.end(), its.begin(), its.end());
 /// }
-/// VKC_ASSIGN(std::vector<quality::PairAgreement> pairs,
+/// VKC_ASSIGN(std::vector<quality::PairAgreement> all,
 ///            checks->summarize(*pooled));
-/// VKC_ASSIGN(std::vector<quality::PairAgreement> own,
-///            checks->summarize(*chosen, chosen_id));
-/// pairs.insert(pairs.end(), own.begin(), own.end());
+/// pairs.insert(pairs.end(), all.begin(), all.end());
 /// @endcode
 class VC_DEPTH_API AgreementHistograms {
  public:
@@ -287,14 +287,20 @@ class VC_DEPTH_API DepthChecks {
   ///                    per camera of @p histograms; an empty slot (a camera
   ///                    with no frame in the capture) takes no part. Several
   ///                    may read one buffer.
-  /// @return OK; `InvalidArgument` for histograms of another device, a
-  ///         slot count that is not their cameras', an image @ref fit_planes
-  ///         would refuse, naming its camera, or a capture that could carry
-  ///         a pair past 2^32 - 1 samples, each leaving the histograms as
-  ///         they were; a device failure, after which their counts are
-  ///         unknown; or `OutOfMemory`. Each message starts `accumulate: `.
+  /// @param alone       Null; or histograms to hold this capture alone,
+  ///                    emptied and counted into in the same pass: of this
+  ///                    device, not @p histograms, with their cameras and
+  ///                    their window, bin, edge gate and stride.
+  /// @return OK; `InvalidArgument` for histograms of another device,
+  ///         @p alone not as above, a slot count that is not their
+  ///         cameras', an image @ref fit_planes would refuse, naming its
+  ///         camera, or a capture that could carry a pair past 2^32 - 1
+  ///         samples, each leaving the histograms as they were; a device
+  ///         failure, after which their counts are unknown; or
+  ///         `OutOfMemory`. Each message starts `accumulate: `.
   core::Status accumulate(AgreementHistograms& histograms,
-                          const std::vector<std::optional<DepthImage>>& images);
+                          const std::vector<std::optional<DepthImage>>& images,
+                          AgreementHistograms* alone = nullptr);
 
   /// @brief What each ordered pair's histogram says: its overlap, its
   ///        samples in the window, and their signed median, median

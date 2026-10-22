@@ -64,6 +64,7 @@ struct LiveWorker::State {
   bool square_measured = false;
   quality::CaptureDecision decision;  // the latest that was not Idle
   std::vector<core::Status> errors;
+  std::atomic<bool> detecting{true};
   std::atomic<bool> stopping{false};
   std::atomic<bool> running{false};
   std::atomic<std::uint64_t> captures{0};
@@ -202,11 +203,23 @@ struct LiveWorker::State {
   }
 
   // One set: read back, offered to the set sink, detected, checked, ruled
-  // on, published.
+  // on, published. While the worker does not detect and no capture is
+  // armed, it is offered and published alone.
   core::Status process(sensor::FrameSet polled, core::StageMetrics stages,
                        const std::vector<std::string>& ids) {
     auto out = std::make_shared<LiveSnapshot>();
     out->stages = std::move(stages);
+    if (!detecting.load() && !rule->armed()) {
+      out->set = std::make_shared<const sensor::FrameSet>(std::move(polled));
+      if (sets != nullptr) sets->offer(out->set);
+      out->detections.assign(ids.size(), Detection{});
+      out->checks.assign(ids.size(), ViewCheck{});
+      out->errors.assign(ids.size(), core::Status{});
+      out->stillness_px.assign(ids.size(), std::nullopt);
+      have_previous = false;  // no stillness across sets not searched
+      publish(std::move(out), ids);
+      return {};
+    }
     // The readback takes over each buffer picture's queue family.
     core::Result<std::vector<std::optional<sensor::PictureView>>> read =
         readback->read(polled.frames, sensor::PictureReadback::Planes::Luma,
@@ -258,7 +271,14 @@ struct LiveWorker::State {
       take(set, views, *out, ids);
     }
     publish_decision(out->decision);
+    publish(std::move(out), ids);
+    return {};
+  }
 
+  // A set's snapshot, with the rig's counters and rate, published: newest
+  // wins.
+  void publish(std::shared_ptr<LiveSnapshot> out,
+               const std::vector<std::string>& ids) {
     out->lost.assign(ids.size(), std::nullopt);
     for (std::size_t i = 0; i < ids.size(); ++i) {
       const auto* orbbec =
@@ -285,7 +305,6 @@ struct LiveWorker::State {
       const std::lock_guard<std::mutex> lock(mutex);
       replaced = std::exchange(snapshot, std::move(out));
     }
-    return {};
   }
 
   // The rule took this set: copy it out and hand it to the sink.
@@ -407,6 +426,10 @@ void LiveWorker::stop() noexcept {
 }
 
 bool LiveWorker::running() const noexcept { return state_->running.load(); }
+
+void LiveWorker::set_detecting(bool on) noexcept {
+  state_->detecting.store(on);
+}
 
 bool LiveWorker::arm() {
   if (state_->sink == nullptr || !running()) return false;

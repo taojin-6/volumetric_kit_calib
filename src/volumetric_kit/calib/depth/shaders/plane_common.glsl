@@ -22,6 +22,8 @@ struct Region {
   vec2 range;           // the depth measured: min and max (metres)
   uint first_partial;   // its first slot in the partials
   uint groups;          // its slots: plane_moments' workgroups over it
+  uvec2 origin;         // the first pixel of the rectangle walked
+  uvec2 extent;         // its width and height: every member is inside
   uint pad0;
   uint pad1;
 };

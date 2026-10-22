@@ -72,8 +72,9 @@ struct AgreementParams {
   std::uint32_t stride = 0;
   float bin = 0.0f;
   float edge_ratio = 0.0f;
+  std::uint32_t alone = 0;
 };
-static_assert(sizeof(AgreementParams) == 20,
+static_assert(sizeof(AgreementParams) == 24,
               "mirrors Params in shaders/agreement.comp");
 
 // agreement_stats.comp's push constants.

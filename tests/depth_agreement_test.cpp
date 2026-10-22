@@ -7,10 +7,12 @@
 // has it; a camera posed 3 mm off; the window and the edge gate over a box
 // with flying pixels round it, counted exactly; the edge gate's scale with
 // depth; each camera's own range; histograms accumulated in either order and
-// as one capture, to the bit; the percentiles of known histograms, and of
+// as one capture, to the bit, and each capture's own in the same pass; the
+// percentiles of known histograms, and of
 // counts past float's 24 bits; empty slots; the stride; a pair with nothing
 // in its window; a capture that could overflow a count; and refusals. Skips
-// where no device is present.
+// where no device is present. And the kernel's shared memory, read from its
+// SPIR-V, which needs none.
 //
 // Most tests pose every camera alike (same_pose): each sample then meets its
 // own pixel, and its difference is the two images' difference there, exact in
@@ -25,7 +27,9 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -36,6 +40,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 
+#include "agreement_comp.spv.hpp"
 #include "depth_fixture.hpp"
 #include "depth_scene.hpp"
 #include "volumetric_kit/calib/depth/depth_checks.hpp"
@@ -695,6 +700,105 @@ TEST_F(AgreementTest, AccumulatingTwiceIsOneHistogramOfBoth) {
   }
 }
 
+// A capture's own histograms, given to accumulate, are counted in the same
+// pass as the pooled ones: each holds the capture alone, to the bit, emptied
+// of the one before whether this one measures every pair, some or none, and
+// the pooled ones hold every capture as without them. Own histograms that
+// are the pooled ones, or differ in cameras or settings, are refused, leaving
+// both as they were; a rig of one camera has none to count.
+TEST_F(AgreementTest, CountsACaptureAloneInTheSamePass) {
+  using Images = std::vector<std::optional<DepthImage>>;
+  std::vector<Camera> first;
+  std::vector<Camera> second;
+  for (std::size_t c = 0; c < 3; ++c) {
+    first.push_back(same_pose(smooth(c, 0)));
+    second.push_back(same_pose(smooth(c, 1)));
+  }
+  std::vector<core::Buffer> first_buffers;
+  std::vector<core::Buffer> second_buffers;
+  const Images a = images_of(first, first_buffers);
+  const Images b = images_of(second, second_buffers);
+  const Images some = {b[0], {}, b[2]};
+  const Images none = {a[0], {}, {}};
+  const std::vector<const Images*> captures = {&a, &b, &some, &none};
+  const auto alone = [&](const Images& images, std::int64_t capture) {
+    const std::unique_ptr<AgreementHistograms> histograms =
+        value_of(checks_->histograms(3));
+    check(checks_->accumulate(*histograms, images));
+    return value_of(checks_->summarize(*histograms, capture));
+  };
+  // Every pair alike, to the bit; one with nothing in its window has no
+  // statistics in either.
+  const auto expect_all_same = [](const std::vector<PairAgreement>& got,
+                                  const std::vector<PairAgreement>& want) {
+    ASSERT_EQ(got.size(), want.size());
+    for (std::size_t i = 0; i < got.size(); ++i) {
+      SCOPED_TRACE(i);
+      if (want[i].in_window > 0) {
+        expect_same(got[i], want[i]);
+        continue;
+      }
+      EXPECT_EQ(got[i].capture, want[i].capture);
+      EXPECT_EQ(got[i].overlap, want[i].overlap);
+      expect_no_statistics(got[i]);
+    }
+  };
+
+  const std::unique_ptr<AgreementHistograms> pooled =
+      value_of(checks_->histograms(3));
+  const std::unique_ptr<AgreementHistograms> own =
+      value_of(checks_->histograms(3));
+  const std::unique_ptr<AgreementHistograms> without =
+      value_of(checks_->histograms(3));
+  for (std::size_t k = 0; k < captures.size(); ++k) {
+    SCOPED_TRACE("capture " + std::to_string(k));
+    const auto index = static_cast<std::int64_t>(k);
+    check(checks_->accumulate(*pooled, *captures[k], own.get()));
+    check(checks_->accumulate(*without, *captures[k]));
+    const std::vector<PairAgreement> its =
+        value_of(checks_->summarize(*own, index));
+    expect_all_same(its, alone(*captures[k], index));
+    expect_all_same(value_of(checks_->summarize(*pooled)),
+                    value_of(checks_->summarize(*without)));
+    if (captures[k] == &none) {
+      for (const PairAgreement& pair : its) expect_unmeasured(pair);
+    }
+  }
+  // 0 to 1 in the first two captures, 0 to 2 in the first three.
+  const std::vector<PairAgreement> all = value_of(checks_->summarize(*pooled));
+  EXPECT_EQ(all[0].overlap, 2 * kInterior);
+  EXPECT_EQ(all[1].overlap, 3 * kInterior);
+
+  const std::vector<PairAgreement> pooled_before =
+      value_of(checks_->summarize(*pooled));
+  const std::vector<PairAgreement> own_before =
+      value_of(checks_->summarize(*own));
+  const auto refused = [&](AgreementHistograms* bad) {
+    expect_refused(checks_->accumulate(*pooled, a, bad), "accumulate",
+                   "the capture's own histograms");
+    expect_all_same(value_of(checks_->summarize(*pooled)), pooled_before);
+    expect_all_same(value_of(checks_->summarize(*own)), own_before);
+  };
+  refused(pooled.get());
+  refused(value_of(checks_->histograms(2)).get());
+  DepthCheckOptions coarse;
+  coarse.bin_mm = 0.2;
+  refused(value_of(checks_->histograms(3, coarse)).get());
+  DepthCheckOptions strided;
+  strided.agreement_stride = 2;
+  refused(value_of(checks_->histograms(3, strided)).get());
+  DepthCheckOptions gated;
+  gated.edge_ratio = 0.05;
+  refused(value_of(checks_->histograms(3, gated)).get());
+
+  const std::unique_ptr<AgreementHistograms> one =
+      value_of(checks_->histograms(1));
+  const std::unique_ptr<AgreementHistograms> one_own =
+      value_of(checks_->histograms(1));
+  check(checks_->accumulate(*one, {a[0]}, one_own.get()));
+  EXPECT_TRUE(value_of(checks_->summarize(*one_own)).empty());
+}
+
 // A histogram known bin by bin, and samples past its window: camera 1's
 // depth is camera 0's plus each sample's difference at a bin's centre, 5 m
 // out, with the edge gate opened.
@@ -1111,6 +1215,12 @@ TEST_F(AgreementTest, RefusesWhatItCannotTake) {
                    "another device");
     expect_refused(checks_->summarize(*foreign).status(), "summarize",
                    "another device");
+    const std::unique_ptr<AgreementHistograms> own =
+        value_of(checks_->histograms(2));
+    expect_refused(checks_->accumulate(*histograms, good, foreign.get()),
+                   "accumulate", "the capture's own histograms");
+    expect_refused(checks_->accumulate(*foreign, good, own.get()), "accumulate",
+                   "another device");
   }
 
   check(checks_->accumulate(*histograms, good));
@@ -1118,6 +1228,55 @@ TEST_F(AgreementTest, RefusesWhatItCannotTake) {
       value_of(checks_->summarize(*histograms));
   EXPECT_EQ(twice[0].overlap, 2 * before[0].overlap);
   EXPECT_FALSE(twice[0].capture.has_value());
+}
+
+// The bytes of a SPIR-V module's Workgroup variables, each a scalar or an
+// array of scalars.
+std::size_t workgroup_bytes(const unsigned char* spv, std::size_t size) {
+  std::vector<std::uint32_t> words(size / 4);
+  std::memcpy(words.data(), spv, words.size() * 4);
+  std::map<std::uint32_t, std::size_t> type_bytes;
+  std::map<std::uint32_t, std::uint32_t> constants;
+  std::map<std::uint32_t, std::uint32_t> pointees;  // Workgroup pointers'
+  constexpr std::uint32_t kWorkgroup = 4;
+  std::size_t total = 0;
+  for (std::size_t at = 5; at < words.size();) {
+    const std::uint32_t* w = &words[at];
+    const std::uint32_t length = w[0] >> 16;
+    if (length == 0) return 0;
+    switch (w[0] & 0xffffu) {
+      case 21:  // OpTypeInt
+      case 22:  // OpTypeFloat
+        type_bytes[w[1]] = w[2] / 8;
+        break;
+      case 28:  // OpTypeArray
+        type_bytes[w[1]] = type_bytes.at(w[2]) * constants.at(w[3]);
+        break;
+      case 32:  // OpTypePointer
+        if (w[2] == kWorkgroup) pointees[w[1]] = w[3];
+        break;
+      case 43:  // OpConstant
+        constants[w[2]] = w[3];
+        break;
+      case 59:  // OpVariable
+        if (w[3] == kWorkgroup) total += type_bytes.at(pointees.at(w[1]));
+        break;
+      default:
+        break;
+    }
+    at += length;
+  }
+  return total;
+}
+
+// The kernel's shared memory is its bins alone: 16 KiB, the least
+// maxComputeSharedMemorySize Vulkan allows, so the depth checks ask no more
+// of a device. No device here has as little, so the module is read, not run.
+TEST(AgreementKernel, TakesNoMoreSharedMemoryThanEveryDeviceHas) {
+  const std::size_t bytes = workgroup_bytes(vc_test_agreement_comp_spv,
+                                            vc_test_agreement_comp_spv_size);
+  EXPECT_EQ(bytes, sizeof(std::uint32_t) * quality::kMaxAgreementBins);
+  EXPECT_LE(bytes, 16384u);
 }
 
 }  // namespace

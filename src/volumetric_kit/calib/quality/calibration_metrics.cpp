@@ -406,12 +406,21 @@ core::Result<Transfer> transfer_of(
   return out;
 }
 
-// The rig @p solution reached, as a start for a warm re-solve: its cameras
-// and boards (the start's, for a capture whose views were all dropped), and
-// @p start's tree and view records.
-solve::InitialRig warm_start(const solve::InitialRig& start,
-                             const solve::RigSolution& solution) {
-  solve::InitialRig warm;
+// A re-solve's input.
+struct Trial {
+  std::vector<Observation> views;
+  solve::InitialRig start;  // a record for each of `views`
+};
+
+// The corners @p solution kept, from where it reached: each view adjusted
+// with only its corners kept, and its record, one with none kept left out;
+// @p solution's cameras and boards (the start's, for a capture whose views
+// were all dropped), and @p start's tree.
+Trial kept_trial(const Fit& fit, const std::vector<Observation>& views,
+                 const solve::InitialRig& start,
+                 const solve::RigSolution& solution) {
+  Trial trial;
+  solve::InitialRig& warm = trial.start;
   warm.reference = solution.reference;
   for (std::size_t c = 0; c < solution.world_to_camera.size(); ++c) {
     warm.world_to_camera.push_back(
@@ -431,8 +440,28 @@ solve::InitialRig warm_start(const solve::InitialRig& start,
                         : b.board_to_world});
   }
   warm.links = start.links;
-  warm.views = start.views;
-  return warm;
+  for (std::size_t i = 0; i < views.size(); ++i) {
+    const std::size_t first = fit.first[i];
+    if (first == kNone) continue;
+    Observation kept{views[i].camera_id, views[i].frame_id, {}};
+    for (std::size_t j = 0; j < views[i].points.size(); ++j) {
+      if (!solution.residuals[first + j].dropped) {
+        kept.points.push_back(views[i].points[j]);
+      }
+    }
+    if (kept.points.empty()) continue;
+    trial.views.push_back(std::move(kept));
+    warm.views.push_back(start.views[i]);
+  }
+  return trial;
+}
+
+// The options a re-solve takes: one solve of the corners kept, with no
+// uncertainty step.
+solve::BundleAdjustOptions trial_options(solve::BundleAdjustOptions options) {
+  options.outlier_rounds = 0;
+  options.uncertainty = false;
+  return options;
 }
 
 core::Result<LeaveOneOut> leave_one_out_of(
@@ -445,7 +474,12 @@ core::Result<LeaveOneOut> leave_one_out_of(
   for (std::size_t i = 0; i < views.size(); ++i) {
     if (fit.first[i] != kNone) captures.insert(views[i].frame_id);
   }
-  const solve::InitialRig warm = warm_start(start, solution);
+  // TODO: every trial is a dense solve over all the boards. A first-order
+  // downdate of the boards-eliminated camera system (bundle_adjust's
+  // uncertainty step), one small solve per capture, would take milliseconds
+  // at the cap; it changes what a move is, so it waits on the owner.
+  const Trial trial = kept_trial(fit, views, start, solution);
+  const solve::BundleAdjustOptions once = trial_options(options);
   std::vector<camera::Mat4d> solved;
   for (const camera::RodriguesTransform& t : solution.world_to_camera) {
     solved.push_back(camera::matrix_from_rodrigues(t));
@@ -455,21 +489,21 @@ core::Result<LeaveOneOut> leave_one_out_of(
   std::size_t done = 0;
   for (const std::int64_t capture : captures) {
     std::vector<Observation> less_views;
-    solve::InitialRig less = warm;
+    solve::InitialRig less = trial.start;
     less.views.clear();
     less.boards.clear();
-    for (std::size_t i = 0; i < views.size(); ++i) {
-      if (views[i].frame_id == capture) continue;
-      less_views.push_back(views[i]);
-      less.views.push_back(warm.views[i]);
+    for (std::size_t i = 0; i < trial.views.size(); ++i) {
+      if (trial.views[i].frame_id == capture) continue;
+      less_views.push_back(trial.views[i]);
+      less.views.push_back(trial.start.views[i]);
     }
-    for (const solve::BoardPose& b : warm.boards) {
+    for (const solve::BoardPose& b : trial.start.boards) {
       if (b.capture != capture) less.boards.push_back(b);
     }
     LeftOut& left = out.captures.emplace_back();
     left.capture = capture;
     core::Result<solve::RigSolution> again =
-        solve::bundle_adjust(cameras, board, less_views, less, options);
+        solve::bundle_adjust(cameras, board, less_views, less, once);
     if (!again.ok()) {
       const Code code = again.status().domain();
       if (code != Code::InvalidArgument && code != Code::Numerical) {
@@ -529,9 +563,9 @@ core::Status check_margin(double fraction, double px,
 }
 
 core::Result<PrincipalPointAB> principal_point_of(
-    const std::vector<solve::RigCamera>& cameras, const compute::Board& board,
-    const std::vector<Observation>& views, const solve::InitialRig& start,
-    const solve::RigSolution& solution,
+    const Fit& fit, const std::vector<solve::RigCamera>& cameras,
+    const compute::Board& board, const std::vector<Observation>& views,
+    const solve::InitialRig& start, const solve::RigSolution& solution,
     const solve::BundleAdjustOptions& options, double shift_px,
     double margin_fraction, double margin_px, const Transfer& as_given) {
   std::vector<solve::RigCamera> shifted = cameras;
@@ -544,8 +578,9 @@ core::Result<PrincipalPointAB> principal_point_of(
   if (!lenses.ok()) return lenses.status().with_context("shifted");
   PrincipalPointAB out;
   out.shift_px = shift_px;
+  const Trial trial = kept_trial(fit, views, start, solution);
   core::Result<solve::RigSolution> again = solve::bundle_adjust(
-      shifted, board, views, warm_start(start, solution), options);
+      shifted, board, trial.views, trial.start, trial_options(options));
   if (!again.ok()) {
     const Code code = again.status().domain();
     if (code != Code::InvalidArgument && code != Code::Numerical) {
@@ -554,23 +589,15 @@ core::Result<PrincipalPointAB> principal_point_of(
     out.refused = again.status().message();
     return out;
   }
-  // The corners both keep: the same views were adjusted, so the residuals
-  // are in the same order.
+  // The corners both keep: the shifted solve's residuals are the solution's
+  // kept ones, in order, less any it dropped as too near as it began.
   std::vector<camera::Vec2d> given_residuals;
   std::vector<camera::Vec2d> shifted_residuals;
-  if (again->residuals.size() != solution.residuals.size()) {
-    return core::Status::invalid_argument(
-        "the shifted solve adjusted other corners");
-  }
-  for (std::size_t j = 0; j < solution.residuals.size(); ++j) {
-    const solve::CornerResidual& a = solution.residuals[j];
-    const solve::CornerResidual& b = again->residuals[j];
-    if (a.camera != b.camera || a.capture != b.capture ||
-        a.corner != b.corner) {
-      return core::Status::invalid_argument(
-          "the shifted solve adjusted other corners");
-    }
-    if (a.dropped || b.dropped) continue;
+  std::size_t next = 0;
+  for (const solve::CornerResidual& a : solution.residuals) {
+    if (a.dropped) continue;
+    const solve::CornerResidual& b = again->residuals[next++];
+    if (b.dropped) continue;
     given_residuals.push_back(a.residual);
     shifted_residuals.push_back(b.residual);
   }
@@ -726,9 +753,9 @@ core::Result<PrincipalPointAB> principal_point_ab(
     core::Result<Transfer> as_given =
         transfer_of(fit->rig, board, views, solution.world_to_camera);
     if (!as_given.ok()) return as_given.status().with_context(kWhat);
-    core::Result<PrincipalPointAB> out =
-        principal_point_of(cameras, board, views, start, solution, options,
-                           shift_px, margin_fraction, margin_px, *as_given);
+    core::Result<PrincipalPointAB> out = principal_point_of(
+        *fit, cameras, board, views, start, solution, options, shift_px,
+        margin_fraction, margin_px, *as_given);
     if (!out.ok()) return out.status().with_context(kWhat);
     return out;
   });
@@ -769,7 +796,7 @@ core::Result<CalibrationMetrics> calibration_metrics(
     if (!loo.ok()) return in("leave_one_out", loo.status());
     metrics.leave_one_out = *std::move(loo);
     core::Result<PrincipalPointAB> ab = principal_point_of(
-        cameras, board, views, start, solution, options.bundle_adjust,
+        *fit, cameras, board, views, start, solution, options.bundle_adjust,
         options.principal_shift_px, options.principal_margin_fraction,
         options.principal_margin_px, metrics.transfer);
     if (!ab.ok()) return in("principal_point_ab", ab.status());

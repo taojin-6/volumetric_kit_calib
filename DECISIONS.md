@@ -195,7 +195,7 @@ camera's depth as points, its frusta, the world's axes and the solved boards.
   a few KB made on the host from the cameras' models, uploaded when they
   change.
 - **A worker of its own (T2)** alone owns its preparations, one per camera,
-  on recon's queue family. The live worker offers it each set it reads back;
+  on recon's queue family. The live worker offers it each set it polls;
   it prepares the newest, every `live_every`-th, lets the set go at once,
   and publishes a snapshot, newest wins. Frozen, hidden or minimized, it
   prepares nothing and lets offers go, and the window keeps its snapshot.
@@ -293,7 +293,9 @@ The `app` tier runs the rig (`app/calib_rig.hpp`, `live_worker.hpp`,
   entries). The live worker (T1) alone touches the
   rig's `SensorArray`, which is not thread-safe: it polls each set, reads every
   camera's luma back in one submit, finds the board (hybrid) and checks each
-  view, drives the capture rule, and publishes a snapshot, newest wins. The
+  view, drives the capture rule, and publishes a snapshot, newest wins.
+  While the 3D view fills the window and no capture is armed, it reads
+  nothing back and searches nothing (amended 2026-10-22). The
   capture worker (T3) searches each capture's luma again at full resolution,
   the solver's input, and queues it on the session writer. The window (T0)
   turns keys and buttons into requests and never waits on a camera, a
@@ -427,8 +429,14 @@ definitions and the schemas).
   of the adjustment: each view's own pose carried into every other camera
   that poses the capture. A view counts when it fixes a pose, not when it has
   4 corners.
-- **Re-solves are warm.** Leave one out and the principal-point A/B test run
-  `bundle_adjust` from the solution. A re-solve `bundle_adjust` refuses
+- **Re-solves are warm** (amended 2026-10-22). Leave one out and the
+  principal-point A/B test run `bundle_adjust` from the solution: its poses
+  and the corners it kept, as one solve with no outlier rounds and no
+  covariance or sensitivity. Outliers are not decided again per trial, which
+  cost a second solve whenever the solve dropped any, so a move is its
+  capture's alone and the A/B sides are paired by construction; on the
+  synthetic rig with outliers both agree with full re-solves far below the
+  digits shown. A re-solve `bundle_adjust` refuses
   (`InvalidArgument` or `Numerical`, e.g. a link short of `min_shared`) is
   recorded as refused, not an error, so it costs no other metric.
 - **The A/B verdict is the RMS alone, by a margin** (amended 2026-10-18, the
