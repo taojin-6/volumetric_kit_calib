@@ -278,8 +278,13 @@ struct LiveWorker::State {
     last_set = now;
     out->sets_per_second = rate;
     out->number = ++published;
-    const std::lock_guard<std::mutex> lock(mutex);
-    snapshot = std::move(out);
+    // A snapshot the window did not take is let go after the lock: it may
+    // hold the last of its set's frames.
+    std::shared_ptr<const LiveSnapshot> replaced;
+    {
+      const std::lock_guard<std::mutex> lock(mutex);
+      replaced = std::exchange(snapshot, std::move(out));
+    }
     return {};
   }
 

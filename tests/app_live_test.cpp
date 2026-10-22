@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -96,6 +97,7 @@ struct Push {
   std::vector<std::size_t> missing;         // cameras that send nothing
   std::optional<std::size_t> without_jpeg;  // a camera that sends no JPEG
   std::vector<std::int64_t> skew_ns;        // added to each camera's time
+  std::shared_ptr<const void> held;         // held by camera 0's frame too
 };
 
 // One fake camera, and what it shows.
@@ -224,7 +226,13 @@ class AppLive : public core::test::VulkanDeviceTest {
           static_cast<std::int64_t>(kStartNs + tick * kPeriodNs) + skew);
       frame.sequence = 100 + tick;
       cam.pixels = host;
-      frame.pixels = std::move(host);
+      if (i == 0 && how.held) {
+        frame.pixels = std::make_shared<std::pair<std::shared_ptr<HostPixels>,
+                                                  std::shared_ptr<const void>>>(
+            std::move(host), how.held);
+      } else {
+        frame.pixels = std::move(host);
+      }
       frames.emplace_back(i, std::move(frame));
     }
     for (auto& [i, frame] : frames) cameras_[i].fake->push(std::move(frame));
@@ -549,6 +557,40 @@ TEST_F(AppLive, TheNewestSnapshotWinsAndIsTakenOnce) {
   EXPECT_FALSE(frames[2].expired());
   EXPECT_EQ(live->take_snapshot(), nullptr);  // taken once
   EXPECT_TRUE(live->take_errors().empty());
+}
+
+// A snapshot replaced before the window took it is let go after the worker's
+// lock: letting its frames go holds up none of the window's reads.
+TEST_F(AppLive, AReplacedSnapshotIsLetGoOutsideTheLock) {
+  // Before the worker, to outlive it: set 1's frame, let go on the worker's
+  // thread, says so and waits until the test has read the worker.
+  std::promise<void> releasing;
+  std::promise<void> read;
+  Push probed;
+  probed.held = std::shared_ptr<const void>(
+      &probed, [&releasing, done = read.get_future().share()](const void*) {
+        releasing.set_value();
+        (void)done.wait_for(kPatience);
+      });
+  make_rig(2);
+  std::unique_ptr<LiveWorker> live = start();
+  ASSERT_NE(live, nullptr);
+  push(1, probed);
+  probed.held.reset();  // the frame holds the probe alone
+  wait_drained();
+  push(2);  // its snapshot replaces set 1's, never taken
+  ASSERT_EQ(releasing.get_future().wait_for(kPatience),
+            std::future_status::ready);
+  std::future<void> reader =
+      std::async(std::launch::async, [&] { (void)live->decision(); });
+  const bool unlocked =
+      reader.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+  read.set_value();  // the release goes on
+  reader.wait();
+  EXPECT_TRUE(unlocked) << "the worker let set 1 go under its lock";
+  const std::shared_ptr<const LiveSnapshot> s = live->take_snapshot();
+  ASSERT_NE(s, nullptr);
+  EXPECT_EQ(s->number, 2u);  // set 1's was published, then replaced
 }
 
 // Keeps every set the worker offers it.
