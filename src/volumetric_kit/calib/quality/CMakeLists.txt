@@ -9,7 +9,6 @@
 # text. Pure and geometric, on core's detection records and solve's poses, view
 # rule, tree, adjustment and world.
 include(GenerateExportHeader)
-include(GNUInstallDirs)
 
 set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 
@@ -47,9 +46,7 @@ if(_vc_type STREQUAL "STATIC_LIBRARY")
   target_compile_definitions(calib_quality PUBLIC VC_QUALITY_STATIC_DEFINE)
 endif()
 
-target_include_directories(
-  calib_quality PUBLIC "$<BUILD_INTERFACE:${_vc_generated_inc}>"
-                       "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+target_include_directories(calib_quality PUBLIC "${_vc_generated_inc}")
 
 # The public headers name compute's board and camera and solve's rig cameras,
 # poses, options, covisibility and solution; nothing calls OpenCV directly. The
@@ -64,17 +61,3 @@ target_include_directories(calib_quality SYSTEM
                            PRIVATE "${VC_JSON_INCLUDE_DIR}")
 
 vc_target_warnings(calib_quality)
-
-if(VC_INSTALL)
-  install(
-    TARGETS calib_quality
-    EXPORT volumetric_kit_calibTargets
-    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-  install(
-    DIRECTORY "${_vc_generated_inc}/"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-    FILES_MATCHING
-    PATTERN "*.hpp")
-endif()

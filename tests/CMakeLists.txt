@@ -224,9 +224,7 @@ endif()
 # The core calib requires (third_party/CMakeLists.txt): calib's configure
 # against a stand-in core of each version (core_requirement/) refuses one older
 # than VC_CORE_MIN_VERSION, 0.6.1 -- before 0.1.0 the core has no
-# vkc_require_core -- and accepts 0.6.1 or newer, its package config finding
-# that core at its version and requiring VC_CORE_MIN_VERSION of it, then recon,
-# whose package config re-finds the core at its MAJOR.MINOR.
+# vkc_require_core -- and accepts 0.6.1 or newer.
 #
 # Those configures, and the ones below, take the fetched sources this build used
 # (FETCHCONTENT_SOURCE_DIR_<NAME>), so they need no network, and the OpenCV it
@@ -243,15 +241,15 @@ set(_vc_fetched_sources
     -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
     -DGLM_DIR=${glm_DIR}
     -DOPENCV_DIR=${OpenCV_DIR})
-function(vc_add_core_requirement_test name core_version expect)
+function(vc_add_core_requirement_test name core_version)
   add_test(
     NAME core_requirement.${name}
     COMMAND
       ${CMAKE_COMMAND} -DCALIB_SOURCE=${PROJECT_SOURCE_DIR}
       -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/core_requirement/${name}
       -DCORE_VERSION=${core_version}
-      -DCORE_MODULES=${volumetric_kit_core_SOURCE_DIR}/cmake
-      -DMIN_VERSION=${VC_CORE_MIN_VERSION} ${expect} ${_vc_fetched_sources} -P
+      -DCORE_MODULES=${volumetric_kit_core_SOURCE_DIR}/cmake ${ARGN}
+      ${_vc_fetched_sources} -P
       ${CMAKE_CURRENT_SOURCE_DIR}/core_requirement/configure.cmake)
 endfunction()
 vc_add_core_requirement_test(
@@ -260,8 +258,8 @@ vc_add_core_requirement_test(
   0_2_0 0.2.0 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.6\\.1 or newer")
 vc_add_core_requirement_test(
   0_6_0 0.6.0 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.6\\.1 or newer")
-vc_add_core_requirement_test(0_6_1 0.6.1 -DEXPECT_CONFIG_VERSION=0.6.1)
-vc_add_core_requirement_test(0_7_2 0.7.2 -DEXPECT_CONFIG_VERSION=0.7.2)
+vc_add_core_requirement_test(0_6_1 0.6.1)
+vc_add_core_requirement_test(0_7_2 0.7.2)
 
 if(VC_WITH_RIG)
   # VC_WITH_RIG needs the core's vulkan tier and all of recon: an application
@@ -330,27 +328,10 @@ if(VC_WITH_RIG)
       "-DEXPECT_ERROR=volumetric_kit_calib needs volumetric_kit_core's config tier"
     )
   endif()
-
-  # The rig tiers from this build's install (rig_package/): a consumer finds
-  # calib, the core and all of recon at the prefix, and builds and runs against
-  # calib_capture and calib_depth, with this build's sanitizers, which its
-  # libraries need; the build-tree-only viz tier is not installed.
-  list(JOIN _vc_sanitize_flags " " _vc_consumer_flags)
-  add_test(
-    NAME rig_package.consumer
-    COMMAND
-      ${CMAKE_COMMAND} -DBUILD_DIR=${PROJECT_BINARY_DIR} -DCONFIG=$<CONFIG>
-      -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/rig_package
-      -DGENERATOR=${CMAKE_GENERATOR} -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
-      -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} -DGLM_DIR=${glm_DIR}
-      -DOPENCV_DIR=${OpenCV_DIR} "-DFLAGS=${_vc_consumer_flags}" -P
-      ${CMAKE_CURRENT_SOURCE_DIR}/rig_package/configure.cmake)
 endif()
 
-# The brain needs no Vulkan (no_vulkan/): calib configures, builds and installs
-# with find_package(Vulkan) disabled, and a consumer builds against the
-# installed package with it disabled too; the installed package refuses a core
-# of another minor version.
+# The brain needs no Vulkan (no_vulkan/): with find_package(Vulkan) disabled,
+# calib configures and builds it, and a configure that keeps all of recon fails.
 add_test(
   NAME no_vulkan.brain
   COMMAND

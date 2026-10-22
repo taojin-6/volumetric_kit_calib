@@ -58,10 +58,10 @@ Read only the sections needed for the current task.
 - volumetric_kit_core's types, functions and macros keep the core's names:
   `core::Status` inside calib's namespaces, `vkc::Status` in tests and
   examples, from the core's own headers. calib re-exports none of them.
-- CMake: `find_package(volumetric_kit_calib)`; component targets
-  `volumetric_kit::calib_core`, `…_compute`, `…_detect`, `…_solve`, `…_quality`,
-  `…_color`, `…_capture`, `…_depth`, `…_viz`, `…_app`; umbrella alias
-  `volumetric_kit::calib`.
+- CMake: component targets `volumetric_kit::calib_core`, `…_compute`,
+  `…_detect`, `…_solve`, `…_quality`, `…_color`, `…_capture`, `…_depth`,
+  `…_viz`, `…_app`; umbrella alias `volumetric_kit::calib`. Applications fetch
+  calib by commit; it installs nothing.
 - Macros/export: `VC_*` for calib's own (e.g. `VC_CORE_API`, `VC_BUILD_TESTS`);
   the error-handling macros are the core's (`VKC_TRY`, `VKC_ASSIGN`,
   `VKC_CHECK`).

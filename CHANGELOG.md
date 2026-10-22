@@ -470,6 +470,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- The install path (DECISIONS.md, 2026-10-22): calib is fetched by commit
+  and installs nothing, so `VC_INSTALL`, its install rules and package config
+  (`find_package(volumetric_kit_calib)`) are gone, and its build leaves the
+  core's and recon's install rules off.
 - Windows and MSVC support, which no calib target or CI leg used
   (DECISIONS.md, "Platforms"): calib builds with GCC or Clang for Linux,
   macOS, iOS and Android, as the core does. The MSVC warning flags

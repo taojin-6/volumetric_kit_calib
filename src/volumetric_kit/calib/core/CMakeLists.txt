@@ -9,7 +9,6 @@
 # tier, which its public headers name. Pure CPU, no GPU and no OpenCV, so it
 # stays usable from a tool or a device-less test.
 include(GenerateExportHeader)
-include(GNUInstallDirs)
 
 set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 
@@ -49,34 +48,13 @@ endif()
 
 target_compile_features(calib_core PUBLIC cxx_std_17)
 
-target_include_directories(
-  calib_core
-  PUBLIC "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
-         "$<BUILD_INTERFACE:${_vc_generated_inc}>"
-         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+target_include_directories(calib_core PUBLIC "${PROJECT_SOURCE_DIR}/include"
+                                             "${_vc_generated_inc}")
 
 # Both are PUBLIC: the public headers name the core's Status / Result and
 # recon's camera types in their signatures, so consumers compile against them
-# too. The installed package re-finds the core, then recon
-# (cmake/volumetric_kit_calibConfig.cmake.in).
+# too.
 target_link_libraries(calib_core PUBLIC volumetric_kit::core_base
                                         volumetric_kit::recon_camera)
 
 vc_target_warnings(calib_core)
-
-# Install the target into the shared export set + the headers this tier
-# generates. The umbrella target, public-header tree, and package config are
-# finalized by the parent (src/CMakeLists.txt).
-if(VC_INSTALL)
-  install(
-    TARGETS calib_core
-    EXPORT volumetric_kit_calibTargets
-    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-  install(
-    DIRECTORY "${_vc_generated_inc}/"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-    FILES_MATCHING
-    PATTERN "*.hpp")
-endif()

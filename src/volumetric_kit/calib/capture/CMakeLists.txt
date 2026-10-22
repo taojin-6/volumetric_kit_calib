@@ -8,7 +8,6 @@
 # encoder), and recon's calibration file for the factory record, so it needs the
 # Vulkan SDK through recon. Depends on calib_core alone among calib's tiers.
 include(GenerateExportHeader)
-include(GNUInstallDirs)
 
 set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 
@@ -39,9 +38,7 @@ if(_vc_type STREQUAL "STATIC_LIBRARY")
   target_compile_definitions(calib_capture PUBLIC VC_CAPTURE_STATIC_DEFINE)
 endif()
 
-target_include_directories(
-  calib_capture PUBLIC "$<BUILD_INTERFACE:${_vc_generated_inc}>"
-                       "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+target_include_directories(calib_capture PUBLIC "${_vc_generated_inc}")
 # nlohmann/json writes the files, privately: no public header names it.
 target_include_directories(calib_capture SYSTEM
                            PRIVATE "${VC_JSON_INCLUDE_DIR}")
@@ -54,17 +51,3 @@ target_link_libraries(
   PRIVATE volumetric_kit::recon_io Threads::Threads)
 
 vc_target_warnings(calib_capture)
-
-if(VC_INSTALL)
-  install(
-    TARGETS calib_capture
-    EXPORT volumetric_kit_calibTargets
-    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-  install(
-    DIRECTORY "${_vc_generated_inc}/"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-    FILES_MATCHING
-    PATTERN "*.hpp")
-endif()

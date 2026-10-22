@@ -31,9 +31,8 @@ domain model and rationale remain in the intentionally gitignored local
   them as the core does -- `core::Status` in calib's namespaces, `vkc::Status`
   outside -- with no `vc::` re-exports (amended 2026-10-05; see the dated
   entry), so a calib error passes to `recon` or `gfx` unchanged. The core is
-  fetched pinned by commit (`third_party/`), and the installed package
-  re-finds it at the version calib was built with, requires calib's floor of
-  it (`vkc_require_core`), and refuses a recon that brings another. Why:
+  fetched pinned by commit (`third_party/`), and calib's configure refuses
+  one older than calib builds with (`vkc_require_core`). Why:
   `recon`'s and `gfx`'s copies of the same bottom layer had drifted (the core's
   DECISIONS.md has the evidence); one copy means a fix lands once.
 - **GPU work runs on the core's vulkan tier, on a `VkDevice` shared with
@@ -72,6 +71,16 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
+
+## 2026-10-22 — Consumed by commit, never installed
+
+The family's packages are not installable (the owner's decision): an
+application fetches calib by commit, as the player and the iOS app fetch
+their siblings, and none finds an installed calib. So calib has no install
+rules, package config or `VC_INSTALL`, and turns the core's install rules off
+(`VKC_INSTALL`) and leaves recon's off. The brain's freedom from Vulkan is
+checked in a build of its own, configured and built in tree
+(`no_vulkan.brain`), not through an install.
 
 ## 2026-10-19 — The world at the origin tag
 
@@ -232,8 +241,7 @@ camera's depth as points, its frusta, the world's axes and the solved boards.
 
 calib has one dependency set on every platform: OpenCV 5 is a prerequisite of
 every build, as GLM is, and `VC_WITH_OPENCV` is gone. `compute`, `detect`,
-`solve` and `quality` always build, and the installed package always re-finds
-OpenCV. `VC_WITH_RIG` stays optional, for the Vulkan SDK, and alone builds
+`solve` and `quality` always build. `VC_WITH_RIG` stays optional, for the Vulkan SDK, and alone builds
 `capture`, `depth` and `viz`.
 
 - **Why.** With the OpenCV tiers optional, the Ubuntu legs, whose packages are
@@ -600,11 +608,8 @@ The `capture` tier writes the rig application's calibration sessions
 - **How it builds.** `VC_WITH_RIG`, OFF by default, fetches all of recon and
   turns on the core's vulkan tier, so it needs the Vulkan SDK. gfx comes with
   the `viz` tier, its first user.
-- **Core 0.6.1.** Its package can be read twice in one configure
-  ([volumetric_kit_core#31](https://github.com/taojin-6/volumetric_kit_core/issues/31)),
-  so calib's package config finds the core directly, and an application may
-  find it too, but not another. calib requires it, since its installed
-  package reads the core again through recon's.
+- **Core 0.6.1** is the oldest calib builds with (`VC_CORE_MIN_VERSION`),
+  the floor its configure checks.
 
 ## 2026-10-12 — OpenCV, behind calib's types
 
@@ -650,7 +655,7 @@ eight-coefficient rational lens) and its rigid transforms.
   unprojection of its own.
 - **How recon arrives.** Fetched camera-only (`VR_CAMERA_ONLY`): recon_camera
   over the core's base tier and GLM, so the brain still builds with no Vulkan
-  SDK (the `no_vulkan.brain` test). calib installs recon beside itself.
+  SDK (the `no_vulkan.brain` test).
 - **The board names its dictionary.** `Target` adds `dictionary`,
   `first_marker_id` and `legacy_pattern`, so a board is fully described without
   OpenCV; `check_target` validates one and `legacy_femto_board()` is the rig's
