@@ -642,9 +642,9 @@ TEST_F(AppLive, OffersEachSetItReadsBackToItsSetSink) {
 
 // Not detecting, as while the window shows the 3D view alone, each set is
 // offered and published with the rig's counters, but nothing is read back,
-// detected or ruled on. Detecting again, the next set is searched, still
-// without a set before it; and a capture armed is searched for, and taken,
-// with detection off.
+// detected or ruled on. Detecting again, the next set is searched, with no
+// stillness against the set searched before the pause; and a capture armed
+// is searched for, and taken, with detection off.
 TEST_F(AppLive, SearchesNoSetWhileNotDetectingUnlessACaptureIsArmed) {
   const auto stages_of = [](const LiveSnapshot& s) {
     std::vector<std::string> names;
@@ -659,9 +659,14 @@ TEST_F(AppLive, SearchesNoSetWhileNotDetectingUnlessACaptureIsArmed) {
   KeepSets sets;
   std::unique_ptr<LiveWorker> live = start(&sink, &sets);
   ASSERT_NE(live, nullptr);
-  live->set_detecting(false);
   push(1);
-  const std::shared_ptr<const LiveSnapshot> off = next(*live, 0);
+  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(stages_of(*first), searched);
+
+  live->set_detecting(false);
+  push(2);
+  const std::shared_ptr<const LiveSnapshot> off = next(*live, first->number);
   ASSERT_NE(off, nullptr);
   EXPECT_EQ(stages_of(*off), std::vector<std::string>{"poll"});
   ASSERT_EQ(off->detections.size(), 2u);
@@ -675,12 +680,12 @@ TEST_F(AppLive, SearchesNoSetWhileNotDetectingUnlessACaptureIsArmed) {
     EXPECT_FALSE(off->stillness_px[i].has_value());
   }
   EXPECT_EQ(off->decision.state, quality::CaptureState::Idle);
-  EXPECT_EQ(off->stats.sets, 1u);
-  ASSERT_EQ(sets.taken().size(), 1u);
-  EXPECT_EQ(sets.taken()[0], off->set);
+  EXPECT_EQ(off->stats.sets, 2u);
+  ASSERT_EQ(sets.taken().size(), 2u);
+  EXPECT_EQ(sets.taken()[1], off->set);
 
   live->set_detecting(true);
-  push(2);
+  push(3);
   const std::shared_ptr<const LiveSnapshot> on = next(*live, off->number);
   ASSERT_NE(on, nullptr);
   EXPECT_EQ(stages_of(*on), searched);
@@ -692,18 +697,18 @@ TEST_F(AppLive, SearchesNoSetWhileNotDetectingUnlessACaptureIsArmed) {
   ASSERT_TRUE(live->arm());
   wait_armed(*live);
   live->set_detecting(false);
-  push(3);
+  push(4);
   const std::shared_ptr<const LiveSnapshot> armed = next(*live, on->number);
   ASSERT_NE(armed, nullptr);
   EXPECT_EQ(stages_of(*armed), searched);
   EXPECT_EQ(armed->decision.state, quality::CaptureState::Take);
   EXPECT_EQ(sink.taken().size(), 1u);
   // The take disarmed the rule: the next set is not searched.
-  push(4);
+  push(5);
   const std::shared_ptr<const LiveSnapshot> after = next(*live, armed->number);
   ASSERT_NE(after, nullptr);
   EXPECT_EQ(stages_of(*after), std::vector<std::string>{"poll"});
-  EXPECT_EQ(sets.taken().size(), 4u);
+  EXPECT_EQ(sets.taken().size(), 5u);
   live->stop();
   sets.release();
 }
