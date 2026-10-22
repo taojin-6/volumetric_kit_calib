@@ -280,6 +280,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `depth::DepthChecks::accumulate` takes a capture's own histograms to count
+  in the same pass (`alone`), emptying them first: Calibrate's depth checks
+  run the agreement kernel once a capture rather than twice, and make no
+  histograms per capture. Each workgroup adds its overlap with one atomic.
 - calib_rig's live worker reads no luma back and searches no set for the
   board while the 3D view fills the window (`LiveWorker::set_detecting`),
   unless a capture is armed: each set's readback (8.3 MB a 4K camera) and

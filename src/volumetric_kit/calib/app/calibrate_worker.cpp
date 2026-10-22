@@ -118,14 +118,15 @@ struct DepthRun {
   std::vector<camera::Mat4d> depth_to_world;
   std::vector<camera::Mat4d> depth_to_color;
   std::unique_ptr<depth::AgreementHistograms> pooled;
+  std::unique_ptr<depth::AgreementHistograms> own;  // each capture's in turn
   std::vector<quality::BoardDepthCheck> checked;
   std::vector<quality::PairAgreement> pairs;
 };
 
 // One kept capture's depth checks: its cameras' raw depth prepared in one
 // batch, its views' planes fitted and their corners met with them, and its
-// pairs added to the pooled histograms and to its own. Its frames are let go
-// as it returns.
+// pairs added to the pooled histograms and to its own in one pass. Its frames
+// are let go as it returns.
 core::Status check_capture(std::vector<sensor::GpuFramePrep>& preps,
                            depth::DepthChecks& checks, DepthRun& run,
                            const KeptCapture& capture) {
@@ -195,12 +196,9 @@ core::Status check_capture(std::vector<sensor::GpuFramePrep>& preps,
                                           fitted[i]->region, planes[i]));
     run.checked.push_back(std::move(check));
   }
-  VKC_TRY(checks.accumulate(*run.pooled, images));
-  VKC_ASSIGN(const std::unique_ptr<depth::AgreementHistograms> own,
-             checks.histograms(n, options));
-  VKC_TRY(checks.accumulate(*own, images));
+  VKC_TRY(checks.accumulate(*run.pooled, images, run.own.get()));
   VKC_ASSIGN(const std::vector<quality::PairAgreement> pairs,
-             checks.summarize(*own, capture.index));
+             checks.summarize(*run.own, capture.index));
   run.pairs.insert(run.pairs.end(), pairs.begin(), pairs.end());
   return {};
 }
@@ -223,7 +221,7 @@ core::Result<quality::DepthSummary> check_depth(
         std::to_string(kept.sensors.size()) + " sensors for a rig of " +
         std::to_string(n));
   }
-  DepthRun run{kept, board, views, {}, {}, {}, nullptr, {}, {}};
+  DepthRun run{kept, board, views, {}, {}, {}, nullptr, nullptr, {}, {}};
   for (std::size_t c = 0; c < n; ++c) {
     const camera::Mat4d& depth_to_color = kept.sensors[c].depth_to_color;
     run.depth_to_color.push_back(depth_to_color);
@@ -232,6 +230,7 @@ core::Result<quality::DepthSummary> check_depth(
   VKC_ASSIGN(run.fitted, quality::depth_views(board, start, solution,
                                               run.depth_to_color, options));
   VKC_ASSIGN(run.pooled, checks.histograms(n, options));
+  VKC_ASSIGN(run.own, checks.histograms(n, options));
   const std::size_t captures = kept.captures.size();
   for (std::size_t k = 0; k < captures; ++k) {
     step(k);
