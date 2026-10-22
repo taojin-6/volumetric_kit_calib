@@ -38,7 +38,8 @@ class FakeSensor final : public recon::sensor::IRgbdSensor {
   }
   /// @brief Make the next drain throw, as a driver's bug would.
   void throw_on_drain() { throw_.store(true); }
-  /// @brief Report it gone from now on, as a disconnected camera.
+  /// @brief Disconnect it, as recon's Orbbec driver reports a camera
+  ///        unplugged: exhausted, and every drain from now on fails.
   void disconnect() { gone_.store(true); }
   /// @return How many pushed frames no drain has taken yet.
   std::size_t queued() {
@@ -76,6 +77,10 @@ class FakeSensor final : public recon::sensor::IRgbdSensor {
   }
   core::Status drain(std::vector<recon::sensor::RgbdFrame>* out) override {
     if (throw_.exchange(false)) throw std::runtime_error("the driver threw");
+    if (gone_.load()) {
+      return core::Status::io_error("camera " + info_.id +
+                                    " disconnected; reopen it to use it again");
+    }
     const std::lock_guard<std::mutex> lock(mutex_);
     for (recon::sensor::RgbdFrame& frame : frames_) {
       out->push_back(std::move(frame));

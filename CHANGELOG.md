@@ -8,6 +8,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- calib_rig says a camera's mosaic tile refusal once, until its reason
+  changes (`app::refusals_to_say`), instead of at every set: on Linux, where
+  every tile is refused, 100 lines a second pushed every other message out of
+  the Messages window.
+- `LiveWorker` documents what recon's Orbbec driver does: a camera that
+  disconnects fails every poll, so the live view ends, saying why once. The
+  "the sets go on without it" message, which that driver never let run, is
+  gone.
+- `CaptureWorker` and `CalibrateWorker` refuse new work with `IoError` once
+  their thread has ended, and `CaptureWorker::flush` returns, rather than
+  queueing work no thread carries out. `CalibrateWorker::request` after
+  `stop` is now that `IoError`, no longer `false`.
+- `LiveWorker` lets go of a snapshot the window never took after releasing
+  its lock, so freeing that snapshot's frames no longer delays the window.
 - calib_rig's Stages panel no longer flickers: its `tiles` row, recorded
   only as a live set arrives, came and went with the total as the window
   redrew between sets. `viz::hold_stages` holds the last recording's time on
@@ -46,8 +60,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tag world, the tag's fit, edges and corners, each camera's height, the
   boards on the floor and `uncertainty_frame`. In `solve`:
   `kMaxTagWorldRmsPx` (3 px), above which `origin_tag_frame` refuses a tag
-  world as `TagMiss::PoorFit`, a solve stopped short of converging judged at
-  its last iterate, and `WorldOrigin::sought`; in `core`:
+  world as `TagMiss::PoorFit`, and `WorldOrigin::sought`; in `core`:
   `apriltag_family`; in `quality`: `floor_boards`, each solved board within
   5 degrees and 20 mm of the tag's floor, with its tilt and height. In
   `viz`: `display_rotation` and `SceneView::frame` take the world's up, a
@@ -113,14 +126,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The world at the origin tag (`solve/world_tag.hpp`; DECISIONS.md,
   2026-10-18): `solve::origin_tag_frame` locates the tag from a solved rig,
   its poses fixed, from every camera's `TagView` of it (an N-view DLT, then
-  `cv::LevMarq` on the corners, `bundle_adjust`'s outlier rule on whole
-  views, and a size-free square fitted in OpenCV's marker frame), as a
-  `WorldOrigin`: a `TagWorld` (the frame, corners, edges against the
-  print's, residuals per view, each camera's height) or a `TagMiss` with its
-  reason (`TagFrameOptions`). `solve::anchor_rig` moves a solution's outputs,
-  never the solution, into that world as an `AnchoredRig`. `compute::finite`,
-  whether a transform's numbers are finite, which the solve and the checks
-  share.
+  least squares on `cv::LevMarq`, `bundle_adjust`'s outlier rule on whole
+  views while it leaves `min_cameras` cameras, and a size-free square
+  fitted in OpenCV's marker frame), as a `WorldOrigin`: a `TagWorld` (the
+  frame, corners, edges against the print's, residuals per view, each
+  camera's height) or a `TagMiss` with its reason (`TagFrameOptions`).
+  `solve::anchor_rig` moves a solution's outputs, never the solution, into
+  that world as an `AnchoredRig`. `compute::finite`, whether a transform's
+  numbers are finite, which the solve and the checks share.
 - `CaptureWorker::kept`, the captures kept for Calibrate (DECISIONS.md,
   2026-10-13): an immutable `KeptCaptures` snapshot of every capture written
   and not dropped, each a `KeptCapture` of every camera's full detection,

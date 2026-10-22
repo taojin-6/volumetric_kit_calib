@@ -7,9 +7,10 @@
 // the window's timeline; a snapshot that does not fit refused with nothing
 // held. Then the app's device split: the live worker reads a camera's picture
 // back on the compute library's queue family while the window copies the same
-// images into the mosaic on the renderer's. Then the marks and panels a
-// snapshot gives each camera, the origin tag's coverage of the captures
-// kept, and the 3D view's cameras before and at Calibrate's result. The GPU
+// images into the mosaic on the renderer's. Then each camera's tile refusal,
+// said once, the marks and panels a snapshot gives each camera, the origin
+// tag's coverage of the captures kept, and the 3D view's cameras before and
+// at Calibrate's result. The GPU
 // cases run under the validation layer
 // when the environment asks (VKC_TEST_VALIDATION) and skip without a Vulkan
 // device, the cross-family case also with one family.
@@ -353,6 +354,34 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
   ASSERT_TRUE(timeline.value().signal(1).ok());
   retire.poll();
   EXPECT_EQ(retire.pending(), 0u);
+}
+
+// The mosaic refuses a camera's picture alike at every set: the window says
+// each camera's refusal once, until its message changes.
+TEST(AppLiveViewModels, SaysEachCamerasTileRefusalOnceUntilItChanges) {
+  const auto refusal = [](std::size_t camera, const char* why) {
+    return viz::TileRefusal{camera, core::Status::unsupported(why)};
+  };
+  std::vector<std::string> said;
+  core::Result<std::vector<viz::TileRefusal>> unsaid = refusals_to_say(
+      {refusal(1, "an I420 picture"), refusal(3, "an I420 picture")}, said);
+  ASSERT_TRUE(unsaid.ok()) << unsaid.status().message();
+  ASSERT_EQ(unsaid->size(), 2u);
+  EXPECT_EQ((*unsaid)[0].camera, 1u);
+  EXPECT_EQ((*unsaid)[1].camera, 3u);
+  EXPECT_EQ((*unsaid)[1].status.message(), "an I420 picture");
+
+  // The next sets: nothing new, then camera 1's reason changes.
+  unsaid = refusals_to_say(
+      {refusal(1, "an I420 picture"), refusal(3, "an I420 picture")}, said);
+  ASSERT_TRUE(unsaid.ok());
+  EXPECT_TRUE(unsaid->empty());
+  unsaid = refusals_to_say(
+      {refusal(1, "buffer planes"), refusal(3, "an I420 picture")}, said);
+  ASSERT_TRUE(unsaid.ok());
+  ASSERT_EQ(unsaid->size(), 1u);
+  EXPECT_EQ((*unsaid)[0].camera, 1u);
+  EXPECT_EQ((*unsaid)[0].status.message(), "buffer planes");
 }
 
 // Each tile's overlay names its camera and takes its check, its detection

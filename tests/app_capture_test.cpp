@@ -4,8 +4,9 @@
 // calib_rig's capture worker: each capture the live view takes is detected
 // again at full resolution in its luma, checked, compared with its live
 // corners and written as a session under the scenario's root; drops, a full
-// queue, requests that do not fit the rig, a missing root and the drain at
-// shutdown; the session's depth unit, the frames'; the captures kept for
+// queue, requests that do not fit the rig, a missing root, the drain at
+// shutdown and a thread ended by a failure, which refuses work; the session's
+// depth unit, the frames'; the captures kept for
 // Calibrate, each view named for its camera even when its detection failed,
 // their depth shared with the writer, their cap, and the captures and drops
 // unresolved until a snapshot reflects them; the origin tag found in
@@ -27,10 +28,12 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <new>
 #include <optional>
 #include <regex>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -265,6 +268,30 @@ class FailAStripe final : public cv::parallel::ParallelForAPI {
   std::atomic<bool> used_{false};
   std::atomic<bool> injected_{false};
   std::atomic<std::size_t> made_{0};
+};
+
+// OpenCV's parallel_for_ throwing std::bad_alloc: the capture worker calls it
+// outside the calls it guards, as it makes its own allocations.
+class ThrowingLoops final : public cv::parallel::ParallelForAPI {
+ public:
+  void parallel_for(int /*tasks*/, FN_parallel_for_body_cb_t /*body*/,
+                    void* /*data*/) override {
+    used_ = true;
+    throw std::bad_alloc();
+  }
+  int getThreadNum() const override { return 0; }
+  int getNumThreads() const override { return threads_; }
+  int setNumThreads(int threads) override {
+    const int old = threads_;
+    threads_ = threads;
+    return old;
+  }
+  const char* getName() const override { return "throwing_loops"; }
+  bool used() const { return used_; }
+
+ private:
+  int threads_ = 0;
+  std::atomic<bool> used_{false};
 };
 
 // OpenCV's parallel_for_ on `api` while alive, then on OpenCV's own again.
@@ -719,6 +746,41 @@ TEST(AppCapture, AKeptViewNamesItsCameraWhenItsDetectionFailed) {
     EXPECT_EQ(views[i].observation.frame_id, 0);
     EXPECT_EQ(views[i].observation.empty(), i == 1);
   }
+}
+
+// Out of memory outside the calls the worker guards ends its thread: said
+// once, and from then on new work is refused and flush() returns, rather than
+// waiting on a thread that is gone.
+TEST(AppCapture, AWorkerWhoseThreadEndedRefusesWork) {
+  ScratchDir root;
+  // Rendered first: the render's own loops would throw.
+  CaptureRequest first = request(2, 0.0, 1);
+  CaptureRequest second = request(2, 0.0, 2);
+  const auto loops = std::make_shared<ThrowingLoops>();
+  const ParallelBackend backend(loops);  // outlives the worker
+  std::unique_ptr<CaptureWorker> worker = make(setup(root.path(), 2));
+  ASSERT_NE(worker, nullptr);
+  ASSERT_TRUE(submit(*worker, std::move(first)));
+  const auto give_up =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  std::vector<core::Status> errors;
+  while (errors.empty()) {
+    ASSERT_LT(std::chrono::steady_clock::now(), give_up);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    errors = worker->take_errors();
+  }
+  EXPECT_TRUE(loops->used());
+  ASSERT_EQ(errors.size(), 1u);
+  EXPECT_EQ(errors[0].domain(), Code::OutOfMemory);
+  EXPECT_EQ(errors[0].message(), "capture worker: out of memory");
+
+  const core::Result<bool> queued = worker->submit(std::move(second));
+  ASSERT_FALSE(queued.ok());
+  EXPECT_EQ(queued.status().domain(), Code::IoError);
+  EXPECT_EQ(queued.status().message(), "the capture worker has stopped");
+  EXPECT_EQ(worker->drop_last().domain(), Code::IoError);
+  worker->flush();
+  EXPECT_TRUE(worker->take_errors().empty());
 }
 
 // Each camera's depth is the one buffer the writer writes and the capture

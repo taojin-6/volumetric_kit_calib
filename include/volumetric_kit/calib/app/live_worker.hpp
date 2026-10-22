@@ -224,10 +224,10 @@ struct LiveOptions {
 ///
 /// Every other member is for the window's thread. The worker starts the
 /// array on its own thread; a failure there, a sensor's failure while
-/// polling, or anything its thread throws ends it, posting why
-/// (@ref take_errors). A set it cannot read back, or a camera it cannot
-/// detect in, is reported and skipped, and the live view goes on; so does a
-/// camera that is gone (disconnected), reported once.
+/// polling -- a camera disconnected among them, as recon's Orbbec driver
+/// fails every poll after it -- or anything its thread throws ends it,
+/// posting why (@ref take_errors). A set it cannot read back, or a camera it
+/// cannot detect in, is reported and skipped, and the live view goes on.
 ///
 /// @warning The device and allocator the readback uses, the capture sink and
 ///          the set sink must outlive the worker. Release every snapshot, and
@@ -321,8 +321,7 @@ class VC_APP_API LiveWorker {
   quality::CaptureDecision decision() const;
 
   /// @brief Take what went wrong since the last call: sets that could not be
-  ///        read back, captures the sink refused, cameras gone, and why the
-  ///        thread ended.
+  ///        read back, captures the sink refused, and why the thread ended.
   /// @return The failures, oldest first.
   std::vector<core::Status> take_errors();
 

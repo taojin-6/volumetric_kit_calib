@@ -97,8 +97,8 @@ TEST(SolveOom, BundleAdjust) {
 }
 
 // The small scene's solution and what its cameras see of the origin tag:
-// every camera in 2 captures, the second's views of the tag moved, so the
-// location drops them in an outlier round and solves again.
+// every camera in 5 captures, the third's views of the tag moved, so the
+// location drops them in the outlier rounds and solves again.
 struct Tagged {
   Small scene;
   RigSolution solution;
@@ -122,15 +122,17 @@ struct Tagged {
     add({}, 0);
     add({}, 1);
     add({0.15, {0.05, 0.03, 0.0}, 4.0}, 2);
+    add({}, 3);
+    add({}, 4);
   }
 };
 
 TEST(SolveOom, OriginTagFrame) {
   const Tagged tagged;
-  ASSERT_EQ(tagged.views.size(), 12u);
+  ASSERT_EQ(tagged.views.size(), 20u);
   const core::Result<WorldOrigin> origin = origin_tag_frame(
       tagged.scene.cameras, tagged.solution, tagged.views, kOriginTag);
-  ASSERT_TRUE(origin.ok() && origin->tag && origin->tag->solves == 2);
+  ASSERT_TRUE(origin.ok() && origin->tag && origin->tag->solves == 3);
   expect_oom_anywhere([&] {
     return origin_tag_frame(tagged.scene.cameras, tagged.solution, tagged.views,
                             kOriginTag);
@@ -159,19 +161,17 @@ TEST(SolveOom, OriginTagFrame) {
     return origin_tag_frame(tagged.scene.cameras, tagged.solution, tagged.views,
                             kOriginTag, keep);
   });
-  // Two cameras 44 px apart: cv::LevMarq stops at its cap, and the world is
-  // refused for the fit there.
+  // Two cameras 44 px apart, which no outlier round can tell apart: the world
+  // is refused for its fit.
   std::vector<TagView> apart(tagged.views.begin(), tagged.views.begin() + 2);
   ASSERT_EQ(apart[1].capture, apart[0].capture);
   for (recon::camera::Vec2d& c : apart[0].marker.corners) {
     c += recon::camera::Vec2d(44.0, 22.0);
   }
-  const core::Result<WorldOrigin> stopped = origin_tag_frame(
+  const core::Result<WorldOrigin> disagree = origin_tag_frame(
       tagged.scene.cameras, tagged.solution, apart, kOriginTag);
-  ASSERT_TRUE(stopped.ok() && stopped->miss == TagMiss::PoorFit &&
-              stopped->reason.find("stopped short of converging") !=
-                  std::string::npos)
-      << (stopped.ok() ? stopped->reason : stopped.status().message());
+  ASSERT_TRUE(disagree.ok() && disagree->miss == TagMiss::PoorFit)
+      << (disagree.ok() ? disagree->reason : disagree.status().message());
   expect_oom_anywhere([&] {
     return origin_tag_frame(tagged.scene.cameras, tagged.solution, apart,
                             kOriginTag);

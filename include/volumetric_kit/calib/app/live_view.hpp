@@ -64,6 +64,23 @@ VC_APP_API core::Status record_snapshot(
     const std::shared_ptr<const LiveSnapshot>& snapshot,
     std::uint64_t frame_number);
 
+/// @brief Which of the mosaic's refusals the window says: each camera's
+///        once, until its message changes, as every set's picture from a
+///        camera is refused alike.
+/// @param refused  What the last record left out (`viz::RigMosaic::refused`).
+/// @param said     Each camera's refusal said last, by camera; grown to fit,
+///                 and set for each refusal returned.
+/// @return The refusals not said before, in @p refused's order; or
+///         `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const auto unsaid, refusals_to_say(mosaic->refused(), said));
+/// for (const viz::TileRefusal& refusal : unsaid) show(refusal);
+/// @endcode
+VC_APP_API core::Result<std::vector<viz::TileRefusal>> refusals_to_say(
+    const std::vector<viz::TileRefusal>& refused,
+    std::vector<std::string>& said);
+
 /// @brief What each tile of the mosaic shows over its picture.
 /// @param snapshot  The snapshot.
 /// @param ids       Each camera's id, which the overlays name; it must

@@ -353,8 +353,10 @@ class VC_APP_API CalibrateWorker final {
   /// @param pressed  When Calibrate was pressed (@ref results_directory); by
   ///                 default, now.
   /// @return `true` once the run is started; `false`, starting nothing,
-  ///         while a run is @ref busy or the worker is stopped;
-  ///         `InvalidArgument` for a null snapshot; or `OutOfMemory`.
+  ///         while a run is @ref busy or the worker is stopping; `IoError`
+  ///         once its thread has ended, stopped (@ref stop) or failed
+  ///         (@ref take_errors); `InvalidArgument` for a null snapshot; or
+  ///         `OutOfMemory`.
   core::Result<bool> request(std::shared_ptr<const KeptCaptures> kept,
                              std::chrono::system_clock::time_point pressed =
                                  std::chrono::system_clock::now());

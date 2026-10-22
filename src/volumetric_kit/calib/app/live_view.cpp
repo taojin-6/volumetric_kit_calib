@@ -45,6 +45,23 @@ core::Status record_snapshot(
   });
 }
 
+core::Result<std::vector<viz::TileRefusal>> refusals_to_say(
+    const std::vector<viz::TileRefusal>& refused,
+    std::vector<std::string>& said) {
+  using Refusals = std::vector<viz::TileRefusal>;
+  return compute::guarded("refusals_to_say", [&]() -> core::Result<Refusals> {
+    Refusals unsaid;
+    for (const viz::TileRefusal& refusal : refused) {
+      if (refusal.camera >= said.size()) said.resize(refusal.camera + 1);
+      std::string& last = said[refusal.camera];
+      if (refusal.status.message() == last) continue;
+      last = refusal.status.message();
+      unsaid.push_back(refusal);
+    }
+    return unsaid;
+  });
+}
+
 core::Result<std::vector<viz::TileOverlay>> tile_overlays(
     const LiveSnapshot& snapshot, const std::vector<std::string>& ids,
     const quality::SessionSummary* session) {
