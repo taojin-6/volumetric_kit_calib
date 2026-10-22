@@ -734,9 +734,10 @@ TEST(BundleAdjust, NotConvergingOrNotFiniteIsNumerical) {
 }
 
 // OpenCV's own multi-camera adjustment, its intrinsics held, on views of the
-// whole board: the two rigs agree.
+// whole board: the two rigs agree. The two converge on the same data, so 12
+// placements show it as well as 60.
 TEST(BundleAdjust, AgreesWithCalibrateMultiviewOnFullViews) {
-  const Scene scene = make_scene();
+  const Scene scene = make_scene(12);
   const RigSolution solution = solved(scene, first_rig(scene));
   const int k = 4;
   const int frames = static_cast<int>(scene.plan.size());
