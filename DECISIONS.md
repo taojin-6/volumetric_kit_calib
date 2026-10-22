@@ -195,7 +195,7 @@ camera's depth as points, its frusta, the world's axes and the solved boards.
   a few KB made on the host from the cameras' models, uploaded when they
   change.
 - **A worker of its own (T2)** alone owns its preparations, one per camera,
-  on recon's queue family. The live worker offers it each set it reads back;
+  on recon's queue family. The live worker offers it each set it polls;
   it prepares the newest, every `live_every`-th, lets the set go at once,
   and publishes a snapshot, newest wins. Frozen, hidden or minimized, it
   prepares nothing and lets offers go, and the window keeps its snapshot.
@@ -293,7 +293,9 @@ The `app` tier runs the rig (`app/calib_rig.hpp`, `live_worker.hpp`,
   entries). The live worker (T1) alone touches the
   rig's `SensorArray`, which is not thread-safe: it polls each set, reads every
   camera's luma back in one submit, finds the board (hybrid) and checks each
-  view, drives the capture rule, and publishes a snapshot, newest wins. The
+  view, drives the capture rule, and publishes a snapshot, newest wins.
+  While the 3D view fills the window and no capture is armed, it reads
+  nothing back and searches nothing (amended 2026-10-22). The
   capture worker (T3) searches each capture's luma again at full resolution,
   the solver's input, and queues it on the session writer. The window (T0)
   turns keys and buttons into requests and never waits on a camera, a

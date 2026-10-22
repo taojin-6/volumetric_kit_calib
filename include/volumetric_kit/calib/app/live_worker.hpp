@@ -19,7 +19,9 @@
 /// out of its set and handed to a @ref CaptureSink, so the set's frames go
 /// back to the driver at once. Each set read back is also offered, before
 /// the board is searched for, to a @ref SetSink: the 3D view's worker, which
-/// prepares its depth.
+/// prepares its depth. While the window shows no camera image
+/// (@ref LiveWorker::set_detecting) and no capture is armed, each set is
+/// offered and published with nothing read back or searched.
 
 #include <chrono>
 #include <cstddef>
@@ -133,9 +135,10 @@ class VC_APP_API CaptureSink {
   CaptureSink& operator=(const CaptureSink&) = default;
 };
 
-/// @brief Where a @ref LiveWorker offers every set it reads back, before it
-///        searches the set for the board: the 3D view's worker
-///        (@ref CloudWorker), or a test's stand-in.
+/// @brief Where a @ref LiveWorker offers every set it reads back -- every
+///        set it polls, while it does not search them -- before it searches
+///        the set for the board: the 3D view's worker (@ref CloudWorker), or
+///        a test's stand-in.
 ///
 /// Called from the live worker's thread while the window's thread may call
 /// the sink's own members: an implementation is thread-safe, and returns at
@@ -155,7 +158,7 @@ class VC_APP_API SetSink {
  public:
   virtual ~SetSink() = default;
 
-  /// @brief Take a set the live worker read back.
+  /// @brief Take a set the live worker polled.
   /// @param set  The set, shared with the live worker's snapshot of it.
   virtual void offer(std::shared_ptr<const recon::sensor::FrameSet> set) = 0;
 
@@ -184,7 +187,9 @@ struct LiveSnapshot {
   /// The set, its frames as the driver handed them out.
   std::shared_ptr<const recon::sensor::FrameSet> set;
   /// Each camera's live (hybrid) detection, in rig order: empty where the set
-  /// has no frame, its frame no picture, or the board was not found.
+  /// has no frame, its frame no picture, or the board was not found, and
+  /// every camera's while the set is not searched
+  /// (@ref LiveWorker::set_detecting).
   std::vector<Detection> detections;
   /// Each camera's view, checked (`quality::check_view`); a default one where
   /// the detection or the check failed.
@@ -199,8 +204,8 @@ struct LiveSnapshot {
   std::vector<std::optional<std::uint64_t>> lost;
   recon::sensor::SensorArrayStats stats;  ///< The array's counters.
   quality::CaptureDecision decision;      ///< The capture rule's answer.
-  /// The stages' times: `"poll"`, `"readback"` (with its device time) and
-  /// `"detect"`.
+  /// The stages' times: `"poll"`, then, for a set searched, `"readback"`
+  /// (with its device time) and `"detect"`.
   core::StageMetrics stages;
   /// Sets a second, smoothed over the last second or so.
   double sets_per_second = 0.0;
@@ -260,8 +265,8 @@ class VC_APP_API LiveWorker {
   /// @param square_measured  Whether its square size was measured.
   /// @param sink             Where captures go; null for a live view that
   ///                         captures nothing (@ref arm refuses).
-  /// @param sets             Where each set read back is offered, before the
-  ///                         board is searched for; null for none.
+  /// @param sets             Where each set is offered (@ref SetSink); null
+  ///                         for none.
   /// @param options          How it detects, checks and captures.
   /// @return The worker, its thread running; `InvalidArgument` for a sensor
   ///         without a colour model (naming it), a board or options refused,
@@ -289,6 +294,16 @@ class VC_APP_API LiveWorker {
 
   /// @return Each camera's id, in rig order.
   const std::vector<std::string>& ids() const noexcept { return ids_; }
+
+  /// @brief Whether to search each set for the board: on, the default,
+  ///        while the window shows the camera images; off while it shows the
+  ///        3D view alone.
+  ///
+  /// Off, each set is still polled, offered to the set sink and published
+  /// with the rig's counters, but nothing is read back, detected or ruled on
+  /// -- unless a capture is armed, which goes on being searched for.
+  /// @param on  Whether to search.
+  void set_detecting(bool on) noexcept;
 
   /// @brief Arm a capture: a press, at this moment.
   /// @return `true` once the worker will arm its rule; `false` with no

@@ -280,6 +280,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- calib_rig's live worker reads no luma back and searches no set for the
+  board while the 3D view fills the window (`LiveWorker::set_detecting`),
+  unless a capture is armed: each set's readback (8.3 MB a 4K camera) and
+  detections are saved there.
 - `app::CalibrateWorker::create` takes the depth checks before the results
   sink, `create(depth, sink)`, and `app::calibrate` takes them after the
   progress; `quality::format_results` takes why the depth was not checked
