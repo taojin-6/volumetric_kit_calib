@@ -52,8 +52,8 @@ inline std::set<std::string> entries(const std::filesystem::path& dir) {
 
 /// @brief Wait until @p done holds, polling.
 /// @param done   What to wait for.
-/// @param limit  How long to wait: by default 30 s, well under ctest's limit
-///               on a test (tests/CMakeLists.txt), so a wait that times out
+/// @param limit  How long to wait: by default 30 s, under ctest's limit on a
+///               test (tests/CMakeLists.txt), so a wait that times out
 ///               reports itself and the binary goes on to its next case.
 /// @return Whether it held before @p limit passed.
 template <class Done>
