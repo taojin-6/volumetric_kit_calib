@@ -11,11 +11,11 @@
 // read as they should; a camera's depth 8 mm far in one capture fails that
 // capture's own pairs alone; a camera without depth is insufficient; each
 // capture's frames are let go before the next; a stop between captures stops
-// the run, and a cancel writes nothing; a failure of the checks is posted and
-// the results written without them; a tag world's checks are the same as the
-// reference's; and the checks give the same while the 3D view's worker
-// prepares on the same device. Under synchronization validation;
-// skips without a Vulkan device, and the last case also with one queue family.
+// the run; a failure of the checks is posted and the results written without
+// them; a tag world's checks are the same as the reference's; and the checks
+// give the same while the 3D view's worker prepares on the same device. Under
+// synchronization validation; skips without a Vulkan device, and the last
+// case also with one queue family.
 
 #include <gtest/gtest.h>
 
@@ -489,8 +489,10 @@ TEST_F(CalibrateDepthTest, LetsEachCapturesFramesGo) {
   EXPECT_LT(bytes.back() - bytes[1], frame);
 }
 
-// A throw from the progress between captures stops the run there: no capture
-// is checked after it, and the run returns what was thrown.
+// A throw from the progress between captures, as the worker's cancel throws
+// (CalibrateWorker.ACancelWritesNothing), stops the run there: no capture is
+// checked after it, and the run returns what was thrown, not a failure of the
+// checks.
 TEST_F(CalibrateDepthTest, AStopBetweenCapturesStopsTheRun) {
   DepthCase scene;
   scene.cameras = 2;
@@ -521,46 +523,6 @@ std::unique_ptr<CalibrateWorker> depth_worker(core::Device& device,
                                               std::size_t cameras) {
   return value_of(CalibrateWorker::create(
       value_of(CalibrateDepth::create(device, allocator, cameras))));
-}
-
-// A cancel while the worker checks the depth stops it at its next capture:
-// nothing is written, published or posted. The most captures a session
-// keeps, of 2 cameras, are checked from the first to the last in about 0.5 s
-// on a laptop under validation, for the 2 ms poll to see; a run that gets
-// past the checks unseen fails at once, not at the poll's limit.
-TEST_F(CalibrateDepthTest, ACancelDuringTheChecksWritesNothing) {
-  const ScratchDir session;
-  DepthCase scene;
-  scene.cameras = 2;
-  scene.placements = 150;
-  const KeptCaptures kept = depth_captures(scene, session.path().string());
-  const auto gate = std::make_shared<test::Gate>();
-  const std::unique_ptr<CalibrateWorker> worker =
-      depth_worker(device(), allocator(), 2);
-  const test::LetGoAtTheEnd let_go{*gate};
-  ASSERT_TRUE(*worker->request(test::held_at_its_end(kept, gate)));
-  ASSERT_TRUE(test::wait_for([&] {
-    const std::optional<CalibrateProgress> at = worker->progress();
-    return !at || at->stage == CalibrateStage::Writing ||
-           (at->stage == CalibrateStage::Checking && at->done >= 1 &&
-            at->done < at->total);
-  }));
-  const std::optional<CalibrateProgress> at = worker->progress();
-  ASSERT_TRUE(at.has_value());
-  ASSERT_EQ(at->stage, CalibrateStage::Checking);
-  EXPECT_EQ(at->total, kept.captures.size());
-  EXPECT_TRUE(worker->cancel());
-  const std::optional<CalibrateProgress> cancelled = worker->progress();
-  ASSERT_TRUE(gate->held());
-  const std::optional<CalibrateProgress> ended = worker->progress();
-  ASSERT_TRUE(cancelled.has_value());
-  ASSERT_TRUE(ended.has_value());
-  EXPECT_EQ(ended->done, cancelled->done);
-  gate->let_go();
-  ASSERT_TRUE(test::idle(*worker));
-  EXPECT_EQ(worker->take_result(), nullptr);
-  EXPECT_TRUE(worker->take_errors().empty());
-  EXPECT_TRUE(entries(session.path()).empty());
 }
 
 // A failure of the depth checks -- a capture's depth not its camera's size
