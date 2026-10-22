@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -100,6 +101,43 @@ std::uint32_t histogram_of(std::size_t cameras, std::size_t from,
 // ceil(a / b), b > 0, without the overflow of (a + b - 1) / b.
 std::uint32_t ceil_div(std::uint32_t a, std::uint32_t b) noexcept {
   return a / b + (a % b != 0 ? 1 : 0);
+}
+
+// The pixels plane_moments walks for `region` in an image of `size` and
+// pinhole `k`: the box round the inset rectangle's corners projected, a pixel
+// wider each side for float's rounding, clamped to the image -- none when it
+// lies outside -- or the whole image when a corner is not in front of the
+// camera. Every member's ray meets the rectangle in front of the camera, so
+// projects inside it.
+std::pair<glm::uvec2, glm::uvec2> region_pixels(
+    const quality::BoardRegion& region, const camera::PinholeIntrinsics& k,
+    const camera::ImageSize& size) {
+  const glm::uvec2 whole(size.width, size.height);
+  const camera::Mat4d board_to_depth =
+      camera::rigid_inverse(region.depth_to_board);
+  camera::Vec2d lo(std::numeric_limits<double>::infinity());
+  camera::Vec2d hi(-std::numeric_limits<double>::infinity());
+  for (const camera::Vec2d& corner :
+       {region.min, camera::Vec2d(region.max.x, region.min.y), region.max,
+        camera::Vec2d(region.min.x, region.max.y)}) {
+    const glm::dvec4 p = board_to_depth * glm::dvec4(corner, 0.0, 1.0);
+    if (!(p.z > 0.0)) return {glm::uvec2(0u), whole};
+    const camera::Vec2d at(k.fx * p.x / p.z + k.cx, k.fy * p.y / p.z + k.cy);
+    lo = glm::min(lo, at);
+    hi = glm::max(hi, at);
+  }
+  glm::uvec2 origin(0u);
+  glm::uvec2 extent(0u);
+  for (int i = 0; i < 2; ++i) {
+    const double last = static_cast<double>(whole[i]) - 1.0;
+    const double first = std::max(std::floor(lo[i]) - 1.0, 0.0);
+    const double end = std::min(std::ceil(hi[i]) + 1.0, last);
+    // Written so a NaN fails it.
+    if (!(first <= end)) return {glm::uvec2(0u), glm::uvec2(0u)};
+    origin[i] = static_cast<std::uint32_t>(first);
+    extent[i] = static_cast<std::uint32_t>(end - first) + 1u;
+  }
+  return {origin, extent};
 }
 
 // Whether two histograms' counts are binned alike: the same window, bins,
@@ -226,11 +264,13 @@ core::Result<std::vector<quality::DepthPlane>> DepthChecks::fit_planes(
           block.size = glm::uvec2(image.size.width, image.size.height);
           block.range = glm::vec2(image.min_depth_m, image.max_depth_m);
           block.first_partial = slots;
-          // The binding range bounds the pixels below 2^30.
-          block.groups =
-              std::min(core::group_count(image.size.width * image.size.height,
-                                         kLocalSize),
-                       kMaxRegionGroups);
+          std::tie(block.origin, block.extent) =
+              region_pixels(view.region, k, image.size);
+          // The binding range bounds the pixels below 2^30. A slot at least,
+          // which a rectangle of none leaves empty.
+          block.groups = std::clamp(
+              core::group_count(block.extent.x * block.extent.y, kLocalSize),
+              1u, kMaxRegionGroups);
           slots += block.groups;
         }
         const VkDeviceSize region_bytes =

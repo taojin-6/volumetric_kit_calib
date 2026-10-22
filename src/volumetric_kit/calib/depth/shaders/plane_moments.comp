@@ -5,9 +5,10 @@
 
 // One round of one region's board-plane fit: the region's pixels counted, its
 // points gated, and the inliers' moments summed, each workgroup's into a slot
-// of its own. Each thread walks the depth image's pixels i, i + stride, ...
-// in that order, so with the tree in vc_sum_workgroup every sum is taken in an
-// order fixed by the image's size alone, and two runs agree to the bit.
+// of its own. Each thread walks the pixels i, i + stride, ... of the
+// rectangle the host bounds the region's members by, in that order, so with
+// the tree in vc_sum_workgroup every sum is taken in an order fixed by that
+// rectangle alone, and two runs agree to the bit.
 //
 // A pixel is a member by its ray alone (vc_board_member); a member whose depth
 // is missing, not a number or outside the camera's range is out of range. An
@@ -57,16 +58,16 @@ void main() {
 
   uint counts[3] = uint[3](0u, 0u, 0u);
   float m[9] = float[9](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-  uint pixels = r.size.x * r.size.y;
+  uint pixels = r.extent.x * r.extent.y;
   uint stride = r.groups * VC_PLANE_LOCAL_SIZE;
   for (uint i = gl_WorkGroupID.x * VC_PLANE_LOCAL_SIZE + lid; i < pixels;
        i += stride) {
-    uvec2 pixel = uvec2(i % r.size.x, i / r.size.x);
+    uvec2 pixel = r.origin + uvec2(i % r.extent.x, i / r.extent.x);
     if (!vc_board_member(pixel, r.k, r.depth_to_board, r.rect)) {
       continue;
     }
     counts[0] += 1u;
-    float z = depth[i];
+    float z = depth[pixel.y * r.size.x + pixel.x];
     if (!vc_in_range(z, r.range)) {
       counts[1] += 1u;  // none, not a number, or out of range
       continue;

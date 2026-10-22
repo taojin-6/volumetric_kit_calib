@@ -28,14 +28,18 @@ struct RegionBlock {
   glm::vec2 range{0.0f};
   std::uint32_t first_partial = 0;
   std::uint32_t groups = 0;
+  glm::uvec2 origin{0u};
+  glm::uvec2 extent{0u};
   std::uint32_t pad[2] = {0, 0};
 };
-static_assert(sizeof(RegionBlock) == 128 && offsetof(RegionBlock, k) == 64 &&
+static_assert(sizeof(RegionBlock) == 144 && offsetof(RegionBlock, k) == 64 &&
                   offsetof(RegionBlock, rect) == 80 &&
                   offsetof(RegionBlock, size) == 96 &&
                   offsetof(RegionBlock, range) == 104 &&
                   offsetof(RegionBlock, first_partial) == 112 &&
-                  offsetof(RegionBlock, groups) == 116,
+                  offsetof(RegionBlock, groups) == 116 &&
+                  offsetof(RegionBlock, origin) == 120 &&
+                  offsetof(RegionBlock, extent) == 128,
               "mirrors Region in shaders/plane_common.glsl");
 
 // plane_common.glsl's Fit: what comes back per region.

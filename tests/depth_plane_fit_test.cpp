@@ -5,8 +5,10 @@
 // made here -- quality::in_board_region's membership, both rounds' gates and
 // least-squares planes, OpenCV's eigen solve: tilted planes on rigs of 1, 3, 4
 // and 5 cameras of mixed sizes, with two regions on one depth, in one batch;
-// the region's rule pixel by pixel; members counted with depth or without; a
-// plane turned near the seed's limit, to 1e-4 degrees; a box on the plane;
+// the region's rule pixel by pixel; members counted with depth or without,
+// wherever the region lies -- past the image's edges, partly or wholly behind
+// the camera, or over more pixels than one pass takes; a plane turned near
+// the seed's limit, to 1e-4 degrees; a box on the plane;
 // 20 % outliers either side, and outliers on one edge; settings other than
 // the defaults; two runs to the bit; too few inliers, or inliers on one line;
 // the requirements; and refusals. Skips where no device is present.
@@ -140,9 +142,7 @@ View view_of(const Pinhole& pinhole, const Vec3d& centre, double tilt_deg,
 // A depth camera 1 m in front of the board and square to it, 512 x 640, with a
 // pinhole whose rays meet the plane at multiples of 2^-9 m, and the region of
 // columns 100 to 400 and rows 300 to 550: every value the device computes is
-// exact in float. The image has more pixels than the moments' workgroups take
-// in one pass (1024 of 256), so the region's last rows are a thread's second.
-// Its depth is `depth` everywhere.
+// exact in float. Its depth is `depth` everywhere.
 constexpr std::uint32_t kDyadicWidth = 512;
 constexpr std::size_t kDyadicMembers = 301 * 251;
 View dyadic_view(float depth) {
@@ -604,6 +604,79 @@ TEST_F(PlaneFitTest, CountsEveryMemberWithDepthOrWithout) {
   EXPECT_EQ(planes[5].out_of_range, missing);
   EXPECT_EQ(planes[5].inliers, kDyadicMembers - holes);
   EXPECT_TRUE(planes[5].valid);
+}
+
+// The moments walk the box round a region's projected corners, and every
+// member is in it wherever the region lies. Square to a 1024 x 640 camera,
+// where nothing rounds: a region past the image on every side counts every
+// pixel, more than one pass of the workgroups takes (1024 of 256), so each
+// thread walks several; one past its corner counts the pixels inside; one
+// beside it counts none. Along a floor: a region partly behind the camera,
+// and one wholly behind, count as the host's rule does.
+TEST_F(PlaneFitTest, CountsEveryMemberWhereverTheRegionLies) {
+  const DepthCheckOptions options;
+  const Pinhole pinhole = {{1024, 640}, {512.0, 512.0, 512.0, 320.0}};
+  // The region of columns u0 to u1 and rows v0 to v1, edges included, as the
+  // camera 1 m from the board sees them, square to it.
+  const auto square = [&](double u0, double v0, double u1, double v1) {
+    View view;
+    view.pinhole = pinhole;
+    view.region.depth_to_board[3] = glm::dvec4(0.25, 0.125, -1.0, 1.0);
+    view.region.board_to_color = depth_to_color();
+    view.region.min =
+        Vec2d(0.25 + (u0 - 512.0) / 512.0, 0.125 + (v0 - 320.0) / 512.0);
+    view.region.max =
+        Vec2d(0.25 + (u1 - 512.0) / 512.0, 0.125 + (v1 - 320.0) / 512.0);
+    view.depth.assign(std::size_t{1024} * 640, 1.0f);
+    return view;
+  };
+  // A floor 0.3 m below the camera, the board's y along its view: the
+  // region of x in [-0.5, 0.5] and y in [y0, y1] (metres).
+  const auto floor = [&](double y0, double y1) {
+    View view;
+    view.pinhole = pinhole;
+    Mat4d m(1.0);
+    m[1] = glm::dvec4(0.0, 0.0, -1.0, 0.0);
+    m[2] = glm::dvec4(0.0, 1.0, 0.0, 0.0);
+    m[3] = glm::dvec4(0.0, 0.0, 0.3, 1.0);
+    view.region.depth_to_board = m;
+    view.region.board_to_color = depth_to_color();
+    view.region.min = Vec2d(-0.5, y0);
+    view.region.max = Vec2d(0.5, y1);
+    view.depth = render(pinhole, m, [](const Vec3d& o, const Vec3d& d) {
+      return hit_plane({Vec3d(0.0), Vec3d(0.0, 0.0, 1.0)}, o, d);
+    });
+    return view;
+  };
+  const std::vector<View> views = {square(-20.0, -10.0, 1030.0, 650.0),
+                                   square(-50.0, 600.0, 100.0, 700.0),
+                                   square(1100.0, 100.0, 1200.0, 200.0),
+                                   floor(-0.5, 2.0), floor(-2.0, -0.5)};
+  std::vector<core::Buffer> buffers;
+  const std::vector<DepthPlane> planes =
+      value_of(checks_->fit_planes(regions_of(views, buffers), options));
+  ASSERT_EQ(planes.size(), 5u);
+
+  const std::size_t whole = std::size_t{1024} * 640;
+  EXPECT_EQ(planes[0].members, whole);
+  EXPECT_EQ(planes[0].out_of_range, 0u);
+  EXPECT_EQ(planes[0].inliers, whole);
+  ASSERT_TRUE(planes[0].valid);
+  EXPECT_NEAR(planes[0].point.z, 0.0, 1e-6);
+  EXPECT_NEAR(planes[0].normal.z, 1.0, 1e-9);
+  EXPECT_EQ(planes[1].members, 101u * 40u);  // columns 0-100, rows 600-639
+  EXPECT_EQ(planes[1].inliers, 101u * 40u);
+  EXPECT_EQ(planes[2].members, 0u);
+  EXPECT_FALSE(planes[2].valid);
+  for (const std::size_t r : {3u, 4u}) {
+    SCOPED_TRACE("region " + std::to_string(r));
+    const Reference want = reference_fit(views[r], options);
+    EXPECT_LE(want.outline_band, want.plane.members / 100);
+    expect_like(planes[r], want, 0.05, 0.01);
+  }
+  EXPECT_GT(planes[3].members, 100000u);
+  EXPECT_TRUE(planes[3].valid);
+  EXPECT_EQ(planes[4].members, 0u);
 }
 
 // The solve converges: a plane turned 3.5 degrees about the board's diagonal,
