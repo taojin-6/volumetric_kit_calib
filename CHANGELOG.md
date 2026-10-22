@@ -47,6 +47,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `solve::BundleAdjustOptions::uncertainty`: off, `bundle_adjust` skips the
+  covariance and the intrinsics sensitivity; its guards still run.
 - Calibrate's world at the origin tag (DECISIONS.md, 2026-10-19):
   `app::calibrate` locates the tag from the kept captures' tags after the
   metrics (`CalibrateStage::Locating`) and anchors the outputs last, so

@@ -684,9 +684,9 @@ PoseShift shift_of(const PoseDerivatives& d, const cv::Vec6d& step) {
           1000.0 * camera::Vec3d(moved[0], moved[1], moved[2])};
 }
 
-// The guard on each camera's conditioning, the covariance and the
-// sensitivity, from the normal matrix at the solution with the boards
-// eliminated: S = A - sum_b B_b D_b^-1 B_b^T.
+// The guard on each camera's conditioning, and unless options.uncertainty is
+// off the covariance and the sensitivity, from the normal matrix at the
+// solution with the boards eliminated: S = A - sum_b B_b D_b^-1 B_b^T.
 core::Status uncertainty(const Problem& p, const BundleAdjustOptions& options,
                          RigSolution& out) {
   const std::size_t k = p.cameras.size();
@@ -705,9 +705,11 @@ core::Status uncertainty(const Problem& p, const BundleAdjustOptions& options,
   for (const Active& a : active_of(p)) {
     Line& line = lines.emplace_back();
     line.view = a.view;
-    detail::project(p.lenses[a.view->camera], p.cameras[a.view->camera],
-                    p.boards[a.view->board], a.object, &a.pixels,
-                    Derivatives::All, line.at);
+    detail::project(
+        p.lenses[a.view->camera], p.cameras[a.view->camera],
+        p.boards[a.view->board], a.object, &a.pixels,
+        options.uncertainty ? Derivatives::All : Derivatives::Extrinsics,
+        line.at);
     for (std::size_t i = 0; i < a.object.size(); ++i) {
       const cv::Vec2d& e = line.at.residuals[i];
       const double s = std::sqrt(e.dot(e));
@@ -784,6 +786,7 @@ core::Status uncertainty(const Problem& p, const BundleAdjustOptions& options,
 
   // The covariance: the variance times S^-1's blocks.
   out.variance = weighted / static_cast<double>(residuals - layout.size);
+  if (!options.uncertainty) return {};
   out.covariance.assign(k, PoseCovariance{});
   std::vector<PoseDerivatives> derivatives;
   for (std::size_t c = 0; c < k; ++c) {
