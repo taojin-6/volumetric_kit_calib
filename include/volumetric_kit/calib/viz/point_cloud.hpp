@@ -18,7 +18,6 @@
 
 #include <glm/mat4x4.hpp>
 
-#include "volumetric_kit/calib/viz/export.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/vulkan/vulkan.hpp"
 #include "volumetric_kit/gfx/pipelines/depth_cloud_pipeline.hpp"
@@ -93,7 +92,7 @@ struct CloudStyle {
 ///            cloud_draw(*snapshot.frames[i], color_to_world[i],
 ///                       info[i].depth_to_color, style));
 /// @endcode
-VC_VIZ_API core::Result<gfx::pipelines::DepthCloudDraw> cloud_draw(
+core::Result<gfx::pipelines::DepthCloudDraw> cloud_draw(
     const recon::sensor::DeviceFrame& frame,
     const recon::camera::Mat4d& color_to_world,
     const recon::camera::Mat4d& depth_to_color, const CloudStyle& style);

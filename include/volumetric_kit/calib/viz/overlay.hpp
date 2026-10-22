@@ -24,7 +24,6 @@
 #include "volumetric_kit/calib/core/detection.hpp"
 #include "volumetric_kit/calib/core/view_check.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
-#include "volumetric_kit/calib/viz/export.hpp"
 #include "volumetric_kit/calib/viz/tone.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/gfx/camera/image_view_2d.hpp"
@@ -157,7 +156,7 @@ struct TileOverlay {
 /// @code
 /// const ImU32 fill = coverage_fill(summary.coverage[cell], style);
 /// @endcode
-VC_VIZ_API ImU32 coverage_fill(int corners, const OverlayStyle& style) noexcept;
+ImU32 coverage_fill(int corners, const OverlayStyle& style) noexcept;
 
 /// @brief The marks over one tile.
 ///
@@ -178,7 +177,7 @@ VC_VIZ_API ImU32 coverage_fill(int corners, const OverlayStyle& style) noexcept;
 /// @code
 /// VKC_ASSIGN(const TileMarks marks, tile_marks(tile, session_options));
 /// @endcode
-VC_VIZ_API core::Result<TileMarks> tile_marks(
+core::Result<TileMarks> tile_marks(
     const TileOverlay& tile, const quality::SessionOptions& thresholds = {},
     const OverlayStyle& style = {});
 
@@ -199,9 +198,8 @@ VC_VIZ_API core::Result<TileMarks> tile_marks(
 /// @code
 /// draw_tile_marks(mosaic->view(), mosaic->tile_region(i), marks);
 /// @endcode
-VC_VIZ_API void draw_tile_marks(const gfx::camera::ImageView2D& view,
-                                const gfx::ui::OverlayRegion& region,
-                                const TileMarks& marks,
-                                ImDrawList* draw_list = nullptr);
+void draw_tile_marks(const gfx::camera::ImageView2D& view,
+                     const gfx::ui::OverlayRegion& region,
+                     const TileMarks& marks, ImDrawList* draw_list = nullptr);
 
 }  // namespace volumetric_kit::calib::viz

@@ -80,7 +80,9 @@ their siblings, and none finds an installed calib. So calib has no install
 rules, package config or `VC_INSTALL`, and turns the core's install rules off
 (`VKC_INSTALL`) and leaves recon's off. The brain's freedom from Vulkan is
 checked in a build of its own, configured and built in tree
-(`no_vulkan.brain`), not through an install.
+(`no_vulkan.brain`), not through an install. `calib_viz` and `calib_app`,
+which serve calib_rig and the tests alone, are static libraries with no
+export macros.
 
 ## 2026-10-19 — The world at the origin tag
 
@@ -335,7 +337,7 @@ The `app` tier runs the rig (`app/calib_rig.hpp`, `live_worker.hpp`,
   on by default only at the top level, as the examples are. The tier is then
   built with `viz` when gfx's `gfx_glfw` (an installed GLFW) and recon's
   Orbbec driver (`VR_WITH_ORBBEC`, with `VR_WITH_FFMPEG`) exist, and turns the
-  core's config tier on. It is build-tree only, as `viz` is. A session
+  core's config tier on. It is a static library, as `viz` is. A session
   records calib's and the siblings' commits as git gives them at each build,
   `-dirty` with uncommitted changes.
 
@@ -519,8 +521,7 @@ The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
   compiles against, as gfx's own core pin yields to it. `viz` also links
   recon's sensor array tier, whose frame sets, counters and decoded pictures
   its panels and mosaic take, and its sensor utils tier, whose prepared
-  frames the 3D view draws. `calib_viz` is build-tree only, as gfx's ui tier
-  is, until gfx installs the ImGui headers.
+  frames the 3D view draws. `calib_viz` is a static library (2026-10-22).
 
 ## 2026-10-14 — The bundle adjustment on `cv::LevMarq`
 

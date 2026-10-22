@@ -30,7 +30,6 @@
 #include <vector>
 
 #include "volumetric_kit/calib/app/capture_worker.hpp"
-#include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
 #include "volumetric_kit/calib/quality/results.hpp"
@@ -64,7 +63,7 @@ enum class CalibrateStage {
 /// @code
 /// if (auto at = calibrate->progress()) show(to_string(at->stage));
 /// @endcode
-VC_APP_API const char* to_string(CalibrateStage stage) noexcept;
+const char* to_string(CalibrateStage stage) noexcept;
 
 /// @brief How far a Calibrate has got.
 ///
@@ -170,9 +169,9 @@ class CalibrateDepth;
 /// VKC_ASSIGN(const CalibrateResult result,
 ///            calibrate(*captures->kept(), {}, depth.get()));
 /// @endcode
-VC_APP_API core::Result<CalibrateResult> calibrate(
-    const KeptCaptures& kept, const CalibrateCallback& progress = {},
-    CalibrateDepth* depth = nullptr);
+core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
+                                        const CalibrateCallback& progress = {},
+                                        CalibrateDepth* depth = nullptr);
 
 /// @brief Calibrate's depth checks of the kept raw depth, on recon's device:
 ///        a depth-only frame preparation per camera (recon's `GpuFramePrep`)
@@ -201,7 +200,7 @@ VC_APP_API core::Result<CalibrateResult> calibrate(
 /// VKC_ASSIGN(std::unique_ptr<CalibrateWorker> calibrate,
 ///            CalibrateWorker::create(std::move(depth)));
 /// @endcode
-class VC_APP_API CalibrateDepth final {
+class CalibrateDepth final {
  public:
   /// @brief Build each camera's preparation, its depth EXCLUSIVE to recon's
   ///        queue family, and the checks' kernels.
@@ -251,7 +250,7 @@ inline constexpr const char* kResultsDirectory = "results";
 ///            results_directory(session, 0, std::chrono::system_clock::now()));
 /// // <session>/results/000_2026-10-18_143000
 /// @endcode
-VC_APP_API core::Result<std::string> results_directory(
+core::Result<std::string> results_directory(
     const std::string& session, int number,
     std::chrono::system_clock::time_point stamp);
 
@@ -295,7 +294,7 @@ struct WrittenResults {
 /// VKC_ASSIGN(const WrittenResults written,
 ///            write_results(kept->directory, 0, pressed, result.files));
 /// @endcode
-VC_APP_API core::Result<WrittenResults> write_results(
+core::Result<WrittenResults> write_results(
     const std::string& session, int first_number,
     std::chrono::system_clock::time_point stamp,
     const quality::ResultFiles& files, const ResultSink& sink = {});
@@ -327,7 +326,7 @@ VC_APP_API core::Result<WrittenResults> write_results(
 /// if (auto result = calibrate->take_result()) place_cameras(*result);
 /// for (const core::Status& e : calibrate->take_errors()) show(e);
 /// @endcode
-class VC_APP_API CalibrateWorker final {
+class CalibrateWorker final {
  public:
   /// @brief Start the thread, waiting for a request.
   /// @param depth  The depth checks every run takes (@ref calibrate), owned

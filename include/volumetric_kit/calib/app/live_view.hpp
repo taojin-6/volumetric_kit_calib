@@ -20,7 +20,6 @@
 
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 #include "volumetric_kit/calib/app/cloud_worker.hpp"
-#include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/app/live_worker.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
 #include "volumetric_kit/calib/viz/mosaic.hpp"
@@ -59,7 +58,7 @@ namespace volumetric_kit::calib::app {
 ///                           frame.number));
 /// }
 /// @endcode
-VC_APP_API core::Status record_snapshot(
+core::Status record_snapshot(
     viz::RigMosaic& mosaic, gfx::RetireQueue& retire, VkCommandBuffer cmd,
     const std::shared_ptr<const LiveSnapshot>& snapshot,
     std::uint64_t frame_number);
@@ -77,7 +76,7 @@ VC_APP_API core::Status record_snapshot(
 /// VKC_ASSIGN(const auto unsaid, refusals_to_say(mosaic->refused(), said));
 /// for (const viz::TileRefusal& refusal : unsaid) show(refusal);
 /// @endcode
-VC_APP_API core::Result<std::vector<viz::TileRefusal>> refusals_to_say(
+core::Result<std::vector<viz::TileRefusal>> refusals_to_say(
     const std::vector<viz::TileRefusal>& refused,
     std::vector<std::string>& said);
 
@@ -99,7 +98,7 @@ VC_APP_API core::Result<std::vector<viz::TileRefusal>> refusals_to_say(
 ///   viz::draw_tile_marks(mosaic->view(), mosaic->tile_region(i), marks);
 /// }
 /// @endcode
-VC_APP_API core::Result<std::vector<viz::TileOverlay>> tile_overlays(
+core::Result<std::vector<viz::TileOverlay>> tile_overlays(
     const LiveSnapshot& snapshot, const std::vector<std::string>& ids,
     const quality::SessionSummary* session);
 
@@ -114,7 +113,7 @@ VC_APP_API core::Result<std::vector<viz::TileOverlay>> tile_overlays(
 /// VKC_ASSIGN(const auto lines, viz::camera_panel(cameras[i], summary_i,
 ///                                                board));
 /// @endcode
-VC_APP_API core::Result<std::vector<viz::CameraLive>> camera_lives(
+core::Result<std::vector<viz::CameraLive>> camera_lives(
     const LiveSnapshot& snapshot);
 
 /// @brief How much of the origin tag the captures kept hold, as the session
@@ -130,7 +129,7 @@ VC_APP_API core::Result<std::vector<viz::CameraLive>> camera_lives(
 ///              viz::origin_tag_line(tag_coverage(*kept)));
 /// }
 /// @endcode
-VC_APP_API viz::TagCoverage tag_coverage(const KeptCaptures& kept) noexcept;
+viz::TagCoverage tag_coverage(const KeptCaptures& kept) noexcept;
 
 /// @brief Record @p snapshot's points, each shown and placed camera's at its
 ///        pose now (`viz::cloud_draws`), and hold the snapshot in @p retire
@@ -161,7 +160,7 @@ VC_APP_API viz::TagCoverage tag_coverage(const KeptCaptures& kept) noexcept;
 ///   frame.waits.push_back({*wait, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT});
 /// }
 /// @endcode
-VC_APP_API core::Result<std::optional<core::TimelinePoint>> record_cloud(
+core::Result<std::optional<core::TimelinePoint>> record_cloud(
     gfx::pipelines::DepthCloudPipeline& pipeline, gfx::RetireQueue& retire,
     VkCommandBuffer cmd, VkExtent2D extent, std::uint64_t frame_number,
     const std::shared_ptr<const CloudSnapshot>& snapshot,
@@ -178,8 +177,8 @@ VC_APP_API core::Result<std::optional<core::TimelinePoint>> record_cloud(
 /// @code
 /// cloud->set_live(cloud_live(frozen, placement, !frame));
 /// @endcode
-VC_APP_API bool cloud_live(bool frozen, viz::ScenePlacement placement,
-                           bool minimized) noexcept;
+bool cloud_live(bool frozen, viz::ScenePlacement placement,
+                bool minimized) noexcept;
 
 /// @brief Sensor @p index's camera in the 3D view before the rig is solved
 ///        (@ref placed_cameras places them all): its factory models, its tint
@@ -198,8 +197,8 @@ VC_APP_API bool cloud_live(bool frozen, viz::ScenePlacement placement,
 ///       scene_camera(array.sensor(i).info(), i, i == array.primary()));
 /// }
 /// @endcode
-VC_APP_API viz::SceneCamera scene_camera(const recon::sensor::SensorInfo& info,
-                                         std::size_t index, bool reference);
+viz::SceneCamera scene_camera(const recon::sensor::SensorInfo& info,
+                              std::size_t index, bool reference);
 
 /// @brief Place every camera of the 3D view at Calibrate's poses; each
 ///        keeps its models, tint and toggle.
@@ -214,7 +213,7 @@ VC_APP_API viz::SceneCamera scene_camera(const recon::sensor::SensorInfo& info,
 ///   VKC_TRY(placed_cameras(view_cameras, result->color_to_world));
 /// }
 /// @endcode
-VC_APP_API core::Status placed_cameras(
+core::Status placed_cameras(
     std::vector<viz::SceneCamera>& cameras,
     const std::vector<recon::camera::Mat4d>& color_to_world);
 

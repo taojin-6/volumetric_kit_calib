@@ -7,13 +7,9 @@
 # on gfx's image pipeline, ImGui overlay and image view; and the 3D view: each
 # camera's prepared depth drawn as points in place at the rig's poses, its
 # frusta and the solved boards, on gfx's depth-cloud and primitive pipelines.
-# Built with VC_WITH_RIG. Build-tree only, as gfx_ui is: neither is installed
-# until gfx co-installs the ImGui headers.
-include(GenerateExportHeader)
-
-set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
-
-add_library(calib_viz)
+# Built with VC_WITH_RIG. A static library for calib_rig and the tests: no
+# export macros (DECISIONS.md, 2026-10-22).
+add_library(calib_viz STATIC)
 add_library(volumetric_kit::calib_viz ALIAS calib_viz)
 
 target_sources(
@@ -25,30 +21,6 @@ target_sources(
           point_cloud.cpp
           scene_view.cpp
           tone.cpp)
-
-# The tier's own export macro and guard (see calib_core).
-generate_export_header(
-  calib_viz
-  BASE_NAME
-  VC_VIZ
-  EXPORT_MACRO_NAME
-  VC_VIZ_API
-  EXPORT_FILE_NAME
-  "${_vc_generated_inc}/volumetric_kit/calib/viz/export.hpp")
-
-set_target_properties(
-  calib_viz
-  PROPERTIES CXX_VISIBILITY_PRESET hidden
-             VISIBILITY_INLINES_HIDDEN ON
-             POSITION_INDEPENDENT_CODE ON)
-
-get_target_property(_vc_type calib_viz TYPE)
-if(_vc_type STREQUAL "STATIC_LIBRARY")
-  target_compile_definitions(calib_viz PUBLIC VC_VIZ_STATIC_DEFINE)
-endif()
-
-target_include_directories(calib_viz
-                           PUBLIC "$<BUILD_INTERFACE:${_vc_generated_inc}>")
 
 # The public headers name quality's checks and summaries, gfx's pipelines,
 # overlay, views and metrics, and recon's pictures, sets, counters and prepared

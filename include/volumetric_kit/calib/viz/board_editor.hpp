@@ -9,7 +9,6 @@
 ///        rest on it.
 
 #include "volumetric_kit/calib/core/target.hpp"
-#include "volumetric_kit/calib/viz/export.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib::viz {
@@ -31,7 +30,7 @@ namespace volumetric_kit::calib::viz {
 /// info.board = editor.board();
 /// info.square_measured = editor.square_measured();
 /// @endcode
-class VC_VIZ_API BoardEditor {
+class BoardEditor {
  public:
   /// @brief An editor holding @p board, unlocked.
   /// @param board            A ChArUco board the detector takes.
@@ -93,7 +92,7 @@ struct BoardFields {
 /// @code
 /// const BoardFields fields = board_fields(legacy_femto_board());  // 5 x 3
 /// @endcode
-VC_VIZ_API BoardFields board_fields(const Target& board) noexcept;
+BoardFields board_fields(const Target& board) noexcept;
 
 /// @brief @p board with @p fields applied: one corner fewer than squares each
 ///        way, held to `int`'s range, and the sizes in metres; a size left as
@@ -107,8 +106,7 @@ VC_VIZ_API BoardFields board_fields(const Target& board) noexcept;
 /// @code
 /// VKC_TRY(editor.edit(apply_fields(editor.board(), fields), measured));
 /// @endcode
-VC_VIZ_API Target apply_fields(const Target& board,
-                               const BoardFields& fields) noexcept;
+Target apply_fields(const Target& board, const BoardFields& fields) noexcept;
 
 /// @brief Draw @p editor's fields as ImGui widgets -- the squares across and
 ///        down, the square and marker sizes (millimetres), the dictionary,
@@ -129,6 +127,6 @@ VC_VIZ_API Target apply_fields(const Target& board,
 /// }
 /// ImGui::End();
 /// @endcode
-VC_VIZ_API core::Status draw_board_editor(BoardEditor& editor);
+core::Status draw_board_editor(BoardEditor& editor);
 
 }  // namespace volumetric_kit::calib::viz

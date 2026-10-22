@@ -24,7 +24,6 @@
 
 #include <glm/vec2.hpp>
 
-#include "volumetric_kit/calib/viz/export.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/vulkan/buffer.hpp"
 #include "volumetric_kit/core/vulkan/vulkan.hpp"
@@ -134,7 +133,7 @@ struct MosaicLayout {
 /// VKC_ASSIGN(const MosaicLayout layout,
 ///            mosaic_layout({{3840, 2160}, {3840, 2160}, {640, 576}}));
 /// @endcode
-VC_VIZ_API core::Result<MosaicLayout> mosaic_layout(
+core::Result<MosaicLayout> mosaic_layout(
     const std::vector<recon::camera::ImageSize>& sizes,
     std::uint32_t gutter = kMosaicGutter, const MosaicLimits& limits = {});
 
@@ -159,7 +158,7 @@ VC_VIZ_API core::Result<MosaicLayout> mosaic_layout(
 /// @endcode
 // TODO: planes in a buffer (NVDEC and nvJPEG on Linux), which need their
 // queue family's ownership taken over first, and I420, once gfx maps it.
-VC_VIZ_API core::Result<gfx::pipelines::ImageWrite> tile_write(
+core::Result<gfx::pipelines::ImageWrite> tile_write(
     const recon::sensor::YuvImage& picture, VkExtent2D expected, VkOffset2D at);
 
 /// @brief How pictures written together become display colour: the Y'CbCr
@@ -178,7 +177,7 @@ VC_VIZ_API core::Result<gfx::pipelines::ImageWrite> tile_write(
 /// VKC_ASSIGN(const gfx::pipelines::ImageConversion conversion,
 ///            tile_conversion(pictures));
 /// @endcode
-VC_VIZ_API core::Result<gfx::pipelines::ImageConversion> tile_conversion(
+core::Result<gfx::pipelines::ImageConversion> tile_conversion(
     const std::vector<const recon::sensor::YuvImage*>& pictures);
 
 /// @brief A camera's new picture that @ref RigMosaic::record left out, and
@@ -232,7 +231,7 @@ struct TileRefusal {
 /// // After the frame, if it may not have run:
 /// if (!end.ok() && !windowing::swapchain_stale(end)) mosaic->discard();
 /// @endcode
-class VC_VIZ_API RigMosaic {
+class RigMosaic {
  public:
   /// @brief Build the mosaic for the rig's cameras.
   /// @param device     The renderer's device: it enabled gfx's

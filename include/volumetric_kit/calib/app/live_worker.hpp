@@ -29,7 +29,6 @@
 #include <string>
 #include <vector>
 
-#include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/core/capture_meta.hpp"
 #include "volumetric_kit/calib/core/detection.hpp"
 #include "volumetric_kit/calib/core/target.hpp"
@@ -113,7 +112,7 @@ struct CaptureRequest {
 ///   std::vector<CaptureRequest> requests;
 /// };
 /// @endcode
-class VC_APP_API CaptureSink {
+class CaptureSink {
  public:
   virtual ~CaptureSink() = default;
 
@@ -151,7 +150,7 @@ class VC_APP_API CaptureSink {
 ///   std::shared_ptr<const recon::sensor::FrameSet> latest;
 /// };
 /// @endcode
-class VC_APP_API SetSink {
+class SetSink {
  public:
   virtual ~SetSink() = default;
 
@@ -249,7 +248,7 @@ struct LiveOptions {
 /// live->stop();
 /// latest.reset();
 /// @endcode
-class VC_APP_API LiveWorker {
+class LiveWorker {
  public:
   /// @brief Take the rig and start its thread.
   /// @param array            The rig, opened and not started; taken whatever

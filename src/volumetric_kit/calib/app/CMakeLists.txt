@@ -8,14 +8,12 @@
 # the Calibrate worker (T4) and the window loop (T0) on gfx's GLFW glue, ImGui
 # overlay and the viz tier's mosaic and scene. Built with VC_BUILD_APPS and the
 # viz tier when gfx_glfw (an installed GLFW) and recon's Orbbec tier
-# (VR_WITH_ORBBEC) exist (src/CMakeLists.txt). Build-tree only, as calib_viz is.
-include(GenerateExportHeader)
+# (VR_WITH_ORBBEC) exist (src/CMakeLists.txt). A static library, as calib_viz
+# is.
 
 # calib_rig loads its scenario as config::Application::CalibRig, which the core
 # has from 0.11.0, in its config tier (third_party/CMakeLists.txt turns it on).
 vkc_require_core(0.11.0 CONFIG)
-
-set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 
 # What a session records it was captured with (capture::Software): calib's and
 # each fetched sibling's commit, read from its checkout at every build
@@ -51,7 +49,7 @@ add_custom_target(
   BYPRODUCTS "${_vc_software_cpp}"
   VERBATIM)
 
-add_library(calib_app)
+add_library(calib_app STATIC)
 add_library(volumetric_kit::calib_app ALIAS calib_app)
 
 target_sources(
@@ -67,30 +65,6 @@ target_sources(
           rig_mode.cpp
           "${_vc_software_cpp}")
 add_dependencies(calib_app calib_app_software)
-
-# The tier's own export macro and guard (see calib_core).
-generate_export_header(
-  calib_app
-  BASE_NAME
-  VC_APP
-  EXPORT_MACRO_NAME
-  VC_APP_API
-  EXPORT_FILE_NAME
-  "${_vc_generated_inc}/volumetric_kit/calib/app/export.hpp")
-
-set_target_properties(
-  calib_app
-  PROPERTIES CXX_VISIBILITY_PRESET hidden
-             VISIBILITY_INLINES_HIDDEN ON
-             POSITION_INDEPENDENT_CODE ON)
-
-get_target_property(_vc_type calib_app TYPE)
-if(_vc_type STREQUAL "STATIC_LIBRARY")
-  target_compile_definitions(calib_app PUBLIC VC_APP_STATIC_DEFINE)
-endif()
-
-target_include_directories(calib_app
-                           PUBLIC "$<BUILD_INTERFACE:${_vc_generated_inc}>")
 
 # The public headers name the viz tier's mosaic, overlays and scene, the quality
 # tier's metrics and results files, the capture tier's session records, the

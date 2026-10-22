@@ -12,7 +12,6 @@
 #include "imgui.h"
 #include "volumetric_kit/calib/core/view_check.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
-#include "volumetric_kit/calib/viz/export.hpp"
 
 namespace volumetric_kit::calib::viz {
 
@@ -34,7 +33,7 @@ enum class Tone : std::uint8_t {
 /// ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(tone_color(tone)), "%s",
 ///                    value.c_str());
 /// @endcode
-VC_VIZ_API ImU32 tone_color(Tone tone) noexcept;
+ImU32 tone_color(Tone tone) noexcept;
 
 /// @brief A view's verdict as a tone, as the live view shows it.
 ///
@@ -48,7 +47,7 @@ VC_VIZ_API ImU32 tone_color(Tone tone) noexcept;
 /// @code
 /// const Tone tone = verdict_tone(view.check, session_options);
 /// @endcode
-VC_VIZ_API Tone verdict_tone(
-    const ViewCheck& check, const quality::SessionOptions& thresholds) noexcept;
+Tone verdict_tone(const ViewCheck& check,
+                  const quality::SessionOptions& thresholds) noexcept;
 
 }  // namespace volumetric_kit::calib::viz

@@ -299,6 +299,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   board while the 3D view fills the window (`LiveWorker::set_detecting`),
   unless a capture is armed: each set's readback (8.3 MB a 4K camera) and
   detections are saved there.
+- `calib_viz` and `calib_app` are static libraries with no export macros:
+  `VC_VIZ_API`, `VC_APP_API` and their `export.hpp` headers are gone.
 - `app::CalibrateWorker::create` takes the depth checks before the results
   sink, `create(depth, sink)`, and `app::calibrate` takes them after the
   progress; `quality::format_results` takes why the depth was not checked
