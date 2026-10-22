@@ -294,19 +294,28 @@ class ThrowingLoops final : public cv::parallel::ParallelForAPI {
   std::atomic<bool> used_{false};
 };
 
-// OpenCV's parallel_for_ on `api` while alive, then on OpenCV's own again.
-// Made and destroyed while no other thread runs OpenCV.
+// OpenCV's parallel_for_ on `api` while alive, then on OpenCV's own again, with
+// the threads it had. parallel_for_ calls a backend only with more than one
+// thread, which a run under ThreadSanitizer does not have
+// (support/opencv_sequential.cpp). Made and destroyed while no other thread
+// runs OpenCV.
 class ParallelBackend {
  public:
-  explicit ParallelBackend(std::shared_ptr<cv::parallel::ParallelForAPI> api) {
+  explicit ParallelBackend(std::shared_ptr<cv::parallel::ParallelForAPI> api)
+      : threads_(cv::getNumThreads()) {
     cv::parallel::setParallelForBackend(api);
+    cv::setNumThreads(4);
   }
   ~ParallelBackend() {
     cv::parallel::setParallelForBackend(
         std::shared_ptr<cv::parallel::ParallelForAPI>());
+    cv::setNumThreads(threads_);
   }
   ParallelBackend(const ParallelBackend&) = delete;
   ParallelBackend& operator=(const ParallelBackend&) = delete;
+
+ private:
+  int threads_;
 };
 
 TEST(AppCapture, WritesEachCaptureDetectedAtFullResolution) {

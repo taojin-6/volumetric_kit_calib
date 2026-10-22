@@ -23,7 +23,6 @@
 /// its tile and draws each prepared depth as points on the GPU, and only the
 /// luma the detector reads crosses to the host.
 
-#include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/app/preset.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/config/config.hpp"
@@ -59,8 +58,7 @@ struct RigRequirements {
 /// @code
 /// VKC_ASSIGN(const RigRequirements wide, rig_requirements(true));
 /// @endcode
-VC_APP_API core::Result<RigRequirements> rig_requirements(
-    bool large_points = true);
+core::Result<RigRequirements> rig_requirements(bool large_points = true);
 
 /// @brief What calib_rig takes from its scenario before it opens a window or
 ///        a camera.
@@ -89,8 +87,7 @@ struct RigScenario {
 /// @code
 /// VKC_ASSIGN(const RigScenario scenario, check_scenario(config));
 /// @endcode
-VC_APP_API core::Result<RigScenario> check_scenario(
-    const core::config::Config& config);
+core::Result<RigScenario> check_scenario(const core::config::Config& config);
 
 /// @brief Run calib_rig until its window closes, or Ctrl+C in the terminal.
 ///
@@ -117,6 +114,6 @@ VC_APP_API core::Result<RigScenario> check_scenario(
 ///                                   core::config::Application::CalibRig));
 /// VKC_TRY(run_calib_rig(config));
 /// @endcode
-VC_APP_API core::Status run_calib_rig(const core::config::Config& config);
+core::Status run_calib_rig(const core::config::Config& config);
 
 }  // namespace volumetric_kit::calib::app

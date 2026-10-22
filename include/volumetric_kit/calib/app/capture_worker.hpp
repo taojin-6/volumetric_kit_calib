@@ -27,7 +27,6 @@
 #include <string>
 #include <vector>
 
-#include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/app/live_worker.hpp"
 #include "volumetric_kit/calib/capture/session_writer.hpp"
 #include "volumetric_kit/calib/core/capture_meta.hpp"
@@ -53,7 +52,7 @@ namespace volumetric_kit::calib::app {
 /// CaptureSetup setup;
 /// setup.software = app_software();
 /// @endcode
-VC_APP_API capture::Software app_software();
+capture::Software app_software();
 
 /// @brief One camera of the rig, as its session records it.
 ///
@@ -70,7 +69,7 @@ VC_APP_API capture::Software app_software();
 /// @param sync    The rig's sync configuration: the camera's depth delay, by
 ///                serial (0 for a camera it does not list).
 /// @return The camera; or `OutOfMemory`.
-VC_APP_API core::Result<capture::SessionCamera> session_camera(
+core::Result<capture::SessionCamera> session_camera(
     const recon::sensor::IRgbdSensor& camera,
     const recon::sensor::OrbbecRigSyncConfig& sync);
 
@@ -215,7 +214,7 @@ struct CaptureEvent {
 /// if (auto summary = captures->summary()) draw_session(*summary);
 /// if (auto kept = captures->kept()) calibrate(*kept);  // on another thread
 /// @endcode
-class VC_APP_API CaptureWorker final : public CaptureSink {
+class CaptureWorker final : public CaptureSink {
  public:
   /// @brief Check @p setup and start the thread; nothing is written until the
   ///        first capture.

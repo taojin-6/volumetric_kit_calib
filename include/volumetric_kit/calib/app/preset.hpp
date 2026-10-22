@@ -17,7 +17,6 @@
 #include <string>
 #include <vector>
 
-#include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/capture/session_writer.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/config/config.hpp"
@@ -67,8 +66,7 @@ struct RigPreset {
 /// @code
 /// VKC_ASSIGN(const capture::DepthMode mode, depth_mode({640, 576}));
 /// @endcode
-VC_APP_API core::Result<capture::DepthMode> depth_mode(
-    recon::camera::ImageSize depth);
+core::Result<capture::DepthMode> depth_mode(recon::camera::ImageSize depth);
 
 /// @brief The preset a CalibRig scenario's source asks for.
 /// @param source  The scenario's source, as `core::config::load` resolved it
@@ -82,8 +80,7 @@ VC_APP_API core::Result<capture::DepthMode> depth_mode(
 ///                                   core::config::Application::CalibRig));
 /// VKC_ASSIGN(const RigPreset preset, rig_preset(config.source));
 /// @endcode
-VC_APP_API core::Result<RigPreset> rig_preset(
-    const core::config::Source& source);
+core::Result<RigPreset> rig_preset(const core::config::Source& source);
 
 /// @brief Refuse a rig whose cameras did not all open at @p preset.
 ///
@@ -99,9 +96,8 @@ VC_APP_API core::Result<RigPreset> rig_preset(
 /// @code
 /// VKC_TRY(check_preset(infos, preset));  // before the window draws a frame
 /// @endcode
-VC_APP_API core::Status check_preset(
-    const std::vector<recon::sensor::SensorInfo>& cameras,
-    const RigPreset& preset);
+core::Status check_preset(const std::vector<recon::sensor::SensorInfo>& cameras,
+                          const RigPreset& preset);
 
 /// @brief What each Orbbec camera of the rig is opened with: @p preset's
 ///        modes and colour coding, decoded onto @p device and readable from
@@ -124,7 +120,7 @@ VC_APP_API core::Status check_preset(
 /// VKC_ASSIGN(auto sensors, recon::sensor::open_orbbec_sensors(
 ///                              config.source.sync_config, options));
 /// @endcode
-VC_APP_API recon::sensor::OrbbecSensor::Options orbbec_options(
+recon::sensor::OrbbecSensor::Options orbbec_options(
     const RigPreset& preset, const core::Device& device,
     core::Allocator& allocator, const std::vector<std::uint32_t>& families);
 

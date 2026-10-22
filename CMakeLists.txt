@@ -16,7 +16,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Are we the top-level project, or pulled in via add_subdirectory/FetchContent?
-# Defaults for "build the extras" and "generate install rules" follow from this.
+# The defaults for "build the extras" follow from this.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(VC_IS_TOP_LEVEL ON)
 else()
@@ -28,7 +28,6 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # --- Options -----------------------------------------------------------------
 option(VC_BUILD_EXAMPLES "Build example programs" ${VC_IS_TOP_LEVEL})
 option(VC_BUILD_TESTS "Build tests" ${VC_IS_TOP_LEVEL})
-option(VC_INSTALL "Generate install/export rules" ${VC_IS_TOP_LEVEL})
 # No GPU options: calib's GPU work runs on volumetric_kit_core's vulkan tier, on
 # a VkDevice shared with recon and gfx (DECISIONS.md), not on a backend of its
 # own. On by default only at the top level: a consumer that pulls us in via
@@ -61,9 +60,8 @@ include(vc_warnings)
 include(vc_sanitizers)
 
 # --- Dependencies + library --------------------------------------------------
-# The oldest volumetric_kit_core calib builds with (DECISIONS.md, 2026-10-13):
-# checked in the core that arrives (third_party/) and again by the installed
-# package config.
+# The oldest volumetric_kit_core calib builds with (DECISIONS.md, 2026-10-13),
+# checked in the core that arrives (third_party/).
 set(VC_CORE_MIN_VERSION 0.6.1)
 # OpenCV 5, a prerequisite of the compute tier and those built on it
 # (DECISIONS.md, 2026-10-17): Homebrew's on macOS, tools/install-opencv.sh's on

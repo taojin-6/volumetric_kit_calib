@@ -247,8 +247,10 @@ double depth_of(const compute::Board& board,
   return (world_to_camera * board_to_world * glm::dvec4(x.x, x.y, x.z, 1.0)).z;
 }
 
-TEST(BundleAdjust, TwentySeedsWithinAFiftiethOfADegreeAndAMillimetre) {
-  for (std::uint32_t seed = 1; seed <= 20; ++seed) {
+// Every seed of plan and noise: 4, or the sweep's 20 (test::sweep_size).
+TEST(BundleAdjustSweep, EachSeedWithinAFiftiethOfADegreeAndAMillimetre) {
+  const std::uint32_t seeds = test::sweep_size(4, 20);
+  for (std::uint32_t seed = 1; seed <= seeds; ++seed) {
     const Scene scene = make_scene(60, 0.3, seed, seed);
     const RigSolution solution = solved(scene, first_rig(scene));
     const auto [deg, m] = worst_error(scene, solution);
@@ -542,14 +544,17 @@ TEST(BundleAdjust, BringsEachRotationWithinPi) {
 
 // The noise's covariance against the spread of 40 solves of the same plan
 // under fresh noise, each corner weighted 1, as the detector weights them:
-// the residuals' variance gives the scale.
-TEST(BundleAdjust, CovarianceIsWithinThirtyPercentOfMonteCarlo) {
-  constexpr int kRuns = 40;
+// the residuals' variance gives the scale. The sweep alone runs it, as a few
+// solves cannot place a spread within 30 %; the default suite checks the
+// covariance's algebra (SchurComplementEqualsTheDenseInverse).
+TEST(BundleAdjustSweep, CovarianceIsWithinThirtyPercentOfMonteCarlo) {
+  const int runs = static_cast<int>(test::sweep_size(0, 40));
+  if (runs == 0) GTEST_SKIP() << "run by the sweep alone (VC_TEST_SWEEPS)";
   std::vector<double> rotation(4, 0.0);
   std::vector<double> centre(4, 0.0);
   std::vector<double> predicted_rotation(4, 0.0);
   std::vector<double> predicted_centre(4, 0.0);
-  for (int run = 0; run < kRuns; ++run) {
+  for (int run = 0; run < runs; ++run) {
     Scene scene = make_scene(60, 0.3, 1, 100 + run);
     for (Observation& view : scene.views) {
       for (DetectedPoint& point : view.points) point.weight = 1.0;
@@ -560,13 +565,13 @@ TEST(BundleAdjust, CovarianceIsWithinThirtyPercentOfMonteCarlo) {
     const std::vector<camera::Mat4d> truth = test::truths_in_world_of(scene, 0);
     for (std::size_t c = 0; c < 4; ++c) {
       const camera::Mat4d got = matrix_of(solution.world_to_camera[c]);
-      rotation[c] += std::pow(angle_deg(got, truth[c]), 2) / kRuns;
+      rotation[c] += std::pow(angle_deg(got, truth[c]), 2) / runs;
       centre[c] +=
           std::pow(1000.0 * glm::length(centre_of(got) - centre_of(truth[c])),
                    2) /
-          kRuns;
-      predicted_rotation[c] += solution.covariance[c].rotation_deg / kRuns;
-      predicted_centre[c] += solution.covariance[c].centre_mm / kRuns;
+          runs;
+      predicted_rotation[c] += solution.covariance[c].rotation_deg / runs;
+      predicted_centre[c] += solution.covariance[c].centre_mm / runs;
     }
   }
   EXPECT_EQ(predicted_rotation[0], 0.0);
@@ -729,9 +734,10 @@ TEST(BundleAdjust, NotConvergingOrNotFiniteIsNumerical) {
 }
 
 // OpenCV's own multi-camera adjustment, its intrinsics held, on views of the
-// whole board: the two rigs agree.
+// whole board: the two rigs agree. The two converge on the same data, so 12
+// placements show it as well as 60.
 TEST(BundleAdjust, AgreesWithCalibrateMultiviewOnFullViews) {
-  const Scene scene = make_scene();
+  const Scene scene = make_scene(12);
   const RigSolution solution = solved(scene, first_rig(scene));
   const int k = 4;
   const int frames = static_cast<int>(scene.plan.size());

@@ -31,16 +31,17 @@ endif()
 # with. Work on both checkouts at once with
 # -DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<core checkout>.
 #
-# The core's tests and -Werror stay off in a subproject; its install rules stay
-# on, so calib's install carries the core its exported targets link. The brain
-# needs only the base tier, so it builds with no Vulkan SDK: calib turns the
-# vulkan tier on only with VC_WITH_RIG, for recon's sensor tier, and otherwise
-# leaves VKC_WITH_VULKAN unset rather than OFF, so an application that turns the
-# tier on for recon or gfx keeps it. Only the examples and calib_rig opt into
+# The core's tests and -Werror stay off in a subproject, and calib installs
+# nothing, so the core's install rules are off too. The brain needs only the
+# base tier, so it builds with no Vulkan SDK: calib turns the vulkan tier on
+# only with VC_WITH_RIG, for recon's sensor tier, and otherwise leaves
+# VKC_WITH_VULKAN unset rather than OFF, so an application that turns the tier
+# on for recon or gfx keeps it. Only the examples and calib_rig opt into
 # core_config.
 #
 # The pin is core main at 0.11.0, for calib_rig's settings
 # (config::Application::CalibRig).
+set(VKC_INSTALL OFF)
 if(VC_WITH_RIG)
   set(VKC_WITH_VULKAN ON)
 endif()
@@ -70,10 +71,10 @@ endif()
 # (DECISIONS.md, "The camera model is recon's"). VR_CAMERA_ONLY builds
 # recon_camera alone, over the core's base tier and GLM, so calib still builds
 # with no Vulkan SDK. Pinned by commit, never main, and declared after the core,
-# so recon's own core pin yields to calib's. recon's tests, examples and -Werror
-# stay off in a subproject; its install follows calib's, as calib's exported
-# targets link recon_camera. It leaves an application's VR_CAMERA_ONLY as set,
-# so an application that turns it off keeps the rest of recon.
+# so recon's own core pin yields to calib's. recon's tests, examples, install
+# and -Werror stay off in a subproject. It leaves an application's
+# VR_CAMERA_ONLY as set, so an application that turns it off keeps the rest of
+# recon.
 #
 # The pin is recon main at PR #254 (ca4b94c): its calibration file names a world
 # at a floor AprilTag (WorldFrame::apriltag), which Calibrate's results write;
@@ -91,7 +92,6 @@ if(VC_WITH_RIG)
 elseif(NOT DEFINED VR_CAMERA_ONLY)
   set(VR_CAMERA_ONLY ON)
 endif()
-set(VR_INSTALL ${VC_INSTALL})
 FetchContent_MakeAvailable(volumetric_kit_recon)
 # The set() above is lost when the application made recon available first.
 if(VC_WITH_RIG AND NOT TARGET volumetric_kit::recon_io)
@@ -108,8 +108,7 @@ endif()
 # (ImageView2D, OrbitCamera) and the 3D view (DepthCloudPipeline's points from
 # depth buffers, PrimitivePipeline's lines). Pinned by commit, never main, and
 # declared after the core, so gfx's own core pin yields to calib's. gfx's tests,
-# examples, install and -Werror stay off in a subproject; its ui tier is
-# build-tree only, so calib_viz is too (src/CMakeLists.txt).
+# examples, install and -Werror stay off in a subproject.
 #
 # The pin is gfx main after PR #142 (76d0655): categorical_rgba8, the cameras'
 # default tints, beside #141's 0 x 0 framebuffer while iconified, #138's
@@ -125,7 +124,7 @@ endif()
 
 # --- nlohmann/json (header-only; the quality and capture tiers' files) -------
 # calib_quality writes its report, and calib_capture its session and capture
-# files, with it, as a PRIVATE SYSTEM include, never part of an installed
+# files, with it, as a PRIVATE SYSTEM include, never part of a tier's public
 # interface. Declared under recon's name and pin, after recon, so the one copy
 # recon fetched is the one used.
 if(POLICY CMP0135)

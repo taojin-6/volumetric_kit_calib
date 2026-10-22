@@ -29,8 +29,9 @@ prerequisites):
 calib_root="$(git rev-parse --show-toplevel)"
 cmake -S "$calib_root" -B "$calib_root/build" -DCMAKE_BUILD_TYPE=Release
 cmake --build "$calib_root/build" --parallel
-ctest --test-dir "$calib_root/build" --output-on-failure
 ```
+
+Then run the tests as [AGENTS.md](AGENTS.md#build-and-validation) does.
 
 The `core` tier is pure CPU, so the suite runs on any machine — no GPU or device
 required.

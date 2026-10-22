@@ -3,10 +3,9 @@
 
 #pragma once
 
-// Internal (not installed): the names and the text of a session's files
-// (session_writer.hpp shows the layout and both schemas). Each function may
-// throw what an allocation, or nlohmann/json, throws; the writer turns it into
-// a Status.
+// Internal: the names and the text of a session's files (session_writer.hpp
+// shows the layout and both schemas). Each function may throw what an
+// allocation, or nlohmann/json, throws; the writer turns it into a Status.
 
 #include <cstdint>
 #include <string>

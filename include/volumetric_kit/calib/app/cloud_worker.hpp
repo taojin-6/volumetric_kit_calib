@@ -26,7 +26,6 @@
 #include <optional>
 #include <vector>
 
-#include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/app/live_worker.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/base/stage_metrics.hpp"
@@ -114,7 +113,7 @@ struct CloudOptions {
 /// cloud->set_color(mode != gfx::pipelines::CloudColor::Solid);
 /// if (auto s = cloud->take_snapshot()) cloud_latest = std::move(s);
 /// @endcode
-class VC_APP_API CloudWorker final : public SetSink {
+class CloudWorker final : public SetSink {
  public:
   /// @brief Build each camera's preparation and start the thread.
   /// @param device     recon's device, on the compute library's queue family,

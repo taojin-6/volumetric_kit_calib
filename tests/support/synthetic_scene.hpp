@@ -7,13 +7,14 @@
 /// @brief The solve's tests' scene, from the synthetic rig
 ///        (synthetic_rig.hpp): the rig, of its 4 cameras or of 2 to 5 whose
 ///        ids sort in another order than the rig's, a plan, what its cameras
-///        see and the cameras as the solve takes them; and the measures the
-///        tests compare rigs by. Its users link calib_solve and
-///        vc_synthetic_rig.
+///        see and the cameras as the solve takes them; how many scenes a
+///        sweep draws; and the measures the tests compare rigs by. Its users
+///        link calib_solve and vc_synthetic_rig.
 
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <utility>
 #include <vector>
@@ -82,6 +83,16 @@ inline Scene make_scene(std::size_t count = 60, double noise_px = 0.3,
                         std::uint32_t plan_seed = 1,
                         std::uint32_t noise_seed = 1) {
   return make_scene(synthetic_rig(), count, noise_px, plan_seed, noise_seed);
+}
+
+/// @brief How many scenes a statistical sweep (a suite named `*Sweep`) draws:
+///        all of DECISIONS.md's evidence when `VC_TEST_SWEEPS` is set, as the
+///        `slow` tests set it (tests/CMakeLists.txt), and a few otherwise.
+/// @param few  The default suite's count.
+/// @param all  The sweep's.
+/// @return @p all or @p few.
+inline std::uint32_t sweep_size(std::uint32_t few, std::uint32_t all) {
+  return std::getenv("VC_TEST_SWEEPS") != nullptr ? all : few;
 }
 
 /// The most cameras a kept scene has.

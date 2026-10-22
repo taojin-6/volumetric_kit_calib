@@ -299,6 +299,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   board while the 3D view fills the window (`LiveWorker::set_detecting`),
   unless a capture is armed: each set's readback (8.3 MB a 4K camera) and
   detections are saved there.
+- `calib_viz` and `calib_app` are static libraries with no export macros:
+  `VC_VIZ_API`, `VC_APP_API` and their `export.hpp` headers are gone.
+- A Debug build with `VC_SANITIZE` compiles at `-O1`, AddressSanitizer's
+  recommended level, so a sanitized run is several times faster; assertions
+  stay on.
+- ctest runs each test binary as one test, named for its file
+  (`detect_charuco`), so a suite's fixture is built once and OpenCV loads
+  once; the out-of-memory binaries still run each case in its own process.
+  `GTEST_FILTER` picks cases.
+- The default tests draw a few seeds of each statistical claim; the full
+  sweeps, DECISIONS.md's evidence, carry the ctest label `slow`.
 - `app::CalibrateWorker::create` takes the depth checks before the results
   sink, `create(depth, sink)`, and `app::calibrate` takes them after the
   progress; `quality::format_results` takes why the depth was not checked
@@ -470,6 +481,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- The install path (DECISIONS.md, 2026-10-22): calib is fetched by commit
+  and installs nothing, so `VC_INSTALL`, its install rules and package config
+  (`find_package(volumetric_kit_calib)`) are gone, and its build leaves the
+  core's and recon's install rules off.
 - Windows and MSVC support, which no calib target or CI leg used
   (DECISIONS.md, "Platforms"): calib builds with GCC or Clang for Linux,
   macOS, iOS and Android, as the core does. The MSVC warning flags

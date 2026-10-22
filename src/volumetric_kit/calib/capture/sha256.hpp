@@ -3,9 +3,9 @@
 
 #pragma once
 
-// Internal (not installed): SHA-256 (FIPS 180-4), which session.json records
-// of the rig's sync file. The family has no other; it moves to the core when
-// a second repository needs one.
+// Internal: SHA-256 (FIPS 180-4), which session.json records of the rig's sync
+// file. The family has no other; it moves to the core when a second repository
+// needs one.
 
 #include <string>
 #include <string_view>

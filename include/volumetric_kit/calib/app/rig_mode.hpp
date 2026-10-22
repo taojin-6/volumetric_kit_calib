@@ -29,7 +29,6 @@
 #include <optional>
 #include <string_view>
 
-#include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/calib/app/keys.hpp"
 #include "volumetric_kit/calib/viz/scene_view.hpp"
 
@@ -103,7 +102,7 @@ struct RigStep {
 ///   if (step.action == RigAction::Arm) live->arm();
 /// }
 /// @endcode
-VC_APP_API RigStep rig_action(const RigMode& mode, KeyRequest request) noexcept;
+RigStep rig_action(const RigMode& mode, KeyRequest request) noexcept;
 
 /// @brief Whether Calibrate may run now, and why not.
 ///
@@ -138,8 +137,8 @@ struct CalibrateGate {
 ///     calibrate_gate(mode, summary && summary->ready, unresolved);
 /// if (!gate.enabled) note(gate.reason);
 /// @endcode
-VC_APP_API CalibrateGate calibrate_gate(const RigMode& mode, bool ready,
-                                        std::size_t unresolved) noexcept;
+CalibrateGate calibrate_gate(const RigMode& mode, bool ready,
+                             std::size_t unresolved) noexcept;
 
 /// @brief Where the 3D view sits in @p mode.
 /// @param mode  Where the window stands.
@@ -149,7 +148,7 @@ VC_APP_API CalibrateGate calibrate_gate(const RigMode& mode, bool ready,
 /// view3d.placement = scene_placement(mode);
 /// cloud->set_live(cloud_live(frozen, view3d.placement, minimized));
 /// @endcode
-VC_APP_API viz::ScenePlacement scene_placement(const RigMode& mode) noexcept;
+viz::ScenePlacement scene_placement(const RigMode& mode) noexcept;
 
 /// @brief The mode once a Calibrate result is shown: the 3D view,
 ///        calibrated. A refusal, a cancel or a failure has no such step: the
@@ -160,7 +159,7 @@ VC_APP_API viz::ScenePlacement scene_placement(const RigMode& mode) noexcept;
 /// @code
 /// if (auto result = calibrate->take_result()) mode = on_result(mode);
 /// @endcode
-VC_APP_API RigMode on_result(RigMode mode) noexcept;
+RigMode on_result(RigMode mode) noexcept;
 
 /// @brief Where a result's world is: what the 3D view is framed on.
 ///
@@ -179,9 +178,9 @@ struct RigOrigin {
 
 /// @return Whether @p a and @p b are the same world: both the tag's, or the
 ///         same reference camera's.
-VC_APP_API bool operator==(const RigOrigin& a, const RigOrigin& b) noexcept;
+bool operator==(const RigOrigin& a, const RigOrigin& b) noexcept;
 /// @return Whether @p a and @p b are different worlds.
-VC_APP_API bool operator!=(const RigOrigin& a, const RigOrigin& b) noexcept;
+bool operator!=(const RigOrigin& a, const RigOrigin& b) noexcept;
 
 /// @brief Whether a result's 3D view is framed afresh (`SceneView::frame`):
 ///        at the first result, and when its world's origin is not the one
@@ -197,8 +196,8 @@ VC_APP_API bool operator!=(const RigOrigin& a, const RigOrigin& b) noexcept;
 ///   framed = origin;
 /// }
 /// @endcode
-VC_APP_API bool frame_on_result(const std::optional<RigOrigin>& framed,
-                                const RigOrigin& origin) noexcept;
+bool frame_on_result(const std::optional<RigOrigin>& framed,
+                     const RigOrigin& origin) noexcept;
 
 /// @brief The up the 3D view takes for @p origin's world (`SceneView::frame`).
 /// @param origin  The result's world.
@@ -208,7 +207,6 @@ VC_APP_API bool frame_on_result(const std::optional<RigOrigin>& framed,
 /// @code
 /// VKC_TRY(view.frame(poses, world_up(origin)));
 /// @endcode
-VC_APP_API std::optional<recon::camera::Vec3d> world_up(
-    const RigOrigin& origin) noexcept;
+std::optional<recon::camera::Vec3d> world_up(const RigOrigin& origin) noexcept;
 
 }  // namespace volumetric_kit::calib::app

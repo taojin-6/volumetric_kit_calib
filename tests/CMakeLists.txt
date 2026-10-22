@@ -3,20 +3,52 @@
 
 include(GoogleTest)
 
-# vc_<name>_test from <name>_test.cpp, linking the given targets. A case that
-# hangs fails after 5 minutes rather than holding a CI job to its limit. Under
-# the sanitizers, LeakSanitizer reads lsan.supp, which spares OpenCV's own leak
-# when an out-of-memory test fails an allocation inside it.
-set(_vc_test_properties TIMEOUT 300)
+# vc_<name>_test from <name>_test.cpp, linking the given targets, run as one
+# test, `<name>`: a binary linking OpenCV takes about 0.1 s to start on macOS,
+# and a suite's fixture (FullViews' four 4K views) is built once per process. An
+# out-of-memory binary (<name>_oom) runs each case in a process of its own, so
+# an allocation failed in one leaves nothing to the next. A test that hangs
+# fails after a minute, two under the sanitizers, rather than holding a CI job
+# to its limit; a test's own waits give up sooner (support/), so it says what it
+# waited for. Under the sanitizers, LeakSanitizer reads lsan.supp, which spares
+# OpenCV's own leak when an out-of-memory test fails an allocation inside it.
+# Under ThreadSanitizer, OpenCV runs each loop on its caller's thread
+# (support/opencv_sequential.cpp).
+set(_vc_test_properties TIMEOUT 60)
 if(VC_SANITIZE)
+  set(_vc_test_properties TIMEOUT 120)
   list(APPEND _vc_test_properties ENVIRONMENT
        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
 endif()
 function(vc_add_test name)
   add_executable(vc_${name}_test ${name}_test.cpp)
   target_link_libraries(vc_${name}_test PRIVATE ${ARGN} GTest::gtest_main)
+  if("thread" IN_LIST VC_SANITIZE)
+    target_sources(vc_${name}_test PRIVATE support/opencv_sequential.cpp)
+    target_link_libraries(vc_${name}_test PRIVATE opencv_core)
+  endif()
   vc_target_warnings(vc_${name}_test)
-  gtest_discover_tests(vc_${name}_test PROPERTIES ${_vc_test_properties})
+  if(name MATCHES "_oom$")
+    gtest_discover_tests(vc_${name}_test PROPERTIES ${_vc_test_properties})
+  else()
+    add_test(NAME ${name} COMMAND vc_${name}_test)
+    set_tests_properties(${name} PROPERTIES ${_vc_test_properties})
+  endif()
+endfunction()
+
+# vc_<name>_test's statistical sweeps, its suites named *Sweep, in full: the
+# evidence DECISIONS.md records, as `<name>.sweeps`, labelled `slow`, where
+# `<name>` draws a few scenes of each (VC_TEST_SWEEPS,
+# support/synthetic_scene.hpp).
+function(vc_add_sweeps name)
+  set(sweeps ${name}.sweeps)
+  add_test(NAME ${sweeps} COMMAND vc_${name}_test --gtest_filter=*Sweep.*)
+  set_tests_properties(${sweeps} PROPERTIES ${_vc_test_properties})
+  set_property(TEST ${sweeps} PROPERTY LABELS slow)
+  set_property(
+    TEST ${sweeps}
+    APPEND
+    PROPERTY ENVIRONMENT VC_TEST_SWEEPS=1)
 endfunction()
 
 # The tests' header-only helpers (support/); allocation_failure.cpp, which an
@@ -80,6 +112,7 @@ vc_add_test(spanning_tree volumetric_kit::calib_solve)
 vc_add_test(initialise volumetric_kit::calib_solve vc_synthetic_rig)
 vc_add_test(bundle_adjust volumetric_kit::calib_solve vc_synthetic_rig
             opencv_calib opencv_geometry)
+vc_add_sweeps(bundle_adjust)
 # solve: the world at the origin tag on the synthetic rig, and the outputs moved
 # into it, read back with recon's calibration file.
 vc_add_test(world_tag volumetric_kit::calib_solve vc_synthetic_rig)
@@ -99,6 +132,7 @@ target_sources(vc_quality_oom_test PRIVATE support/allocation_failure.cpp)
 # recon's reader.
 vc_add_test(calibration_metrics volumetric_kit::calib_quality vc_synthetic_rig
             opencv_geometry)
+vc_add_sweeps(calibration_metrics)
 # quality: the depth checks' geometry against planes and corners made here, and
 # their verdicts, on rigs of 1, 3, 4 and 5 cameras.
 vc_add_test(depth_checks volumetric_kit::calib_quality vc_synthetic_rig)
@@ -224,13 +258,14 @@ endif()
 # The core calib requires (third_party/CMakeLists.txt): calib's configure
 # against a stand-in core of each version (core_requirement/) refuses one older
 # than VC_CORE_MIN_VERSION, 0.6.1 -- before 0.1.0 the core has no
-# vkc_require_core -- and accepts 0.6.1 or newer, its package config finding
-# that core at its version and requiring VC_CORE_MIN_VERSION of it, then recon,
-# whose package config re-finds the core at its MAJOR.MINOR.
+# vkc_require_core -- and accepts 0.6.1 or newer.
 #
 # Those configures, and the ones below, take the fetched sources this build used
 # (FETCHCONTENT_SOURCE_DIR_<NAME>), so they need no network, and the OpenCV it
-# found.
+# found. They check calib's build, not its code, so they carry the label
+# `package`, which the default local run leaves out and CI runs on one leg, and
+# a cost that starts them first.
+set(_vc_package_properties LABELS package COST 60)
 include(FetchContent)
 FetchContent_GetProperties(volumetric_kit_core)
 FetchContent_GetProperties(volumetric_kit_recon)
@@ -243,16 +278,18 @@ set(_vc_fetched_sources
     -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
     -DGLM_DIR=${glm_DIR}
     -DOPENCV_DIR=${OpenCV_DIR})
-function(vc_add_core_requirement_test name core_version expect)
+function(vc_add_core_requirement_test name core_version)
   add_test(
     NAME core_requirement.${name}
     COMMAND
       ${CMAKE_COMMAND} -DCALIB_SOURCE=${PROJECT_SOURCE_DIR}
       -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/core_requirement/${name}
       -DCORE_VERSION=${core_version}
-      -DCORE_MODULES=${volumetric_kit_core_SOURCE_DIR}/cmake
-      -DMIN_VERSION=${VC_CORE_MIN_VERSION} ${expect} ${_vc_fetched_sources} -P
+      -DCORE_MODULES=${volumetric_kit_core_SOURCE_DIR}/cmake ${ARGN}
+      ${_vc_fetched_sources} -P
       ${CMAKE_CURRENT_SOURCE_DIR}/core_requirement/configure.cmake)
+  set_tests_properties(core_requirement.${name}
+                       PROPERTIES ${_vc_package_properties})
 endfunction()
 vc_add_core_requirement_test(
   before_0_1_0 none "-DEXPECT_ERROR=Unknown CMake command \"vkc_require_core\"")
@@ -260,8 +297,8 @@ vc_add_core_requirement_test(
   0_2_0 0.2.0 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.6\\.1 or newer")
 vc_add_core_requirement_test(
   0_6_0 0.6.0 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.6\\.1 or newer")
-vc_add_core_requirement_test(0_6_1 0.6.1 -DEXPECT_CONFIG_VERSION=0.6.1)
-vc_add_core_requirement_test(0_7_2 0.7.2 -DEXPECT_CONFIG_VERSION=0.7.2)
+vc_add_core_requirement_test(0_6_1 0.6.1)
+vc_add_core_requirement_test(0_7_2 0.7.2)
 
 if(VC_WITH_RIG)
   # VC_WITH_RIG needs the core's vulkan tier and all of recon: an application
@@ -276,6 +313,8 @@ if(VC_WITH_RIG)
         -DCORE_SOURCE=${volumetric_kit_core_SOURCE_DIR} ${_vc_fetched_sources}
         -DCORE_VULKAN=${core_vulkan} "-DEXPECT_ERROR=${expect}" -P
         ${CMAKE_CURRENT_SOURCE_DIR}/rig_requirement/configure.cmake)
+    set_tests_properties(rig_requirement.${name}
+                         PROPERTIES ${_vc_package_properties})
   endfunction()
   vc_add_rig_requirement_test(
     core_without_vulkan OFF
@@ -322,6 +361,8 @@ if(VC_WITH_RIG)
           -DGLFW_DIR=${glfw3_DIR} -DOPENCV_DIR=${OpenCV_DIR}
           -DORBBEC_DIR=${OrbbecSDK_DIR} -DBUILD_APPS=${build_apps} ${ARGN} -P
           ${CMAKE_CURRENT_SOURCE_DIR}/app_requirement/configure.cmake)
+      set_tests_properties(app_requirement.${name}
+                           PROPERTIES ${_vc_package_properties})
     endfunction()
     vc_add_app_requirement_test(not_asked OFF)
     vc_add_app_requirement_test(
@@ -330,27 +371,10 @@ if(VC_WITH_RIG)
       "-DEXPECT_ERROR=volumetric_kit_calib needs volumetric_kit_core's config tier"
     )
   endif()
-
-  # The rig tiers from this build's install (rig_package/): a consumer finds
-  # calib, the core and all of recon at the prefix, and builds and runs against
-  # calib_capture and calib_depth, with this build's sanitizers, which its
-  # libraries need; the build-tree-only viz tier is not installed.
-  list(JOIN _vc_sanitize_flags " " _vc_consumer_flags)
-  add_test(
-    NAME rig_package.consumer
-    COMMAND
-      ${CMAKE_COMMAND} -DBUILD_DIR=${PROJECT_BINARY_DIR} -DCONFIG=$<CONFIG>
-      -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/rig_package
-      -DGENERATOR=${CMAKE_GENERATOR} -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
-      -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} -DGLM_DIR=${glm_DIR}
-      -DOPENCV_DIR=${OpenCV_DIR} "-DFLAGS=${_vc_consumer_flags}" -P
-      ${CMAKE_CURRENT_SOURCE_DIR}/rig_package/configure.cmake)
 endif()
 
-# The brain needs no Vulkan (no_vulkan/): calib configures, builds and installs
-# with find_package(Vulkan) disabled, and a consumer builds against the
-# installed package with it disabled too; the installed package refuses a core
-# of another minor version.
+# The brain needs no Vulkan (no_vulkan/): with find_package(Vulkan) disabled,
+# calib configures and builds it, and a configure that keeps all of recon fails.
 add_test(
   NAME no_vulkan.brain
   COMMAND
@@ -358,3 +382,4 @@ add_test(
     -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/no_vulkan
     -DCORE_SOURCE=${volumetric_kit_core_SOURCE_DIR} ${_vc_fetched_sources} -P
     ${CMAKE_CURRENT_SOURCE_DIR}/no_vulkan/configure.cmake)
+set_tests_properties(no_vulkan.brain PROPERTIES ${_vc_package_properties})

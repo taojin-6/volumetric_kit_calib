@@ -19,7 +19,6 @@
 #include <utility>
 #include <vector>
 
-#include "volumetric_kit/calib/app/export.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib::app {
@@ -54,8 +53,7 @@ enum class KeyRequest : std::uint8_t {
 ///   live->arm();
 /// }
 /// @endcode
-VC_APP_API KeyRequest key_request(int key, int action,
-                                  bool want_text_input) noexcept;
+KeyRequest key_request(int key, int action, bool want_text_input) noexcept;
 
 /// @brief GLFW key events as they come, mapped to requests (@ref key_request)
 ///        once the window's frame knows whether ImGui takes text.
@@ -72,7 +70,7 @@ VC_APP_API KeyRequest key_request(int key, int action,
 /// VKC_ASSIGN(const std::vector<KeyRequest> requests,
 ///            queue.take(io.WantTextInput));
 /// @endcode
-class VC_APP_API KeyQueue {
+class KeyQueue {
  public:
   /// @brief Queue a key event.
   /// @param key     The GLFW key (`GLFW_KEY_*`).

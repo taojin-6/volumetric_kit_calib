@@ -5,7 +5,6 @@
 # The ChArUco board and the origin tag in a luma image, through OpenCV's
 # detectors.
 include(GenerateExportHeader)
-include(GNUInstallDirs)
 
 set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 
@@ -35,9 +34,7 @@ if(_vc_type STREQUAL "STATIC_LIBRARY")
   target_compile_definitions(calib_detect PUBLIC VC_DETECT_STATIC_DEFINE)
 endif()
 
-target_include_directories(
-  calib_detect PUBLIC "$<BUILD_INTERFACE:${_vc_generated_inc}>"
-                      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+target_include_directories(calib_detect PUBLIC "${_vc_generated_inc}")
 
 # The public header names compute's Board; imgproc (resize, cornerSubPix) is
 # private.
@@ -47,17 +44,3 @@ target_link_libraries(
   PRIVATE opencv_imgproc)
 
 vc_target_warnings(calib_detect)
-
-if(VC_INSTALL)
-  install(
-    TARGETS calib_detect
-    EXPORT volumetric_kit_calibTargets
-    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-  install(
-    DIRECTORY "${_vc_generated_inc}/"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-    FILES_MATCHING
-    PATTERN "*.hpp")
-endif()

@@ -9,7 +9,6 @@
 # beside viz: it takes the quality tier's region, plane, options and pair
 # agreement, and names no recon sensor type and nothing of gfx.
 include(GenerateExportHeader)
-include(GNUInstallDirs)
 
 set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
 
@@ -39,9 +38,7 @@ if(_vc_type STREQUAL "STATIC_LIBRARY")
   target_compile_definitions(calib_depth PUBLIC VC_DEPTH_STATIC_DEFINE)
 endif()
 
-target_include_directories(
-  calib_depth PUBLIC "$<BUILD_INTERFACE:${_vc_generated_inc}>"
-                     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+target_include_directories(calib_depth PUBLIC "${_vc_generated_inc}")
 
 # The public header names quality's region, plane, options and pair agreement,
 # and the core's device, allocator and buffers.
@@ -76,17 +73,3 @@ vkc_embed_shaders(
   "${CMAKE_CURRENT_SOURCE_DIR}/shaders/agreement_stats.comp")
 
 vc_target_warnings(calib_depth)
-
-if(VC_INSTALL)
-  install(
-    TARGETS calib_depth
-    EXPORT volumetric_kit_calibTargets
-    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-  install(
-    DIRECTORY "${_vc_generated_inc}/"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-    FILES_MATCHING
-    PATTERN "*.hpp")
-endif()

@@ -24,6 +24,9 @@ if(VC_SANITIZE)
 
   add_compile_options(${_vc_sanitize_flags})
   add_link_options(${_vc_sanitize_flags})
+  # Debug at -O1, AddressSanitizer's recommended level: assertions stay on, and
+  # the sanitized suite runs several times faster than at -O0.
+  add_compile_options($<$<CONFIG:Debug>:-O1>)
 
   message(STATUS "Sanitizers enabled (VC_SANITIZE): ${VC_SANITIZE}")
 endif()

@@ -26,7 +26,6 @@
 #include <glm/mat4x4.hpp>
 
 #include "volumetric_kit/calib/compute/board.hpp"
-#include "volumetric_kit/calib/viz/export.hpp"
 #include "volumetric_kit/calib/viz/point_cloud.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/vulkan/vulkan.hpp"
@@ -109,7 +108,7 @@ struct SceneOptions {
 /// VKC_ASSIGN(const auto lines,
 ///            frustum_lines(*info.color, color_to_world, 0.3, tint));
 /// @endcode
-VC_VIZ_API core::Result<std::vector<gfx::pipelines::ColorVertex>> frustum_lines(
+core::Result<std::vector<gfx::pipelines::ColorVertex>> frustum_lines(
     const recon::camera::CameraModel& camera,
     const recon::camera::Mat4d& to_world, double depth_m, std::uint32_t rgba);
 
@@ -121,7 +120,7 @@ VC_VIZ_API core::Result<std::vector<gfx::pipelines::ColorVertex>> frustum_lines(
 /// @code
 /// VKC_ASSIGN(const auto axes, axes_lines(0.5));
 /// @endcode
-VC_VIZ_API core::Result<std::vector<gfx::pipelines::ColorVertex>> axes_lines(
+core::Result<std::vector<gfx::pipelines::ColorVertex>> axes_lines(
     double length_m);
 
 /// @brief A solved board's outline: the chessboard's outer edge, on its
@@ -136,7 +135,7 @@ VC_VIZ_API core::Result<std::vector<gfx::pipelines::ColorVertex>> axes_lines(
 /// @code
 /// VKC_ASSIGN(const auto quad, board_lines(board, solution.boards[k], rgba));
 /// @endcode
-VC_VIZ_API core::Result<std::vector<gfx::pipelines::ColorVertex>> board_lines(
+core::Result<std::vector<gfx::pipelines::ColorVertex>> board_lines(
     const compute::Board& board, const recon::camera::Mat4d& board_to_world,
     std::uint32_t rgba);
 
@@ -152,7 +151,7 @@ VC_VIZ_API core::Result<std::vector<gfx::pipelines::ColorVertex>> board_lines(
 /// @code
 /// VKC_ASSIGN(const auto outline, tag_lines(tag_world.edge_m, rgba));
 /// @endcode
-VC_VIZ_API core::Result<std::vector<gfx::pipelines::ColorVertex>> tag_lines(
+core::Result<std::vector<gfx::pipelines::ColorVertex>> tag_lines(
     double edge_m, std::uint32_t rgba);
 
 /// @brief Every line of the scene: the axes, each shown and placed camera's
@@ -172,7 +171,7 @@ VC_VIZ_API core::Result<std::vector<gfx::pipelines::ColorVertex>> tag_lines(
 /// @code
 /// VKC_ASSIGN(const auto lines, scene_lines(cameras, nullptr, {}, {}));
 /// @endcode
-VC_VIZ_API core::Result<std::vector<gfx::pipelines::ColorVertex>> scene_lines(
+core::Result<std::vector<gfx::pipelines::ColorVertex>> scene_lines(
     const std::vector<SceneCamera>& cameras, const compute::Board* board,
     const std::vector<recon::camera::Mat4d>& boards_to_world,
     const SceneOptions& options);
@@ -193,8 +192,7 @@ VC_VIZ_API core::Result<std::vector<gfx::pipelines::ColorVertex>> scene_lines(
 /// VKC_TRY(clouds->submit(cmd, {extent, frame.number, draws.data(),
 ///                              static_cast<std::uint32_t>(draws.size())}));
 /// @endcode
-VC_VIZ_API core::Result<std::vector<gfx::pipelines::DepthCloudDraw>>
-cloud_draws(
+core::Result<std::vector<gfx::pipelines::DepthCloudDraw>> cloud_draws(
     const std::vector<std::optional<recon::sensor::DeviceFrame>>& frames,
     const std::vector<SceneCamera>& cameras, const CloudStyle& style);
 
@@ -221,7 +219,7 @@ cloud_draws(
 /// VKC_ASSIGN(const recon::camera::Mat3d level,
 ///            display_rotation(poses, recon::camera::Vec3d(0.0, 0.0, 1.0)));
 /// @endcode
-VC_VIZ_API core::Result<recon::camera::Mat3d> display_rotation(
+core::Result<recon::camera::Mat3d> display_rotation(
     const std::vector<recon::camera::Mat4d>& color_to_world,
     const std::optional<recon::camera::Vec3d>& up = std::nullopt);
 
@@ -251,8 +249,7 @@ struct WindowSplit {
 /// @code
 /// const WindowSplit split = window_split(placement, frame.target->extent());
 /// @endcode
-VC_VIZ_API WindowSplit window_split(ScenePlacement placement,
-                                    VkExtent2D extent) noexcept;
+WindowSplit window_split(ScenePlacement placement, VkExtent2D extent) noexcept;
 
 /// @brief The 3D view's camera: gfx's `OrbitCamera` in the turned world, and
 ///        its perspective.
@@ -263,7 +260,7 @@ VC_VIZ_API WindowSplit window_split(ScenePlacement placement,
 /// view.orbit().orbit(0.01f * dx, 0.01f * dy);  // a drag
 /// const glm::mat4 view_proj = view.view_proj(split.scene);
 /// @endcode
-class VC_VIZ_API SceneView {
+class SceneView {
  public:
   /// The vertical field of view, in radians.
   static constexpr float kFovY = 0.87f;  // 50 degrees

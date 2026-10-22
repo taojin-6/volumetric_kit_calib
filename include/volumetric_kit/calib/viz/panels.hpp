@@ -33,7 +33,6 @@
 #include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
-#include "volumetric_kit/calib/viz/export.hpp"
 #include "volumetric_kit/calib/viz/tone.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/base/stage_metrics.hpp"
@@ -110,7 +109,7 @@ struct CameraLive {
 /// VKC_ASSIGN(const std::vector<PanelLine> lines,
 ///            camera_panel(camera, summary.cameras[i], board, options));
 /// @endcode
-VC_VIZ_API core::Result<std::vector<PanelLine>> camera_panel(
+core::Result<std::vector<PanelLine>> camera_panel(
     const CameraLive& camera, const quality::CameraSummary& session,
     const Target& board, const PanelOptions& options = {});
 
@@ -150,7 +149,7 @@ struct SaverQueue {
 /// VKC_ASSIGN(const std::vector<PanelLine> lines,
 ///            set_panel(*snapshot.set, array_stats, serials, saver));
 /// @endcode
-VC_VIZ_API core::Result<std::vector<PanelLine>> set_panel(
+core::Result<std::vector<PanelLine>> set_panel(
     const recon::sensor::FrameSet& set,
     const recon::sensor::SensorArrayStats& stats,
     const std::vector<std::string>& ids, const SaverQueue& saver,
@@ -188,9 +187,9 @@ struct SessionPanel {
 /// @return The panel; `InvalidArgument` for ids, cameras and a matrix that
 ///         do not agree in number, or a link to a camera outside the rig; or
 ///         `OutOfMemory`.
-VC_VIZ_API core::Result<SessionPanel> session_panel(
-    const quality::SessionSummary& summary, const std::vector<std::string>& ids,
-    const PanelOptions& options = {});
+core::Result<SessionPanel> session_panel(const quality::SessionSummary& summary,
+                                         const std::vector<std::string>& ids,
+                                         const PanelOptions& options = {});
 
 /// @brief The origin tag in the captures kept: the cameras that saw it, and
 ///        how often.
@@ -222,7 +221,7 @@ struct TagCoverage {
 /// VKC_ASSIGN(const PanelLine line, origin_tag_line(coverage));
 /// panel.lines.push_back(line);
 /// @endcode
-VC_VIZ_API core::Result<PanelLine> origin_tag_line(const TagCoverage& coverage);
+core::Result<PanelLine> origin_tag_line(const TagCoverage& coverage);
 
 /// @brief Where a capture stands: the rule's latest answer and the last
 ///        capture written.
@@ -259,8 +258,7 @@ struct CaptureStatus {
 /// @code
 /// VKC_ASSIGN(const std::vector<PanelLine> lines, capture_panel(status));
 /// @endcode
-VC_VIZ_API core::Result<std::vector<PanelLine>> capture_panel(
-    const CaptureStatus& status);
+core::Result<std::vector<PanelLine>> capture_panel(const CaptureStatus& status);
 
 /// @brief The line that stands for the Calibrate button while Calibrate
 ///        runs.
@@ -279,9 +277,10 @@ VC_VIZ_API core::Result<std::vector<PanelLine>> capture_panel(
 ///            calibrate_progress_line(to_string(at->stage), at->done,
 ///                                    at->total, at->seconds));
 /// @endcode
-VC_VIZ_API core::Result<PanelLine> calibrate_progress_line(
-    std::string_view stage, std::size_t done, std::size_t total,
-    double seconds);
+core::Result<PanelLine> calibrate_progress_line(std::string_view stage,
+                                                std::size_t done,
+                                                std::size_t total,
+                                                double seconds);
 
 /// @brief The Calibration window's panel: what a Calibrate's result is
 ///        worth.
@@ -320,7 +319,7 @@ VC_VIZ_API core::Result<PanelLine> calibrate_progress_line(
 ///                              result.seconds));
 /// draw_panel_lines("calibration", lines);
 /// @endcode
-VC_VIZ_API core::Result<std::vector<PanelLine>> calibration_panel(
+core::Result<std::vector<PanelLine>> calibration_panel(
     const std::vector<std::string>& ids,
     const quality::CalibrationMetrics& metrics, int number,
     const std::string& directory, std::size_t captures, double seconds);
@@ -362,7 +361,7 @@ VC_VIZ_API core::Result<std::vector<PanelLine>> calibration_panel(
 ///                        result.depth_failure));
 /// lines.insert(lines.end(), depth.begin(), depth.end());
 /// @endcode
-VC_VIZ_API core::Result<std::vector<PanelLine>> depth_panel(
+core::Result<std::vector<PanelLine>> depth_panel(
     const std::vector<std::string>& ids, const quality::DepthSummary* depth,
     const core::Status& failure = {});
 
@@ -396,7 +395,7 @@ VC_VIZ_API core::Result<std::vector<PanelLine>> depth_panel(
 ///            world_panel(result.ids, result.reference, result.world));
 /// lines.insert(lines.end(), world.begin(), world.end());
 /// @endcode
-VC_VIZ_API core::Result<std::vector<PanelLine>> world_panel(
+core::Result<std::vector<PanelLine>> world_panel(
     const std::vector<std::string>& ids, std::size_t reference,
     const quality::ResultWorld& world);
 
@@ -415,7 +414,7 @@ VC_VIZ_API core::Result<std::vector<PanelLine>> world_panel(
 ///            calibration_notices(result.number, result.directory, world));
 /// for (const std::string& notice : notices) notify(notice);
 /// @endcode
-VC_VIZ_API core::Result<std::vector<std::string>> calibration_notices(
+core::Result<std::vector<std::string>> calibration_notices(
     int number, const std::string& directory,
     const std::vector<PanelLine>& world);
 
@@ -431,7 +430,7 @@ VC_VIZ_API core::Result<std::vector<std::string>> calibration_notices(
 ///            stage_frame_metrics(stages, rate));
 /// gfx::ui::draw_metrics_panel(metrics, "Stages");
 /// @endcode
-VC_VIZ_API core::Result<gfx::FrameMetrics> stage_frame_metrics(
+core::Result<gfx::FrameMetrics> stage_frame_metrics(
     const core::StageMetrics& stages, double fps);
 
 /// @brief Hold a stage run only on some frames -- the mosaic's `"tiles"`,
@@ -459,9 +458,8 @@ VC_VIZ_API core::Result<gfx::FrameMetrics> stage_frame_metrics(
 /// }
 /// VKC_TRY(hold_stages(ran, mosaic_shown, tiles, frame_stages));
 /// @endcode
-VC_VIZ_API core::Status hold_stages(const core::StageMetrics& ran, bool shown,
-                                    core::StageMetrics& held,
-                                    core::StageMetrics& stages);
+core::Status hold_stages(const core::StageMetrics& ran, bool shown,
+                         core::StageMetrics& held, core::StageMetrics& stages);
 
 /// @brief Draw lines as a two-column ImGui table, each value in its tone.
 /// @param id     The table's ImGui id, unique in its window.
@@ -473,13 +471,12 @@ VC_VIZ_API core::Status hold_stages(const core::StageMetrics& ran, bool shown,
 /// draw_panel_lines("camera", lines);
 /// ImGui::End();
 /// @endcode
-VC_VIZ_API void draw_panel_lines(const char* id,
-                                 const std::vector<PanelLine>& lines);
+void draw_panel_lines(const char* id, const std::vector<PanelLine>& lines);
 
 /// @brief Draw the session's panel: its lines, then the shared captures as a
 ///        matrix.
 /// @param panel  The panel.
 /// @pre An ImGui frame is active, with its context current.
-VC_VIZ_API void draw_session_panel(const SessionPanel& panel);
+void draw_session_panel(const SessionPanel& panel);
 
 }  // namespace volumetric_kit::calib::viz
