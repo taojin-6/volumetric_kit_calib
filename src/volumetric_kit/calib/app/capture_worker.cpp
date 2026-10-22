@@ -73,6 +73,11 @@ struct Job {
   CaptureRequest request;
 };
 
+// Work refused once the thread has ended.
+core::Status stopped() {
+  return core::Status::io_error("the capture worker has stopped");
+}
+
 }  // namespace
 
 core::Result<capture::SessionCamera> session_camera(
@@ -123,6 +128,7 @@ struct CaptureWorker::State {
   std::size_t drops = 0;     // drops queued and not yet resolved
   bool releasing = false;    // a snapshot replaced is being let go
   bool stopping = false;
+  bool ended = false;  // the thread has returned: no job is carried out
   std::vector<CaptureEvent> events;
   std::optional<quality::SessionSummary> summary;
   std::shared_ptr<const KeptCaptures> kept;  // published with `summary`
@@ -542,7 +548,10 @@ CaptureWorker::~CaptureWorker() {
 void CaptureWorker::run() noexcept {
   const core::Status ended = compute::guarded(
       "capture worker", [this]() -> core::Status { return state_->loop(); });
-  if (!ended.ok()) state_->resolve({}, 0, 0, {ended});
+  const std::lock_guard<std::mutex> lock(state_->mutex);
+  if (!ended.ok()) state_->errors.push_back(ended);
+  state_->ended = true;
+  state_->idle.notify_all();
 }
 
 bool CaptureWorker::full() const { return pending() >= capacity_; }
@@ -579,6 +588,7 @@ core::Result<bool> CaptureWorker::submit(CaptureRequest request) {
     const std::size_t max_kept = state_->setup.max_kept;
     {
       const std::lock_guard<std::mutex> lock(state_->mutex);
+      if (state_->ended) return stopped();
       const std::size_t kept =
           state_->kept != nullptr ? state_->kept->captures.size() : 0;
       if (kept + state_->captures >= max_kept) {
@@ -599,6 +609,7 @@ core::Status CaptureWorker::drop_last() {
   return compute::guarded("CaptureWorker::drop_last", [&]() -> core::Status {
     {
       const std::lock_guard<std::mutex> lock(state_->mutex);
+      if (state_->ended) return stopped();
       state_->jobs.push_back({true, {}});
       ++state_->drops;
     }
@@ -649,8 +660,9 @@ std::vector<core::Status> CaptureWorker::take_errors() {
 void CaptureWorker::flush() {
   std::unique_lock<std::mutex> lock(state_->mutex);
   state_->idle.wait(lock, [&] {
-    return state_->jobs.empty() && !state_->busy && state_->captures == 0 &&
-           state_->drops == 0 && !state_->releasing;
+    return state_->ended ||
+           (state_->jobs.empty() && !state_->busy && state_->captures == 0 &&
+            state_->drops == 0 && !state_->releasing);
   });
 }
 

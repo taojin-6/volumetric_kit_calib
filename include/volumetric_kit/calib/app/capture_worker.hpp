@@ -202,7 +202,9 @@ struct CaptureEvent {
 ///        resolution and queues it on the session writer.
 ///
 /// Every member may be called from any thread. Destroying the worker first
-/// carries out every capture and drop queued, then flushes the writer.
+/// carries out every capture and drop queued, then flushes the writer. A
+/// failure that ends the thread is posted (@ref take_errors); from then on
+/// new work is refused, and what was queued is never carried out.
 ///
 /// @code
 /// VKC_ASSIGN(std::unique_ptr<CaptureWorker> captures,
@@ -243,15 +245,16 @@ class VC_APP_API CaptureWorker final : public CaptureSink {
   ///         captures kept and pending add up to `max_kept` (a drop makes
   ///         room); `InvalidArgument` for a request with a part per camera
   ///         missing or extra, a part's luma not its size, or a part without
-  ///         a depth unit or in another unit than the first part; or
-  ///         `OutOfMemory`.
+  ///         a depth unit or in another unit than the first part; `IoError`
+  ///         once the thread has ended; or `OutOfMemory`.
   core::Result<bool> submit(CaptureRequest request) override;
 
   /// @brief Queue a drop of the latest capture requested before it that no
   ///        drop took (`SessionWriter::drop_last`): the capture stays on
   ///        disk, marked dropped. Its outcome is an event: `NotFound` before
   ///        any capture was written.
-  /// @return OK once queued; or `OutOfMemory`.
+  /// @return OK once queued; `IoError` once the thread has ended; or
+  ///         `OutOfMemory`.
   core::Status drop_last();
 
   /// @brief Take the outcome of every capture and drop since the last call.
@@ -296,7 +299,8 @@ class VC_APP_API CaptureWorker final : public CaptureSink {
   std::vector<core::Status> take_errors();
 
   /// @brief Wait until nothing is queued, being detected, or being written,
-  ///        and the worker holds no snapshot but its latest (@ref kept).
+  ///        and the worker holds no snapshot but its latest (@ref kept); or
+  ///        until the thread has ended.
   void flush();
 
  private:

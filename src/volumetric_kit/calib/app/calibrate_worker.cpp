@@ -527,6 +527,7 @@ struct CalibrateWorker::State {
   bool busy = false;  // a run requested and not yet ended
   bool cancelled = false;
   bool stopping = false;
+  bool ended = false;    // the thread has returned: no run is started
   CalibrateProgress at;  // its seconds counted when read
   Clock::time_point began;
   ResultPtr result;  // newest, not yet taken
@@ -638,10 +639,10 @@ CalibrateWorker::~CalibrateWorker() { stop(); }
 void CalibrateWorker::run() noexcept {
   const core::Status ended = compute::guarded(
       "Calibrate", [this]() -> core::Status { return state_->loop(); });
-  if (ended.ok()) return;
   const std::lock_guard<std::mutex> lock(state_->mutex);
-  state_->errors.push_back(ended);
+  if (!ended.ok()) state_->errors.push_back(ended);
   state_->busy = false;
+  state_->ended = true;
 }
 
 core::Result<bool> CalibrateWorker::request(
@@ -655,6 +656,9 @@ core::Result<bool> CalibrateWorker::request(
         }
         {
           const std::lock_guard<std::mutex> lock(state_->mutex);
+          if (state_->ended) {
+            return core::Status::io_error("the Calibrate worker has stopped");
+          }
           if (state_->busy || state_->stopping) return false;
           state_->pending = std::move(kept);
           state_->pressed = pressed;

@@ -16,6 +16,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   disconnects fails every poll, so the live view ends, saying why once. The
   "the sets go on without it" message, which that driver never let run, is
   gone, and the tests' fake camera fails its drains once disconnected.
+- `CaptureWorker` and `CalibrateWorker` refuse new work with `IoError` once
+  their thread has ended, and `CaptureWorker::flush` returns, rather than
+  queueing work no thread carries out. `CalibrateWorker::request` after
+  `stop` is now that `IoError`, no longer `false`.
 - calib_rig's Stages panel no longer flickers: its `tiles` row, recorded
   only as a live set arrives, came and went with the total as the window
   redrew between sets. `viz::hold_stages` holds the last recording's time on

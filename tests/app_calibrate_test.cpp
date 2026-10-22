@@ -867,8 +867,8 @@ TEST(CalibrateWorker, WritingIsNeitherCancelledNorStopped) {
 }
 
 // stop() cancels a run at its next re-solve, short of the last, and returns
-// once its thread has; the worker then takes no request. The destructor
-// stops it too, and a worker given none goes at once.
+// once its thread has; the worker then refuses every request, its thread
+// ended. The destructor stops it too, and a worker given none goes at once.
 TEST(CalibrateWorker, StopsWithARunUnderWay) {
   const ScratchDir session;
   const test::Scene scene = test::make_kept_scene(4, 60);
@@ -897,7 +897,11 @@ TEST(CalibrateWorker, StopsWithARunUnderWay) {
     EXPECT_EQ(ended->total, 60u);
     EXPECT_LT(ended->done, ended->total);
     EXPECT_FALSE(worker->busy());
-    EXPECT_FALSE(*worker->request(kept));
+    const core::Result<bool> after = worker->request(kept);
+    ASSERT_FALSE(after.ok());
+    EXPECT_EQ(after.status().domain(), Code::IoError);
+    EXPECT_EQ(after.status().message(), "the Calibrate worker has stopped");
+    EXPECT_FALSE(worker->busy());
     EXPECT_EQ(worker->take_result(), nullptr);
     EXPECT_TRUE(worker->take_errors().empty());
     worker->stop();  // idempotent
