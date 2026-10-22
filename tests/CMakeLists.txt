@@ -228,7 +228,10 @@ endif()
 #
 # Those configures, and the ones below, take the fetched sources this build used
 # (FETCHCONTENT_SOURCE_DIR_<NAME>), so they need no network, and the OpenCV it
-# found.
+# found. They check calib's build, not its code, so they carry the label
+# `package`, which the default local run leaves out and CI runs on one leg, and
+# a cost that starts them first.
+set(_vc_package_properties LABELS package COST 60)
 include(FetchContent)
 FetchContent_GetProperties(volumetric_kit_core)
 FetchContent_GetProperties(volumetric_kit_recon)
@@ -251,6 +254,8 @@ function(vc_add_core_requirement_test name core_version)
       -DCORE_MODULES=${volumetric_kit_core_SOURCE_DIR}/cmake ${ARGN}
       ${_vc_fetched_sources} -P
       ${CMAKE_CURRENT_SOURCE_DIR}/core_requirement/configure.cmake)
+  set_tests_properties(core_requirement.${name}
+                       PROPERTIES ${_vc_package_properties})
 endfunction()
 vc_add_core_requirement_test(
   before_0_1_0 none "-DEXPECT_ERROR=Unknown CMake command \"vkc_require_core\"")
@@ -274,6 +279,8 @@ if(VC_WITH_RIG)
         -DCORE_SOURCE=${volumetric_kit_core_SOURCE_DIR} ${_vc_fetched_sources}
         -DCORE_VULKAN=${core_vulkan} "-DEXPECT_ERROR=${expect}" -P
         ${CMAKE_CURRENT_SOURCE_DIR}/rig_requirement/configure.cmake)
+    set_tests_properties(rig_requirement.${name}
+                         PROPERTIES ${_vc_package_properties})
   endfunction()
   vc_add_rig_requirement_test(
     core_without_vulkan OFF
@@ -320,6 +327,8 @@ if(VC_WITH_RIG)
           -DGLFW_DIR=${glfw3_DIR} -DOPENCV_DIR=${OpenCV_DIR}
           -DORBBEC_DIR=${OrbbecSDK_DIR} -DBUILD_APPS=${build_apps} ${ARGN} -P
           ${CMAKE_CURRENT_SOURCE_DIR}/app_requirement/configure.cmake)
+      set_tests_properties(app_requirement.${name}
+                           PROPERTIES ${_vc_package_properties})
     endfunction()
     vc_add_app_requirement_test(not_asked OFF)
     vc_add_app_requirement_test(
@@ -339,3 +348,4 @@ add_test(
     -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/no_vulkan
     -DCORE_SOURCE=${volumetric_kit_core_SOURCE_DIR} ${_vc_fetched_sources} -P
     ${CMAKE_CURRENT_SOURCE_DIR}/no_vulkan/configure.cmake)
+set_tests_properties(no_vulkan.brain PROPERTIES ${_vc_package_properties})

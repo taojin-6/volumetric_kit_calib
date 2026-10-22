@@ -15,7 +15,9 @@
 # CORE_SOURCE, RECON_SOURCE and JSON_SOURCE are the sources the calling build
 # fetched, so this needs no network; GENERATOR, CXX_COMPILER, MAKE_PROGRAM,
 # GLM_DIR and OPENCV_DIR repeat the calling build's settings. The build is
-# Release, so a multi-config generator builds that.
+# Release, so a multi-config generator builds that, and runs at the caller's
+# CMAKE_BUILD_PARALLEL_LEVEL, or on every core where none is set (a bare
+# --parallel would not bound make's jobs).
 foreach(_var CALIB_SOURCE BINARY_DIR CORE_SOURCE RECON_SOURCE JSON_SOURCE
              GENERATOR)
   if(NOT DEFINED ${_var})
@@ -74,4 +76,8 @@ _vc_cmake_refuses(
 
 _vc_cmake("Configuring calib with no Vulkan" ${_common} -B
           "${BINARY_DIR}/calib")
+if(NOT DEFINED ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+  cmake_host_system_information(RESULT _cores QUERY NUMBER_OF_LOGICAL_CORES)
+  set(ENV{CMAKE_BUILD_PARALLEL_LEVEL} ${_cores})
+endif()
 _vc_cmake("Building calib" --build "${BINARY_DIR}/calib" --config Release)

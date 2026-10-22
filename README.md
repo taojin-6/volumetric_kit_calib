@@ -171,10 +171,10 @@ calib_root="$(git rev-parse --show-toplevel)"
 cmake -S "$calib_root" -B "$calib_root/build" -DCMAKE_BUILD_TYPE=Release \
   -DVC_WITH_RIG=ON  # leave out without the Vulkan SDK
 cmake --build "$calib_root/build" --parallel
-ctest --test-dir "$calib_root/build" --output-on-failure
 ```
 
-Run the demo:
+Run the tests as [AGENTS.md](AGENTS.md#build-and-validation) does. Then run
+the demo:
 
 ```bash
 ./build/examples/example_01_project_point --config config/project_point.json

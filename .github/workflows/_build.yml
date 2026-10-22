@@ -240,10 +240,16 @@ jobs:
           VKC_REQUIRE_VULKAN_DEVICE: ${{ inputs.rig && '1' || '' }}
           VKC_TEST_VALIDATION: ${{ inputs.rig && '1' || '' }}
         # Exported here, as macOS strips DYLD_* from a step's env when it
-        # starts the system's bash.
+        # starts the system's bash. The `package` tests, nested configures of
+        # calib (tests/CMakeLists.txt), run on the rig leg alone, the one leg
+        # that registers them all.
         run: |
           if [ -n "${VC_LAYER_LIBRARY_PATH:-}" ]; then
             export DYLD_FALLBACK_LIBRARY_PATH="${VC_LAYER_LIBRARY_PATH}"
           fi
-          ctest --test-dir build --output-on-failure \
+          select=(-LE package)
+          if [ "${{ inputs.rig }}" = "true" ]; then
+            select=()
+          fi
+          ctest --test-dir build --output-on-failure "${select[@]}" \
             --parallel "${CTEST_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"

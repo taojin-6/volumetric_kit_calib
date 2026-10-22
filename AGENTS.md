@@ -134,10 +134,15 @@ calib_root="$(git rev-parse --show-toplevel)"
 cmake -S "$calib_root" -B "$calib_root/build" -DCMAKE_BUILD_TYPE=Release \
   -DVC_BUILD_TESTS=ON -DVC_WITH_RIG=ON
 cmake --build "$calib_root/build" --parallel
-ctest --test-dir "$calib_root/build" --output-on-failure
+ctest --test-dir "$calib_root/build" --output-on-failure \
+  -j "$(getconf _NPROCESSORS_ONLN)" -LE "slow|package"
 pre-commit run --all-files --show-diff-on-failure
 git -C "$calib_root" diff --check
 ```
+
+That `ctest` is the default suite. It leaves out the labels `slow`, the full
+statistical sweeps, and `package`, the nested configures of calib's build;
+`-L slow` and `-L package` run them, as CI does.
 
 - Use the pinned formatting tools in `.pre-commit-config.yaml`; CI runs the
   same hooks. Set the build type explicitly and report it with measurements.
