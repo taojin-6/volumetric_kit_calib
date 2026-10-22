@@ -15,7 +15,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `LiveWorker` documents what recon's Orbbec driver does: a camera that
   disconnects fails every poll, so the live view ends, saying why once. The
   "the sets go on without it" message, which that driver never let run, is
-  gone, and the tests' fake camera fails its drains once disconnected.
+  gone.
 - `CaptureWorker` and `CalibrateWorker` refuse new work with `IoError` once
   their thread has ended, and `CaptureWorker::flush` returns, rather than
   queueing work no thread carries out. `CalibrateWorker::request` after
@@ -130,10 +130,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   views while it leaves `min_cameras` cameras, and a size-free square
   fitted in OpenCV's marker frame), as a `WorldOrigin`: a `TagWorld` (the
   frame, corners, edges against the print's, residuals per view, each
-  camera's height) or a `TagMiss` with its reason (`TagFrameOptions`). `solve::anchor_rig` moves a solution's outputs,
-  never the solution, into that world as an `AnchoredRig`. `compute::finite`,
-  whether a transform's numbers are finite, which the solve and the checks
-  share.
+  camera's height) or a `TagMiss` with its reason (`TagFrameOptions`).
+  `solve::anchor_rig` moves a solution's outputs, never the solution, into
+  that world as an `AnchoredRig`. `compute::finite`, whether a transform's
+  numbers are finite, which the solve and the checks share.
 - `CaptureWorker::kept`, the captures kept for Calibrate (DECISIONS.md,
   2026-10-13): an immutable `KeptCaptures` snapshot of every capture written
   and not dropped, each a `KeptCapture` of every camera's full detection,
