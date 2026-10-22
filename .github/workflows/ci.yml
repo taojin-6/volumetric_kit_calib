@@ -30,9 +30,11 @@ jobs:
       # Homebrew OpenCV 5, Vulkan SDK, FFmpeg and GLFW, at the levels its
       # runners' .env sets: a hosted macOS job spends 2-3 minutes installing
       # those formulae and tests on 3 cores (DECISIONS.md, 2026-10-16). Every
-      # leg builds every OpenCV tier. The rig leg is static: shared libraries
-      # there would build core, recon and gfx shared too, which none of them
-      # is.
+      # leg builds every OpenCV tier. The rig legs are static: shared
+      # libraries there would build core, recon and gfx shared too, which none
+      # of them is. The first macOS leg runs the tests of calib's threads under
+      # ThreadSanitizer, in RelWithDebInfo, as Debug would make them minutes
+      # long.
       #
       # `runner: ''` moves a macOS leg back to a hosted runner, which then
       # installs its formulae itself.
@@ -42,10 +44,12 @@ jobs:
             build_types: '["Release"]'
           - os: ubuntu-26.04
             build_types: '["Release"]'
+            shared: true
           - os: macos-26
             runner: mac
-            build_types: '["Debug"]'
-            shared: true
+            build_types: '["RelWithDebInfo"]'
+            rig: true
+            tsan: true
           - os: macos-26
             runner: mac
             build_types: '["Release"]'
@@ -57,6 +61,7 @@ jobs:
       build_types: ${{ matrix.build_types }}
       shared: ${{ matrix.shared || false }}
       rig: ${{ matrix.rig || false }}
+      tsan: ${{ matrix.tsan || false }}
 
   lint:
     uses: ./.github/workflows/lint.yml

@@ -48,6 +48,14 @@ on:
         required: false
         type: boolean
         default: false
+      tsan:
+        description: >-
+          With `rig`: build under ThreadSanitizer (VC_SANITIZE=thread) only
+          the tests of calib's threads, the session writer's and the app's
+          workers', and run those.
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -190,9 +198,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: build/_deps
-          key: deps-${{ inputs.os }}-${{ matrix.build_type }}-so${{ inputs.shared }}-rig${{ inputs.rig }}-brew${{ steps.brew.outputs.key || 'none' }}-ws${{ steps.ws.outputs.hash }}-${{ hashFiles('third_party/CMakeLists.txt', 'CMakeLists.txt') }}
+          key: deps-${{ inputs.os }}-${{ matrix.build_type }}-so${{ inputs.shared }}-rig${{ inputs.rig }}-tsan${{ inputs.tsan }}-brew${{ steps.brew.outputs.key || 'none' }}-ws${{ steps.ws.outputs.hash }}-${{ hashFiles('third_party/CMakeLists.txt', 'CMakeLists.txt') }}
           restore-keys: |
-            deps-${{ inputs.os }}-${{ matrix.build_type }}-so${{ inputs.shared }}-rig${{ inputs.rig }}-brew${{ steps.brew.outputs.key || 'none' }}-ws${{ steps.ws.outputs.hash }}-
+            deps-${{ inputs.os }}-${{ matrix.build_type }}-so${{ inputs.shared }}-rig${{ inputs.rig }}-tsan${{ inputs.tsan }}-brew${{ steps.brew.outputs.key || 'none' }}-ws${{ steps.ws.outputs.hash }}-
 
       - name: Configure
         # Retry to ride out transient FetchContent clone failures.
@@ -202,6 +210,9 @@ jobs:
                  -DVC_WITH_RIG=${{ inputs.rig && 'ON' || 'OFF' }})
           if [ "${{ inputs.rig }}" = "true" ]; then
             flags+=(-DVR_WITH_ORBBEC=ON -DVR_WITH_FFMPEG=ON)
+          fi
+          if [ "${{ inputs.tsan }}" = "true" ]; then
+            flags+=(-DVC_SANITIZE=thread)
           fi
           ok=0
           for attempt in 1 2 3; do
@@ -223,9 +234,18 @@ jobs:
       # They are passed explicitly: a bare `--parallel` runs make with no job
       # limit, ignoring CMAKE_BUILD_PARALLEL_LEVEL. calib_rig needs GLFW and
       # the Orbbec tier; a rig build without it would skip the app's tests
-      # silently.
+      # silently. Under ThreadSanitizer only the threaded tests' targets are
+      # built, the Test step's.
       - name: Build
         run: |
+          if [ "${{ inputs.tsan }}" = "true" ]; then
+            cmake --build build \
+              --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}" \
+              --target vc_session_writer_test vc_app_live_test \
+                vc_app_live_view_test vc_app_cloud_test vc_app_capture_test \
+                vc_app_calibrate_test vc_app_calibrate_depth_test
+            exit 0
+          fi
           cmake --build build \
             --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
           if [ "${{ inputs.rig }}" = "true" ]; then
@@ -239,16 +259,27 @@ jobs:
           # any error the layer reports.
           VKC_REQUIRE_VULKAN_DEVICE: ${{ inputs.rig && '1' || '' }}
           VKC_TEST_VALIDATION: ${{ inputs.rig && '1' || '' }}
+          TSAN_OPTIONS: ${{ inputs.tsan && 'halt_on_error=1' || '' }}
         # Exported here, as macOS strips DYLD_* from a step's env when it
         # starts the system's bash. The `package` tests, nested configures of
         # calib (tests/CMakeLists.txt), run on the rig leg alone, the one leg
-        # that registers them all.
+        # that registers them all. Under ThreadSanitizer, the tests of the
+        # session writer's and the app's threads run, but not the solve's and
+        # the depth checks' numerics, which run on the test's own thread and
+        # take minutes there.
         run: |
           if [ -n "${VC_LAYER_LIBRARY_PATH:-}" ]; then
             export DYLD_FALLBACK_LIBRARY_PATH="${VC_LAYER_LIBRARY_PATH}"
           fi
           select=(-LE package)
-          if [ "${{ inputs.rig }}" = "true" ]; then
+          if [ "${{ inputs.tsan }}" = "true" ]; then
+            threads='^(SessionWriter|AppLive[A-Za-z]*|AppCloud[A-Za-z]*|AppCapture'
+            threads+='|CalibrateWorker|CalibrateDepthBesideTheCloud)\.'
+            threads+='|^CalibrateDepthTest\.(AStopBetweenCapturesStopsTheRun'
+            threads+='|LetsEachCapturesFramesGo'
+            threads+='|AFailureOfTheChecksIsPostedAndTheResultsWritten)$'
+            select=(--no-tests=error -R "${threads}")
+          elif [ "${{ inputs.rig }}" = "true" ]; then
             select=()
           fi
           ctest --test-dir build --output-on-failure "${select[@]}" \

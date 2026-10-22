@@ -279,9 +279,11 @@ of them did.
   No calib job needs the Linux GPU hosts: none draws on an NVIDIA GPU. The
   hosted `required` gate always reports; while the Mac is offline its legs
   queue, and `runner: ''` moves a leg back to a hosted runner.
-- **Two macOS legs:** Debug with shared libraries, and Release with the rig
-  tiers, whose GPU tests run on the Mac's GPU under the validation layer.
-  Ubuntu 24.04 and 26.04 build Release; Linux Debug is the sanitizer job's.
+- **Two macOS legs:** the tests of calib's threads -- the session writer's
+  and the app's workers' -- under ThreadSanitizer in RelWithDebInfo, and
+  Release with the rig tiers, whose GPU tests run on the Mac's GPU under the
+  validation layer (amended 2026-10-22). Ubuntu 24.04 and 26.04 build Release,
+  26.04 with shared libraries; Linux Debug is the sanitizer job's.
   Every leg builds the OpenCV tiers (amended 2026-10-17): the Mac's Homebrew
   has OpenCV 5, and the Linux jobs restore their cached OpenCV 5.
 - **The Mac's Homebrew is shared**, so a job there installs nothing and fails

@@ -6,7 +6,9 @@ include(GoogleTest)
 # vc_<name>_test from <name>_test.cpp, linking the given targets. A case that
 # hangs fails after 5 minutes rather than holding a CI job to its limit. Under
 # the sanitizers, LeakSanitizer reads lsan.supp, which spares OpenCV's own leak
-# when an out-of-memory test fails an allocation inside it.
+# when an out-of-memory test fails an allocation inside it. Under
+# ThreadSanitizer, OpenCV runs each loop on its caller's thread
+# (support/opencv_sequential.cpp).
 set(_vc_test_properties TIMEOUT 300)
 if(VC_SANITIZE)
   list(APPEND _vc_test_properties ENVIRONMENT
@@ -15,6 +17,10 @@ endif()
 function(vc_add_test name)
   add_executable(vc_${name}_test ${name}_test.cpp)
   target_link_libraries(vc_${name}_test PRIVATE ${ARGN} GTest::gtest_main)
+  if("thread" IN_LIST VC_SANITIZE)
+    target_sources(vc_${name}_test PRIVATE support/opencv_sequential.cpp)
+    target_link_libraries(vc_${name}_test PRIVATE opencv_core)
+  endif()
   vc_target_warnings(vc_${name}_test)
   gtest_discover_tests(vc_${name}_test PROPERTIES ${_vc_test_properties})
 endfunction()
