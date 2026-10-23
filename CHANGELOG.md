@@ -240,9 +240,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `BoardEditor` and `draw_board_editor` (its fields through `board_fields`
   and `apply_fields`) edit the board, checked as the detector's `Board`
   takes it, until the first capture locks it. `VC_WITH_RIG` fetches
-  `volumetric_kit_gfx`, pinned at `76d0655` (main after #136, #137, with the
-  overlay scissor repair, #138, `DepthCloudPipeline`, #141, a minimized
-  window's framebuffer size of 0 x 0, and #142, `categorical_rgba8`).
+  `volumetric_kit_gfx` (#136; #137, with the overlay scissor repair; #138,
+  `DepthCloudPipeline`; #141, a minimized window's framebuffer size of
+  0 x 0; and #142, `categorical_rgba8`).
 - `marker_count`, the markers a board carries, in `calib/core/target.hpp`.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds
@@ -351,12 +351,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   test every OpenCV tier on it.
 - `initialise` places the board of a capture whose views are all ambiguous,
   from those views, so the adjustment takes them.
-- recon is pinned at `ca4b94c` (recon main, with its #228; its #245, whose
-  exported `pinhole.glsl` the depth tier's kernels include; its #246, whose
+- calib takes recon's #228; its #245, whose exported `pinhole.glsl` the depth
+  tier's kernels include; its #246, whose
   `GpuFramePrepConfig::depth_queue_families` shares a prepared frame's depth
   with the renderer's queue family; and its #254, whose
-  `WorldFrame::apriltag` names a tag world in the calibration file), and
-  CI's Orbbec SDK action with it. `cv_pose` now converts through recon's
+  `WorldFrame::apriltag` names a tag world in the calibration file, with CI's
+  Orbbec SDK action at the same pin. `cv_pose` now converts through recon's
   `rodrigues_from_matrix`, accurate where `cv::Rodrigues` returns zero (below
   about 1e-5 rad).
 - calib requires `volumetric_kit_core` 0.6.1 or newer (was 0.1.0), with its
