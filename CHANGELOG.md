@@ -287,10 +287,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   build requires core 0.18.0 or newer (`VC_CORE_MIN_VERSION`, from 0.6.1),
   the pinned gfx's floor; `calib_app` requires its config tier at that
   floor. calib_rig now presents FIFO, paced to the display (gfx #150's
-  default), where it presented MAILBOX, and its panels show ImGui's colours
-  as authored on the `_SRGB` swapchain (gfx #144), where they drew washed
-  out. It builds its overlay's config with `gfx::ui::overlay_config`. Tests:
-  `core_requirement.*`.
+  default), where it presented MAILBOX, and its panels and tile marks show
+  their colours as authored on the `_SRGB` swapchain (gfx #144), where they
+  drew washed out. It builds its overlay's config with
+  `gfx::ui::overlay_config`. Tests: `core_requirement.*`.
 - `quality::leave_one_out` and `principal_point_ab` re-solve only the
   corners the solution kept, in one solve each, with no outlier rounds or
   uncertainty step (DECISIONS.md, 2026-10-16, amended 2026-10-22): when the
