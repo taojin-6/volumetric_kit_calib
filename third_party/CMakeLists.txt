@@ -109,9 +109,10 @@ endif()
 # examples and -Werror stay off in a subproject.
 #
 # The pin is gfx main at #152's merge (f147e00), on core 0.19.0. calib takes
-# #142's categorical_rgba8, the cameras' default tints, #141's 0 x 0 framebuffer
-# while iconified, #138's DepthCloudPipeline and the region writes, and the
-# marks over a region and the fractional-scale scissor repair of #136 and #137.
+# #145's overlay_config for the swapchain's ImGui overlay, #142's
+# categorical_rgba8, the cameras' default tints, #141's 0 x 0 framebuffer while
+# iconified, #138's DepthCloudPipeline and the region writes, and the marks over
+# a region and the fractional-scale scissor repair of #136 and #137.
 if(VC_WITH_RIG)
   FetchContent_Declare(
     volumetric_kit_gfx
