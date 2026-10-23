@@ -77,9 +77,9 @@ locked decision above.)
 The family's packages are not installable (the owner's decision): an
 application fetches calib by commit, as the player and the iOS app fetch
 their siblings, and none finds an installed calib. So calib has no install
-rules, package config or `VC_INSTALL`, and turns the core's install rules off
-(`VKC_INSTALL`) and leaves recon's off. The brain's freedom from Vulkan is
-checked in a build of its own, configured and built in tree
+rules, package config or `VC_INSTALL`, and neither have the core, recon and
+gfx it pins. The brain's freedom from Vulkan is checked in a build of its
+own, configured and built in tree
 (`no_vulkan.brain`), not through an install. `calib_viz` and `calib_app`,
 which serve calib_rig and the tests alone, are static libraries with no
 export macros.
