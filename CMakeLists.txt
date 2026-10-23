@@ -62,7 +62,7 @@ include(vc_sanitizers)
 # --- Dependencies + library --------------------------------------------------
 # The oldest volumetric_kit_core calib builds with (DECISIONS.md, 2026-10-13),
 # checked in the core that arrives (third_party/).
-set(VC_CORE_MIN_VERSION 0.6.1)
+set(VC_CORE_MIN_VERSION 0.18.0)
 # OpenCV 5, a prerequisite of the compute tier and those built on it
 # (DECISIONS.md, 2026-10-17): Homebrew's on macOS, tools/install-opencv.sh's on
 # Linux (README, "Prerequisites"). Found here so its imported targets reach
