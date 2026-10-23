@@ -77,9 +77,9 @@ locked decision above.)
 The family's packages are not installable (the owner's decision): an
 application fetches calib by commit, as the player and the iOS app fetch
 their siblings, and none finds an installed calib. So calib has no install
-rules, package config or `VC_INSTALL`, and turns the core's install rules off
-(`VKC_INSTALL`) and leaves recon's off. The brain's freedom from Vulkan is
-checked in a build of its own, configured and built in tree
+rules, package config or `VC_INSTALL`, and neither have the core, recon and
+gfx it pins. The brain's freedom from Vulkan is checked in a build of its
+own, configured and built in tree
 (`no_vulkan.brain`), not through an install. `calib_viz` and `calib_app`,
 which serve calib_rig and the tests alone, are static libraries with no
 export macros.
@@ -611,8 +611,9 @@ The `capture` tier writes the rig application's calibration sessions
 - **How it builds.** `VC_WITH_RIG`, OFF by default, fetches all of recon and
   turns on the core's vulkan tier, so it needs the Vulkan SDK. gfx comes with
   the `viz` tier, its first user.
-- **Core 0.6.1** is the oldest calib builds with (`VC_CORE_MIN_VERSION`),
-  the floor its configure checks.
+- **Core 0.18.0** is the oldest calib builds with (`VC_CORE_MIN_VERSION`),
+  the floor its configure checks: the pinned gfx's floor, which the `viz`
+  tier builds on, so one floor covers every build.
 
 ## 2026-10-12 — OpenCV, behind calib's types
 

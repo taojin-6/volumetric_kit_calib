@@ -941,13 +941,10 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   const InputBinding binding(window, input);
   glfwSetKeyCallback(window, on_key);
   glfwSetScrollCallback(window, on_scroll);
-  gfx::ui::ImGuiOverlayConfig overlay_config;
-  overlay_config.layout = app.swapchain().layout();
-  overlay_config.min_image_count = app.swapchain().image_count();
-  overlay_config.image_count = app.swapchain().image_count();
-  VKC_ASSIGN(gfx::ui::ImGuiOverlay overlay,
-             gfx::ui::ImGuiOverlay::create(app.device(), app.instance_handle(),
-                                           overlay_config));
+  VKC_ASSIGN(
+      gfx::ui::ImGuiOverlay overlay,
+      gfx::ui::ImGuiOverlay::create(app.device(), app.instance_handle(),
+                                    gfx::ui::overlay_config(app.swapchain())));
   ImGui::SetCurrentContext(overlay.context());
   VKC_ASSIGN(std::unique_ptr<glfw::ImGuiGlfw> platform,
              glfw::ImGuiGlfw::create(window, overlay.context()));

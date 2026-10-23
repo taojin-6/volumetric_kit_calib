@@ -12,8 +12,9 @@
 # is.
 
 # calib_rig loads its scenario as config::Application::CalibRig, which the core
-# has from 0.11.0, in its config tier (third_party/CMakeLists.txt turns it on).
-vkc_require_core(0.11.0 CONFIG)
+# has from 0.11.0, below calib's floor, in its config tier
+# (third_party/CMakeLists.txt turns it on).
+vkc_require_core(${VC_CORE_MIN_VERSION} CONFIG)
 
 # What a session records it was captured with (capture::Software): calib's and
 # each fetched sibling's commit, read from its checkout at every build

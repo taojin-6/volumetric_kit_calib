@@ -31,17 +31,15 @@ endif()
 # with. Work on both checkouts at once with
 # -DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<core checkout>.
 #
-# The core's tests and -Werror stay off in a subproject, and calib installs
-# nothing, so the core's install rules are off too. The brain needs only the
-# base tier, so it builds with no Vulkan SDK: calib turns the vulkan tier on
+# The core's tests and -Werror stay off in a subproject. The brain needs only
+# the base tier, so it builds with no Vulkan SDK: calib turns the vulkan tier on
 # only with VC_WITH_RIG, for recon's sensor tier, and otherwise leaves
 # VKC_WITH_VULKAN unset rather than OFF, so an application that turns the tier
 # on for recon or gfx keeps it. Only the examples and calib_rig opt into
 # core_config.
 #
-# The pin is core main at 0.11.0, for calib_rig's settings
-# (config::Application::CalibRig).
-set(VKC_INSTALL OFF)
+# The pin is core 0.19.0 (ff44a98, core #49's merge), as is the Homebrew key
+# action in .github/workflows/_build.yml.
 if(VC_WITH_RIG)
   set(VKC_WITH_VULKAN ON)
 endif()
@@ -53,7 +51,7 @@ endif()
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG a78f5f3262de20f30b07ed8815c4f2386bfd125e)
+  GIT_TAG ff44a981055d505590e295ff6a943bb1b6e96109)
 FetchContent_MakeAvailable(volumetric_kit_core)
 # The set() above is lost when the application made the core available first.
 if(VC_WITH_RIG)
@@ -71,20 +69,20 @@ endif()
 # (DECISIONS.md, "The camera model is recon's"). VR_CAMERA_ONLY builds
 # recon_camera alone, over the core's base tier and GLM, so calib still builds
 # with no Vulkan SDK. Pinned by commit, never main, and declared after the core,
-# so recon's own core pin yields to calib's. recon's tests, examples, install
-# and -Werror stay off in a subproject. It leaves an application's
-# VR_CAMERA_ONLY as set, so an application that turns it off keeps the rest of
-# recon.
+# so recon's own core pin yields to calib's. recon's tests, examples and -Werror
+# stay off in a subproject. It leaves an application's VR_CAMERA_ONLY as set, so
+# an application that turns it off keeps the rest of recon.
 #
-# The pin is recon main at PR #254 (ca4b94c): its calibration file names a world
-# at a floor AprilTag (WorldFrame::apriltag), which Calibrate's results write;
-# with PR #246's GpuFramePrep, which shares a prepared frame's depth with
-# another queue family (depth_queue_families) for the 3D view, and PR #245's
-# pinhole.glsl under VR_SHADER_INCLUDE_DIR for calib_depth's kernels.
+# The pin is recon main at #271's merge (9fd8790), on core 0.19.0. calib takes
+# #254's calibration file, which names a world at a floor AprilTag
+# (WorldFrame::apriltag), as Calibrate's results write it; #246's GpuFramePrep,
+# which shares a prepared frame's depth with another queue family
+# (depth_queue_families) for the 3D view; and #245's pinhole.glsl under
+# VR_SHADER_INCLUDE_DIR for calib_depth's kernels.
 FetchContent_Declare(
   volumetric_kit_recon
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_recon.git
-  GIT_TAG ca4b94c77a167f6176d83ebbf2dc1a11d2cae475)
+  GIT_TAG 9fd879052e97ac315805d4f42dd231f4457b5112)
 # VC_WITH_RIG takes all of recon: the capture tier links its sensor and io
 # tiers. An application's own VR_WITH_ORBBEC / VR_WITH_FFMPEG still apply.
 if(VC_WITH_RIG)
@@ -108,17 +106,18 @@ endif()
 # (ImageView2D, OrbitCamera) and the 3D view (DepthCloudPipeline's points from
 # depth buffers, PrimitivePipeline's lines). Pinned by commit, never main, and
 # declared after the core, so gfx's own core pin yields to calib's. gfx's tests,
-# examples, install and -Werror stay off in a subproject.
+# examples and -Werror stay off in a subproject.
 #
-# The pin is gfx main after PR #142 (76d0655): categorical_rgba8, the cameras'
-# default tints, beside #141's 0 x 0 framebuffer while iconified, #138's
-# DepthCloudPipeline and the region writes, marks over a region and the
-# fractional-scale scissor repair of PRs #136 and #137.
+# The pin is gfx main at #152's merge (f147e00), on core 0.19.0. calib takes
+# #145's overlay_config for the swapchain's ImGui overlay, #142's
+# categorical_rgba8, the cameras' default tints, #141's 0 x 0 framebuffer while
+# iconified, #138's DepthCloudPipeline and the region writes, and the marks over
+# a region and the fractional-scale scissor repair of #136 and #137.
 if(VC_WITH_RIG)
   FetchContent_Declare(
     volumetric_kit_gfx
     GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_gfx.git
-    GIT_TAG 76d0655ab04672c9971e0681adf8d937aa52eca0)
+    GIT_TAG f147e00e7fb45382da8874198684656496f09b7c)
   FetchContent_MakeAvailable(volumetric_kit_gfx)
 endif()
 

@@ -240,9 +240,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `BoardEditor` and `draw_board_editor` (its fields through `board_fields`
   and `apply_fields`) edit the board, checked as the detector's `Board`
   takes it, until the first capture locks it. `VC_WITH_RIG` fetches
-  `volumetric_kit_gfx`, pinned at `76d0655` (main after #136, #137, with the
-  overlay scissor repair, #138, `DepthCloudPipeline`, #141, a minimized
-  window's framebuffer size of 0 x 0, and #142, `categorical_rgba8`).
+  `volumetric_kit_gfx` (#136; #137, with the overlay scissor repair; #138,
+  `DepthCloudPipeline`; #141, a minimized window's framebuffer size of
+  0 x 0; and #142, `categorical_rgba8`).
 - `marker_count`, the markers a board carries, in `calib/core/target.hpp`.
 - `solve::bundle_adjust`, the rig's bundle adjustment on OpenCV's
   `cv::LevMarq` from `initialise`'s first rig: a Huber loss, outlier rounds
@@ -282,6 +282,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- build: **calib pins core 0.19.0** (ff44a98, core #49's merge), gfx at
+  #152's merge (f147e00) and recon at #271's merge (9fd8790), and every
+  build requires core 0.18.0 or newer (`VC_CORE_MIN_VERSION`, from 0.6.1),
+  the pinned gfx's floor; `calib_app` requires its config tier at that
+  floor. calib_rig now presents FIFO, paced to the display (gfx #150's
+  default), where it presented MAILBOX, and its panels and tile marks show
+  their colours as authored on the `_SRGB` swapchain (gfx #144), where they
+  drew washed out. It builds its overlay's config with
+  `gfx::ui::overlay_config`. Tests: `core_requirement.*`.
 - `quality::leave_one_out` and `principal_point_ab` re-solve only the
   corners the solution kept, in one solve each, with no outlier rounds or
   uncertainty step (DECISIONS.md, 2026-10-16, amended 2026-10-22): when the
@@ -342,12 +351,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   test every OpenCV tier on it.
 - `initialise` places the board of a capture whose views are all ambiguous,
   from those views, so the adjustment takes them.
-- recon is pinned at `ca4b94c` (recon main, with its #228; its #245, whose
-  exported `pinhole.glsl` the depth tier's kernels include; its #246, whose
+- calib takes recon's #228; its #245, whose exported `pinhole.glsl` the depth
+  tier's kernels include; its #246, whose
   `GpuFramePrepConfig::depth_queue_families` shares a prepared frame's depth
   with the renderer's queue family; and its #254, whose
-  `WorldFrame::apriltag` names a tag world in the calibration file), and
-  CI's Orbbec SDK action with it. `cv_pose` now converts through recon's
+  `WorldFrame::apriltag` names a tag world in the calibration file, with CI's
+  Orbbec SDK action at the same pin. `cv_pose` now converts through recon's
   `rodrigues_from_matrix`, accurate where `cv::Rodrigues` returns zero (below
   about 1e-5 rad).
 - calib requires `volumetric_kit_core` 0.6.1 or newer (was 0.1.0), with its
@@ -483,8 +492,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The install path (DECISIONS.md, 2026-10-22): calib is fetched by commit
   and installs nothing, so `VC_INSTALL`, its install rules and package config
-  (`find_package(volumetric_kit_calib)`) are gone, and its build leaves the
-  core's and recon's install rules off.
+  (`find_package(volumetric_kit_calib)`) are gone.
 - Windows and MSVC support, which no calib target or CI leg used
   (DECISIONS.md, "Platforms"): calib builds with GCC or Clang for Linux,
   macOS, iOS and Android, as the core does. The MSVC warning flags
