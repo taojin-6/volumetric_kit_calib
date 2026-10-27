@@ -548,7 +548,7 @@ DepthPlane plane_read_with_bias(const BoardRegion& region, double bias_m) {
 
 // A depth camera that reads 4 mm too far, or 1 mm too near, along its own
 // axis, turned off its colour camera's: each board, turned from facing the
-// colour camera to 70 degrees, near the axis and 24 degrees off it, has its
+// colour camera to 70 degrees, 13 and 23 degrees off the axis, has its
 // plane's offset made axial back to the bias within 0.2 mm, while the offset
 // itself, along the board's normal, is half the bias or less at 70. Off the
 // axis, the bias read along the ray instead would miss 4 mm by more than
