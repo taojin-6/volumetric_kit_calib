@@ -76,12 +76,12 @@ endif()
 # The pin is recon main at #298's merge (9839fdd), on core 0.25.0, the floor
 # recon refuses an older core below (calib's VC_CORE_MIN_VERSION). calib takes
 # #254's calibration file, which names a world at a floor AprilTag
-# (WorldFrame::apriltag), as Calibrate's results write it, and #296's version
-# 3 of it, which carries each sensor's depth offset; #298's colour controls,
-# which every Orbbec open writes and reads back (calib_rig opens at auto
-# exposure); #246's GpuFramePrep, which shares a prepared frame's depth with
-# another queue family (depth_queue_families) for the 3D view; and #245's
-# pinhole.glsl under VR_SHADER_INCLUDE_DIR for calib_depth's kernels.
+# (WorldFrame::apriltag), as Calibrate's results write it, and #296's version 3
+# of it, which carries each sensor's depth offset; #298's colour controls, which
+# every Orbbec open writes and reads back (calib_rig opens at auto exposure);
+# #246's GpuFramePrep, which shares a prepared frame's depth with another queue
+# family (depth_queue_families) for the 3D view; and #245's pinhole.glsl under
+# VR_SHADER_INCLUDE_DIR for calib_depth's kernels.
 FetchContent_Declare(
   volumetric_kit_recon
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_recon.git
