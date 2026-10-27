@@ -125,7 +125,9 @@ struct ResultFiles {
   /// @ref kArrayCalibrationFile: recon's `format_array_calibration` of the
   /// solution's calibration in the world (`solve::anchor_rig`), whose `pose`
   /// is each camera's T_cw there and whose `world` is the tag or the
-  /// reference camera.
+  /// reference camera; with each camera's `depth_offset_m`
+  /// (@ref CameraDepth::depth_offset_m) whose plane verdict passed, which
+  /// makes it recon's version 3.
   std::string array_calibration;
   std::string report;     ///< @ref kReportFile.
   std::string residuals;  ///< @ref kResidualsFile.
@@ -152,7 +154,9 @@ struct ResultWorld {
 /// @param solution  The adjustment's solution.
 /// @param metrics   @ref calibration_metrics of it.
 /// @param depth     @ref summarize_depth_checks of its depth; null when the
-///                  depth was not checked.
+///                  depth was not checked. Each camera whose plane verdict
+///                  passed has its depth offset in the calibration file,
+///                  and no other has one.
 /// @param depth_unchecked  Why the depth was not checked though it was to
 ///                  be, which the report writes as `depth_unchecked`; empty,
 ///                  written `null`, when it was checked or not asked for.

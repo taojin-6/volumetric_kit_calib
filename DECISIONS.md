@@ -98,6 +98,12 @@ camera's axis (`quality/depth_checks.hpp` has the definitions).
 - **Measured on raw depth.** The checks prepare the kept raw depth with no
   calibration, so an offset is the depth's own, never a correction of an
   earlier one.
+- **Written when the plane passes.** `format_results` puts each camera's
+  offset whose plane verdict passed into the results' calibration file
+  (recon's `depth_offset_m`, which makes it version 3), and none for any
+  other camera: an offset belongs with the poses solved beside it, so a
+  session's always replace an earlier file's, and a camera that failed
+  keeps its raw depth.
 - **Oblique views weigh most.** A view's axial offset multiplies its plane
   fit's error by `d_z / (n . d)`, about 3 at 70 degrees, so one oblique view
   in four can sit millimetres from its camera's median. The median holds,
@@ -164,9 +170,10 @@ steps, the numbering and the write order).
   depth checks are done, so a refusal or a cancel leaves nothing behind. The
   directory's stamp is the press's, in the session's own format (the user's
   call).
-- **Colour lenses and poses only** in the results' calibration file (the
-  user's call): `SensorArray` reads only the poses, and the session's
-  factory file already has the depth models.
+- **Colour lenses, poses and depth offsets** in the results' calibration
+  file (the user's call; the offsets amended 2026-10-27, "Each camera's
+  depth offset"): `SensorArray` reads the poses and the offsets, and the
+  session's factory file already has the depth models.
 - **Cancelled between steps.** `bundle_adjust` is not interruptible, so a
   cancel takes effect at the next progress call (`app::CalibrateCallback`
   lists them); the writing, a few files, is not cancelled.

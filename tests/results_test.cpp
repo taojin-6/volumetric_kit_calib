@@ -1125,5 +1125,56 @@ TEST(Results, RefusesATagWorldThatDoesNotFit) {
   refused(aruco, "anchor_rig: the tag world's tag sought, of DICT_4X4_50");
 }
 
+// Each camera's depth offset whose plane verdict passed is in the calibration
+// file, as recon reads it back, version 3; none for a camera whose plane did
+// not pass, or whose offset is not a number; none at all, the file as without
+// the checks (version 2), when no camera passed. In a tag world as in the
+// reference's.
+TEST(Results, TheCalibrationFileCarriesEachDepthOffsetThatPassed) {
+  const Solved& s = solved();
+  const std::vector<solve::RigCamera>& cams = s.scene.cameras;
+  ASSERT_EQ(cams.size(), 4u);
+  DepthSummary d = depth_checks();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const std::vector<std::pair<double, DepthVerdict>> each = {
+      {0.00417, DepthVerdict::Ok},
+      {-0.00096, DepthVerdict::Ok},
+      {0.0123, DepthVerdict::Off},
+      {nan, DepthVerdict::Ok}};
+  for (std::size_t c = 0; c < cams.size(); ++c) {
+    d.cameras[c].depth_offset_m = each[c].first;
+    d.cameras[c].plane = each[c].second;
+  }
+  const ResultWorld reference;
+  for (const ResultWorld* world : {&reference, &tagged().world}) {
+    SCOPED_TRACE(world->origin.tag ? "tag world" : "reference world");
+    const ResultFiles files = value_of(
+        format_results(cams, s.solution, s.metrics, &d, {}, *world));
+    const json doc = json::parse(files.array_calibration);
+    EXPECT_EQ(doc["version"], 3);
+    const camera::ArrayCalibration back =
+        value_of(camera::parse_array_calibration(files.array_calibration));
+    for (std::size_t c = 0; c < cams.size(); ++c) {
+      const camera::SensorCalibration* sensor =
+          camera::find_sensor(back, cams[c].id);
+      ASSERT_NE(sensor, nullptr);
+      const bool written = c < 2;
+      EXPECT_EQ(sensor->depth_offset_m, written ? each[c].first : 0.0)
+          << cams[c].id;
+      EXPECT_EQ(doc["device_calibration"][cams[c].id].contains(
+                    "depth_offset_m"),
+                written)
+          << cams[c].id;
+    }
+  }
+  for (CameraDepth& cam : d.cameras) cam.plane = DepthVerdict::Off;
+  const ResultFiles none =
+      value_of(format_results(cams, s.solution, s.metrics, &d));
+  EXPECT_EQ(json::parse(none.array_calibration)["version"], 2);
+  EXPECT_EQ(none.array_calibration,
+            value_of(format_results(cams, s.solution, s.metrics))
+                .array_calibration);
+}
+
 }  // namespace
 }  // namespace volumetric_kit::calib::quality

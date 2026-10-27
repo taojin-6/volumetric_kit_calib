@@ -61,7 +61,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `scatter_mm`, how far its views lie from it. `report.json`'s depth section
   lists them (`depth_offset_m` and `scatter_mm` per camera,
   `axial_offset_mm` per view), and the Calibration window's depth lines
-  show each camera's depth offset and scatter.
+  show each camera's depth offset and scatter. `quality::format_results`
+  writes each camera's depth offset whose plane verdict passed into
+  `array_calibration.json` (recon's `depth_offset_m`, calibration file
+  version 3), so a live rig that reads the file subtracts it from that
+  camera's depth; the depth checks still read raw depth.
 - `solve::BundleAdjustOptions::uncertainty`: off, `bundle_adjust` skips the
   covariance and the intrinsics sensitivity; its guards still run.
 - Calibrate's world at the origin tag (DECISIONS.md, 2026-10-19):

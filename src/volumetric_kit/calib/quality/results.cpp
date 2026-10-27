@@ -121,6 +121,24 @@ core::Status check_depth_fits(std::size_t k, const DepthSummary& d) {
       " cameras");
 }
 
+// Each sensor's depth offset: its camera's when the depth checks' plane
+// verdict passed, else none. The checks measured it at these poses, so it
+// replaces whatever the calibration held.
+void take_depth_offsets(const std::vector<std::string>& ids,
+                        const DepthSummary& d,
+                        camera::ArrayCalibration& calibration) {
+  for (camera::SensorCalibration& sensor : calibration.sensors) {
+    const auto at = std::find(ids.begin(), ids.end(), sensor.id);
+    if (at == ids.end()) continue;
+    const CameraDepth& cam =
+        d.cameras[static_cast<std::size_t>(at - ids.begin())];
+    sensor.depth_offset_m =
+        cam.plane == DepthVerdict::Ok && std::isfinite(cam.depth_offset_m)
+            ? cam.depth_offset_m
+            : 0.0;
+  }
+}
+
 // Refuses a tag world whose cameras are not the rig's, in its order, or
 // whose views name another camera.
 core::Status check_world_fits(const std::vector<std::string>& ids,
@@ -752,6 +770,7 @@ core::Result<ResultFiles> format_results(
     core::Result<solve::AnchoredRig> anchored =
         solve::anchor_rig(solution, world.origin);
     if (!anchored.ok()) return anchored.status().with_context(kWhat);
+    if (depth) take_depth_offsets(ids, *depth, anchored->calibration);
     core::Result<std::string> calibration =
         camera::format_array_calibration(anchored->calibration);
     if (!calibration.ok()) return calibration.status().with_context(kWhat);

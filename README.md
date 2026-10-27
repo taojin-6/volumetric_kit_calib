@@ -93,7 +93,10 @@ renderer.
   Over the device's depth results, for any number of cameras: the board's
   scale and plane from each view's depth, each ordered pair's depth
   agreement, and their verdicts
-  ([DECISIONS.md](DECISIONS.md#2026-10-16--depth-checks-the-hosts-geometry-over-the-devices-results)).
+  ([DECISIONS.md](DECISIONS.md#2026-10-16--depth-checks-the-hosts-geometry-over-the-devices-results));
+  and each camera's depth offset along its axis, which the calibration file
+  carries when its plane passes
+  ([DECISIONS.md](DECISIONS.md#2026-10-27--each-cameras-depth-offset)).
 - **Depth:** the depth checks' device side, on the core's vulkan tier, over
   each camera's depth where recon's frame preparation left it, for any number
   of cameras: each view's board plane fitted on the GPU in two gated rounds in
