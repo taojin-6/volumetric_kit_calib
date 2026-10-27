@@ -16,7 +16,12 @@ FetchContent_Declare(volumetric_kit_recon SOURCE_DIR "${RECON_SOURCE}")
 set(VKC_WITH_VULKAN ON)
 set(VR_CAMERA_ONLY OFF)
 set(VR_WITH_ORBBEC ON)
-set(VR_WITH_FFMPEG ON)
+# The driver's colour decoders: VideoToolbox on Apple, with no FFmpeg; FFmpeg
+# and CUDA elsewhere, which recon requires together (its cmake/vr_ffmpeg.cmake).
+if(NOT APPLE)
+  set(VR_WITH_FFMPEG ON)
+  set(VR_WITH_CUDA ON)
+endif()
 FetchContent_MakeAvailable(volumetric_kit_core volumetric_kit_recon)
 
 set(VC_WITH_RIG ON)

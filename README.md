@@ -154,10 +154,12 @@ configure. `VC_WITH_RIG` (OFF by default) builds `capture`, `depth` and
 core's vulkan tier
 [prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
 `viz` fetches `volumetric_kit_gfx` (pinned by commit). Given GLFW
-(`brew install glfw`) and recon's Orbbec driver
-(`-DVR_WITH_ORBBEC=ON -DVR_WITH_FFMPEG=ON`, with the
-[Orbbec SDK](https://github.com/taojin-6/volumetric_kit_recon#optional-orbbec-sdk)
-and [FFmpeg](https://github.com/taojin-6/volumetric_kit_recon#optional-ffmpeg)),
+(`brew install glfw`) and recon's Orbbec driver (`-DVR_WITH_ORBBEC=ON`, with
+the
+[Orbbec SDK](https://github.com/taojin-6/volumetric_kit_recon#optional-orbbec-sdk);
+off Apple also `-DVR_WITH_FFMPEG=ON -DVR_WITH_CUDA=ON`, with FFmpeg and the
+CUDA toolkit for recon's
+[video decoders](https://github.com/taojin-6/volumetric_kit_recon#video-decoders)),
 `VC_WITH_RIG` builds the `app` tier and `calib_rig` too. To build against a
 local core, recon or gfx checkout instead of the pinned one, pass
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>`,
@@ -239,7 +241,7 @@ e.g. `-DVC_SANITIZE="address;undefined"`. calib is consumed by commit, as
 above, and installs nothing: it has no install rules or package config
 ([DECISIONS.md](DECISIONS.md#2026-10-22--consumed-by-commit-never-installed)).
 
-calib needs `volumetric_kit_core` 0.18.0 or newer, with its vulkan tier for
+calib needs `volumetric_kit_core` 0.25.0 or newer, with its vulkan tier for
 `VC_WITH_RIG` and its config tier for `calib_app`. An
 application that declares the core before calib, to share it with `recon` or
 `gfx`, pins at least that: on an older core, calib's configure fails at

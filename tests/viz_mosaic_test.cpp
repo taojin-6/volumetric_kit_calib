@@ -320,6 +320,10 @@ TEST(TileWrite, CopiesTheDecodersPlanesInPlaceToItsTile) {
   EXPECT_EQ(write.value().planes[1].buffer, nullptr);
   expect_offset(write.value().offset, 3856, 2176);
   expect_extent(write.value().extent, 3840, 2160);
+  // Images a readback took over onto a family of the device.
+  sensor::YuvImage taken = mjpeg_picture();
+  taken.queue_family = 0;
+  EXPECT_TRUE(tile_write(taken, {3840, 2160}, {}).ok());
 }
 
 TEST(TileWrite, RefusesWhatATileCannotTake) {
@@ -333,6 +337,11 @@ TEST(TileWrite, RefusesWhatATileCannotTake) {
   buffer.image[1].reset();
   buffer.device = std::make_shared<core::Buffer>();
   EXPECT_EQ(tile_write(buffer, tile, {}).status().domain(), Code::Unsupported);
+  // NVDEC's images, which CUDA wrote, until a readback takes them over.
+  sensor::YuvImage external = mjpeg_picture();
+  external.queue_family = sensor::kQueueFamilyExternal;
+  EXPECT_EQ(tile_write(external, tile, {}).status().domain(),
+            Code::Unsupported);
 
   sensor::YuvImage no_chroma = mjpeg_picture();
   no_chroma.image[1].reset();

@@ -338,10 +338,12 @@ The `app` tier runs the rig (`app/calib_rig.hpp`, `live_worker.hpp`,
 - **How it builds.** calib_rig is an application's choice: `VC_BUILD_APPS`,
   on by default only at the top level, as the examples are. The tier is then
   built with `viz` when gfx's `gfx_glfw` (an installed GLFW) and recon's
-  Orbbec driver (`VR_WITH_ORBBEC`, with `VR_WITH_FFMPEG`) exist, and turns the
-  core's config tier on. It is a static library, as `viz` is. A session
-  records calib's and the siblings' commits as git gives them at each build,
-  `-dirty` with uncommitted changes.
+  Orbbec driver (`VR_WITH_ORBBEC`) exist, and turns the core's config tier
+  on. The driver's colour decoders take no FFmpeg on Apple, where recon
+  refuses `VR_WITH_FFMPEG`, and `VR_WITH_FFMPEG` with `VR_WITH_CUDA`
+  elsewhere (amended 2026-10-27). It is a static library, as `viz` is. A
+  session records calib's and the siblings' commits as git gives them at each
+  build, `-dirty` with uncommitted changes.
 
 ## 2026-10-16 — Depth checks are calib's kernels
 
@@ -483,9 +485,11 @@ The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
 - **Pictures stay on the device.** A tile takes recon's decoded NV12 images
   as they are; gfx's image pipeline copies and converts them on the GPU, so
   no picture reaches the host to be shown. Only control data -- corners,
-  checks, counters -- goes from the host to the screen. Planes in a buffer
-  and I420, as Linux's decoders leave them, are refused until the tile takes
-  over their queue family's ownership (and gfx maps I420).
+  checks, counters -- goes from the host to the screen. What Linux's
+  decoders leave -- NVDEC's images still owned outside Vulkan, and nvJPEG's
+  I420 planes in a buffer -- is refused until the tile takes over their
+  ownership (and gfx maps I420); a readback that has taken NVDEC's images
+  over leaves them to the tile (amended 2026-10-27).
 - **One mosaic, any number of cameras.** Each camera's picture is a tile of
   one NV12 picture: gfx copies each new picture into its tile, the others
   keep theirs, and each page with a new picture is converted once per set,
@@ -611,9 +615,10 @@ The `capture` tier writes the rig application's calibration sessions
 - **How it builds.** `VC_WITH_RIG`, OFF by default, fetches all of recon and
   turns on the core's vulkan tier, so it needs the Vulkan SDK. gfx comes with
   the `viz` tier, its first user.
-- **Core 0.18.0** is the oldest calib builds with (`VC_CORE_MIN_VERSION`),
-  the floor its configure checks: the pinned gfx's floor, which the `viz`
-  tier builds on, so one floor covers every build.
+- **Core 0.25.0** is the oldest calib builds with (`VC_CORE_MIN_VERSION`),
+  the floor its configure checks: the highest of the pinned siblings' floors,
+  recon's, which every build fetches, so one floor covers every build
+  (amended 2026-10-27).
 
 ## 2026-10-12 — OpenCV, behind calib's types
 

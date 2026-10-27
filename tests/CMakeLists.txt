@@ -257,8 +257,8 @@ endif()
 
 # The core calib requires (third_party/CMakeLists.txt): calib's configure
 # against a stand-in core of each version (core_requirement/) refuses one older
-# than VC_CORE_MIN_VERSION, 0.18.0 -- before 0.1.0 the core has no
-# vkc_require_core -- and accepts 0.18.0 or newer.
+# than VC_CORE_MIN_VERSION, 0.25.0 -- before 0.1.0 the core has no
+# vkc_require_core -- and accepts 0.25.0 or newer.
 #
 # Those configures, and the ones below, take the fetched sources this build used
 # (FETCHCONTENT_SOURCE_DIR_<NAME>), so they need no network, and the OpenCV it
@@ -293,12 +293,14 @@ function(vc_add_core_requirement_test name core_version)
 endfunction()
 vc_add_core_requirement_test(
   before_0_1_0 none "-DEXPECT_ERROR=Unknown CMake command \"vkc_require_core\"")
-vc_add_core_requirement_test(
-  0_6_1 0.6.1 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.18\\.0 or newer")
-vc_add_core_requirement_test(
-  0_17_0 0.17.0 "-DEXPECT_ERROR=needs volumetric_kit_core 0\\.18\\.0 or newer")
-vc_add_core_requirement_test(0_18_0 0.18.0)
-vc_add_core_requirement_test(0_19_2 0.19.2)
+# calib's own check refuses, before recon's at the same floor.
+set(_vc_below_floor
+    "-DEXPECT_ERROR=volumetric_kit_calib needs volumetric_kit_core 0\\.25\\.0 or newer"
+)
+vc_add_core_requirement_test(0_18_0 0.18.0 "${_vc_below_floor}")
+vc_add_core_requirement_test(0_24_0 0.24.0 "${_vc_below_floor}")
+vc_add_core_requirement_test(0_25_0 0.25.0)
+vc_add_core_requirement_test(0_26_1 0.26.1)
 
 if(VC_WITH_RIG)
   # VC_WITH_RIG needs the core's vulkan tier and all of recon: an application
@@ -347,6 +349,11 @@ if(VC_WITH_RIG)
       endif()
     endforeach()
     list(JOIN _vc_fetched "|" _vc_fetched)
+    # The CUDA toolkit recon found off Apple (its cmake/vr_cuda.cmake).
+    set(_vc_cuda_root)
+    if(CUDAToolkit_BIN_DIR)
+      get_filename_component(_vc_cuda_root "${CUDAToolkit_BIN_DIR}" DIRECTORY)
+    endif()
     function(vc_add_app_requirement_test name build_apps)
       add_test(
         NAME app_requirement.${name}
@@ -359,7 +366,8 @@ if(VC_WITH_RIG)
           -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
           -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} -DGLM_DIR=${glm_DIR}
           -DGLFW_DIR=${glfw3_DIR} -DOPENCV_DIR=${OpenCV_DIR}
-          -DORBBEC_DIR=${OrbbecSDK_DIR} -DBUILD_APPS=${build_apps} ${ARGN} -P
+          -DORBBEC_DIR=${OrbbecSDK_DIR} -DCUDA_ROOT=${_vc_cuda_root}
+          -DBUILD_APPS=${build_apps} ${ARGN} -P
           ${CMAKE_CURRENT_SOURCE_DIR}/app_requirement/configure.cmake)
       set_tests_properties(app_requirement.${name}
                            PROPERTIES ${_vc_package_properties})

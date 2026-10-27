@@ -80,6 +80,15 @@ using test::wide;
 constexpr double kPixelBand = 2e-4;
 constexpr double kDepthBand = 1e-5;
 constexpr double kBinBand = 0.02;
+// How far Vulkan's float rules let a statistic within a bin of 0 lie from the
+// exact value, in bins. agreement_stats.comp takes the fraction into the
+// quantile's bin from two divides, which the spec lets be off by 2.5 ULP each
+// ("Precision and Operation of SPIR-V Instructions"; some GPUs' divides are
+// not correctly rounded), and from a subtract and an add, which it rounds
+// correctly. Within a bin of 0 an ULP is at most 2^-23 bins, and the four
+// leave the statistic at most 4.75 of them off; correctly rounded divides
+// give the exact value.
+constexpr double kFloatRuleBins = 5.0 / (1 << 23);
 
 std::size_t apart(std::size_t a, std::size_t b) {
   return a > b ? a - b : b - a;
@@ -551,8 +560,10 @@ TEST_F(AgreementTest, TheWindowExcludesABoxAndTheEdgeGateItsFlyingPixels) {
   // border past it.
   expect_counts(options, kInterior - 84 - 76 - 88, kInterior - 384 - 84 - 88);
   const std::vector<PairAgreement> gated = agree(cameras, options);
-  EXPECT_DOUBLE_EQ(gated[0].signed_median_mm, 0.5 * options.bin_mm);
-  EXPECT_DOUBLE_EQ(gated[1].signed_median_mm, 0.5 * options.bin_mm);
+  EXPECT_NEAR(gated[0].signed_median_mm, 0.5 * options.bin_mm,
+              kFloatRuleBins * options.bin_mm);
+  EXPECT_NEAR(gated[1].signed_median_mm, 0.5 * options.bin_mm,
+              kFloatRuleBins * options.bin_mm);
   DepthCheckOptions open = options;
   open.edge_ratio = 0.5;
   expect_counts(open, kInterior, kInterior - 384);
@@ -893,7 +904,8 @@ TEST_F(AgreementTest, ItsPercentilesAreTheKnownHistogramsQuantiles) {
   EXPECT_NEAR(seventh.signed_median_mm, 0.75, 1e-6);
   EXPECT_NEAR(seventh.median_abs_mm, 0.75, 1e-6);
   EXPECT_NEAR(seventh.p90_abs_mm, 0.79, 1e-6);
-  EXPECT_EQ(at(known[2]).signed_median_mm, 0.0);
+  EXPECT_NEAR(at(known[2]).signed_median_mm, 0.0,
+              kFloatRuleBins * known[2].options.bin_mm);
 }
 
 // The quantiles' bins are found in integers, so counts past float's 24 bits

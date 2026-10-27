@@ -8,6 +8,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `depth_agreement`'s exact signed medians (a half bin, and 0) pass on GPUs
+  whose float divide is not correctly rounded, as on NVIDIA's: they hold
+  within the 2.5 ULP per divide that Vulkan allows, 5 ULP of 1.0 in bins.
+- `viz::tile_write` refuses images still owned outside Vulkan
+  (`YuvImage::queue_family` is `kQueueFamilyExternal`), as NVDEC's pictures
+  arrive since recon #294, until a readback takes them over: a tile reads its
+  picture in place, with no ownership transfer.
 - calib_rig says a camera's mosaic tile refusal once, until its reason
   changes (`app::refusals_to_say`), instead of at every set: on Linux, where
   every tile is refused, 100 lines a second pushed every other message out of
@@ -282,15 +289,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- build: **calib pins core 0.19.0** (ff44a98, core #49's merge), gfx at
-  #152's merge (f147e00) and recon at #271's merge (9fd8790), and every
-  build requires core 0.18.0 or newer (`VC_CORE_MIN_VERSION`, from 0.6.1),
-  the pinned gfx's floor; `calib_app` requires its config tier at that
+- build: **calib pins core 0.25.0** (effc464, core #62's merge), gfx at
+  #152's merge (f147e00) and recon at #298's merge (9839fdd), and every
+  build requires core 0.25.0 or newer (`VC_CORE_MIN_VERSION`, from 0.6.1),
+  the pinned recon's floor; `calib_app` requires its config tier at that
   floor. calib_rig now presents FIFO, paced to the display (gfx #150's
   default), where it presented MAILBOX, and its panels and tile marks show
   their colours as authored on the `_SRGB` swapchain (gfx #144), where they
   drew washed out. It builds its overlay's config with
-  `gfx::ui::overlay_config`. Tests: `core_requirement.*`.
+  `gfx::ui::overlay_config`. Its scenario resolves as before: MJPEG colour
+  at 3840x2160, 640x576 depth, 25 fps. Its cameras open at auto exposure
+  with auto white balance on, which the pinned recon writes at every open
+  where a camera differs (`app::orbbec_options` names no colour controls),
+  so a camera no longer keeps a manual exposure an earlier run left in it.
+  Tests: `core_requirement.*`, `app_live`.
+- build: the rig tiers' configure takes no FFmpeg on Apple, where the
+  pinned recon refuses `VR_WITH_FFMPEG` and decodes on VideoToolbox:
+  `-DVR_WITH_ORBBEC=ON` alone, and off Apple with
+  `-DVR_WITH_FFMPEG=ON -DVR_WITH_CUDA=ON`, which recon requires together.
+  CI's rig legs no longer list the `ffmpeg` and `pkgconf` formulae, and
+  `app_requirement.*` configures off Apple, given the CUDA toolkit the
+  calling build found.
 - `quality::leave_one_out` and `principal_point_ab` re-solve only the
   corners the solution kept, in one solve each, with no outlier rounds or
   uncertainty step (DECISIONS.md, 2026-10-16, amended 2026-10-22): when the

@@ -147,17 +147,20 @@ core::Result<MosaicLayout> mosaic_layout(
 /// @param picture   The picture, as `RgbdFrame::color` holds it.
 /// @param expected  The tile's size (@ref MosaicTile::extent).
 /// @param at        The tile's place in its page (@ref MosaicTile::at).
-/// @return The write; `Unsupported` for an I420 picture, or planes in a buffer
-///         rather than images; `InvalidArgument` for a picture missing its
-///         luma or chroma image, or whose size is zero or not @p expected; or
-///         `OutOfMemory`.
+/// @return The write; `Unsupported` for an I420 picture, planes in a buffer
+///         rather than images, or images still owned outside Vulkan
+///         (`YuvImage::queue_family` is `kQueueFamilyExternal`, as NVDEC's
+///         arrive until a readback takes them over); `InvalidArgument` for a
+///         picture missing its luma or chroma image, or whose size is zero or
+///         not @p expected; or `OutOfMemory`.
 ///
 /// @code
 /// VKC_ASSIGN(const gfx::pipelines::ImageWrite write,
 ///            tile_write(frame.color, tile.extent, tile.at));
 /// @endcode
-// TODO: planes in a buffer (NVDEC and nvJPEG on Linux), which need their
-// queue family's ownership taken over first, and I420, once gfx maps it.
+// TODO: images owned outside Vulkan (NVDEC's) and planes in a buffer
+// (nvJPEG's, on Linux), which need their ownership taken over first, and I420,
+// once gfx maps it.
 core::Result<gfx::pipelines::ImageWrite> tile_write(
     const recon::sensor::YuvImage& picture, VkExtent2D expected, VkOffset2D at);
 
