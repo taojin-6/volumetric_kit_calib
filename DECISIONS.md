@@ -485,9 +485,11 @@ The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
 - **Pictures stay on the device.** A tile takes recon's decoded NV12 images
   as they are; gfx's image pipeline copies and converts them on the GPU, so
   no picture reaches the host to be shown. Only control data -- corners,
-  checks, counters -- goes from the host to the screen. Planes in a buffer
-  and I420, as Linux's decoders leave them, are refused until the tile takes
-  over their queue family's ownership (and gfx maps I420).
+  checks, counters -- goes from the host to the screen. What Linux's
+  decoders leave -- NVDEC's images still owned outside Vulkan, and nvJPEG's
+  I420 planes in a buffer -- is refused until the tile takes over their
+  ownership (and gfx maps I420); a readback that has taken NVDEC's images
+  over leaves them to the tile (amended 2026-10-27).
 - **One mosaic, any number of cameras.** Each camera's picture is a tile of
   one NV12 picture: gfx copies each new picture into its tile, the others
   keep theirs, and each page with a new picture is converted once per set,
