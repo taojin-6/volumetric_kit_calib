@@ -548,29 +548,39 @@ DepthPlane plane_read_with_bias(const BoardRegion& region, double bias_m) {
 
 // A depth camera that reads 4 mm too far, or 1 mm too near, along its own
 // axis, turned off its colour camera's: each board, turned from facing the
-// colour camera to 70 degrees and off the axis, has its plane's offset made
-// axial back to the bias within 0.2 mm, while the offset itself,
-// along the board's normal, is half the bias or less at 70. A board behind
-// the depth camera has no axial offset.
+// colour camera to 70 degrees, near the axis and 24 degrees off it, has its
+// plane's offset made axial back to the bias within 0.2 mm, while the offset
+// itself, along the board's normal, is half the bias or less at 70. Off the
+// axis, the bias read along the ray instead would miss 4 mm by more than
+// 0.3 mm. A board behind the depth camera has no axial offset.
 TEST(BoardDepthCheck, MakesTheOffsetAxialAtAnyTilt) {
   const compute::Board board = test::femto_board();
   const std::vector<solve::RigCamera> rig = rig_of(1);
-  for (const double tilt_deg : {0.0, 30.0, 50.0, 70.0}) {
-    for (const double bias_mm : {4.0, -1.0}) {
-      SCOPED_TRACE(std::to_string(tilt_deg) + " degrees, " +
-                   std::to_string(bias_mm) + " mm");
-      const Mat4d pose =
-          test::board_facing_camera(board, {0.3, -0.2, 2.2}, tilt_deg, 20.0);
-      const BoardRegion region =
-          value_of(board_region(board, pose, femto_depth_to_color()));
-      const BoardDepthCheck check = value_of(
-          board_depth_check(rig, board, view_of(rig[0], board, pose), region,
-                            plane_read_with_bias(region, bias_mm / 1000.0)));
-      EXPECT_NEAR(check.axial_offset_mm, bias_mm, 0.2);
-      EXPECT_GT(check.offset_mm * bias_mm, 0.0);
-      // At 70 degrees the ray meets the board at 60 or more.
-      if (tilt_deg == 70.0) {
-        EXPECT_LT(std::abs(check.offset_mm), 0.6 * std::abs(bias_mm));
+  for (const Vec3d& centre : {Vec3d(0.3, -0.2, 2.2), Vec3d(0.9, 0.2, 2.0)}) {
+    // The centre's ray from the depth camera, along its axis: 1 / d_z - 1
+    // is how far a reading along the ray strays, over the bias.
+    const Vec3d seen =
+        apply(camera::rigid_inverse(femto_depth_to_color()), centre);
+    const double d_z = seen.z / glm::length(seen);
+    if (centre.x > 0.5) EXPECT_GT(4.0 * (1.0 / d_z - 1.0), 0.3);
+    for (const double tilt_deg : {0.0, 30.0, 50.0, 70.0}) {
+      for (const double bias_mm : {4.0, -1.0}) {
+        SCOPED_TRACE(std::to_string(centre.x) + " m across, " +
+                     std::to_string(tilt_deg) + " degrees, " +
+                     std::to_string(bias_mm) + " mm");
+        const Mat4d pose =
+            test::board_facing_camera(board, centre, tilt_deg, 20.0);
+        const BoardRegion region =
+            value_of(board_region(board, pose, femto_depth_to_color()));
+        const BoardDepthCheck check = value_of(
+            board_depth_check(rig, board, view_of(rig[0], board, pose), region,
+                              plane_read_with_bias(region, bias_mm / 1000.0)));
+        EXPECT_NEAR(check.axial_offset_mm, bias_mm, 0.2);
+        EXPECT_GT(check.offset_mm * bias_mm, 0.0);
+        // At 70 degrees the ray meets the board at 60 or more.
+        if (tilt_deg == 70.0) {
+          EXPECT_LT(std::abs(check.offset_mm), 0.6 * std::abs(bias_mm));
+        }
       }
     }
   }
