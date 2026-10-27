@@ -8,6 +8,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `depth_agreement`'s exact signed medians (a half bin, and 0) pass on GPUs
+  whose float divide is not correctly rounded, as on NVIDIA's: they hold
+  within the 2.5 ULP per divide that Vulkan allows, 5 ULP of 1.0 in bins.
 - calib_rig says a camera's mosaic tile refusal once, until its reason
   changes (`app::refusals_to_say`), instead of at every set: on Linux, where
   every tile is refused, 100 lines a second pushed every other message out of
