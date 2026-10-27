@@ -6,8 +6,9 @@
 # with output matching it, blanks and line breaks counting as one space.
 # CALIB_SOURCE, CORE_SOURCE and RECON_SOURCE are the sources the calling build
 # used, and FETCHED its other fetched sources, "<NAME>=<dir>" entries joined by
-# "|"; GENERATOR, CXX_COMPILER, MAKE_PROGRAM, GLM_DIR, GLFW_DIR, OPENCV_DIR and
-# ORBBEC_DIR repeat its settings (tests/CMakeLists.txt).
+# "|"; GENERATOR, CXX_COMPILER, MAKE_PROGRAM, GLM_DIR, GLFW_DIR, OPENCV_DIR,
+# ORBBEC_DIR and, off Apple, CUDA_ROOT repeat its settings
+# (tests/CMakeLists.txt).
 foreach(
   _var
   CALIB_SOURCE
@@ -28,6 +29,11 @@ foreach(_entry IN LISTS _fetched)
   list(APPEND _sources "-DFETCHCONTENT_SOURCE_DIR_${_entry}")
 endforeach()
 
+set(_cuda)
+if(CUDA_ROOT)
+  set(_cuda "-DCUDAToolkit_ROOT=${CUDA_ROOT}")
+endif()
+
 file(REMOVE_RECURSE "${BINARY_DIR}")
 execute_process(
   COMMAND
@@ -38,7 +44,7 @@ execute_process(
     "-Dglfw3_DIR=${GLFW_DIR}" "-DOpenCV_DIR=${OPENCV_DIR}"
     "-DOrbbecSDK_DIR=${ORBBEC_DIR}" "-DCALIB_SOURCE=${CALIB_SOURCE}"
     "-DCORE_SOURCE=${CORE_SOURCE}" "-DRECON_SOURCE=${RECON_SOURCE}"
-    "-DBUILD_APPS=${BUILD_APPS}" ${_sources}
+    "-DBUILD_APPS=${BUILD_APPS}" ${_cuda} ${_sources}
   RESULT_VARIABLE _result
   OUTPUT_VARIABLE _output
   ERROR_VARIABLE _output)

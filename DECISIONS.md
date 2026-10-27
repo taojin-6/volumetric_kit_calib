@@ -338,10 +338,12 @@ The `app` tier runs the rig (`app/calib_rig.hpp`, `live_worker.hpp`,
 - **How it builds.** calib_rig is an application's choice: `VC_BUILD_APPS`,
   on by default only at the top level, as the examples are. The tier is then
   built with `viz` when gfx's `gfx_glfw` (an installed GLFW) and recon's
-  Orbbec driver (`VR_WITH_ORBBEC`, with `VR_WITH_FFMPEG`) exist, and turns the
-  core's config tier on. It is a static library, as `viz` is. A session
-  records calib's and the siblings' commits as git gives them at each build,
-  `-dirty` with uncommitted changes.
+  Orbbec driver (`VR_WITH_ORBBEC`) exist, and turns the core's config tier
+  on. The driver's colour decoders take no FFmpeg on Apple, where recon
+  refuses `VR_WITH_FFMPEG`, and `VR_WITH_FFMPEG` with `VR_WITH_CUDA`
+  elsewhere (amended 2026-10-27). It is a static library, as `viz` is. A
+  session records calib's and the siblings' commits as git gives them at each
+  build, `-dirty` with uncommitted changes.
 
 ## 2026-10-16 — Depth checks are calib's kernels
 

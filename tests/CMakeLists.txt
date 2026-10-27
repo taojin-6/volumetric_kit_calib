@@ -349,6 +349,11 @@ if(VC_WITH_RIG)
       endif()
     endforeach()
     list(JOIN _vc_fetched "|" _vc_fetched)
+    # The CUDA toolkit recon found off Apple (its cmake/vr_cuda.cmake).
+    set(_vc_cuda_root)
+    if(CUDAToolkit_BIN_DIR)
+      get_filename_component(_vc_cuda_root "${CUDAToolkit_BIN_DIR}" DIRECTORY)
+    endif()
     function(vc_add_app_requirement_test name build_apps)
       add_test(
         NAME app_requirement.${name}
@@ -361,7 +366,8 @@ if(VC_WITH_RIG)
           -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
           -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} -DGLM_DIR=${glm_DIR}
           -DGLFW_DIR=${glfw3_DIR} -DOPENCV_DIR=${OpenCV_DIR}
-          -DORBBEC_DIR=${OrbbecSDK_DIR} -DBUILD_APPS=${build_apps} ${ARGN} -P
+          -DORBBEC_DIR=${OrbbecSDK_DIR} -DCUDA_ROOT=${_vc_cuda_root}
+          -DBUILD_APPS=${build_apps} ${ARGN} -P
           ${CMAKE_CURRENT_SOURCE_DIR}/app_requirement/configure.cmake)
       set_tests_properties(app_requirement.${name}
                            PROPERTIES ${_vc_package_properties})

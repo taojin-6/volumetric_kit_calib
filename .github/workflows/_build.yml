@@ -45,7 +45,9 @@ on:
           Build the rig tiers (VC_WITH_RIG): recon's sensor, video and Orbbec
           tiers against calib's core pin, gfx for the viz tier, and calib_rig
           over gfx's GLFW glue. The viz and app tiers' GPU tests need a device
-          (MoltenVK) and run under the validation layer. macOS only.
+          (MoltenVK) and run under the validation layer. macOS only: off
+          Apple the configure also takes recon's FFmpeg and CUDA, which no
+          step here installs.
         required: false
         type: boolean
         default: false
@@ -132,7 +134,7 @@ jobs:
           if [ "${{ inputs.rig }}" = "true" ]; then
             pkgs="$pkgs molten-vk vulkan-headers vulkan-loader"
             pkgs="$pkgs vulkan-validationlayers shaderc glslang spirv-tools"
-            pkgs="$pkgs ffmpeg pkgconf glfw"
+            pkgs="$pkgs glfw"
           fi
           echo "formulae=$pkgs" >> "$GITHUB_OUTPUT"
           missing=""
@@ -215,8 +217,14 @@ jobs:
           flags=(-DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
                  -DBUILD_SHARED_LIBS=${{ inputs.shared && 'ON' || 'OFF' }}
                  -DVC_WITH_RIG=${{ inputs.rig && 'ON' || 'OFF' }})
+          # recon's Orbbec driver decodes colour on VideoToolbox on Apple, which
+          # takes no FFmpeg, and through FFmpeg and CUDA elsewhere, which recon
+          # requires together (its cmake/vr_ffmpeg.cmake).
           if [ "${{ inputs.rig }}" = "true" ]; then
-            flags+=(-DVR_WITH_ORBBEC=ON -DVR_WITH_FFMPEG=ON)
+            flags+=(-DVR_WITH_ORBBEC=ON)
+            if [ "${{ runner.os }}" != macOS ]; then
+              flags+=(-DVR_WITH_FFMPEG=ON -DVR_WITH_CUDA=ON)
+            fi
           fi
           if [ "${{ inputs.tsan }}" = "true" ]; then
             flags+=(-DVC_SANITIZE=thread)
