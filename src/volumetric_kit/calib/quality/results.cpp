@@ -349,6 +349,7 @@ void depth_section(Writer& w, const DepthSummary& d,
     for (const double r : view.ratios) w.value(r);
     w.close_array();
     w.key("offset_mm").value(view.offset_mm);
+    w.key("axial_offset_mm").value(view.axial_offset_mm);
     w.key("angle_deg").value(view.angle_deg);
     w.close_object();
   }

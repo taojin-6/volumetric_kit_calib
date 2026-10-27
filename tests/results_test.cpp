@@ -488,6 +488,7 @@ DepthSummary depth_checks() {
       true, {0.3, 0.2, 0.001}, {0.0, 0.01, 1.0}, 0.00125, 9100, 210, 8700};
   views[0].ratios = {1.0021, 1.0019, 1.0024};
   views[0].offset_mm = 2.75;
+  views[0].axial_offset_mm = 4.125;
   views[0].angle_deg = 0.375;
   views[1].camera = 0;
   views[1].capture = 5;
@@ -501,6 +502,7 @@ DepthSummary depth_checks() {
       true, {0.3, 0.2, -0.002}, {0.02, 0.0, -1.0}, 0.0021, 7300, 64, 7001};
   views[2].ratios = {0.9985};
   views[2].offset_mm = -11.5;
+  views[2].axial_offset_mm = -23.25;
   views[2].angle_deg = 1.125;
   std::vector<PairAgreement> pairs(2);
   pairs[0].from = 3;
@@ -596,9 +598,10 @@ TEST(Results, TheReportHasItsDepthSection) {
     const BoardDepthCheck& view = d.views[v];
     const json& j = depth["views"][v];
     EXPECT_EQ(keys_of(ordered["views"][v]),
-              (std::vector<std::string>{"camera", "capture", "valid", "members",
-                                        "out_of_range", "inliers", "rms_mm",
-                                        "ratios", "offset_mm", "angle_deg"}));
+              (std::vector<std::string>{
+                  "camera", "capture", "valid", "members", "out_of_range",
+                  "inliers", "rms_mm", "ratios", "offset_mm", "axial_offset_mm",
+                  "angle_deg"}));
     EXPECT_EQ(j["camera"], cams[view.camera].id);
     EXPECT_EQ(j["capture"], view.capture);
     EXPECT_EQ(j["valid"], view.plane.valid);
@@ -612,6 +615,7 @@ TEST(Results, TheReportHasItsDepthSection) {
     }
     EXPECT_EQ(j["ratios"].get<std::vector<double>>(), view.ratios);
     expect_number(j["offset_mm"], view.offset_mm);
+    expect_number(j["axial_offset_mm"], view.axial_offset_mm);
     expect_number(j["angle_deg"], view.angle_deg);
   }
   EXPECT_EQ(depth["views"][0]["capture"], 3);

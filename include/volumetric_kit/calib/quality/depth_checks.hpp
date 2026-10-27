@@ -299,6 +299,15 @@ struct BoardDepthCheck {
   /// camera seeing its face. Not a number when the plane is not valid, or is
   /// perpendicular to the board.
   double offset_mm = std::numeric_limits<double>::quiet_NaN();
+  /// @ref offset_mm made axial: how far the depth reads along its camera's
+  /// own axis to put the plane there, `offset_mm d_z / (n . d)`, with `d`
+  /// the unit ray from the depth camera to the chessboard's centre and `n`
+  /// the board's z, both in the depth camera's frame (millimetres; positive
+  /// when the depth reads too far). A board seen square on the axis gives
+  /// the offset itself; seen at 60 degrees, about twice it. Not a number
+  /// when the offset is not, or the centre is not in front of the depth
+  /// camera.
+  double axial_offset_mm = std::numeric_limits<double>::quiet_NaN();
   /// The angle between the plane and the solved board (degrees), in
   /// [0, 90]; not a number when the plane is not valid.
   double angle_deg = std::numeric_limits<double>::quiet_NaN();
@@ -309,8 +318,9 @@ struct BoardDepthCheck {
 ///        plane, and the plane against the solved board.
 ///
 /// The ratios do not depend on the solved board: the plane comes to the
-/// colour camera through `T_cb T_cb^-1 depth_to_color`. The offset and the
-/// angle do.
+/// colour camera through `T_cb T_cb^-1 depth_to_color`. The offset, its
+/// axial form and the angle do; the axial form takes the depth camera from
+/// the region's `depth_to_board`.
 /// @param cameras  The rig's cameras.
 /// @param board    The board seen.
 /// @param view     The view's detection, at its camera's lens's size.

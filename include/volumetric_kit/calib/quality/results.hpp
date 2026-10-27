@@ -73,7 +73,8 @@
 ///   `views`, `ratio`, `scale`, `offset_mm`, `angle_deg`, `plane`,
 ///   `verdict`); `views` (`camera`, `capture`, `valid`, `members`,
 ///   `out_of_range`, `inliers`, `rms_mm`, `ratios`, `offset_mm`,
-///   `angle_deg`); `pairs`, pooled, and `captures` (`capture`, `pairs`), each
+///   `axial_offset_mm`, `angle_deg`); `pairs`, pooled, and `captures`
+///   (`capture`, `pairs`), each
 ///   pair `from`, `to`, `overlap`, `in_window`, `signed_median_mm`,
 ///   `median_abs_mm`, `p90_abs_mm`, `verdict`. Verdicts are
 ///   @ref to_string(DepthVerdict)'s names; an invalid plane's `rms_mm` is

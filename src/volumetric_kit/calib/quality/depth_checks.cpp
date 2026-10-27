@@ -383,6 +383,15 @@ core::Result<BoardDepthCheck> board_depth_check(
                                         normal.y * (centre.y - plane.point.y)) /
                                            normal.z;
       out.offset_mm = 1000.0 * z;
+      // The ray from the depth camera to the centre, in the board frame: its
+      // length along the depth camera's z over its length along the board's
+      // is d_z / (n . d).
+      const Vec3d ray =
+          Vec3d(centre.x, centre.y, centre.z) - Vec3d(region.depth_to_board[3]);
+      const double along_axis = glm::dot(Vec3d(region.depth_to_board[2]), ray);
+      if (along_axis > 0.0 && ray.z != 0.0) {
+        out.axial_offset_mm = out.offset_mm * along_axis / ray.z;
+      }
     }
 
     if (view.points.empty()) return out;

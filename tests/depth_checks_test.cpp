@@ -5,9 +5,11 @@
 // the board region and its membership rule against the inset outline, the
 // views a solved rig's checks fit and their regions, a 4K colour lens's
 // corner rays met with an exact plane (a board printed 0.3 % large), a plane
-// 5 mm off and 1 degree turned, the ratios' pairs and order on boards of any
-// size, and the summary's pooling and verdicts over rigs of 1, 3, 4 and 5
-// cameras, each camera's verdict over every scale and plane; and refusals.
+// 5 mm off and 1 degree turned, a depth camera's axial bias read back from
+// its plane's offset from square to 70 degrees, the ratios' pairs and order
+// on boards of any size, and the summary's pooling and verdicts over rigs of
+// 1, 3, 4 and 5 cameras, each camera's verdict over every scale and plane;
+// and refusals.
 
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
 
@@ -23,6 +25,7 @@
 
 #include <gtest/gtest.h>
 #include <glm/glm.hpp>
+#include <opencv2/core.hpp>
 
 #include "depth_scene.hpp"
 #include "result_checks.hpp"
@@ -498,8 +501,90 @@ TEST(BoardDepthCheck, FindsAPlaneFiveMillimetresOffAndOneDegreeTurned) {
     const BoardDepthCheck check =
         value_of(board_depth_check(rig, board, view, region, across));
     EXPECT_TRUE(std::isnan(check.offset_mm)) << at.x;
+    EXPECT_TRUE(std::isnan(check.axial_offset_mm)) << at.x;
     EXPECT_NEAR(check.angle_deg, 90.0, 1e-12);
   }
+}
+
+// The plane a depth camera that reads `bias_m` too far along its own axis
+// sees of the solved board, in `region`'s board frame: each pixel of a
+// Femto-like narrow depth whose ray meets the board in the region, met with
+// it and moved by the bias along the ray, as a raw depth z reads z + bias;
+// then the least-squares plane z = a x + b y + c of those points.
+DepthPlane plane_read_with_bias(const BoardRegion& region, double bias_m) {
+  const test::Pinhole depth = test::nfov();
+  const Vec3d origin(region.depth_to_board[3]);
+  const Mat3d turn(region.depth_to_board);
+  // The normal equations of (x, y, 1) . (a, b, c) = z, about the region's
+  // centre so they stay well conditioned.
+  const Vec2d mid = 0.5 * (region.min + region.max);
+  cv::Matx33d m = cv::Matx33d::zeros();
+  cv::Vec3d r(0.0, 0.0, 0.0);
+  std::size_t members = 0;
+  for (std::uint32_t v = 0; v < depth.size.height; ++v) {
+    for (std::uint32_t u = 0; u < depth.size.width; ++u) {
+      const Vec3d ray = test::ray_of(depth, u, v);
+      if (!in_board_region(region, ray)) continue;
+      const Vec3d along = turn * ray;
+      const double s = -origin.z / along.z;  // the depth z of the board
+      const Vec3d p = origin + (s + bias_m) * along;
+      const cv::Vec3d x(p.x - mid.x, p.y - mid.y, 1.0);
+      m += x * x.t();
+      r += p.z * x;
+      ++members;
+    }
+  }
+  cv::Vec3d abc;
+  EXPECT_TRUE(cv::solve(m, r, abc));
+  DepthPlane plane;
+  plane.valid = true;
+  plane.point = Vec3d(mid.x, mid.y, abc[2]);
+  plane.normal = Vec3d(-abc[0], -abc[1], 1.0);
+  plane.rms_m = 0.0;
+  plane.members = members;
+  plane.inliers = members;
+  return plane;
+}
+
+// A depth camera that reads 4 mm too far, or 1 mm too near, along its own
+// axis, turned off its colour camera's: each board, turned from facing the
+// colour camera to 70 degrees and off the axis, has its plane's offset made
+// axial back to the bias within 0.2 mm, while the offset itself,
+// along the board's normal, is half the bias or less at 70. A board behind
+// the depth camera has no axial offset.
+TEST(BoardDepthCheck, MakesTheOffsetAxialAtAnyTilt) {
+  const compute::Board board = test::femto_board();
+  const std::vector<solve::RigCamera> rig = rig_of(1);
+  for (const double tilt_deg : {0.0, 30.0, 50.0, 70.0}) {
+    for (const double bias_mm : {4.0, -1.0}) {
+      SCOPED_TRACE(std::to_string(tilt_deg) + " degrees, " +
+                   std::to_string(bias_mm) + " mm");
+      const Mat4d pose =
+          test::board_facing_camera(board, {0.3, -0.2, 2.2}, tilt_deg, 20.0);
+      const BoardRegion region =
+          value_of(board_region(board, pose, femto_depth_to_color()));
+      const BoardDepthCheck check = value_of(
+          board_depth_check(rig, board, view_of(rig[0], board, pose), region,
+                            plane_read_with_bias(region, bias_mm / 1000.0)));
+      EXPECT_NEAR(check.axial_offset_mm, bias_mm, 0.2);
+      EXPECT_GT(check.offset_mm * bias_mm, 0.0);
+      // At 70 degrees the ray meets the board at 60 or more.
+      if (tilt_deg == 70.0) {
+        EXPECT_LT(std::abs(check.offset_mm), 0.6 * std::abs(bias_mm));
+      }
+    }
+  }
+  const Mat4d behind =
+      test::board_facing_camera(board, {0.0, 0.0, -1.5}, 0.0, 0.0);
+  const BoardRegion region =
+      value_of(board_region(board, behind, femto_depth_to_color()));
+  DepthPlane plane = plane_in(region, Vec3d(0.0, 0.0, -1.5),
+                              Mat3d(behind) * Vec3d(0.0, 0.0, 1.0));
+  plane.point.z += 0.004;
+  const BoardDepthCheck check = value_of(board_depth_check(
+      rig, board, view_of(rig[0], board, behind), region, plane));
+  EXPECT_NEAR(check.offset_mm, 4.0, 1e-9);
+  EXPECT_TRUE(std::isnan(check.axial_offset_mm));
 }
 
 // Each two adjacent corners both detected, in row-major order of the first,
@@ -592,6 +677,7 @@ TEST(BoardDepthCheck, MeasuresNothingThatMeetsNoPlane) {
       value_of(board_depth_check(rig, board, view, region, invalid));
   EXPECT_TRUE(skipped.ratios.empty());
   EXPECT_TRUE(std::isnan(skipped.offset_mm));
+  EXPECT_TRUE(std::isnan(skipped.axial_offset_mm));
   EXPECT_TRUE(std::isnan(skipped.angle_deg));
   EXPECT_FALSE(skipped.plane.valid);
   EXPECT_EQ(skipped.plane.members, 40u);
