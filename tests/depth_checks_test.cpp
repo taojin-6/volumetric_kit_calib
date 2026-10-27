@@ -972,19 +972,26 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
 TEST(SummarizeDepthChecks, TakesEachCamerasDepthOffsetAndJudgesWhatIsLeft) {
   const std::vector<BoardDepthCheck> views = {
       // 0: oblique views whose offsets understate the axial ones.
-      axial_of(0, 1, 5.5, 7.25), axial_of(0, 2, 3.75, 8.0),
-      axial_of(0, 3, 3.75, 11.5), axial_of(0, 4, 4.25, 7.0),
+      axial_of(0, 1, 5.5, 7.25),
+      axial_of(0, 2, 3.75, 8.0),
+      axial_of(0, 3, 3.75, 11.5),
+      axial_of(0, 4, 4.25, 7.0),
       // 1: 20 mm, consistently.
-      axial_of(1, 1, 20.0, 20.0), axial_of(1, 2, 20.5, 20.5),
+      axial_of(1, 1, 20.0, 20.0),
+      axial_of(1, 2, 20.5, 20.5),
       axial_of(1, 3, 19.5, 19.5),
       // 2: views 12 mm either side of 0.
-      axial_of(2, 1, 0.0, 0.0), axial_of(2, 2, 12.0, 12.0),
+      axial_of(2, 1, 0.0, 0.0),
+      axial_of(2, 2, 12.0, 12.0),
       axial_of(2, 3, -12.0, -12.0),
       // 3: 60 mm; 4: 50 mm, the file's bound; 5: -1.75 mm, one view.
-      axial_of(3, 1, 60.0, 60.0), axial_of(3, 2, 60.0, 60.0),
-      axial_of(4, 1, 50.0, 50.0), axial_of(5, 1, -1.0, -1.75),
+      axial_of(3, 1, 60.0, 60.0),
+      axial_of(3, 2, 60.0, 60.0),
+      axial_of(4, 1, 50.0, 50.0),
+      axial_of(5, 1, -1.0, -1.75),
       // 6: offsets, but no axial one (the board behind the depth camera).
-      axial_of(6, 1, 2.0, kNaN), axial_of(6, 2, 3.0, kNaN),
+      axial_of(6, 1, 2.0, kNaN),
+      axial_of(6, 2, 3.0, kNaN),
   };
   const DepthSummary s = value_of(summarize_depth_checks(7, views, {}));
   ASSERT_EQ(s.cameras.size(), 7u);
@@ -1014,10 +1021,9 @@ TEST(SummarizeDepthChecks, TakesEachCamerasDepthOffsetAndJudgesWhatIsLeft) {
   // The bound on the scatter is the setting's.
   DepthCheckOptions options;
   options.max_scatter_mm = 12.0;
-  EXPECT_EQ(value_of(summarize_depth_checks(7, views, {}, options))
-                .cameras[2]
-                .plane,
-            DepthVerdict::Ok);
+  EXPECT_EQ(
+      value_of(summarize_depth_checks(7, views, {}, options)).cameras[2].plane,
+      DepthVerdict::Ok);
 }
 
 // A camera's verdict over every scale and plane: fail if either fails, pass

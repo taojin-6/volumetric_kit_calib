@@ -603,11 +603,11 @@ TEST(Results, TheReportHasItsDepthSection) {
   for (std::size_t v = 0; v < d.views.size(); ++v) {
     const BoardDepthCheck& view = d.views[v];
     const json& j = depth["views"][v];
-    EXPECT_EQ(keys_of(ordered["views"][v]),
-              (std::vector<std::string>{
-                  "camera", "capture", "valid", "members", "out_of_range",
-                  "inliers", "rms_mm", "ratios", "offset_mm", "axial_offset_mm",
-                  "angle_deg"}));
+    EXPECT_EQ(
+        keys_of(ordered["views"][v]),
+        (std::vector<std::string>{
+            "camera", "capture", "valid", "members", "out_of_range", "inliers",
+            "rms_mm", "ratios", "offset_mm", "axial_offset_mm", "angle_deg"}));
     EXPECT_EQ(j["camera"], cams[view.camera].id);
     EXPECT_EQ(j["capture"], view.capture);
     EXPECT_EQ(j["valid"], view.plane.valid);
@@ -1148,8 +1148,8 @@ TEST(Results, TheCalibrationFileCarriesEachDepthOffsetThatPassed) {
   const ResultWorld reference;
   for (const ResultWorld* world : {&reference, &tagged().world}) {
     SCOPED_TRACE(world->origin.tag ? "tag world" : "reference world");
-    const ResultFiles files = value_of(
-        format_results(cams, s.solution, s.metrics, &d, {}, *world));
+    const ResultFiles files =
+        value_of(format_results(cams, s.solution, s.metrics, &d, {}, *world));
     const json doc = json::parse(files.array_calibration);
     EXPECT_EQ(doc["version"], 3);
     const camera::ArrayCalibration back =
@@ -1161,9 +1161,9 @@ TEST(Results, TheCalibrationFileCarriesEachDepthOffsetThatPassed) {
       const bool written = c < 2;
       EXPECT_EQ(sensor->depth_offset_m, written ? each[c].first : 0.0)
           << cams[c].id;
-      EXPECT_EQ(doc["device_calibration"][cams[c].id].contains(
-                    "depth_offset_m"),
-                written)
+      EXPECT_EQ(
+          doc["device_calibration"][cams[c].id].contains("depth_offset_m"),
+          written)
           << cams[c].id;
     }
   }
@@ -1171,9 +1171,9 @@ TEST(Results, TheCalibrationFileCarriesEachDepthOffsetThatPassed) {
   const ResultFiles none =
       value_of(format_results(cams, s.solution, s.metrics, &d));
   EXPECT_EQ(json::parse(none.array_calibration)["version"], 2);
-  EXPECT_EQ(none.array_calibration,
-            value_of(format_results(cams, s.solution, s.metrics))
-                .array_calibration);
+  EXPECT_EQ(
+      none.array_calibration,
+      value_of(format_results(cams, s.solution, s.metrics)).array_calibration);
 }
 
 }  // namespace

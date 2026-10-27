@@ -76,9 +76,8 @@
 ///   `offset_mm`, `axial_offset_mm`, `angle_deg`); `pairs`, pooled, and
 ///   `captures` (`capture`, `pairs`), each pair `from`, `to`, `overlap`,
 ///   `in_window`, `signed_median_mm`, `median_abs_mm`, `p90_abs_mm`,
-///   `verdict`. Verdicts are
-///   @ref to_string(DepthVerdict)'s names; an invalid plane's `rms_mm` is
-///   `null`;
+///   `verdict`. Verdicts are @ref to_string(DepthVerdict)'s names; an
+///   invalid plane's `rms_mm` is `null`;
 /// - `depth_unchecked`: why `depth` is `null` though the depth was to be
 ///   checked, such as the device's failure; `null` otherwise.
 ///

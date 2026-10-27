@@ -9,14 +9,14 @@
 // every camera and pair; a board printed 0.3 % large, a board's depth 5 mm
 // deep, a camera's depth 3 mm far, cameras' depth 4 mm far and 1 mm near
 // along their axes (each camera's depth offset, into the results' file) and
-// depth in half-millimetre units each read as they should; a camera's depth 8 mm far in one capture fails that
-// capture's own pairs alone; a camera without depth is insufficient; each
-// capture's frames are let go before the next; a stop between captures stops
-// the run; a failure of the checks is posted and the results written without
-// them; a tag world's checks are the same as the reference's; and the checks
-// give the same while the 3D view's worker prepares on the same device. Under
-// synchronization validation; skips without a Vulkan device, and the last
-// case also with one queue family.
+// depth in half-millimetre units each read as they should; a camera's depth
+// 8 mm far in one capture fails that capture's own pairs alone; a camera
+// without depth is insufficient; each capture's frames are let go before the
+// next; a stop between captures stops the run; a failure of the checks is
+// posted and the results written without them; a tag world's checks are the
+// same as the reference's; and the checks give the same while the 3D view's
+// worker prepares on the same device. Under synchronization validation; skips
+// without a Vulkan device, and the last case also with one queue family.
 
 #include <gtest/gtest.h>
 
@@ -181,10 +181,9 @@ KeptCaptures depth_captures(const DepthCase& c, const std::string& directory) {
           k < c.bias_mm.size() && (!c.biased_capture || c.biased_capture == p)
               ? c.bias_mm[k]
               : 0.0;
-      capture->depth[k] =
-          std::make_shared<const std::vector<std::uint16_t>>(test::render_raw(
-              depth_rays(), depth_to_world, surface, c.metres_per_unit,
-              bias_mm / 1000.0));
+      capture->depth[k] = std::make_shared<const std::vector<std::uint16_t>>(
+          test::render_raw(depth_rays(), depth_to_world, surface,
+                           c.metres_per_unit, bias_mm / 1000.0));
     }
     kept.captures[p] = std::move(capture);
   }

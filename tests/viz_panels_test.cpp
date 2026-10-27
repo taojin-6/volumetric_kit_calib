@@ -628,13 +628,12 @@ quality::DepthSummary three_camera_depth() {
   d.scale = V::Ok;
   d.cameras.resize(3);
   d.cameras[0] = {
-      14, {140, 1.0003, 0.001}, V::Ok, 0.42, 0.214, 0.00072, 0.31, V::Ok,
+      14,   {140, 1.0003, 0.001}, V::Ok, 0.42, 0.214, 0.00072, 0.31, V::Ok,
       V::Ok};
   d.cameras[1] = {
       1, {12, 0.99951, 0.002}, V::Ok, -1.24, 0.5, -0.00186, 0.0, V::Ok, V::Ok};
   d.cameras[2] = {
-      13, {130, 1.0019, 0.001}, V::Ok, 12.5, 0.38, 0.0123, 6.4, V::Off,
-      V::Off};
+      13, {130, 1.0019, 0.001}, V::Ok, 12.5, 0.38, 0.0123, 6.4, V::Off, V::Off};
   const double nan = std::numeric_limits<double>::quiet_NaN();
   d.pairs = {pair_check(0, 1, V::Ok, 0.12),
              pair_check(0, 2, V::Ok, -1.4),
