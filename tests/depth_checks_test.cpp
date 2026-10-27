@@ -562,7 +562,9 @@ TEST(BoardDepthCheck, MakesTheOffsetAxialAtAnyTilt) {
     const Vec3d seen =
         apply(camera::rigid_inverse(femto_depth_to_color()), centre);
     const double d_z = seen.z / glm::length(seen);
-    if (centre.x > 0.5) EXPECT_GT(4.0 * (1.0 / d_z - 1.0), 0.3);
+    if (centre.x > 0.5) {
+      EXPECT_GT(4.0 * (1.0 / d_z - 1.0), 0.3);
+    }
     for (const double tilt_deg : {0.0, 30.0, 50.0, 70.0}) {
       for (const double bias_mm : {4.0, -1.0}) {
         SCOPED_TRACE(std::to_string(centre.x) + " m across, " +
