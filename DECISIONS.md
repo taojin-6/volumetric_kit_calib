@@ -107,12 +107,10 @@ camera's axis (`quality/depth_checks.hpp` has the definitions).
   session's always replace an earlier file's, and a camera whose plane did
   not pass keeps its raw depth.
 - **Oblique views weigh most.** A view's axial offset multiplies its plane
-  fit's error by `d_z / (n . d)`, about 3 at 70 degrees, so one oblique view
-  in four can sit millimetres from its camera's median. The median holds,
-  but on that camera the tail of the cross-camera registration can grow
-  while its median falls. Sessions with ten or more shared captures per
-  link steady it; weighing or leaving out oblique views waits until a
-  session shows the need (the `TODO:` in `quality/depth_checks.cpp`).
+  fit's error by `d_z / (n . d)`, about 3 at 70 degrees. The median keeps
+  one such view from moving the offset; weighing or leaving out oblique
+  views waits until a session shows the need (the `TODO:` in
+  `quality/depth_checks.cpp`).
 
 ## 2026-10-22 — Consumed by commit, never installed
 
