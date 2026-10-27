@@ -87,7 +87,8 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_recon.git
   GIT_TAG 9839fdd158787d7511ec1ec61d2ec666e939636c)
 # VC_WITH_RIG takes all of recon: the capture tier links its sensor and io
-# tiers. An application's own VR_WITH_ORBBEC / VR_WITH_FFMPEG still apply.
+# tiers. An application's own VR_WITH_ORBBEC, VR_WITH_FFMPEG and VR_WITH_CUDA
+# still apply.
 if(VC_WITH_RIG)
   set(VR_CAMERA_ONLY OFF)
 elseif(NOT DEFINED VR_CAMERA_ONLY)

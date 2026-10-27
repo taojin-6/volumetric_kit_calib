@@ -617,8 +617,8 @@ The `capture` tier writes the rig application's calibration sessions
   the `viz` tier, its first user.
 - **Core 0.25.0** is the oldest calib builds with (`VC_CORE_MIN_VERSION`),
   the floor its configure checks: the highest of the pinned siblings' floors,
-  so one floor covers every build. Since 2026-10-27 that is recon's, which
-  every build fetches; before, it was gfx's.
+  recon's, which every build fetches, so one floor covers every build
+  (amended 2026-10-27).
 
 ## 2026-10-12 — OpenCV, behind calib's types
 
