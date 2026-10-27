@@ -446,14 +446,17 @@ struct CameraDepth {
   /// @ref format_results writes when @ref plane is `Ok`. Not a number for
   /// none.
   double depth_offset_m = std::numeric_limits<double>::quiet_NaN();
-  /// How far their axial offsets lie from @ref depth_offset_m: the median
-  /// of their magnitudes less it (millimetres); not a number for none.
+  /// How far their axial offsets lie from @ref depth_offset_m: the median of
+  /// `|a - depth offset|` over their axial offsets `a` (millimetres); not a
+  /// number for fewer than 2.
   double scatter_mm = std::numeric_limits<double>::quiet_NaN();
   /// Its plane against the solved boards once @ref depth_offset_m is taken
-  /// off: `Insufficient` for no valid view, else `Off` when the scatter is
-  /// beyond `max_scatter_mm`, the median angle beyond `max_angle_deg`, or
-  /// the depth offset one recon's calibration file does not carry (its
-  /// `validate_array_calibration` refuses it, as it does one not a number).
+  /// off: `Insufficient` for no valid view; else `Off` when the median angle
+  /// is beyond `max_angle_deg` or the depth offset is one recon's
+  /// calibration file does not carry (its `validate_array_calibration`
+  /// refuses it, as it does one not a number); else `Insufficient` when the
+  /// scatter is not a number (one view), and `Off` when it is beyond
+  /// `max_scatter_mm`.
   DepthVerdict plane = DepthVerdict::Insufficient;
   /// Its depth's: @ref camera_verdict of @ref scale and @ref plane.
   DepthVerdict verdict = DepthVerdict::Insufficient;

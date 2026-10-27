@@ -880,10 +880,12 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
       check_of(0, 3, {}, 3.0, 1.5),
       // 1: scale 1.0025, beyond; a depth offset of 11, taken off: ok.
       check_of(1, 1, {1.0025}, 11.0, 0.1),
-      // 2: scale 0.9975, beyond below; median angle 1.2: off.
+      check_of(1, 2, {}, 11.0, 0.1),
+      // 2: scale 0.9975, beyond below; one view, but its angle, 1.2: off.
       check_of(2, 1, {0.9975}, 0.0, 1.2),
-      // 3: a valid plane but no ratios (its rays met nothing).
+      // 3: valid planes but no ratios (their rays met nothing).
       check_of(3, 1, {}, 2.0, 0.5),
+      check_of(3, 2, {}, 2.0, 0.5),
       // 4: an offset not a number (the plane across the board).
       check_of(4, 1, {1.0}, kNaN, 90.0),
       // 5: no valid view.
@@ -967,8 +969,9 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
 // Each camera's depth offset is the median of its views' axial offsets, not
 // of their offsets along the normals, and its plane is judged on what is left
 // once it is taken off: a consistent offset past the old 10 mm bound passes,
-// views that disagree fail, and so does an offset recon's calibration file
-// cannot carry (past 0.05 m) or none at all.
+// views that disagree fail, and so does an axial offset recon's calibration
+// file cannot carry (past 0.05 m), however small along the normals, or none
+// at all; one view has no scatter, so its plane is insufficient.
 TEST(SummarizeDepthChecks, TakesEachCamerasDepthOffsetAndJudgesWhatIsLeft) {
   const std::vector<BoardDepthCheck> views = {
       // 0: oblique views whose offsets understate the axial ones.
@@ -984,10 +987,12 @@ TEST(SummarizeDepthChecks, TakesEachCamerasDepthOffsetAndJudgesWhatIsLeft) {
       axial_of(2, 1, 0.0, 0.0),
       axial_of(2, 2, 12.0, 12.0),
       axial_of(2, 3, -12.0, -12.0),
-      // 3: 60 mm; 4: 50 mm, the file's bound; 5: -1.75 mm, one view.
-      axial_of(3, 1, 60.0, 60.0),
-      axial_of(3, 2, 60.0, 60.0),
-      axial_of(4, 1, 50.0, 50.0),
+      // 3: 60 mm axial, 40 along the normals; 4: 50 mm, the file's bound;
+      // 5: -1.75 mm, one view.
+      axial_of(3, 1, 40.0, 60.0),
+      axial_of(3, 2, 40.0, 60.0),
+      axial_of(4, 1, 45.0, 50.0),
+      axial_of(4, 2, 45.0, 50.0),
       axial_of(5, 1, -1.0, -1.75),
       // 6: offsets, but no axial one (the board behind the depth camera).
       axial_of(6, 1, 2.0, kNaN),
@@ -1007,13 +1012,16 @@ TEST(SummarizeDepthChecks, TakesEachCamerasDepthOffsetAndJudgesWhatIsLeft) {
   EXPECT_EQ(s.cameras[2].depth_offset_m, 0.0);
   EXPECT_EQ(s.cameras[2].scatter_mm, 12.0);
   EXPECT_EQ(s.cameras[2].plane, DepthVerdict::Off);
+  EXPECT_DOUBLE_EQ(s.cameras[3].offset_mm, 40.0);
   EXPECT_DOUBLE_EQ(s.cameras[3].depth_offset_m, 0.06);
   EXPECT_EQ(s.cameras[3].scatter_mm, 0.0);
   EXPECT_EQ(s.cameras[3].plane, DepthVerdict::Off);
   EXPECT_EQ(s.cameras[4].depth_offset_m, 0.05);
   EXPECT_EQ(s.cameras[4].plane, DepthVerdict::Ok);
+  EXPECT_EQ(s.cameras[5].views, 1u);
   EXPECT_DOUBLE_EQ(s.cameras[5].depth_offset_m, -0.00175);
-  EXPECT_EQ(s.cameras[5].plane, DepthVerdict::Ok);
+  EXPECT_TRUE(std::isnan(s.cameras[5].scatter_mm));
+  EXPECT_EQ(s.cameras[5].plane, DepthVerdict::Insufficient);
   EXPECT_DOUBLE_EQ(s.cameras[6].offset_mm, 2.5);
   EXPECT_TRUE(std::isnan(s.cameras[6].depth_offset_m));
   EXPECT_TRUE(std::isnan(s.cameras[6].scatter_mm));

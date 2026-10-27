@@ -100,10 +100,12 @@ DepthVerdict scale_verdict(const RatioStats& ratio,
 DepthVerdict plane_verdict(const CameraDepth& camera, bool carried,
                            const DepthCheckOptions& options) noexcept {
   if (camera.views == 0) return DepthVerdict::Insufficient;
-  return carried && camera.scatter_mm <= options.max_scatter_mm &&
-                 camera.angle_deg <= options.max_angle_deg
-             ? DepthVerdict::Ok
-             : DepthVerdict::Off;
+  if (!carried || !(camera.angle_deg <= options.max_angle_deg)) {
+    return DepthVerdict::Off;
+  }
+  if (std::isnan(camera.scatter_mm)) return DepthVerdict::Insufficient;
+  return camera.scatter_mm <= options.max_scatter_mm ? DepthVerdict::Ok
+                                                     : DepthVerdict::Off;
 }
 
 // Whether recon's calibration file carries `offset_m` as a sensor's depth
@@ -549,8 +551,11 @@ core::Result<DepthSummary> summarize_depth_checks(
       // 70 degrees multiplies its offset's error by about 3.
       const double depth_offset_mm = compute::median(axial[c]);
       camera.depth_offset_m = depth_offset_mm / 1000.0;
-      for (double& a : axial[c]) a = std::abs(a - depth_offset_mm);
-      camera.scatter_mm = compute::median(std::move(axial[c]));
+      // One view has no scatter, as one ratio has no spread.
+      if (axial[c].size() >= 2) {
+        for (double& a : axial[c]) a = std::abs(a - depth_offset_mm);
+        camera.scatter_mm = compute::median(std::move(axial[c]));
+      }
       core::Result<bool> carried = file_carries(camera.depth_offset_m);
       if (!carried.ok()) return carried.status().with_context(kWhat);
       camera.plane = plane_verdict(camera, *carried, options);

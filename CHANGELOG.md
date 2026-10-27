@@ -305,7 +305,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its depth offset is taken off: its views' scatter against
   `DepthCheckOptions::max_scatter_mm` (5 mm), which replaces
   `max_offset_mm`, the bound on the median offset, with the median angle as
-  before, and an offset recon's calibration file cannot carry fails.
+  before, and an offset recon's calibration file cannot carry fails. A
+  camera with one view has no scatter, so its plane is insufficient.
   `report.json`'s depth settings name `max_scatter_mm`.
 - build: **calib pins core 0.25.0** (effc464, core #62's merge), gfx at
   #152's merge (f147e00) and recon at #298's merge (9839fdd), and every

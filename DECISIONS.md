@@ -89,12 +89,14 @@ camera's axis (`quality/depth_checks.hpp` has the definitions).
   medians.
 - **Judged after the offset.** The plane verdict no longer fails a camera
   for having an offset. It fails views that disagree once the offset is
-  taken off: the median magnitude of their axial offsets less the camera's,
+  taken off: the median of `|a - offset|` over their axial offsets `a`,
   against `max_scatter_mm`, 5 mm, a pair's bound on its signed median,
-  since what is left is depth error another camera would see. It also fails
-  a median angle past `max_angle_deg`, and an offset recon's calibration
-  file cannot carry, which recon's validator decides, so its bound is not
-  copied here. The median offset along the normals is still reported.
+  since what is left is depth error another camera would see. One view has
+  no scatter, so its camera's plane is insufficient and no offset is written
+  for it. The verdict also fails a median angle past `max_angle_deg`, and
+  an offset recon's calibration file cannot carry, which recon's validator
+  decides, so its bound is not copied here. The median offset along the
+  normals is still reported.
 - **Measured on raw depth.** The checks prepare the kept raw depth with no
   calibration, so an offset is the depth's own, never a correction of an
   earlier one.
@@ -102,8 +104,8 @@ camera's axis (`quality/depth_checks.hpp` has the definitions).
   offset whose plane verdict passed into the results' calibration file
   (recon's `depth_offset_m`, which makes it version 3), and none for any
   other camera: an offset belongs with the poses solved beside it, so a
-  session's always replace an earlier file's, and a camera that failed
-  keeps its raw depth.
+  session's always replace an earlier file's, and a camera whose plane did
+  not pass keeps its raw depth.
 - **Oblique views weigh most.** A view's axial offset multiplies its plane
   fit's error by `d_z / (n . d)`, about 3 at 70 degrees, so one oblique view
   in four can sit millimetres from its camera's median. The median holds,

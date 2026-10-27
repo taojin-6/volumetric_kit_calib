@@ -463,7 +463,8 @@ TEST(Results, TheReportHasItsSchema) {
 
 // Depth checks of the solved rig's 4 cameras, with options not the defaults
 // and values that differ wherever two members could be swapped: views of two
-// captures, one plane not valid; pairs pooled and of one capture.
+// captures, one plane not valid, one camera with two views; pairs pooled and
+// of one capture.
 DepthSummary depth_checks() {
   DepthCheckOptions options;
   options.inset_m = 0.025;
@@ -481,7 +482,7 @@ DepthSummary depth_checks() {
   options.max_angle_deg = 1.25;
   options.max_signed_median_mm = 4.5;
   options.max_median_abs_mm = 9.5;
-  std::vector<BoardDepthCheck> views(3);
+  std::vector<BoardDepthCheck> views(4);
   views[0].camera = 2;
   views[0].capture = 5;
   views[0].plane = {
@@ -504,6 +505,13 @@ DepthSummary depth_checks() {
   views[2].offset_mm = -11.5;
   views[2].axial_offset_mm = -23.25;
   views[2].angle_deg = 1.375;
+  views[3].camera = 2;
+  views[3].capture = 3;
+  views[3].plane = {
+      true, {0.25, 0.15, 0.0015}, {0.01, 0.0, 1.0}, 0.0015, 8800, 120, 8400};
+  views[3].offset_mm = 3.0;
+  views[3].axial_offset_mm = 4.625;
+  views[3].angle_deg = 0.5;
   std::vector<PairAgreement> pairs(2);
   pairs[0].from = 3;
   pairs[0].to = 1;
@@ -593,7 +601,8 @@ TEST(Results, TheReportHasItsDepthSection) {
   EXPECT_EQ(depth["cameras"][cams[1].id]["plane"], "off");
   EXPECT_EQ(depth["cameras"][cams[1].id]["verdict"], "off");
   EXPECT_EQ(depth["cameras"][cams[2].id]["scale"], "ok");
-  EXPECT_EQ(depth["cameras"][cams[2].id]["depth_offset_m"], 0.004125);
+  EXPECT_EQ(depth["cameras"][cams[2].id]["depth_offset_m"], 0.004375);
+  EXPECT_EQ(depth["cameras"][cams[2].id]["scatter_mm"], 0.25);
   EXPECT_EQ(depth["cameras"][cams[2].id]["plane"], "ok");
   EXPECT_TRUE(depth["cameras"][cams[0].id]["depth_offset_m"].is_null());
   EXPECT_EQ(depth["cameras"][cams[0].id]["plane"], "insufficient");
@@ -625,7 +634,7 @@ TEST(Results, TheReportHasItsDepthSection) {
     expect_number(j["angle_deg"], view.angle_deg);
   }
   EXPECT_EQ(depth["views"][0]["capture"], 3);
-  EXPECT_FALSE(depth["views"][1]["valid"].get<bool>());
+  EXPECT_FALSE(depth["views"][2]["valid"].get<bool>());
   expect_pairs(depth["pairs"], d.pairs, cams);
   ASSERT_EQ(depth["pairs"].size(), 12u);
   ASSERT_EQ(depth["captures"].size(), 1u);
@@ -1128,8 +1137,8 @@ TEST(Results, RefusesATagWorldThatDoesNotFit) {
 // Each camera's depth offset whose plane verdict passed is in the calibration
 // file, as recon reads it back, version 3; none for a camera whose plane did
 // not pass, or whose offset is not a number; none at all, the file as without
-// the checks (version 2), when no camera passed. In a tag world as in the
-// reference's.
+// the checks (version 2), when every plane failed or was insufficient. In a
+// tag world as in the reference's.
 TEST(Results, TheCalibrationFileCarriesEachDepthOffsetThatPassed) {
   const Solved& s = solved();
   const std::vector<solve::RigCamera>& cams = s.scene.cameras;
@@ -1167,7 +1176,11 @@ TEST(Results, TheCalibrationFileCarriesEachDepthOffsetThatPassed) {
           << cams[c].id;
     }
   }
-  for (CameraDepth& cam : d.cameras) cam.plane = DepthVerdict::Off;
+  for (std::size_t c = 0; c < cams.size(); ++c) {
+    d.cameras[c].depth_offset_m = 0.002;
+    d.cameras[c].plane =
+        c % 2 == 0 ? DepthVerdict::Insufficient : DepthVerdict::Off;
+  }
   const ResultFiles none =
       value_of(format_results(cams, s.solution, s.metrics, &d));
   EXPECT_EQ(json::parse(none.array_calibration)["version"], 2);
