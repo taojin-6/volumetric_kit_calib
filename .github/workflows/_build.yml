@@ -172,7 +172,7 @@ jobs:
       # Keep the ref at calib's recon pin (third_party/CMakeLists.txt).
       - name: Install the Orbbec SDK
         if: inputs.rig
-        uses: taojin-6/volumetric_kit_recon/.github/actions/install-orbbec-sdk@9fd879052e97ac315805d4f42dd231f4457b5112
+        uses: taojin-6/volumetric_kit_recon/.github/actions/install-orbbec-sdk@b50974295c15a460dc468784d903277f2078cf22
 
       # The installed versions of the leg's formulae and of their dependencies,
       # so the first run after a brew upgrade builds the dependency tree afresh
@@ -183,7 +183,7 @@ jobs:
       - name: Homebrew key
         id: brew
         if: runner.os == 'macOS'
-        uses: taojin-6/volumetric_kit_core/.github/actions/homebrew-key@ff44a981055d505590e295ff6a943bb1b6e96109
+        uses: taojin-6/volumetric_kit_core/.github/actions/homebrew-key@effc4649acf4c418fe45143c6b728197f2bcbb58
         with:
           formulae: ${{ steps.formulae.outputs.formulae }}
 

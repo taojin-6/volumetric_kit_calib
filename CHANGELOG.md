@@ -282,11 +282,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- build: **calib pins core 0.19.0** (ff44a98, core #49's merge), gfx at
-  #152's merge (f147e00) and recon at #271's merge (9fd8790), and every
-  build requires core 0.18.0 or newer (`VC_CORE_MIN_VERSION`, from 0.6.1),
-  the pinned gfx's floor; `calib_app` requires its config tier at that
-  floor. calib_rig now presents FIFO, paced to the display (gfx #150's
+- build: **calib pins core 0.25.0** (effc464, core #62's merge), gfx at
+  #152's merge (f147e00) and recon at #297's merge (b509742), and every
+  build requires core 0.24.0 or newer (`VC_CORE_MIN_VERSION`, from 0.6.1),
+  the pinned recon's floor; `calib_app` requires its config tier at that
+  floor. calib_rig's scenario resolves as before: MJPEG colour at
+  3840x2160, 640x576 depth, 25 fps. calib_rig now presents FIFO, paced to the display (gfx #150's
   default), where it presented MAILBOX, and its panels and tile marks show
   their colours as authored on the `_SRGB` swapchain (gfx #144), where they
   drew washed out. It builds its overlay's config with

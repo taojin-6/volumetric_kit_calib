@@ -38,7 +38,7 @@ endif()
 # on for recon or gfx keeps it. Only the examples and calib_rig opt into
 # core_config.
 #
-# The pin is core 0.19.0 (ff44a98, core #49's merge), as is the Homebrew key
+# The pin is core 0.25.0 (effc464, core #62's merge), as is the Homebrew key
 # action in .github/workflows/_build.yml.
 if(VC_WITH_RIG)
   set(VKC_WITH_VULKAN ON)
@@ -51,7 +51,7 @@ endif()
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG ff44a981055d505590e295ff6a943bb1b6e96109)
+  GIT_TAG effc4649acf4c418fe45143c6b728197f2bcbb58)
 FetchContent_MakeAvailable(volumetric_kit_core)
 # The set() above is lost when the application made the core available first.
 if(VC_WITH_RIG)
@@ -73,16 +73,18 @@ endif()
 # stay off in a subproject. It leaves an application's VR_CAMERA_ONLY as set, so
 # an application that turns it off keeps the rest of recon.
 #
-# The pin is recon main at #271's merge (9fd8790), on core 0.19.0. calib takes
+# The pin is recon main at #297's merge (b509742), on core 0.24.0, the floor
+# recon refuses an older core below (calib's VC_CORE_MIN_VERSION). calib takes
 # #254's calibration file, which names a world at a floor AprilTag
-# (WorldFrame::apriltag), as Calibrate's results write it; #246's GpuFramePrep,
-# which shares a prepared frame's depth with another queue family
+# (WorldFrame::apriltag), as Calibrate's results write it, and #296's version
+# 3 of it, which carries each sensor's depth offset; #246's GpuFramePrep, which
+# shares a prepared frame's depth with another queue family
 # (depth_queue_families) for the 3D view; and #245's pinhole.glsl under
 # VR_SHADER_INCLUDE_DIR for calib_depth's kernels.
 FetchContent_Declare(
   volumetric_kit_recon
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_recon.git
-  GIT_TAG 9fd879052e97ac315805d4f42dd231f4457b5112)
+  GIT_TAG b50974295c15a460dc468784d903277f2078cf22)
 # VC_WITH_RIG takes all of recon: the capture tier links its sensor and io
 # tiers. An application's own VR_WITH_ORBBEC / VR_WITH_FFMPEG still apply.
 if(VC_WITH_RIG)

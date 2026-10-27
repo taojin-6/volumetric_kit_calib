@@ -611,9 +611,10 @@ The `capture` tier writes the rig application's calibration sessions
 - **How it builds.** `VC_WITH_RIG`, OFF by default, fetches all of recon and
   turns on the core's vulkan tier, so it needs the Vulkan SDK. gfx comes with
   the `viz` tier, its first user.
-- **Core 0.18.0** is the oldest calib builds with (`VC_CORE_MIN_VERSION`),
-  the floor its configure checks: the pinned gfx's floor, which the `viz`
-  tier builds on, so one floor covers every build.
+- **Core 0.24.0** is the oldest calib builds with (`VC_CORE_MIN_VERSION`),
+  the floor its configure checks: the highest of the pinned siblings' floors,
+  so one floor covers every build. Since 2026-10-27 that is recon's, which
+  every build fetches; before, it was gfx's.
 
 ## 2026-10-12 — OpenCV, behind calib's types
 
