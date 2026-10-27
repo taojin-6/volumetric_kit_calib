@@ -257,8 +257,8 @@ endif()
 
 # The core calib requires (third_party/CMakeLists.txt): calib's configure
 # against a stand-in core of each version (core_requirement/) refuses one older
-# than VC_CORE_MIN_VERSION, 0.24.0 -- before 0.1.0 the core has no
-# vkc_require_core -- and accepts 0.24.0 or newer.
+# than VC_CORE_MIN_VERSION, 0.25.0 -- before 0.1.0 the core has no
+# vkc_require_core -- and accepts 0.25.0 or newer.
 #
 # Those configures, and the ones below, take the fetched sources this build used
 # (FETCHCONTENT_SOURCE_DIR_<NAME>), so they need no network, and the OpenCV it
@@ -295,12 +295,12 @@ vc_add_core_requirement_test(
   before_0_1_0 none "-DEXPECT_ERROR=Unknown CMake command \"vkc_require_core\"")
 # calib's own check refuses, before recon's at the same floor.
 set(_vc_below_floor
-    "-DEXPECT_ERROR=volumetric_kit_calib needs volumetric_kit_core 0\\.24\\.0 or newer"
+    "-DEXPECT_ERROR=volumetric_kit_calib needs volumetric_kit_core 0\\.25\\.0 or newer"
 )
 vc_add_core_requirement_test(0_18_0 0.18.0 "${_vc_below_floor}")
-vc_add_core_requirement_test(0_23_0 0.23.0 "${_vc_below_floor}")
-vc_add_core_requirement_test(0_24_0 0.24.0)
-vc_add_core_requirement_test(0_25_2 0.25.2)
+vc_add_core_requirement_test(0_24_0 0.24.0 "${_vc_below_floor}")
+vc_add_core_requirement_test(0_25_0 0.25.0)
+vc_add_core_requirement_test(0_26_1 0.26.1)
 
 if(VC_WITH_RIG)
   # VC_WITH_RIG needs the core's vulkan tier and all of recon: an application

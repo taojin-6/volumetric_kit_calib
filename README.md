@@ -241,7 +241,7 @@ e.g. `-DVC_SANITIZE="address;undefined"`. calib is consumed by commit, as
 above, and installs nothing: it has no install rules or package config
 ([DECISIONS.md](DECISIONS.md#2026-10-22--consumed-by-commit-never-installed)).
 
-calib needs `volumetric_kit_core` 0.24.0 or newer, with its vulkan tier for
+calib needs `volumetric_kit_core` 0.25.0 or newer, with its vulkan tier for
 `VC_WITH_RIG` and its config tier for `calib_app`. An
 application that declares the core before calib, to share it with `recon` or
 `gfx`, pins at least that: on an older core, calib's configure fails at

@@ -291,22 +291,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - build: **calib pins core 0.25.0** (effc464, core #62's merge), gfx at
-  #152's merge (f147e00) and recon at #297's merge (b509742), and every
-  build requires core 0.24.0 or newer (`VC_CORE_MIN_VERSION`, from 0.6.1),
+  #152's merge (f147e00) and recon at #298's merge (9839fdd), and every
+  build requires core 0.25.0 or newer (`VC_CORE_MIN_VERSION`, from 0.6.1),
   the pinned recon's floor; `calib_app` requires its config tier at that
-  floor. calib_rig's scenario resolves as before: MJPEG colour at
-  3840x2160, 640x576 depth, 25 fps.
+  floor. calib_rig now presents FIFO, paced to the display (gfx #150's
+  default), where it presented MAILBOX, and its panels and tile marks show
+  their colours as authored on the `_SRGB` swapchain (gfx #144), where they
+  drew washed out. It builds its overlay's config with
+  `gfx::ui::overlay_config`. Its scenario resolves as before: MJPEG colour
+  at 3840x2160, 640x576 depth, 25 fps. Its cameras open at auto exposure
+  with auto white balance on, which the pinned recon writes at every open
+  where a camera differs (`app::orbbec_options` names no colour controls),
+  so a camera no longer keeps a manual exposure an earlier run left in it.
+  Tests: `core_requirement.*`, `app_live`.
 - build: the rig tiers' configure takes no FFmpeg on Apple, where the
   pinned recon refuses `VR_WITH_FFMPEG` and decodes on VideoToolbox:
   `-DVR_WITH_ORBBEC=ON` alone, and off Apple with
   `-DVR_WITH_FFMPEG=ON -DVR_WITH_CUDA=ON`, which recon requires together.
   CI's rig legs no longer list the `ffmpeg` and `pkgconf` formulae, and
   `app_requirement.*` configures off Apple, given the CUDA toolkit the
-  calling build found. calib_rig now presents FIFO, paced to the display (gfx #150's
-  default), where it presented MAILBOX, and its panels and tile marks show
-  their colours as authored on the `_SRGB` swapchain (gfx #144), where they
-  drew washed out. It builds its overlay's config with
-  `gfx::ui::overlay_config`. Tests: `core_requirement.*`.
+  calling build found.
 - `quality::leave_one_out` and `principal_point_ab` re-solve only the
   corners the solution kept, in one solve each, with no outlier rounds or
   uncertainty step (DECISIONS.md, 2026-10-16, amended 2026-10-22): when the

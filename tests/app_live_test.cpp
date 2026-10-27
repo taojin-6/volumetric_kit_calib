@@ -856,6 +856,9 @@ TEST_F(AppLive, OpensOrbbecCamerasAtThePresetReadableByEachFamily) {
   EXPECT_TRUE(options.serial.empty());
   EXPECT_FALSE(options.sync.has_value());
   EXPECT_FALSE(options.apply_sync);
+  // No colour controls: each camera opens at auto exposure, which the
+  // driver writes where the camera differs.
+  EXPECT_FALSE(options.color_controls.has_value());
   // More families than the options hold: kept to the array, the count left
   // for the camera's open to refuse.
   const sensor::OrbbecSensor::Options many =

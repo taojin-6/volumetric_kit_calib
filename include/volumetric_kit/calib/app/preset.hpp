@@ -112,7 +112,8 @@ core::Status check_preset(const std::vector<recon::sensor::SensorInfo>& cameras,
 ///                   is checked when a camera opens.
 /// @return The options, for `recon::sensor::open_orbbec_sensors`; no serial,
 ///         sync settings or pose, which the rig's sync file and calibration
-///         give.
+///         give, and no colour controls, so each camera opens at auto
+///         exposure with auto white balance on, written where it differs.
 ///
 /// @code
 /// const auto options = orbbec_options(preset, device, allocator,

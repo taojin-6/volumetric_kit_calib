@@ -73,18 +73,19 @@ endif()
 # stay off in a subproject. It leaves an application's VR_CAMERA_ONLY as set, so
 # an application that turns it off keeps the rest of recon.
 #
-# The pin is recon main at #297's merge (b509742), on core 0.24.0, the floor
+# The pin is recon main at #298's merge (9839fdd), on core 0.25.0, the floor
 # recon refuses an older core below (calib's VC_CORE_MIN_VERSION). calib takes
 # #254's calibration file, which names a world at a floor AprilTag
 # (WorldFrame::apriltag), as Calibrate's results write it, and #296's version
-# 3 of it, which carries each sensor's depth offset; #246's GpuFramePrep, which
-# shares a prepared frame's depth with another queue family
-# (depth_queue_families) for the 3D view; and #245's pinhole.glsl under
-# VR_SHADER_INCLUDE_DIR for calib_depth's kernels.
+# 3 of it, which carries each sensor's depth offset; #298's colour controls,
+# which every Orbbec open writes and reads back (calib_rig opens at auto
+# exposure); #246's GpuFramePrep, which shares a prepared frame's depth with
+# another queue family (depth_queue_families) for the 3D view; and #245's
+# pinhole.glsl under VR_SHADER_INCLUDE_DIR for calib_depth's kernels.
 FetchContent_Declare(
   volumetric_kit_recon
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_recon.git
-  GIT_TAG b50974295c15a460dc468784d903277f2078cf22)
+  GIT_TAG 9839fdd158787d7511ec1ec61d2ec666e939636c)
 # VC_WITH_RIG takes all of recon: the capture tier links its sensor and io
 # tiers. An application's own VR_WITH_ORBBEC / VR_WITH_FFMPEG still apply.
 if(VC_WITH_RIG)
