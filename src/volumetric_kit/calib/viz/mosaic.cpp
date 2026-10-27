@@ -217,6 +217,11 @@ core::Result<pipelines::ImageWrite> tile_write(const sensor::YuvImage& picture,
           return core::Status::unsupported(
               "tile_write: planes in a buffer; tiles take image planes");
         }
+        if (picture.queue_family == sensor::kQueueFamilyExternal) {
+          return core::Status::unsupported(
+              "tile_write: images still owned outside Vulkan; tiles read "
+              "them in place");
+        }
         if (picture.image[0] == nullptr || picture.image[1] == nullptr) {
           return core::Status::invalid_argument(
               "tile_write: the picture lacks its luma or chroma image");
