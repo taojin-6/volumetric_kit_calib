@@ -20,6 +20,7 @@
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
+#include "volumetric_kit/recon/camera/array_calibration.hpp"
 
 namespace volumetric_kit::calib::quality {
 namespace {
@@ -94,13 +95,28 @@ DepthVerdict scale_verdict(const RatioStats& ratio,
              : DepthVerdict::Off;
 }
 
-DepthVerdict plane_verdict(const CameraDepth& camera,
+// `carried`: whether recon's calibration file takes the camera's depth
+// offset (file_carries).
+DepthVerdict plane_verdict(const CameraDepth& camera, bool carried,
                            const DepthCheckOptions& options) noexcept {
   if (camera.views == 0) return DepthVerdict::Insufficient;
-  return std::abs(camera.offset_mm) <= options.max_offset_mm &&
+  return carried && camera.scatter_mm <= options.max_scatter_mm &&
                  camera.angle_deg <= options.max_angle_deg
              ? DepthVerdict::Ok
              : DepthVerdict::Off;
+}
+
+// Whether recon's calibration file carries `offset_m` as a sensor's depth
+// offset: its validator holds the bound, so it is not copied here. A
+// failure for want of memory is passed on.
+core::Result<bool> file_carries(double offset_m) {
+  camera::ArrayCalibration array;
+  array.sensors.emplace_back();
+  array.sensors.back().id = "depth";
+  array.sensors.back().depth_offset_m = offset_m;
+  core::Status valid = camera::validate_array_calibration(array);
+  if (valid.domain() == core::Status::Code::OutOfMemory) return valid;
+  return valid.ok();
 }
 
 DepthVerdict pair_verdict(const PairAgreement& pair,
@@ -179,7 +195,7 @@ core::Status check_depth_options(const DepthCheckOptions& options) {
           std::pair{"bin_mm", options.bin_mm},
           std::pair{"edge_ratio", options.edge_ratio},
           std::pair{"max_scale_error", options.max_scale_error},
-          std::pair{"max_offset_mm", options.max_offset_mm},
+          std::pair{"max_scatter_mm", options.max_scatter_mm},
           std::pair{"max_angle_deg", options.max_angle_deg},
           std::pair{"max_signed_median_mm", options.max_signed_median_mm},
           std::pair{"max_median_abs_mm", options.max_median_abs_mm}}) {
@@ -506,6 +522,7 @@ core::Result<DepthSummary> summarize_depth_checks(
     out.cameras.resize(cameras);
     std::vector<std::vector<double>> ratios(cameras);
     std::vector<std::vector<double>> offsets(cameras);
+    std::vector<std::vector<double>> axial(cameras);
     std::vector<std::vector<double>> angles(cameras);
     std::vector<double> every_ratio;
     for (const BoardDepthCheck& view : out.views) {
@@ -516,6 +533,9 @@ core::Result<DepthSummary> summarize_depth_checks(
       every_ratio.insert(every_ratio.end(), view.ratios.begin(),
                          view.ratios.end());
       if (!std::isnan(view.offset_mm)) offsets[c].push_back(view.offset_mm);
+      if (!std::isnan(view.axial_offset_mm)) {
+        axial[c].push_back(view.axial_offset_mm);
+      }
       if (!std::isnan(view.angle_deg)) angles[c].push_back(view.angle_deg);
     }
     for (std::size_t c = 0; c < cameras; ++c) {
@@ -524,7 +544,16 @@ core::Result<DepthSummary> summarize_depth_checks(
       camera.scale = scale_verdict(camera.ratio, options);
       camera.offset_mm = compute::median(offsets[c]);
       camera.angle_deg = compute::median(angles[c]);
-      camera.plane = plane_verdict(camera, options);
+      // TODO: Weigh the views by how square they are, or leave out the most
+      // oblique, if sessions show those pulling the median: a board seen at
+      // 70 degrees multiplies its offset's error by about 3.
+      const double depth_offset_mm = compute::median(axial[c]);
+      camera.depth_offset_m = depth_offset_mm / 1000.0;
+      for (double& a : axial[c]) a = std::abs(a - depth_offset_mm);
+      camera.scatter_mm = compute::median(std::move(axial[c]));
+      core::Result<bool> carried = file_carries(camera.depth_offset_m);
+      if (!carried.ok()) return carried.status().with_context(kWhat);
+      camera.plane = plane_verdict(camera, *carried, options);
       camera.verdict = camera_verdict(camera.scale, camera.plane);
     }
     out.ratio = stats_of(every_ratio);

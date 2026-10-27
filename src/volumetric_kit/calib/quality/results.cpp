@@ -309,7 +309,7 @@ void depth_section(Writer& w, const DepthSummary& d,
   w.key("agreement_stride").value(std::size_t{o.agreement_stride});
   w.key("min_overlap").value(o.min_overlap);
   w.key("max_scale_error").value(o.max_scale_error);
-  w.key("max_offset_mm").value(o.max_offset_mm);
+  w.key("max_scatter_mm").value(o.max_scatter_mm);
   w.key("max_angle_deg").value(o.max_angle_deg);
   w.key("max_signed_median_mm").value(o.max_signed_median_mm);
   w.key("max_median_abs_mm").value(o.max_median_abs_mm);
@@ -325,6 +325,8 @@ void depth_section(Writer& w, const DepthSummary& d,
     w.key("scale").value(to_string(cam.scale));
     w.key("offset_mm").value(cam.offset_mm);
     w.key("angle_deg").value(cam.angle_deg);
+    w.key("depth_offset_m").value(cam.depth_offset_m);
+    w.key("scatter_mm").value(cam.scatter_mm);
     w.key("plane").value(to_string(cam.plane));
     w.key("verdict").value(to_string(cam.verdict));
     w.close_object();

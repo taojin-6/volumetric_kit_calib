@@ -769,6 +769,8 @@ TEST(BoardDepthCheck, RefusesWhatDoesNotFit) {
 
 // --- The summary ------------------------------------------------------------
 
+// A view's check; its axial offset its offset, as for a board seen square on
+// its depth camera's axis.
 BoardDepthCheck check_of(std::size_t camera, std::int64_t capture,
                          std::vector<double> ratios, double offset_mm,
                          double angle_deg, bool valid = true) {
@@ -778,7 +780,16 @@ BoardDepthCheck check_of(std::size_t camera, std::int64_t capture,
   check.plane.valid = valid;
   check.ratios = std::move(ratios);
   check.offset_mm = offset_mm;
+  check.axial_offset_mm = offset_mm;
   check.angle_deg = angle_deg;
+  return check;
+}
+
+// A view's check with an axial offset of its own.
+BoardDepthCheck axial_of(std::size_t camera, std::int64_t capture,
+                         double offset_mm, double axial_offset_mm) {
+  BoardDepthCheck check = check_of(camera, capture, {}, offset_mm, 0.25);
+  check.axial_offset_mm = axial_offset_mm;
   return check;
 }
 
@@ -841,6 +852,8 @@ TEST(SummarizeDepthChecks, PoolsTheRatiosOverCapturesAndCameras) {
   EXPECT_EQ(s.cameras[2].ratio.count, 0u);
   EXPECT_TRUE(std::isnan(s.cameras[2].ratio.mean));
   EXPECT_TRUE(std::isnan(s.cameras[2].offset_mm));
+  EXPECT_TRUE(std::isnan(s.cameras[2].depth_offset_m));
+  EXPECT_TRUE(std::isnan(s.cameras[2].scatter_mm));
   expect_stats(s.ratio, {1.002, 1.0025, 1.0045, 1.0001, 1.0031, 1.001, 1.0035,
                          1.004, 1.002, 1.003});
   // Medians of an even count: the mean of the middle two.
@@ -858,14 +871,14 @@ TEST(SummarizeDepthChecks, PoolsTheRatiosOverCapturesAndCameras) {
 TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
   DepthCheckOptions options;
   options.max_scale_error = 0.002;
-  options.max_offset_mm = 10.0;
+  options.max_scatter_mm = 5.0;
   options.max_angle_deg = 1.0;
   const std::vector<BoardDepthCheck> views = {
-      // 0: scale 1.0015, within; median offset -9, angle 0.9: ok.
+      // 0: scale 1.0015, within; depth offset -9, scatter 3, angle 0.9: ok.
       check_of(0, 1, {1.001, 1.002}, -9.0, 0.9),
       check_of(0, 2, {1.0015}, -12.0, 0.2),
       check_of(0, 3, {}, 3.0, 1.5),
-      // 1: scale 1.0025, beyond; median offset 11: off.
+      // 1: scale 1.0025, beyond; a depth offset of 11, taken off: ok.
       check_of(1, 1, {1.0025}, 11.0, 0.1),
       // 2: scale 0.9975, beyond below; median angle 1.2: off.
       check_of(2, 1, {0.9975}, 0.0, 1.2),
@@ -880,7 +893,7 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
       value_of(summarize_depth_checks(6, views, {}, options));
   const std::vector<std::pair<DepthVerdict, DepthVerdict>> want = {
       {DepthVerdict::Ok, DepthVerdict::Ok},
-      {DepthVerdict::Off, DepthVerdict::Off},
+      {DepthVerdict::Off, DepthVerdict::Ok},
       {DepthVerdict::Off, DepthVerdict::Off},
       {DepthVerdict::Insufficient, DepthVerdict::Ok},
       {DepthVerdict::Ok, DepthVerdict::Off},
@@ -897,8 +910,14 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
   EXPECT_EQ(s.cameras[3].verdict, DepthVerdict::Insufficient);
   EXPECT_EQ(s.cameras[4].verdict, DepthVerdict::Off);
   EXPECT_DOUBLE_EQ(s.cameras[0].offset_mm, -9.0);
+  EXPECT_DOUBLE_EQ(s.cameras[0].depth_offset_m, -0.009);
+  EXPECT_DOUBLE_EQ(s.cameras[0].scatter_mm, 3.0);
   EXPECT_DOUBLE_EQ(s.cameras[0].angle_deg, 0.9);
+  EXPECT_DOUBLE_EQ(s.cameras[1].depth_offset_m, 0.011);
+  EXPECT_EQ(s.cameras[1].scatter_mm, 0.0);
   EXPECT_TRUE(std::isnan(s.cameras[4].offset_mm));
+  EXPECT_TRUE(std::isnan(s.cameras[4].depth_offset_m));
+  EXPECT_TRUE(std::isnan(s.cameras[4].scatter_mm));
   // The board's: every valid view's ratio, 1.00075 on average.
   EXPECT_EQ(s.scale, DepthVerdict::Ok);
   options.max_scale_error = 0.0004;
@@ -907,19 +926,28 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
   EXPECT_EQ(value_of(summarize_depth_checks(6, {}, {})).scale,
             DepthVerdict::Insufficient);
 
-  // Exactly at each bound: ok (values a double holds exactly).
+  // Exactly at each bound: ok (values a double holds exactly); a scatter a
+  // quarter beyond: off.
   options.max_scale_error = 0.25;
   const DepthSummary edge = value_of(summarize_depth_checks(
       1,
-      {check_of(0, 1, {1.25}, -12.0, 1.5), check_of(0, 2, {}, -10.0, 1.0),
-       check_of(0, 3, {}, 3.0, 0.2)},
+      {check_of(0, 1, {1.25}, -15.0, 1.5), check_of(0, 2, {}, -10.0, 1.0),
+       check_of(0, 3, {}, -5.0, 0.2)},
       {}, options));
-  EXPECT_EQ(edge.cameras[0].offset_mm, -10.0);
+  EXPECT_EQ(edge.cameras[0].depth_offset_m, -0.01);
+  EXPECT_EQ(edge.cameras[0].scatter_mm, 5.0);
   EXPECT_EQ(edge.cameras[0].angle_deg, 1.0);
   EXPECT_EQ(edge.cameras[0].ratio.mean, 1.25);
   EXPECT_EQ(edge.cameras[0].scale, DepthVerdict::Ok);
   EXPECT_EQ(edge.cameras[0].plane, DepthVerdict::Ok);
   EXPECT_EQ(edge.scale, DepthVerdict::Ok);
+  const DepthSummary beyond = value_of(summarize_depth_checks(
+      1,
+      {check_of(0, 1, {}, -15.25, 0.5), check_of(0, 2, {}, -10.0, 0.5),
+       check_of(0, 3, {}, -4.75, 0.5)},
+      {}, options));
+  EXPECT_EQ(beyond.cameras[0].scatter_mm, 5.25);
+  EXPECT_EQ(beyond.cameras[0].plane, DepthVerdict::Off);
 
   // A view across the board has no offset, which its camera's median leaves
   // out; its angle counts.
@@ -930,8 +958,66 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
       {}, options));
   EXPECT_EQ(across.cameras[0].views, 3u);
   EXPECT_DOUBLE_EQ(across.cameras[0].offset_mm, 1.5);
+  EXPECT_DOUBLE_EQ(across.cameras[0].depth_offset_m, 0.0015);
+  EXPECT_DOUBLE_EQ(across.cameras[0].scatter_mm, 0.5);
   EXPECT_DOUBLE_EQ(across.cameras[0].angle_deg, 0.2);
   EXPECT_EQ(across.cameras[0].plane, DepthVerdict::Ok);
+}
+
+// Each camera's depth offset is the median of its views' axial offsets, not
+// of their offsets along the normals, and its plane is judged on what is left
+// once it is taken off: a consistent offset past the old 10 mm bound passes,
+// views that disagree fail, and so does an offset recon's calibration file
+// cannot carry (past 0.05 m) or none at all.
+TEST(SummarizeDepthChecks, TakesEachCamerasDepthOffsetAndJudgesWhatIsLeft) {
+  const std::vector<BoardDepthCheck> views = {
+      // 0: oblique views whose offsets understate the axial ones.
+      axial_of(0, 1, 5.5, 7.25), axial_of(0, 2, 3.75, 8.0),
+      axial_of(0, 3, 3.75, 11.5), axial_of(0, 4, 4.25, 7.0),
+      // 1: 20 mm, consistently.
+      axial_of(1, 1, 20.0, 20.0), axial_of(1, 2, 20.5, 20.5),
+      axial_of(1, 3, 19.5, 19.5),
+      // 2: views 12 mm either side of 0.
+      axial_of(2, 1, 0.0, 0.0), axial_of(2, 2, 12.0, 12.0),
+      axial_of(2, 3, -12.0, -12.0),
+      // 3: 60 mm; 4: 50 mm, the file's bound; 5: -1.75 mm, one view.
+      axial_of(3, 1, 60.0, 60.0), axial_of(3, 2, 60.0, 60.0),
+      axial_of(4, 1, 50.0, 50.0), axial_of(5, 1, -1.0, -1.75),
+      // 6: offsets, but no axial one (the board behind the depth camera).
+      axial_of(6, 1, 2.0, kNaN), axial_of(6, 2, 3.0, kNaN),
+  };
+  const DepthSummary s = value_of(summarize_depth_checks(7, views, {}));
+  ASSERT_EQ(s.cameras.size(), 7u);
+  const CameraDepth& oblique = s.cameras[0];
+  EXPECT_EQ(oblique.views, 4u);
+  EXPECT_DOUBLE_EQ(oblique.offset_mm, 4.0);
+  EXPECT_DOUBLE_EQ(oblique.depth_offset_m, 7.625 / 1000.0);
+  EXPECT_DOUBLE_EQ(oblique.scatter_mm, 0.5);
+  EXPECT_EQ(oblique.plane, DepthVerdict::Ok);
+  EXPECT_DOUBLE_EQ(s.cameras[1].depth_offset_m, 0.02);
+  EXPECT_DOUBLE_EQ(s.cameras[1].scatter_mm, 0.5);
+  EXPECT_EQ(s.cameras[1].plane, DepthVerdict::Ok);
+  EXPECT_EQ(s.cameras[2].depth_offset_m, 0.0);
+  EXPECT_EQ(s.cameras[2].scatter_mm, 12.0);
+  EXPECT_EQ(s.cameras[2].plane, DepthVerdict::Off);
+  EXPECT_DOUBLE_EQ(s.cameras[3].depth_offset_m, 0.06);
+  EXPECT_EQ(s.cameras[3].scatter_mm, 0.0);
+  EXPECT_EQ(s.cameras[3].plane, DepthVerdict::Off);
+  EXPECT_EQ(s.cameras[4].depth_offset_m, 0.05);
+  EXPECT_EQ(s.cameras[4].plane, DepthVerdict::Ok);
+  EXPECT_DOUBLE_EQ(s.cameras[5].depth_offset_m, -0.00175);
+  EXPECT_EQ(s.cameras[5].plane, DepthVerdict::Ok);
+  EXPECT_DOUBLE_EQ(s.cameras[6].offset_mm, 2.5);
+  EXPECT_TRUE(std::isnan(s.cameras[6].depth_offset_m));
+  EXPECT_TRUE(std::isnan(s.cameras[6].scatter_mm));
+  EXPECT_EQ(s.cameras[6].plane, DepthVerdict::Off);
+  // The bound on the scatter is the setting's.
+  DepthCheckOptions options;
+  options.max_scatter_mm = 12.0;
+  EXPECT_EQ(value_of(summarize_depth_checks(7, views, {}, options))
+                .cameras[2]
+                .plane,
+            DepthVerdict::Ok);
 }
 
 // A camera's verdict over every scale and plane: fail if either fails, pass
@@ -1077,8 +1163,8 @@ TEST(SummarizeDepthChecks, RefusesWhatDoesNotFit) {
        {0.0, -1.0, kNaN, std::numeric_limits<double>::infinity()}) {
     option([&](DepthCheckOptions& o) { o.max_scale_error = bad; },
            "max_scale_error");
-    option([&](DepthCheckOptions& o) { o.max_offset_mm = bad; },
-           "max_offset_mm");
+    option([&](DepthCheckOptions& o) { o.max_scatter_mm = bad; },
+           "max_scatter_mm");
     option([&](DepthCheckOptions& o) { o.max_angle_deg = bad; },
            "max_angle_deg");
     option([&](DepthCheckOptions& o) { o.max_signed_median_mm = bad; },

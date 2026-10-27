@@ -477,7 +477,7 @@ DepthSummary depth_checks() {
   options.agreement_stride = 2;
   options.min_overlap = 900;
   options.max_scale_error = 0.003;
-  options.max_offset_mm = 8.5;
+  options.max_scatter_mm = 8.5;
   options.max_angle_deg = 1.25;
   options.max_signed_median_mm = 4.5;
   options.max_median_abs_mm = 9.5;
@@ -503,7 +503,7 @@ DepthSummary depth_checks() {
   views[2].ratios = {0.9985};
   views[2].offset_mm = -11.5;
   views[2].axial_offset_mm = -23.25;
-  views[2].angle_deg = 1.125;
+  views[2].angle_deg = 1.375;
   std::vector<PairAgreement> pairs(2);
   pairs[0].from = 3;
   pairs[0].to = 1;
@@ -565,7 +565,7 @@ TEST(Results, TheReportHasItsDepthSection) {
                             "min_inliers": 250, "window_mm": 50.0,
                             "bin_mm": 0.25, "edge_ratio": 0.04,
                             "agreement_stride": 2, "min_overlap": 900,
-                            "max_scale_error": 0.003, "max_offset_mm": 8.5,
+                            "max_scale_error": 0.003, "max_scatter_mm": 8.5,
                             "max_angle_deg": 1.25,
                             "max_signed_median_mm": 4.5,
                             "max_median_abs_mm": 9.5})"));
@@ -578,18 +578,24 @@ TEST(Results, TheReportHasItsDepthSection) {
     const json& j = depth["cameras"][cams[c].id];
     EXPECT_EQ(keys_of(ordered["cameras"][cams[c].id]),
               (std::vector<std::string>{"views", "ratio", "scale", "offset_mm",
-                                        "angle_deg", "plane", "verdict"}));
+                                        "angle_deg", "depth_offset_m",
+                                        "scatter_mm", "plane", "verdict"}));
     EXPECT_EQ(j["views"], cam.views);
     expect_ratio(j["ratio"], cam.ratio);
     EXPECT_EQ(j["scale"], to_string(cam.scale));
     expect_number(j["offset_mm"], cam.offset_mm);
     expect_number(j["angle_deg"], cam.angle_deg);
+    expect_number(j["depth_offset_m"], cam.depth_offset_m);
+    expect_number(j["scatter_mm"], cam.scatter_mm);
     EXPECT_EQ(j["plane"], to_string(cam.plane));
     EXPECT_EQ(j["verdict"], to_string(cam.verdict));
   }
   EXPECT_EQ(depth["cameras"][cams[1].id]["plane"], "off");
   EXPECT_EQ(depth["cameras"][cams[1].id]["verdict"], "off");
   EXPECT_EQ(depth["cameras"][cams[2].id]["scale"], "ok");
+  EXPECT_EQ(depth["cameras"][cams[2].id]["depth_offset_m"], 0.004125);
+  EXPECT_EQ(depth["cameras"][cams[2].id]["plane"], "ok");
+  EXPECT_TRUE(depth["cameras"][cams[0].id]["depth_offset_m"].is_null());
   EXPECT_EQ(depth["cameras"][cams[0].id]["plane"], "insufficient");
   EXPECT_EQ(depth["cameras"][cams[0].id]["verdict"], "insufficient");
   EXPECT_TRUE(doc["depth_unchecked"].is_null());

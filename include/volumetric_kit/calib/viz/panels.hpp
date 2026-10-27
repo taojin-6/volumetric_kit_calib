@@ -336,7 +336,7 @@ core::Result<std::vector<PanelLine>> calibration_panel(
 /// - `depth scale`: the board's scale over every camera, its verdict, mean
 ///   ratio, its standard deviation and the ratios;
 /// - `depth <id>` for each camera: its verdict, its views with a plane, and
-///   its ratio, offset and angle;
+///   its ratio, depth offset (millimetres), scatter and angle;
 /// - `depth pairs`: of the pairs pooled over every capture, those that pass,
 ///   fail and have no overlap (green when every one passes, red when one
 ///   fails), and the largest signed median of the pairs that pass or fail,

@@ -72,6 +72,40 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-27 — Each camera's depth offset
+
+A depth that reads too far or too near is a correction, not only a
+verdict: Calibrate's depth checks give each camera's offset along its depth
+camera's axis (`quality/depth_checks.hpp` has the definitions).
+
+- **Axial, as recon applies it.** recon subtracts a camera's offset from
+  every return, along the depth camera's axis. A board's plane offset is
+  measured along the board's normal, which an axial error of b moves by
+  about `b (n . d) / d_z`, so each view's offset is made axial,
+  `offset d_z / (n . d)`, with `d` the ray from the depth camera to the
+  chessboard's centre and `n` the board's normal: a board seen square on
+  the axis gives its offset, one seen at 60 degrees twice it.
+- **The median over the views**, per camera, as the other verdicts take
+  medians.
+- **Judged after the offset.** The plane verdict no longer fails a camera
+  for having an offset. It fails views that disagree once the offset is
+  taken off: the median magnitude of their axial offsets less the camera's,
+  against `max_scatter_mm`, 5 mm, a pair's bound on its signed median,
+  since what is left is depth error another camera would see. It also fails
+  a median angle past `max_angle_deg`, and an offset recon's calibration
+  file cannot carry, which recon's validator decides, so its bound is not
+  copied here. The median offset along the normals is still reported.
+- **Measured on raw depth.** The checks prepare the kept raw depth with no
+  calibration, so an offset is the depth's own, never a correction of an
+  earlier one.
+- **Oblique views weigh most.** A view's axial offset multiplies its plane
+  fit's error by `d_z / (n . d)`, about 3 at 70 degrees, so one oblique view
+  in four can sit millimetres from its camera's median. The median holds,
+  but on that camera the tail of the cross-camera registration can grow
+  while its median falls. Sessions with ten or more shared captures per
+  link steady it; weighing or leaving out oblique views waits until a
+  session shows the need (the `TODO:` in `quality/depth_checks.cpp`).
+
 ## 2026-10-22 — Consumed by commit, never installed
 
 The family's packages are not installable (the owner's decision): an
@@ -405,7 +439,8 @@ calib measures the depth; recon only prepares it, and gfx draws it
 - **Two kinds of check.** The board's scale does not depend on the solved
   board, so it checks the depth against the printed board. The plane's offset
   and angle do depend on it, so they check `depth_to_color` and the depth's
-  units.
+  units; the offset is each camera's depth offset, judged once it is taken
+  off (amended 2026-10-27, "Each camera's depth offset").
 - **At Calibrate, on its worker (T4)** (amended 2026-10-19, the user's
   calls). T4 owns a depth-only preparation per camera and the checks
   (`app::CalibrateDepth`), built as calib_rig starts, and checks each kept
