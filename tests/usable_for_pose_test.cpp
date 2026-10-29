@@ -79,7 +79,7 @@ TEST(UsableForPose, RefusesACornerTheBoardLacksOrRepeats) {
 // The image's edge is at -0.5 and size - 0.5: a corner 2 px inside it is
 // usable, one a hair closer is not, nor one not finite.
 TEST(UsableForPose, KeepsCornersTwoPixelsInsideTheImage) {
-  const std::vector<recon::camera::Vec2d> inside = {
+  const std::vector<sensor::camera::Vec2d> inside = {
       {1.5, 1.5}, {3837.5, 1.5}, {3837.5, 2157.5}, {1.5, 2157.5}};
   Observation view = view_of({0, 3, 7, 4});
   for (std::size_t i = 0; i < inside.size(); ++i) {
@@ -89,10 +89,10 @@ TEST(UsableForPose, KeepsCornersTwoPixelsInsideTheImage) {
 
   const double nan = std::numeric_limits<double>::quiet_NaN();
   const double inf = std::numeric_limits<double>::infinity();
-  const std::vector<recon::camera::Vec2d> outside = {
+  const std::vector<sensor::camera::Vec2d> outside = {
       {1.49, 1000.0},    {3837.51, 1000.0}, {1000.0, 1.49},
       {1000.0, 2157.51}, {nan, 1000.0},     {1000.0, inf}};
-  for (const recon::camera::Vec2d& pixel : outside) {
+  for (const sensor::camera::Vec2d& pixel : outside) {
     Observation off = view_of({0, 1, 5, 6});
     off.points[2].pixel = pixel;
     EXPECT_EQ(use_of(off), ViewUse::OutsideImage) << pixel.x << ", " << pixel.y;

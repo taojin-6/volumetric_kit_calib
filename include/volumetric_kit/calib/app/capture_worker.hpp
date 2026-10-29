@@ -37,13 +37,13 @@
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/sensor/orbbec/orbbec_sync_config.hpp"
-#include "volumetric_kit/recon/sensor/rgbd_sensor.hpp"
+#include "volumetric_kit/sensor/orbbec/orbbec_sync_config.hpp"
+#include "volumetric_kit/sensor/rgbd_sensor.hpp"
 
 namespace volumetric_kit::calib::app {
 
 /// @brief What calib_rig records a session was captured with: calib's,
-///        the core's, recon's and gfx's commits as this build fetched them
+///        the core's, sensor's and gfx's commits as this build fetched them
 ///        (empty where a checkout is not a git one), and OpenCV's and the
 ///        Orbbec SDK's versions.
 /// @return The versions.
@@ -70,8 +70,7 @@ capture::Software app_software();
 ///                serial (0 for a camera it does not list).
 /// @return The camera; or `OutOfMemory`.
 core::Result<capture::SessionCamera> session_camera(
-    const recon::sensor::IRgbdSensor& camera,
-    const recon::sensor::OrbbecRigSyncConfig& sync);
+    const sensor::IRgbdSensor& camera, const sensor::OrbbecRigSyncConfig& sync);
 
 /// @brief What the capture worker writes, and how it judges each capture.
 ///
@@ -159,7 +158,7 @@ struct KeptCaptures {
   std::vector<solve::RigCamera> cameras;
   /// Each camera's sensor, in rig order (`CaptureSetup::cameras`): its depth
   /// model and `depth_to_color` among them.
-  std::vector<recon::sensor::SensorInfo> sensors;
+  std::vector<sensor::SensorInfo> sensors;
   std::size_t reference = 0;  ///< The reference camera, by index.
   /// The rig's depth mode, in the session's depth unit.
   capture::DepthMode depth_mode;

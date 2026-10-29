@@ -18,7 +18,7 @@
 namespace volumetric_kit::calib::quality {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 
 constexpr int kCellsPerSide = 3;
 

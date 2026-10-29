@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-// recon's camera model in OpenCV's types: its layout, cv::projectPoints and
-// compute::project equal to recon's distort_rational, pixels undistorted to
+// sensor's camera model in OpenCV's types: its layout, cv::projectPoints and
+// compute::project equal to sensor's distort_rational, pixels undistorted to
 // convergence, and the models it refuses.
 
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
@@ -20,12 +20,12 @@
 #include <opencv2/geometry.hpp>
 
 #include "synthetic_rig.hpp"
-#include "volumetric_kit/recon/camera/projection.hpp"
+#include "volumetric_kit/sensor/camera/projection.hpp"
 
 namespace volumetric_kit::calib::compute {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 
 // The lens's radial map, r -> r * radial(r^2), with no tangential part.
 double radial_map(const camera::RationalDistortion& d, double r) {
@@ -75,11 +75,11 @@ double undistorted_radius(const camera::RationalDistortion& d, double distorted,
   return high;
 }
 
-// cv::projectPoints with the model equals recon's distort_rational out to
+// cv::projectPoints with the model equals sensor's distort_rational out to
 // the image's corners, which the lens takes from `expected_corner`, an
 // undistorted normalized radius below its fold.
-void expect_projects_as_recon(const camera::CameraModel& model,
-                              double expected_corner) {
+void expect_projects_as_sensor(const camera::CameraModel& model,
+                               double expected_corner) {
   const core::Result<CvCamera> cam = cv_camera(model);
   ASSERT_TRUE(cam.ok()) << cam.status().message();
   const double fold = fold_radius(model.distortion, 10.0);
@@ -136,13 +136,13 @@ TEST(CvCamera, HoldsTheModelInOpenCVsLayout) {
   EXPECT_EQ(cam->distortion, lens);
 }
 
-TEST(CvCamera, ProjectsAsReconsColourLikeLens) {
-  expect_projects_as_recon(test::color_like_lens(), 0.979);
+TEST(CvCamera, ProjectsAsSensorsColourLikeLens) {
+  expect_projects_as_sensor(test::color_like_lens(), 0.979);
 }
 
 // The depth-like lens folds over at r = 1.83, past its corners at 1.244.
-TEST(CvCamera, ProjectsAsReconsDepthLikeLens) {
-  expect_projects_as_recon(test::depth_like_lens(), 1.244);
+TEST(CvCamera, ProjectsAsSensorsDepthLikeLens) {
+  expect_projects_as_sensor(test::depth_like_lens(), 1.244);
 }
 
 // A point not in front of the camera, or one so far off-axis that the lens
@@ -217,7 +217,7 @@ TEST(CvCamera, UndistortsPixelsToConvergence) {
   EXPECT_TRUE(none->empty());
 }
 
-TEST(CvCamera, RefusesAModelReconRefuses) {
+TEST(CvCamera, RefusesAModelSensorRefuses) {
   camera::CameraModel no_focal = test::color_like_lens();
   no_focal.intrinsics.fx = std::numeric_limits<double>::quiet_NaN();
   camera::CameraModel no_width = test::color_like_lens();

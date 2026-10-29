@@ -24,14 +24,14 @@
 #include "sha256.hpp"
 #include "volumetric_kit/core/base/exception_status.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
-#include "volumetric_kit/recon/camera/array_calibration.hpp"
-#include "volumetric_kit/recon/io/image_io.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
+#include "volumetric_kit/sensor/io/image_io.hpp"
 
 namespace volumetric_kit::calib::capture {
 namespace {
 
-using recon::camera::ArrayCalibration;
-using recon::camera::CameraModel;
+using sensor::camera::ArrayCalibration;
+using sensor::camera::CameraModel;
 using Code = core::Status::Code;
 
 core::Status invalid(const std::string& message) {
@@ -42,11 +42,11 @@ bool finite(const std::optional<double>& value) {
   return !value || std::isfinite(*value);
 }
 
-bool finite(const recon::camera::Vec2d& p) {
+bool finite(const sensor::camera::Vec2d& p) {
   return std::isfinite(p.x) && std::isfinite(p.y);
 }
 
-std::string size_text(const recon::camera::ImageSize& size) {
+std::string size_text(const sensor::camera::ImageSize& size) {
   return std::to_string(size.width) + "x" + std::to_string(size.height);
 }
 
@@ -89,28 +89,28 @@ core::Status check_depth_mode(const DepthMode& d) {
 }
 
 // The factory record: every camera's models and depth_to_color, unposed,
-// which recon checks: a camera at least, no id twice, models it can hold.
+// which sensor's checks: a camera at least, no id twice, models it can hold.
 // @pre Every camera has both models.
 core::Result<ArrayCalibration> factory_calibration(const SessionInfo& info) {
   ArrayCalibration array;
   for (const SessionCamera& camera : info.cameras) {
-    recon::camera::SensorCalibration sensor;
+    sensor::camera::SensorCalibration sensor;
     sensor.id = camera.info.id;
-    sensor.color = recon::camera::CameraCalibration{
-        *camera.info.color, recon::camera::IntrinsicsSource::Factory};
-    sensor.depth = recon::camera::CameraCalibration{
-        *camera.info.depth, recon::camera::IntrinsicsSource::Factory};
+    sensor.color = sensor::camera::CameraCalibration{
+        *camera.info.color, sensor::camera::IntrinsicsSource::Factory};
+    sensor.depth = sensor::camera::CameraCalibration{
+        *camera.info.depth, sensor::camera::IntrinsicsSource::Factory};
     sensor.depth_to_color = camera.info.depth_to_color;
     array.sensors.push_back(std::move(sensor));
   }
-  if (core::Status valid = recon::camera::validate_array_calibration(array);
+  if (core::Status valid = sensor::camera::validate_array_calibration(array);
       !valid.ok()) {
     return std::move(valid).with_context("SessionWriter: factory calibration");
   }
   return array;
 }
 
-// The session's checks, around recon's of its factory record, which it
+// The session's checks, around sensor's of its factory record, which it
 // returns.
 core::Result<ArrayCalibration> check_info(const SessionInfo& info) {
   VKC_TRY(core::check_path("SessionWriter: directory", info.directory));
@@ -141,7 +141,7 @@ core::Result<ArrayCalibration> check_info(const SessionInfo& info) {
     }
   }
   VKC_ASSIGN(ArrayCalibration factory, factory_calibration(info));
-  // recon found a camera at least, and no serial twice.
+  // sensor's check found a camera at least, and no serial twice.
   const SessionCamera& first = info.cameras.front();
   bool reference = false;
   for (std::size_t i = 0; i < info.cameras.size(); ++i) {
@@ -176,22 +176,22 @@ core::Result<ArrayCalibration> check_info(const SessionInfo& info) {
 // @pre `info` passed check_info.
 core::Status check_part(const SessionInfo& info, std::size_t i,
                         const CameraCapture& part) {
-  const recon::sensor::SensorInfo& camera = info.cameras[i].info;
+  const sensor::SensorInfo& camera = info.cameras[i].info;
   const std::string where = "capture: camera " + camera.id + ": ";
   // A JPEG starts with its SOI marker.
   if (part.jpeg.size() < 2 || part.jpeg[0] != 0xFF || part.jpeg[1] != 0xD8) {
     return invalid(where + "the colour is not a JPEG");
   }
   if (part.depth == nullptr) return invalid(where + "no depth");
-  const recon::camera::ImageSize& depth = camera.depth->size;
+  const sensor::camera::ImageSize& depth = camera.depth->size;
   const std::size_t samples =
       static_cast<std::size_t>(depth.width) * depth.height;
   if (part.depth->size() != samples) {
     return invalid(where + std::to_string(part.depth->size()) +
                    " depth samples for a " + size_text(depth) + " depth image");
   }
-  const recon::camera::ImageSize& size = part.detection.image_size;
-  const recon::camera::ImageSize& color = camera.color->size;
+  const sensor::camera::ImageSize& size = part.detection.image_size;
+  const sensor::camera::ImageSize& color = camera.color->size;
   if (size.width != color.width || size.height != color.height) {
     return invalid(where + "a detection in a " + size_text(size) +
                    " image, not the colour image's " + size_text(color));
@@ -203,7 +203,7 @@ core::Status check_part(const SessionInfo& info, std::size_t i,
     }
   }
   for (const DetectedMarker& marker : part.detection.markers) {
-    for (const recon::camera::Vec2d& corner : marker.corners) {
+    for (const sensor::camera::Vec2d& corner : marker.corners) {
       if (!finite(corner)) {
         return invalid(where + "marker " + std::to_string(marker.id) +
                        " is not finite");
@@ -216,7 +216,7 @@ core::Status check_part(const SessionInfo& info, std::size_t i,
           where + "origin tag " + std::to_string(part.origin_tag->id) +
           " is not the session's " + std::to_string(info.origin_tag.id));
     }
-    for (const recon::camera::Vec2d& corner : part.origin_tag->corners) {
+    for (const sensor::camera::Vec2d& corner : part.origin_tag->corners) {
       if (!finite(corner)) {
         return invalid(where + "the origin tag is not finite");
       }
@@ -318,7 +318,7 @@ struct SessionWriter::State {
       ++made;
     }
     if (!factory_written) {
-      VKC_TRY(recon::camera::write_array_calibration(
+      VKC_TRY(sensor::camera::write_array_calibration(
           detail::join(info.directory, detail::kFactoryFile), factory,
           core::WriteMode::CreateNew));
       factory_written = true;
@@ -356,15 +356,15 @@ struct SessionWriter::State {
     // rig's write time per capture (hand check H4) asks for it.
     for (std::size_t i = 0; i < info.cameras.size(); ++i) {
       const std::string& serial = info.cameras[i].info.id;
-      const recon::camera::ImageSize& depth = info.cameras[i].info.depth->size;
+      const sensor::camera::ImageSize& depth = info.cameras[i].info.depth->size;
       const CameraCapture& part = job.cameras[i];
       const std::vector<std::uint16_t>& samples = *part.depth;
       VKC_TRY(core::write_file(
           detail::join(info.directory, detail::color_file(serial, index)),
           bytes_of(part.jpeg), core::WriteMode::CreateNew));
       VKC_ASSIGN(const std::vector<std::uint8_t> png,
-                 recon::io::encode_png_u16(samples.data(), samples.size(),
-                                           depth.width, depth.height));
+                 sensor::io::encode_png_u16(samples.data(), samples.size(),
+                                            depth.width, depth.height));
       VKC_TRY(core::write_file(
           detail::join(info.directory, detail::depth_file(serial, index)),
           bytes_of(png), core::WriteMode::CreateNew));

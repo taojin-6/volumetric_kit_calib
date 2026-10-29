@@ -19,7 +19,7 @@
 #include "volumetric_kit/core/vulkan/device.hpp"
 #include "volumetric_kit/core/vulkan/image.hpp"
 #include "volumetric_kit/core/vulkan/vulkan.hpp"
-#include "volumetric_kit/recon/sensor/yuv_image.hpp"
+#include "volumetric_kit/sensor/yuv_image.hpp"
 
 namespace volumetric_kit::calib::test {
 
@@ -55,12 +55,12 @@ inline std::shared_ptr<const core::Image> device_plane(
 ///        with neutral chroma, coded as an MJPEG camera's: BT.601, full
 ///        range, centred chroma; its planes as @ref device_plane makes them.
 /// @return The picture; its images null when they cannot be made.
-inline recon::sensor::YuvImage device_nv12(
+inline sensor::YuvImage device_nv12(
     const core::Device& device, core::Allocator& allocator, std::uint32_t width,
     std::uint32_t height, const std::vector<std::uint8_t>& luma,
     const std::vector<std::uint32_t>& families = {}) {
-  recon::sensor::YuvImage picture;
-  picture.layout = recon::sensor::YuvLayout::Nv12;
+  sensor::YuvImage picture;
+  picture.layout = sensor::YuvLayout::Nv12;
   picture.width = width;
   picture.height = height;
   const std::uint32_t cw = (width + 1) / 2;
@@ -71,12 +71,12 @@ inline recon::sensor::YuvImage device_nv12(
       device, allocator, VK_FORMAT_R8G8_UNORM, cw, ch,
       std::vector<std::uint8_t>(static_cast<std::size_t>(cw) * ch * 2, 128),
       families);
-  const recon::sensor::YcbcrWeights weights =
-      recon::sensor::ycbcr_weights(recon::sensor::VideoColorMatrix::Bt601);
+  const sensor::YcbcrWeights weights =
+      sensor::ycbcr_weights(sensor::VideoColorMatrix::Bt601);
   picture.kr = weights.kr;
   picture.kb = weights.kb;
   picture.full_range = true;
-  picture.chroma_location = recon::sensor::ChromaLocation::Center;
+  picture.chroma_location = sensor::ChromaLocation::Center;
   return picture;
 }
 

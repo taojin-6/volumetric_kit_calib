@@ -32,7 +32,7 @@
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::quality {
 
@@ -52,7 +52,7 @@ struct ErrorStats {
   double p90_px = std::numeric_limits<double>::quiet_NaN();
   double max_px = std::numeric_limits<double>::quiet_NaN();  ///< The largest.
   /// The mean residual vector: a bias hint, where a lens or a pose is off.
-  recon::camera::Vec2d mean_px{std::numeric_limits<double>::quiet_NaN()};
+  sensor::camera::Vec2d mean_px{std::numeric_limits<double>::quiet_NaN()};
 };
 
 /// @brief How many corners err how far.
@@ -383,7 +383,7 @@ struct PrincipalPointAB {
 /// @endcode
 struct RigGeometry {
   /// Each camera's centre, `-R^T t` of its T_cw (metres), in the rig's order.
-  std::vector<recon::camera::Vec3d> centres_m;
+  std::vector<sensor::camera::Vec3d> centres_m;
   /// The distance between each two cameras' centres (metres),
   /// `baselines_m[a][b]`.
   std::vector<std::vector<double>> baselines_m;
@@ -470,7 +470,7 @@ using Progress = std::function<void(std::size_t done, std::size_t total)>;
 VC_QUALITY_API core::Result<Transfer> cross_camera_transfer(
     const std::vector<solve::RigCamera>& cameras, const compute::Board& board,
     const std::vector<Observation>& views,
-    const std::vector<recon::camera::RodriguesTransform>& world_to_camera);
+    const std::vector<sensor::camera::RodriguesTransform>& world_to_camera);
 
 /// @brief The rig re-solved without each capture the adjustment took, in
 ///        turn, warm: from @p solution's poses and the corners it kept, with

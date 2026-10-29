@@ -3,11 +3,11 @@
 
 # --- calib_depth: Tier 4 -----------------------------------------------------
 # The depth checks' device side: each view's board plane fitted on the GPU to
-# the depth recon's frame preparation leaves on the device, and each ordered
+# the depth sensor's frame preparation leaves on the device, and each ordered
 # pair of cameras' depth compared, read in place, on the core's vulkan tier
 # (DECISIONS.md, "Depth checks are calib's kernels"). Built with VC_WITH_RIG,
 # beside viz: it takes the quality tier's region, plane, options and pair
-# agreement, and names no recon sensor type and nothing of gfx.
+# agreement, and names no sensor type and nothing of gfx.
 include(GenerateExportHeader)
 
 set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
@@ -45,27 +45,17 @@ target_include_directories(calib_depth PUBLIC "${_vc_generated_inc}")
 target_link_libraries(calib_depth PUBLIC calib_quality
                                          volumetric_kit::core_vulkan)
 
-# The kernels include recon's pinhole (pinhole.glsl) under the root recon_core
-# exports, and calib's own GLSL under src/, spelt as the C++ headers are. The
-# VC_SHADER_INCLUDE_DIRS property names both, for the tests' kernels.
-get_target_property(_vc_recon_glsl volumetric_kit::recon_core
-                    VR_SHADER_INCLUDE_DIR)
-if(NOT _vc_recon_glsl)
-  message(
-    FATAL_ERROR
-      "calib_depth needs volumetric_kit_recon at or after bdbe26e (PR #245), "
-      "whose recon_core names its GLSL include root in VR_SHADER_INCLUDE_DIR; "
-      "the recon this build made available has none.")
-endif()
-set(_vc_glsl_roots "${PROJECT_SOURCE_DIR}/src" "${_vc_recon_glsl}")
-set_target_properties(calib_depth PROPERTIES VC_SHADER_INCLUDE_DIRS
-                                             "${_vc_glsl_roots}")
+# The kernels include calib's own GLSL under src/, spelt as the C++ headers are,
+# and sensor's pinhole (pinhole.glsl), which sensor_frame exports. The tests'
+# kernels take the same (tests/CMakeLists.txt).
 vkc_embed_shaders(
   calib_depth
   SYMBOL_PREFIX
   vc_
   INCLUDE_DIRS
-  ${_vc_glsl_roots}
+  "${PROJECT_SOURCE_DIR}/src"
+  INCLUDE_TARGETS
+  volumetric_kit::sensor_frame
   SHADERS
   "${CMAKE_CURRENT_SOURCE_DIR}/shaders/plane_moments.comp"
   "${CMAKE_CURRENT_SOURCE_DIR}/shaders/plane_solve.comp"

@@ -24,7 +24,7 @@
 namespace volumetric_kit::calib::quality {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using camera::Mat3d;
 using camera::Mat4d;
 using camera::Vec2d;
@@ -34,7 +34,7 @@ bool finite(const Vec3d& v) noexcept {
   return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
 }
 
-// TODO: Give a point's rigid transform one home (recon's camera geometry),
+// TODO: Give a point's rigid transform one home (sensor's camera geometry),
 // for this and the copies in the tests, the solve and the metrics.
 Vec3d apply(const Mat4d& m, const Vec3d& p) noexcept {
   return Vec3d(m * glm::dvec4(p, 1.0));

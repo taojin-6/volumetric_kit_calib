@@ -32,7 +32,7 @@
 namespace volumetric_kit::calib::quality {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using camera::Mat3d;
 using camera::Mat4d;
 using camera::Vec2d;

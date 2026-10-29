@@ -32,7 +32,7 @@
 #include "volumetric_kit/core/vulkan/vulkan.hpp"
 #include "volumetric_kit/gfx/core/retire_queue.hpp"
 #include "volumetric_kit/gfx/pipelines/depth_cloud_pipeline.hpp"
-#include "volumetric_kit/recon/sensor/rgbd_sensor.hpp"
+#include "volumetric_kit/sensor/rgbd_sensor.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -197,8 +197,8 @@ bool cloud_live(bool frozen, viz::ScenePlacement placement,
 ///       scene_camera(array.sensor(i).info(), i, i == array.primary()));
 /// }
 /// @endcode
-viz::SceneCamera scene_camera(const recon::sensor::SensorInfo& info,
-                              std::size_t index, bool reference);
+viz::SceneCamera scene_camera(const sensor::SensorInfo& info, std::size_t index,
+                              bool reference);
 
 /// @brief Place every camera of the 3D view at Calibrate's poses; each
 ///        keeps its models, tint and toggle.
@@ -215,6 +215,6 @@ viz::SceneCamera scene_camera(const recon::sensor::SensorInfo& info,
 /// @endcode
 core::Status placed_cameras(
     std::vector<viz::SceneCamera>& cameras,
-    const std::vector<recon::camera::Mat4d>& color_to_world);
+    const std::vector<sensor::camera::Mat4d>& color_to_world);
 
 }  // namespace volumetric_kit::calib::app

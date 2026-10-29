@@ -185,9 +185,8 @@ TEST(CameraPanel, ShowsAMissingFrameAndAViewWithoutAPose) {
       "none");
 }
 
-recon::sensor::FrameSet set_of(
-    const std::vector<std::optional<std::int64_t>>& at) {
-  recon::sensor::FrameSet set;
+sensor::FrameSet set_of(const std::vector<std::optional<std::int64_t>>& at) {
+  sensor::FrameSet set;
   set.timestamp_ns = 1'000'000'000;
   for (const std::optional<std::int64_t>& offset_ns : at) {
     set.frames.emplace_back();
@@ -202,7 +201,7 @@ recon::sensor::FrameSet set_of(
 const std::vector<std::string> kIds = {"N", "G", "6G"};
 
 TEST(SetPanel, ShowsTheSetsFramesSpreadAndSkew) {
-  recon::sensor::SensorArrayStats stats;
+  sensor::SensorArrayStats stats;
   stats.sets = 900;
   stats.incomplete = 3;
   stats.unmatched = 12;
@@ -239,7 +238,7 @@ TEST(SetPanel, WarnsOfAMissingFrameAWideSpreadAndAFullWriter) {
 // The writer is full when the caller says so, as it tells the capture rule:
 // the panel keeps no rule of its own.
 TEST(SetPanel, TonesTheWriterAsTheCallerJudgesIt) {
-  const recon::sensor::FrameSet set = set_of({0, 0, 0});
+  const sensor::FrameSet set = set_of({0, 0, 0});
   EXPECT_EQ(line(set_panel(set, {}, kIds, {4, 4, false}).value(), "saver").tone,
             Tone::Normal);
   EXPECT_EQ(line(set_panel(set, {}, kIds, {1, 4, true}).value(), "saver").tone,
@@ -248,7 +247,7 @@ TEST(SetPanel, TonesTheWriterAsTheCallerJudgesIt) {
 
 TEST(SetPanel, WaitsForTheFirstSetAndRefusesIdsThatDoNotMatch) {
   const std::vector<PanelLine> l =
-      set_panel(recon::sensor::FrameSet{}, {}, {}, {}).value();
+      set_panel(sensor::FrameSet{}, {}, {}, {}).value();
   EXPECT_EQ(line(l, "set").value, "none yet");
   EXPECT_EQ(line(l, "spread").tone, Tone::Muted);
   EXPECT_EQ(line(l, "saver").value, "0/0 queued");

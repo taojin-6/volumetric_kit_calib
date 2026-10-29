@@ -171,8 +171,8 @@ TEST(DetectTag, FollowsThePrintedTopLeftAsThePrintTurns) {
   }
   for (std::size_t quarter = 1; quarter < turned.size(); ++quarter) {
     for (std::size_t k = 0; k < 4; ++k) {
-      const recon::camera::Vec2d a = turned[quarter].corners[k];
-      const recon::camera::Vec2d b = turned[quarter - 1].corners[(k + 1) % 4];
+      const sensor::camera::Vec2d a = turned[quarter].corners[k];
+      const sensor::camera::Vec2d b = turned[quarter - 1].corners[(k + 1) % 4];
       EXPECT_LT(std::hypot(a.x - b.x, a.y - b.y), 0.5)
           << "quarter " << quarter << ", corner " << k;
     }

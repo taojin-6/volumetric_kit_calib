@@ -5,7 +5,7 @@
 
 /// @file depth_fixture.hpp
 /// @brief The depth tier's device tests' fixture: the depth checks on a
-///        validated device, and depth uploaded as recon's frame preparation
+///        validated device, and depth uploaded as sensor's frame preparation
 ///        leaves it. Its users link volumetric_kit::calib_depth and
 ///        volumetric_kit::core_test_support.
 
@@ -69,7 +69,7 @@ class DepthChecksTest : public core::test::VulkanDeviceTest {
     checks_ = *std::move(checks);
   }
 
-  /// @brief @p depth on the device, as recon's frame preparation leaves a
+  /// @brief @p depth on the device, as sensor's frame preparation leaves a
   ///        frame's.
   /// @param depth  Row-major depth (metres; 0 for none).
   /// @return A device-local storage buffer holding it.

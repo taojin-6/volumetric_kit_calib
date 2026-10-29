@@ -22,9 +22,8 @@ namespace volumetric_kit::calib::viz {
 namespace {
 
 using Code = core::Status::Code;
-using recon::camera::ImageSize;
+using sensor::camera::ImageSize;
 namespace pipelines = gfx::pipelines;
-namespace sensor = recon::sensor;
 
 MosaicLayout layout_of(const std::vector<ImageSize>& sizes,
                        std::uint32_t gutter = kMosaicGutter,

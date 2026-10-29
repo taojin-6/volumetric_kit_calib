@@ -17,14 +17,13 @@
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/detect/charuco.hpp"
-#include "volumetric_kit/recon/sensor/orbbec/orbbec_sensor.hpp"
-#include "volumetric_kit/recon/sensor/utils/picture_readback.hpp"
+#include "volumetric_kit/sensor/orbbec/orbbec_sensor.hpp"
+#include "volumetric_kit/sensor/prep/picture_readback.hpp"
 
 namespace volumetric_kit::calib::app {
 
 namespace {
 
-namespace sensor = recon::sensor;
 using Clock = std::chrono::steady_clock;
 
 // How quickly the published rate follows a change: the weight of each new

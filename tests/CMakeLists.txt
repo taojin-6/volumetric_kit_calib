@@ -114,7 +114,7 @@ vc_add_test(bundle_adjust volumetric_kit::calib_solve vc_synthetic_rig
             opencv_calib opencv_geometry)
 vc_add_sweeps(bundle_adjust)
 # solve: the world at the origin tag on the synthetic rig, and the outputs moved
-# into it, read back with recon's calibration file.
+# into it, read back with sensor's calibration file.
 vc_add_test(world_tag volumetric_kit::calib_solve vc_synthetic_rig)
 vc_add_test(solve_oom volumetric_kit::calib_solve vc_synthetic_rig)
 target_sources(vc_solve_oom_test PRIVATE support/allocation_failure.cpp)
@@ -129,7 +129,7 @@ vc_add_test(quality_oom volumetric_kit::calib_quality vc_synthetic_rig)
 target_sources(vc_quality_oom_test PRIVATE support/allocation_failure.cpp)
 # quality: the solved rig's metrics on the synthetic rig, the transfer against
 # verify_rig.py's check in OpenCV; its results files read back with nlohmann and
-# recon's reader.
+# sensor's reader.
 vc_add_test(calibration_metrics volumetric_kit::calib_quality vc_synthetic_rig
             opencv_geometry)
 vc_add_sweeps(calibration_metrics)
@@ -143,9 +143,9 @@ target_include_directories(vc_results_test SYSTEM
                            PRIVATE "${VC_JSON_INCLUDE_DIR}")
 
 if(VC_WITH_RIG)
-  # capture: sessions on disk, read back with recon's readers and nlohmann.
+  # capture: sessions on disk, read back with sensor's readers and nlohmann.
   vc_add_test(session_writer volumetric_kit::calib_capture
-              volumetric_kit::recon_io vc_test_support Threads::Threads)
+              volumetric_kit::sensor_image_io vc_test_support Threads::Threads)
   target_include_directories(vc_session_writer_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
   vc_add_test(capture_oom volumetric_kit::calib_capture vc_test_support
@@ -160,13 +160,15 @@ if(VC_WITH_RIG)
   # driver's spared.
   vc_add_test(depth_plane_fit volumetric_kit::calib_depth
               volumetric_kit::core_test_support vc_synthetic_rig)
-  get_target_property(_vc_glsl_roots calib_depth VC_SHADER_INCLUDE_DIRS)
+  # The kernels' include roots are calib_depth's (its CMakeLists.txt).
   vkc_embed_shaders(
     vc_depth_plane_fit_test
     SYMBOL_PREFIX
     vc_test_
     INCLUDE_DIRS
-    ${_vc_glsl_roots}
+    "${PROJECT_SOURCE_DIR}/src"
+    INCLUDE_TARGETS
+    volumetric_kit::sensor_frame
     SHADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/board_member_cases.comp")
   vc_add_test(depth_agreement volumetric_kit::calib_depth
@@ -177,7 +179,9 @@ if(VC_WITH_RIG)
     SYMBOL_PREFIX
     vc_test_
     INCLUDE_DIRS
-    ${_vc_glsl_roots}
+    "${PROJECT_SOURCE_DIR}/src"
+    INCLUDE_TARGETS
+    volumetric_kit::sensor_frame
     SHADERS
     "${PROJECT_SOURCE_DIR}/src/volumetric_kit/calib/depth/shaders/agreement.comp"
   )
@@ -208,7 +212,7 @@ if(TARGET calib_app)
   # cameras whose synthetic board pictures sit in device images, and the mosaic
   # drawn from its snapshots, through the core's Vulkan test fixtures (they skip
   # without a device); the capture worker's sessions on disk, read back with
-  # recon's readers and nlohmann.
+  # sensor's readers and nlohmann.
   vc_add_test(app_preset volumetric_kit::calib_app)
   # GLFW's key codes, through gfx_glfw, whose GLFW is gfx's own find.
   vc_add_test(app_keys volumetric_kit::calib_app volumetric_kit::gfx_glfw)
@@ -223,10 +227,11 @@ if(TARGET calib_app)
   # renderer's queue family through gfx's depth-cloud pipeline.
   vc_add_test(app_cloud volumetric_kit::calib_app
               volumetric_kit::core_test_support)
-  # calib_capture before recon_io, which it links, so recon_io is linked once.
-  # allocation_failure.cpp fails a detection and counts the depth buffers.
+  # calib_capture before sensor_image_io, which it links, so sensor_image_io is
+  # linked once. allocation_failure.cpp fails a detection and counts the depth
+  # buffers.
   vc_add_test(app_capture volumetric_kit::calib_app vc_synthetic_rig
-              volumetric_kit::calib_capture volumetric_kit::recon_io)
+              volumetric_kit::calib_capture volumetric_kit::sensor_image_io)
   target_sources(vc_app_capture_test PRIVATE support/allocation_failure.cpp)
   target_include_directories(vc_app_capture_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
@@ -241,7 +246,7 @@ if(TARGET calib_app)
   set_tests_properties(app_capture.software_commit
                        PROPERTIES SKIP_REGULAR_EXPRESSION "not a git checkout")
   # app: Calibrate on the synthetic rig's detections, its results directories
-  # read back with recon's reader and nlohmann; its out-of-memory sweep.
+  # read back with sensor's reader and nlohmann; its out-of-memory sweep.
   vc_add_test(app_calibrate volumetric_kit::calib_app vc_synthetic_rig)
   target_sources(vc_app_calibrate_test PRIVATE support/allocation_failure.cpp)
   target_include_directories(vc_app_calibrate_test SYSTEM
@@ -257,8 +262,8 @@ endif()
 
 # The core calib requires (third_party/CMakeLists.txt): calib's configure
 # against a stand-in core of each version (core_requirement/) refuses one older
-# than VC_CORE_MIN_VERSION, 0.25.0 -- before 0.1.0 the core has no
-# vkc_require_core -- and accepts 0.25.0 or newer.
+# than VC_CORE_MIN_VERSION, 0.29.0 -- before 0.1.0 the core has no
+# vkc_require_core -- and accepts 0.29.0 or newer.
 #
 # Those configures, and the ones below, take the fetched sources this build used
 # (FETCHCONTENT_SOURCE_DIR_<NAME>), so they need no network, and the OpenCV it
@@ -268,10 +273,10 @@ endif()
 set(_vc_package_properties LABELS package COST 60)
 include(FetchContent)
 FetchContent_GetProperties(volumetric_kit_core)
-FetchContent_GetProperties(volumetric_kit_recon)
+FetchContent_GetProperties(volumetric_kit_sensor)
 FetchContent_GetProperties(nlohmann_json)
 set(_vc_fetched_sources
-    -DRECON_SOURCE=${volumetric_kit_recon_SOURCE_DIR}
+    -DSENSOR_SOURCE=${volumetric_kit_sensor_SOURCE_DIR}
     -DJSON_SOURCE=${nlohmann_json_SOURCE_DIR}
     -DGENERATOR=${CMAKE_GENERATOR}
     -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
@@ -293,19 +298,19 @@ function(vc_add_core_requirement_test name core_version)
 endfunction()
 vc_add_core_requirement_test(
   before_0_1_0 none "-DEXPECT_ERROR=Unknown CMake command \"vkc_require_core\"")
-# calib's own check refuses, before recon's at the same floor.
+# calib's own check refuses, before sensor's at the same floor.
 set(_vc_below_floor
-    "-DEXPECT_ERROR=volumetric_kit_calib needs volumetric_kit_core 0\\.25\\.0 or newer"
+    "-DEXPECT_ERROR=volumetric_kit_calib needs volumetric_kit_core 0\\.29\\.0 or newer"
 )
 vc_add_core_requirement_test(0_18_0 0.18.0 "${_vc_below_floor}")
-vc_add_core_requirement_test(0_24_0 0.24.0 "${_vc_below_floor}")
-vc_add_core_requirement_test(0_25_0 0.25.0)
-vc_add_core_requirement_test(0_26_1 0.26.1)
+vc_add_core_requirement_test(0_28_0 0.28.0 "${_vc_below_floor}")
+vc_add_core_requirement_test(0_29_0 0.29.0)
+vc_add_core_requirement_test(0_30_1 0.30.1)
 
 if(VC_WITH_RIG)
-  # VC_WITH_RIG needs the core's vulkan tier and all of recon: an application
-  # that made either available without them first stops calib's configure, which
-  # names what is missing (rig_requirement/).
+  # VC_WITH_RIG needs the core's vulkan tier and sensor's tiers beyond its
+  # camera tier: an application that made either available without them first
+  # stops calib's configure, which names what is missing (rig_requirement/).
   function(vc_add_rig_requirement_test name core_vulkan expect)
     add_test(
       NAME rig_requirement.${name}
@@ -322,9 +327,9 @@ if(VC_WITH_RIG)
     core_without_vulkan OFF
     "volumetric_kit_calib needs volumetric_kit_core's vulkan tier")
   vc_add_rig_requirement_test(
-    camera_only_recon
+    camera_only_sensor
     ON
-    "VC_WITH_RIG needs all of volumetric_kit_recon, but it was made available camera-only"
+    "volumetric_kit_calib needs volumetric_kit::sensor_frame, which the sensor at .* was built without"
   )
 
   if(TARGET calib_app)
@@ -340,7 +345,7 @@ if(VC_WITH_RIG)
         continue()
       endif()
       set(_vc_name "${CMAKE_MATCH_1}")
-      if(NOT _vc_name MATCHES "^VOLUMETRIC_KIT_(CORE|RECON)$")
+      if(NOT _vc_name MATCHES "^VOLUMETRIC_KIT_(CORE|SENSOR)$")
         string(TOLOWER "${_vc_name}" _vc_lower)
         FetchContent_GetProperties(${_vc_lower})
         if(${_vc_lower}_SOURCE_DIR)
@@ -349,7 +354,7 @@ if(VC_WITH_RIG)
       endif()
     endforeach()
     list(JOIN _vc_fetched "|" _vc_fetched)
-    # The CUDA toolkit recon found off Apple (its cmake/vr_cuda.cmake).
+    # The CUDA toolkit sensor found off Apple (its cmake/vs_cuda.cmake).
     set(_vc_cuda_root)
     if(CUDAToolkit_BIN_DIR)
       get_filename_component(_vc_cuda_root "${CUDAToolkit_BIN_DIR}" DIRECTORY)
@@ -361,7 +366,7 @@ if(VC_WITH_RIG)
           ${CMAKE_COMMAND} -DCALIB_SOURCE=${PROJECT_SOURCE_DIR}
           -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/app_requirement/${name}
           -DCORE_SOURCE=${volumetric_kit_core_SOURCE_DIR}
-          -DRECON_SOURCE=${volumetric_kit_recon_SOURCE_DIR}
+          -DSENSOR_SOURCE=${volumetric_kit_sensor_SOURCE_DIR}
           "-DFETCHED=${_vc_fetched}" -DGENERATOR=${CMAKE_GENERATOR}
           -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
           -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM} -DGLM_DIR=${glm_DIR}
@@ -382,7 +387,8 @@ if(VC_WITH_RIG)
 endif()
 
 # The brain needs no Vulkan (no_vulkan/): with find_package(Vulkan) disabled,
-# calib configures and builds it, and a configure that keeps all of recon fails.
+# calib configures and builds it, and a configure that takes sensor's tiers
+# beyond its camera tier fails.
 add_test(
   NAME no_vulkan.brain
   COMMAND

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-// A solved rig's results files: recon's calibration file posed by each
-// camera's T_cw and read back by recon; the report parsed back with
+// A solved rig's results files: sensor's calibration file posed by each
+// camera's T_cw and read back by sensor's reader; the report parsed back with
 // nlohmann, every section, member and number as the metrics and the solution
 // hold it; the residuals CSV, every corner; the world at the origin tag in
 // both files, and the reference's for each miss, its file to the byte the
@@ -26,12 +26,12 @@
 
 #include "result_checks.hpp"
 #include "synthetic_scene.hpp"
-#include "volumetric_kit/recon/camera/array_calibration.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
 
 namespace volumetric_kit::calib::quality {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using test::value_of;
 using Code = core::Status::Code;
 using json = nlohmann::json;
@@ -81,7 +81,7 @@ ResultFiles formatted(const Solved& s) {
   return formatted(s.scene.cameras, s.solution, s.metrics);
 }
 
-// The file's pose is each camera's T_cw, world to camera; recon's reader
+// The file's pose is each camera's T_cw, world to camera; sensor's reader
 // gives its inverse as color_to_world.
 TEST(Results, TheCalibrationFilePosesEachCameraByItsTcw) {
   const Solved& s = solved();
@@ -867,7 +867,7 @@ TEST(Results, RefusesWhatDoesNotFit) {
   bad.calibration.sensors.pop_back();
   refused(s.scene.cameras, bad, s.metrics,
           "the solution's calibration's sensors");
-  // recon's writer refuses a calibration whose world is no sensor.
+  // sensor's writer refuses a calibration whose world is no sensor.
   bad = s.solution;
   bad.calibration.world.sensor = "nobody";
   core::Result<ResultFiles> files =
@@ -923,9 +923,9 @@ const json kRigsTag = json::parse(R"({"dictionary": "DICT_APRILTAG_36h11",
     "family": "tag36h11", "id": 0, "edge_mm": 150.0, "refinement": "subpix"})");
 
 // A tag world: the calibration file names the tag and poses each camera in
-// its world, as recon reads it back; the report's world section holds the
-// tag world's every figure, each camera's height and the boards on the floor,
-// and says its uncertainties are the reference camera's.
+// its world, as sensor's reader reads it back; the report's world section
+// holds the tag world's every figure, each camera's height and the boards on
+// the floor, and says its uncertainties are the reference camera's.
 TEST(Results, TheTagWorldIsTheFilesAndTheReportsWorld) {
   const Solved& s = solved();
   const Tagged& t = tagged();
@@ -1097,7 +1097,7 @@ TEST(Results, WithoutATagWorldTheReferenceStaysAndTheReportSaysWhy) {
   EXPECT_TRUE(report["reason"].is_null());
 }
 
-// A tag world of another rig, or one recon's file cannot name, is refused.
+// A tag world of another rig, or one sensor's file cannot name, is refused.
 TEST(Results, RefusesATagWorldThatDoesNotFit) {
   const Solved& s = solved();
   const auto refused = [&](const ResultWorld& world, const std::string& says) {

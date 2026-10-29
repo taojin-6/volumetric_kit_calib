@@ -169,7 +169,7 @@ VC_CORE_API const char* to_string(TargetKind kind) noexcept;
 ///         @ref MarkerDictionary.
 VC_CORE_API const char* to_string(MarkerDictionary dictionary) noexcept;
 
-/// @brief The AprilTag library's name for a dictionary's family, as recon's
+/// @brief The AprilTag library's name for a dictionary's family, as sensor's
 ///        calibration file names a tag world's.
 /// @param dictionary  The dictionary.
 /// @return `"tag16h5"`, `"tag25h9"`, `"tag36h10"` or `"tag36h11"` for an

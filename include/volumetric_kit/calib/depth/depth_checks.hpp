@@ -6,7 +6,7 @@
 /// @file depth_checks.hpp
 /// @brief The depth checks' device side: each view's board plane fitted on
 ///        the GPU to its camera's depth, and each ordered pair of cameras'
-///        depth compared, read where recon's frame preparation left it.
+///        depth compared, read where sensor's frame preparation left it.
 ///
 /// The quality tier's `depth_checks.hpp` is the host side: the region each
 /// fit takes, and what the planes and pairs say of the solved rig. Here runs
@@ -29,8 +29,8 @@
 #include "volumetric_kit/core/vulkan/descriptor.hpp"
 #include "volumetric_kit/core/vulkan/device_requirements.hpp"
 #include "volumetric_kit/core/vulkan/vulkan.hpp"
-#include "volumetric_kit/recon/camera/camera_model.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::core {
 class Allocator;
@@ -40,30 +40,30 @@ class Device;
 namespace volumetric_kit::calib::depth {
 
 /// @brief One camera's prepared depth on the device, and where the camera is:
-///        what the checks read of recon's `sensor::DeviceFrame` and the
+///        what the checks read of sensor's `DeviceFrame` and the
 ///        solved rig, so this tier names no sensor type.
 ///
 /// @code
-/// const recon::DepthCameraParams& d = frame.depth_camera;  // a DeviceFrame
+/// const sensor::DepthCameraParams& d = frame.depth_camera;  // a DeviceFrame
 /// DepthImage image;
 /// image.depth = frame.depth.get();
 /// image.intrinsics = {d.fx, d.fy, d.cx, d.cy};
 /// image.size = {d.width, d.height};
 /// image.min_depth_m = d.min_depth;
 /// image.max_depth_m = d.max_depth;
-/// image.depth_to_color = info.depth_to_color;  // recon's SensorInfo
+/// image.depth_to_color = info.depth_to_color;  // sensor's SensorInfo
 /// image.depth_to_world = color_to_world * info.depth_to_color;
 /// @endcode
 struct DepthImage {
   /// Row-major depth in metres, `size.width * size.height` floats from its
   /// start, 0 where there is none: a storage buffer in device-local memory
-  /// that the checks' device can read in place, on its queue family (recon's
+  /// that the checks' device can read in place, on its queue family (sensor's
   /// `GpuFramePrep` on the same device leaves one), its writes complete.
   /// Borrowed for the call.
   const core::Buffer* depth = nullptr;
   /// The depth's pinhole, in its pixels, whose centres are at integers.
-  recon::camera::PinholeIntrinsics intrinsics;
-  recon::camera::ImageSize size;  ///< The depth image's size.
+  sensor::camera::PinholeIntrinsics intrinsics;
+  sensor::camera::ImageSize size;  ///< The depth image's size.
   /// The camera's range: depth nearer than this, or none, is out of range
   /// (metres); finite and not negative.
   double min_depth_m = 0.0;
@@ -71,12 +71,12 @@ struct DepthImage {
   double max_depth_m = 0.0;
   /// The depth camera in the solved rig's world; rigid. `accumulate` reads
   /// it; `fit_planes` checks it but does not read it.
-  recon::camera::Mat4d depth_to_world{1.0};
-  /// The depth camera's frame to its colour camera's (recon's
+  sensor::camera::Mat4d depth_to_world{1.0};
+  /// The depth camera's frame to its colour camera's (sensor's
   /// `SensorInfo::depth_to_color`), which `quality::board_region` takes;
   /// rigid. The checks check it but do not read it: a region's
   /// `depth_to_board` already holds it.
-  recon::camera::Mat4d depth_to_color{1.0};
+  sensor::camera::Mat4d depth_to_color{1.0};
 };
 
 /// @brief One view's plane fit: a camera's depth, and the region of it the
@@ -169,7 +169,7 @@ class VC_DEPTH_API AgreementHistograms {
 // e.g. one robust to them from a histogram of the first round's residuals,
 // before the verdicts rely on the planes; the test
 // OutliersOnOneSideMoveThePlaneByTheirShare pins today's bias.
-/// @brief The depth checks' kernels on a device shared with recon: each
+/// @brief The depth checks' kernels on a device shared with sensor: each
 ///        view's board plane fitted to its camera's depth, and each ordered
 ///        pair of cameras' depth compared, read in place.
 ///
@@ -198,18 +198,18 @@ class VC_DEPTH_API DepthChecks {
   ///        baseline -- Vulkan 1.2, a compute queue and timeline semaphores
   ///        -- and nothing more.
   ///
-  /// The device a rig shares merges these with recon's and gfx's.
+  /// The device a rig shares merges these with sensor's and gfx's.
   /// @return The requirements, a default `core::DeviceRequirements`.
   ///
   /// @code
   /// VKC_ASSIGN(core::DeviceRequirements reqs,
-  ///            core::merge(recon::device_requirements(),
+  ///            core::merge(sensor::device_requirements(),
   ///                        DepthChecks::device_requirements()));
   /// @endcode
   static core::DeviceRequirements device_requirements();
 
   /// @brief Build the kernels.
-  /// @param device     The device recon's frames are prepared on, so their
+  /// @param device     The device sensor's frames are prepared on, so their
   ///                   depth is read in place; it enabled
   ///                   @ref device_requirements, and must outlive the
   ///                   checks.
@@ -277,7 +277,7 @@ class VC_DEPTH_API DepthChecks {
   /// at every `agreement_stride`-th column and row, with depth in its range.
   /// Each moves into the other's depth frame (`to`) by
   /// `to.depth_to_world^-1 from.depth_to_world`, composed in double, and
-  /// meets the pixel of `to`'s depth nearest where it projects (recon's
+  /// meets the pixel of `to`'s depth nearest where it projects (sensor's
   /// pinhole). It counts in the pair's overlap when that pixel has depth in
   /// range and neither pixel is at an edge (`options.edge_ratio`). Its
   /// difference, its depth in `to`'s frame minus `to`'s depth there, is

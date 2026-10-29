@@ -12,13 +12,13 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 
 > **Status:** Early scaffolding. The `core` tier — the data model (the board
 > and its check, observations, detections, view and capture records, lens and
-> sensor profiles) over recon's camera model and the core's exception-free
+> sensor profiles) over sensor's camera model and the core's exception-free
 > `Status`/`Result` — builds and is tested (GoogleTest); so do the `compute`
 > tier's OpenCV bridge, the `detect` tier's board and tag detection, the `solve`
 > tier's rig solve and the `quality` tier's live checks and solved-rig
 > metrics; with `VC_WITH_RIG`, the `capture` tier's session writer, the `viz`
 > tier's live and 3D views and the `depth` tier's board-plane fit and
-> pairwise depth agreement; and, with GLFW and recon's Orbbec driver too, the
+> pairwise depth agreement; and, with GLFW and sensor's Orbbec driver too, the
 > `app` tier's `calib_rig`, live view, 3D view, capture and Calibrate. The
 > color tier is not yet implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain
@@ -41,21 +41,23 @@ renderer.
   [`volumetric_kit_core`](https://github.com/taojin-6/volumetric_kit_core), the
   family's shared foundation. Its base tier supplies calib's `Status`/`Result`;
   its vulkan tier, the rig tiers' GPU work, so the brain needs no Vulkan SDK.
-- **Cameras and sensors:** cameras are `volumetric_kit_recon`'s
+- **Cameras and sensors:** cameras are
+  [`volumetric_kit_sensor`](https://github.com/taojin-6/volumetric_kit_sensor)'s
   `CameraModel`, from its camera tier, which calib fetches alone so the brain
   still needs no Vulkan SDK ([DECISIONS.md](DECISIONS.md#locked-decisions)).
 - **Capture:** the `capture` tier writes a calibration session to disk on a
   thread of its own and never overwrites: each camera's JPEG as the camera
-  coded it, raw 16-bit depth, the factory models in recon's calibration file,
+  coded it, raw 16-bit depth, the factory models in sensor's calibration file,
   and the detections of the board and the origin tag, and the checks
   ([DECISIONS.md](DECISIONS.md#2026-10-13--sessions-on-disk)). It takes
-  recon's sensor and io tiers, so `VC_WITH_RIG` fetches all of recon.
+  sensor's interface and image I/O tiers, so `VC_WITH_RIG` builds sensor
+  beyond its camera tier.
 - **Compute:** a CPU backend is the correctness oracle: OpenCV, behind
-  recon's and calib's types. The `compute` tier holds the bridge -- the camera
+  sensor's and calib's types. The `compute` tier holds the bridge -- the camera
   model and rigid transforms in OpenCV's types, the ChArUco board and whether a
   view of it fixes a pose, the measures the solve and the checks share, and
   `guarded()`, which returns what OpenCV throws as a `Status`. GPU work runs
-  on the core's vulkan tier, on a `VkDevice` shared with `recon` and `gfx`, so
+  on the core's vulkan tier, on a `VkDevice` shared with `sensor` and `gfx`, so
   frames pass between them without copies (MoltenVK on Apple; native Metal
   deferred).
 - **Detection:** the `detect` tier finds the ChArUco board in an 8-bit luma
@@ -68,7 +70,7 @@ renderer.
   link's robust relative pose -- in the world of the reference camera's colour
   frame: the first rig. `bundle_adjust` refines it on OpenCV's `cv::LevMarq`,
   with a Huber loss and outlier rounds, and reports each camera's covariance
-  and its sensitivity to the intrinsics, and the poses as recon's
+  and its sensitivity to the intrinsics, and the poses as sensor's
   calibration. `origin_tag_frame` then triangulates the origin tag on the
   floor from the solved rig, and `anchor_rig` moves the outputs into its
   world, z up from the floor
@@ -87,7 +89,7 @@ renderer.
   `verify_rig.py`'s check), each camera's move with one capture left out, a
   principal-point A/B test decided by the RMS with a margin, the cameras'
   baselines and the boards on the origin tag's floor; and the text of the
-  results directory's files -- recon's calibration file in the rig's world,
+  results directory's files -- sensor's calibration file in the rig's world,
   `report.json` and `residuals.csv` -- which the application writes
   ([DECISIONS.md](DECISIONS.md#2026-10-16--the-solved-rigs-metrics-and-its-results-files)).
   Over the device's depth results, for any number of cameras: the board's
@@ -95,7 +97,7 @@ renderer.
   agreement, and their verdicts
   ([DECISIONS.md](DECISIONS.md#2026-10-16--depth-checks-the-hosts-geometry-over-the-devices-results)).
 - **Depth:** the depth checks' device side, on the core's vulkan tier, over
-  each camera's depth where recon's frame preparation left it, for any number
+  each camera's depth where sensor's frame preparation left it, for any number
   of cameras: each view's board plane fitted on the GPU in two gated rounds in
   one submit, with 48 bytes per view read back; and each ordered pair's depth
   differences binned on the GPU over every capture, with 32 bytes per pair
@@ -108,7 +110,7 @@ renderer.
   panels show each camera's view, the latest set, the session and the
   capture; the board's editor locks at the first capture
   ([DECISIONS.md](DECISIONS.md#2026-10-16--the-live-view-on-gfx)). The 3D
-  view draws each camera's prepared depth as points where recon left it, at
+  view draws each camera's prepared depth as points where sensor left it, at
   the rig's poses, with the cameras' frusta, the world's axes, the solved
   boards and the origin tag, turned upright, the tag's floor level
   ([DECISIONS.md](DECISIONS.md#2026-10-17--the-live-3d-view-drawn-from-prepared-frames-in-place)).
@@ -137,7 +139,7 @@ calib needs a C++17 compiler -- GCC or Clang; Windows and MSVC are not
 supported ([DECISIONS.md](DECISIONS.md#platforms)) -- CMake ≥ 3.21, GLM, and
 OpenCV 5 (5.0 or a later 5.x: its core, imgproc, objdetect and geometry
 modules, and, for the tests, imgcodecs and calib). The first configure
-fetches `volumetric_kit_core` and `volumetric_kit_recon` (pinned by commit)
+fetches `volumetric_kit_core` and `volumetric_kit_sensor` (pinned by commit)
 and, for tests, googletest, so it needs network access. Ubuntu's packages are
 OpenCV 4, so `tools/install-opencv.sh` builds OpenCV 5 from its source, the
 newest 5.x release or a given tag, with only those modules, as CI does:
@@ -150,20 +152,20 @@ tools/install-opencv.sh latest /usr/local
 
 For another prefix, pass `-DOpenCV_DIR=<prefix>/lib/cmake/opencv5` to calib's
 configure. `VC_WITH_RIG` (OFF by default) builds `capture`, `depth` and
-`viz`, over all of recon, which needs the Vulkan SDK and a GLSL compiler: the
-core's vulkan tier
+`viz`, over sensor beyond its camera tier, which needs the Vulkan SDK and a
+GLSL compiler: the core's vulkan tier
 [prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
 `viz` fetches `volumetric_kit_gfx` (pinned by commit). Given GLFW
-(`brew install glfw`) and recon's Orbbec driver (`-DVR_WITH_ORBBEC=ON`, with
+(`brew install glfw`) and sensor's Orbbec driver (`-DVS_WITH_ORBBEC=ON`, with
 the
-[Orbbec SDK](https://github.com/taojin-6/volumetric_kit_recon#optional-orbbec-sdk);
-off Apple also `-DVR_WITH_FFMPEG=ON -DVR_WITH_CUDA=ON`, with FFmpeg and the
-CUDA toolkit for recon's
-[video decoders](https://github.com/taojin-6/volumetric_kit_recon#video-decoders)),
+[Orbbec SDK](https://github.com/taojin-6/volumetric_kit_sensor#orbbec-driver);
+off Apple also `-DVS_WITH_FFMPEG=ON -DVS_WITH_CUDA=ON`, with FFmpeg and the
+CUDA toolkit for sensor's
+[video decoders](https://github.com/taojin-6/volumetric_kit_sensor#video-decoders)),
 `VC_WITH_RIG` builds the `app` tier and `calib_rig` too. To build against a
-local core, recon or gfx checkout instead of the pinned one, pass
+local core, sensor or gfx checkout instead of the pinned one, pass
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>`,
-`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_RECON=<path>` or
+`-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_SENSOR=<path>` or
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_GFX=<path>`.
 
 ## Build and test
@@ -186,7 +188,7 @@ The demo reads the family's versioned JSON scenario format through
 `volumetric_kit::core_config`. Core owns defaults and static validation, including
 unknown fields and application compatibility. Edit `config/project_point.json`
 to change the camera and point. The demo accepts only `--config PATH` and `--help`;
-the calibration library itself keeps its core_base/recon_camera dependency.
+the calibration library itself keeps its core_base/sensor_camera dependency.
 
 Run calib_rig on a rig (the session root must exist):
 
@@ -234,21 +236,22 @@ compiler adds. `volumetric_kit::calib_compute`, `volumetric_kit::calib_detect`,
 `volumetric_kit::calib_solve` and `volumetric_kit::calib_quality` are always
 built. Set `VC_WITH_RIG` ON before calib is made available to link
 `volumetric_kit::calib_capture`, `volumetric_kit::calib_depth`,
-`volumetric_kit::calib_viz` and, with `VC_BUILD_APPS`, GLFW and recon's Orbbec
+`volumetric_kit::calib_viz` and, with `VC_BUILD_APPS`, GLFW and sensor's Orbbec
 driver, `volumetric_kit::calib_app`.
 `VC_SANITIZE` is a semicolon list, empty (off) by default —
 e.g. `-DVC_SANITIZE="address;undefined"`. calib is consumed by commit, as
 above, and installs nothing: it has no install rules or package config
 ([DECISIONS.md](DECISIONS.md#2026-10-22--consumed-by-commit-never-installed)).
 
-calib needs `volumetric_kit_core` 0.25.0 or newer, with its vulkan tier for
-`VC_WITH_RIG` and its config tier for `calib_app`. An
-application that declares the core before calib, to share it with `recon` or
-`gfx`, pins at least that: on an older core, calib's configure fails at
-`vkc_require_core`. Without `VC_WITH_RIG`, calib makes recon available
-camera-only, so an application that uses recon beyond its camera tier makes
-recon available, with its options, before calib; with it, an application that
-makes recon available first makes all of it.
+calib needs `volumetric_kit_core` 0.29.0 or newer, with its vulkan tier for
+`VC_WITH_RIG` and its config tier for `calib_app`, and `volumetric_kit_sensor`
+0.1.0 or newer. An application that declares either before calib, to share it
+with another sibling, pins at least that: on an older one, calib's configure
+fails at `vkc_require_core` or `vkc_require_sibling`. Without `VC_WITH_RIG`,
+calib makes sensor available camera-only (`VS_CAMERA_ONLY`), so an application
+that uses sensor beyond its camera tier makes sensor available, with its
+options, before calib; with it, an application that makes sensor available
+first builds it beyond its camera tier.
 
 ## Development
 

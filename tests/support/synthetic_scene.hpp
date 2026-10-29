@@ -118,13 +118,13 @@ inline std::vector<SyntheticCamera> kept_scene_rig(std::size_t count) {
   std::vector<SyntheticCamera> rig = synthetic_rig();
   SyntheticCamera fifth = rig.front();
   const double a = glm::radians(130.0);
-  recon::camera::Mat4d turn(1.0);  // the camera moved about the floor's z
+  sensor::camera::Mat4d turn(1.0);  // the camera moved about the floor's z
   turn[0][0] = std::cos(a);
   turn[0][1] = std::sin(a);
   turn[1][0] = -std::sin(a);
   turn[1][1] = std::cos(a);
   fifth.world_to_camera =
-      fifth.world_to_camera * recon::camera::rigid_inverse(turn);
+      fifth.world_to_camera * sensor::camera::rigid_inverse(turn);
   fifth.model.intrinsics.cx += 3.0;
   fifth.model.intrinsics.cy -= 3.0;
   rig.push_back(fifth);
@@ -162,18 +162,19 @@ inline std::size_t index_of(const std::vector<solve::RigCamera>& cameras,
 /// @param a  A transform.
 /// @param b  Another.
 /// @return The angle (degrees).
-inline double angle_deg(const recon::camera::Mat4d& a,
-                        const recon::camera::Mat4d& b) {
-  return glm::degrees(glm::length(recon::camera::rodrigues_from_rotation(
-      glm::transpose(recon::camera::Mat3d(a)) * recon::camera::Mat3d(b))));
+inline double angle_deg(const sensor::camera::Mat4d& a,
+                        const sensor::camera::Mat4d& b) {
+  return glm::degrees(glm::length(sensor::camera::rodrigues_from_rotation(
+      glm::transpose(sensor::camera::Mat3d(a)) * sensor::camera::Mat3d(b))));
 }
 
 /// @brief Where a camera is.
 /// @param world_to_camera  T_cw.
 /// @return Its centre in the world.
-inline recon::camera::Vec3d centre_of(
-    const recon::camera::Mat4d& world_to_camera) {
-  return recon::camera::Vec3d(recon::camera::rigid_inverse(world_to_camera)[3]);
+inline sensor::camera::Vec3d centre_of(
+    const sensor::camera::Mat4d& world_to_camera) {
+  return sensor::camera::Vec3d(
+      sensor::camera::rigid_inverse(world_to_camera)[3]);
 }
 
 /// @brief Each camera's true T_cw in the world of one of them, as the solve
@@ -182,11 +183,11 @@ inline recon::camera::Vec3d centre_of(
 /// @param reference  The camera whose frame is the world, by index in
 ///                   @ref Scene::rig.
 /// @return Each camera's T_cw, in @ref Scene::rig's order.
-inline std::vector<recon::camera::Mat4d> truths_in_world_of(
+inline std::vector<sensor::camera::Mat4d> truths_in_world_of(
     const Scene& scene, std::size_t reference) {
-  const recon::camera::Mat4d reference_to_world =
-      recon::camera::rigid_inverse(scene.rig[reference].world_to_camera);
-  std::vector<recon::camera::Mat4d> truth;
+  const sensor::camera::Mat4d reference_to_world =
+      sensor::camera::rigid_inverse(scene.rig[reference].world_to_camera);
+  std::vector<sensor::camera::Mat4d> truth;
   for (const SyntheticCamera& cam : scene.rig) {
     truth.push_back(cam.world_to_camera * reference_to_world);
   }

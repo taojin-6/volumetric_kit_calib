@@ -19,26 +19,25 @@
 #include <vector>
 
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/sensor/rgbd_sensor.hpp"
+#include "volumetric_kit/sensor/rgbd_sensor.hpp"
 
 namespace volumetric_kit::calib::test {
 
 /// @brief A camera whose frames the test pushes; `drain` hands them over.
 ///        Thread-safe: the test pushes while a worker drains.
-class FakeSensor final : public recon::sensor::IRgbdSensor {
+class FakeSensor final : public sensor::IRgbdSensor {
  public:
   /// @brief A camera reporting @p info.
-  explicit FakeSensor(recon::sensor::SensorInfo info)
-      : info_(std::move(info)) {}
+  explicit FakeSensor(sensor::SensorInfo info) : info_(std::move(info)) {}
 
   /// @brief Queue @p frame for the next drain.
-  void push(recon::sensor::RgbdFrame frame) {
+  void push(sensor::RgbdFrame frame) {
     const std::lock_guard<std::mutex> lock(mutex_);
     frames_.push_back(std::move(frame));
   }
   /// @brief Make the next drain throw, as a driver's bug would.
   void throw_on_drain() { throw_.store(true); }
-  /// @brief Disconnect it, as recon's Orbbec driver reports a camera
+  /// @brief Disconnect it, as sensor's Orbbec driver reports a camera
   ///        unplugged: exhausted, and every drain from now on fails.
   void disconnect() { gone_.store(true); }
   /// @return How many pushed frames no drain has taken yet.
@@ -51,9 +50,7 @@ class FakeSensor final : public recon::sensor::IRgbdSensor {
   /// @return How often it was stopped.
   int stops() const { return stops_.load(); }
 
-  const recon::sensor::SensorInfo& info() const noexcept override {
-    return info_;
-  }
+  const sensor::SensorInfo& info() const noexcept override { return info_; }
   core::Status set_queue_depth(std::size_t frames) override {
     return frames == 0 ? core::Status::invalid_argument("depth 0")
                        : core::Status{};
@@ -68,33 +65,33 @@ class FakeSensor final : public recon::sensor::IRgbdSensor {
     const std::lock_guard<std::mutex> lock(mutex_);
     frames_.clear();
   }
-  core::Result<std::optional<recon::sensor::RgbdFrame>> poll() override {
+  core::Result<std::optional<sensor::RgbdFrame>> poll() override {
     const std::lock_guard<std::mutex> lock(mutex_);
     if (frames_.empty()) return no_frame();
-    recon::sensor::RgbdFrame frame = std::move(frames_.back());
+    sensor::RgbdFrame frame = std::move(frames_.back());
     frames_.clear();
     return some_frame(std::move(frame));
   }
-  core::Status drain(std::vector<recon::sensor::RgbdFrame>* out) override {
+  core::Status drain(std::vector<sensor::RgbdFrame>* out) override {
     if (throw_.exchange(false)) throw std::runtime_error("the driver threw");
     if (gone_.load()) {
       return core::Status::io_error("camera " + info_.id +
                                     " disconnected; reopen it to use it again");
     }
     const std::lock_guard<std::mutex> lock(mutex_);
-    for (recon::sensor::RgbdFrame& frame : frames_) {
+    for (sensor::RgbdFrame& frame : frames_) {
       out->push_back(std::move(frame));
     }
     frames_.clear();
     return {};
   }
   bool exhausted() const noexcept override { return gone_.load(); }
-  recon::sensor::SensorStats stats() const noexcept override { return {}; }
+  sensor::SensorStats stats() const noexcept override { return {}; }
 
  private:
-  recon::sensor::SensorInfo info_;
+  sensor::SensorInfo info_;
   std::mutex mutex_;
-  std::vector<recon::sensor::RgbdFrame> frames_;
+  std::vector<sensor::RgbdFrame> frames_;
   std::atomic<bool> started_{false};
   std::atomic<bool> throw_{false};
   std::atomic<bool> gone_{false};

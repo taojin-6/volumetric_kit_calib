@@ -23,8 +23,7 @@
 namespace volumetric_kit::calib::app {
 namespace {
 
-namespace camera = recon::camera;
-namespace sensor = recon::sensor;
+namespace camera = sensor::camera;
 using Code = core::Status::Code;
 
 camera::CameraModel model(std::uint32_t width, std::uint32_t height) {

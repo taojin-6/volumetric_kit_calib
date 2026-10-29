@@ -30,7 +30,7 @@
 namespace volumetric_kit::calib::viz {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 namespace pipelines = gfx::pipelines;
 using camera::Mat3d;
 using camera::Mat4d;

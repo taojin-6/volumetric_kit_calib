@@ -29,8 +29,8 @@
 #include "volumetric_kit/calib/solve/export.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/camera/array_calibration.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::solve {
 
@@ -46,13 +46,13 @@ using CornerJacobian = cv::Matx<double, 2, 6>;
 /// VKC_ASSIGN(const ViewResiduals at,
 ///            view_residuals(cam, board, view, world_to_camera,
 ///            board_to_world));
-/// const recon::camera::Vec2d& e = at.residuals[0];  // pixels
+/// const sensor::camera::Vec2d& e = at.residuals[0];  // pixels
 /// const CornerJacobian& by_camera = at.camera_jacobian[0];
 /// @endcode
 struct ViewResiduals {
   /// Each corner's projection minus its detection (pixels), in the view's
   /// order.
-  std::vector<recon::camera::Vec2d> residuals;
+  std::vector<sensor::camera::Vec2d> residuals;
   /// Each corner's depth in the camera (metres): z of `T_cw T_wb X`.
   std::vector<double> depths;
   /// Each corner's residual by `world_to_camera`'s parameters: OpenCV's
@@ -83,8 +83,8 @@ struct ViewResiduals {
 VC_SOLVE_API core::Result<ViewResiduals> view_residuals(
     const compute::CvCamera& camera, const compute::Board& board,
     const Observation& view,
-    const recon::camera::RodriguesTransform& world_to_camera,
-    const recon::camera::RodriguesTransform& board_to_world);
+    const sensor::camera::RodriguesTransform& world_to_camera,
+    const sensor::camera::RodriguesTransform& board_to_world);
 
 /// @brief The thresholds and amounts @ref bundle_adjust applies.
 ///
@@ -220,10 +220,10 @@ struct CornerResidual {
   std::size_t camera = 0;    ///< Its camera's index in the rig.
   std::int64_t capture = 0;  ///< Its capture, as `Observation::frame_id`.
   int corner = 0;            ///< Its id on the board.
-  recon::camera::Vec2d pixel{0.0};  ///< Where it was detected.
+  sensor::camera::Vec2d pixel{0.0};  ///< Where it was detected.
   /// Its projection minus its detection (pixels); not a number for a corner
   /// behind its camera.
-  recon::camera::Vec2d residual{0.0};
+  sensor::camera::Vec2d residual{0.0};
   double weight = 1.0;  ///< Its detection's weight, as given.
   /// Huber's weight on it at the solution: 1 within `huber_px`, and
   /// `huber_px / |residual|` beyond.
@@ -234,13 +234,13 @@ struct CornerResidual {
 /// @brief A capture's board at the solution.
 ///
 /// @code
-/// const recon::camera::Mat4d board_to_world =
-///     recon::camera::matrix_from_rodrigues(solved.board_to_world);
+/// const sensor::camera::Mat4d board_to_world =
+///     sensor::camera::matrix_from_rodrigues(solved.board_to_world);
 /// @endcode
 struct SolvedBoard {
   std::int64_t capture = 0;  ///< The capture, as `Observation::frame_id`.
   /// T_wb, its rotation's angle at most pi.
-  recon::camera::RodriguesTransform board_to_world;
+  sensor::camera::RodriguesTransform board_to_world;
 };
 
 /// @brief How uncertain a camera's solved pose is from the corners' noise
@@ -271,8 +271,8 @@ struct PoseCovariance {
 /// log(cameras[c].id, moved.rotation_deg, glm::length(moved.centre_mm));
 /// @endcode
 struct PoseShift {
-  double rotation_deg = 0.0;            ///< The rotation's turn (degrees).
-  recon::camera::Vec3d centre_mm{0.0};  ///< The centre's move (millimetres).
+  double rotation_deg = 0.0;             ///< The rotation's turn (degrees).
+  sensor::camera::Vec3d centre_mm{0.0};  ///< The centre's move (millimetres).
 };
 
 /// @brief What one camera's intrinsics being off does to every camera's
@@ -309,13 +309,13 @@ struct RigSolution {
   std::size_t reference = 0;  ///< The camera the world is.
   /// T_cw for each camera, in the rig's order, each rotation's angle at
   /// most pi; the reference's exactly zero.
-  std::vector<recon::camera::RodriguesTransform> world_to_camera;
-  /// The same poses as recon's calibration: the world the reference's id,
-  /// each camera's `color_to_world` the inverse of recon's
+  std::vector<sensor::camera::RodriguesTransform> world_to_camera;
+  /// The same poses as sensor's calibration: the world the reference's id,
+  /// each camera's `color_to_world` the inverse of sensor's
   /// `matrix_from_rodrigues` of its T_cw (the reference's exactly the
   /// identity), and its colour lens as given, marked factory: the adjustment
   /// solves no intrinsics. Sensors in id order; no depth cameras.
-  recon::camera::ArrayCalibration calibration;
+  sensor::camera::ArrayCalibration calibration;
   /// The board in each capture adjusted, in the captures' order.
   std::vector<SolvedBoard> boards;
   /// Every corner of every view adjusted, in the observations' order.

@@ -48,9 +48,8 @@
 namespace volumetric_kit::calib::viz {
 namespace {
 
-namespace sensor = recon::sensor;
 using Code = core::Status::Code;
-using recon::camera::ImageSize;
+using sensor::camera::ImageSize;
 
 constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
 constexpr VkExtent2D kExtent{256, 128};
@@ -227,7 +226,7 @@ class VizRenderTest : public core::test::VulkanDeviceTest {
   }
 
   // A `width` x `height` picture of luma `fill` with its white texel at
-  // `dot`, its planes uploaded and left in GENERAL, as recon's decoders leave
+  // `dot`, its planes uploaded and left in GENERAL, as sensor's decoders leave
   // them; BT.601 full range, centred chroma, as MJPEG.
   Picture make_picture(std::uint32_t width, std::uint32_t height, glm::vec2 dot,
                        std::uint8_t fill = 0) {
@@ -992,7 +991,7 @@ TEST_F(VizRenderTest, MarksTheCoverageCellAndTheMarkerWhereTheyAre) {
   Detection found;
   DetectedMarker marker;
   marker.corners = {
-      recon::camera::Vec2d{8.0, 8.0}, {24.0, 8.0}, {24.0, 24.0}, {8.0, 24.0}};
+      sensor::camera::Vec2d{8.0, 8.0}, {24.0, 8.0}, {24.0, 24.0}, {8.0, 24.0}};
   found.markers.push_back(marker);
   TileOverlay tile;
   tile.detection = &found;

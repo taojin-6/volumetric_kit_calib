@@ -27,7 +27,7 @@
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/config/config.hpp"
 #include "volumetric_kit/core/vulkan/device_requirements.hpp"
-#include "volumetric_kit/recon/sensor/orbbec/orbbec_sync_config.hpp"
+#include "volumetric_kit/sensor/orbbec/orbbec_sync_config.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -40,7 +40,7 @@ namespace volumetric_kit::calib::app {
 ///            gfx::glfw::make_shared_device(window, needs.compute, config));
 /// @endcode
 struct RigRequirements {
-  /// The compute library's side: recon's decoders, readback and frame
+  /// The compute library's side: sensor's decoders, readback and frame
   /// preparation, merged with calib_depth's checks.
   core::DeviceRequirements compute;
   /// The renderer's: gfx's, with `largePoints` for points wider than a pixel
@@ -52,7 +52,7 @@ struct RigRequirements {
 /// @param large_points  Whether the renderer enables `largePoints`. Without
 ///                      it gfx draws every point one pixel wide, which a
 ///                      device that lacks the feature is left with.
-/// @return Both sides' requirements; or `InvalidArgument` if recon's and
+/// @return Both sides' requirements; or `InvalidArgument` if sensor's and
 ///         calib_depth's cannot merge (`core::merge`).
 ///
 /// @code
@@ -71,7 +71,7 @@ struct RigScenario {
   RigPreset preset;  ///< The modes every camera streams at.
   /// The rig's sync file (`source.sync_config`), read: its cameras, each
   /// one's sync settings.
-  recon::sensor::OrbbecRigSyncConfig sync;
+  sensor::OrbbecRigSyncConfig sync;
 };
 
 /// @brief What calib_rig checks of its scenario before it opens a window or
@@ -80,7 +80,7 @@ struct RigScenario {
 ///                `Application::CalibRig`.
 /// @return The scenario's preset and sync file; @ref rig_preset's refusals;
 ///         `NotFound` when `output.path` is not an existing directory;
-///         `recon::sensor::read_orbbec_sync_config`'s refusals of the sync
+///         `sensor::read_orbbec_sync_config`'s refusals of the sync
 ///         file (missing, unreadable, malformed or listing no camera); or
 ///         `OutOfMemory`.
 ///
@@ -93,7 +93,7 @@ core::Result<RigScenario> check_scenario(const core::config::Config& config);
 ///
 /// After @ref check_scenario it opens a window of `config.window`'s size,
 /// with the validation layer when `window.validation`, the one device gfx and
-/// recon share, and every camera of the rig's sync file
+/// sensor's tiers share, and every camera of the rig's sync file
 /// (`source.sync_config`) at the preset (@ref check_preset). Ctrl+C or
 /// SIGTERM closes the window while it runs; the handlers it replaced are put
 /// back when it returns. The camera images come first: there the keys

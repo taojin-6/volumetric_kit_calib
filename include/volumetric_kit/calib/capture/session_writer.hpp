@@ -12,7 +12,7 @@
 ///
 /// @code{.txt}
 /// session.json                 the rig, the board, the captures
-/// factory_calibration.json     recon's calibration file, unposed
+/// factory_calibration.json     sensor's calibration file, unposed
 /// images/<serial>/calib_img_<serial>_<NNN>.jpg
 ///                              the camera's JPEG, byte for byte
 /// depth/<serial>/calib_depth_<serial>_<NNN>.png
@@ -22,8 +22,8 @@
 ///
 /// - `<NNN>` is the capture's index, zero-padded to three digits. The image
 ///   names are the ones the legacy `camera_calibration` scripts glob for.
-/// - `factory_calibration.json` is recon's version-2 calibration file
-///   (`recon/camera/array_calibration.hpp`): each camera's factory colour and
+/// - `factory_calibration.json` is sensor's version-2 calibration file
+///   (`sensor/camera/array_calibration.hpp`): each camera's factory colour and
 ///   depth models at the streamed mode, and its `depth_to_color`, with no pose.
 /// - Depth is as the sensor captured it: raw, not undistorted.
 /// - `streams` records the cameras' colour and depth sizes and rate, which
@@ -43,7 +43,7 @@
 /// @code{.json}
 /// {"format": "volumetric_kit_calib.session", "version": 1,
 ///  "created": "2026-10-13T09:41:07.250Z",
-///  "software": {"calib": "...", "recon": "...", "gfx": "...", "core": "...",
+///  "software": {"calib": "...", "sensor": "...", "gfx": "...", "core": "...",
 ///               "opencv": "5.0.0", "orbbec_sdk": "2.10.6"},
 ///  "rig": {"sync_file": "config/femto_mega_sync.json",
 ///          "sync_sha256": "...", "reference": "CL2A141000N"},
@@ -112,7 +112,7 @@
 #include "volumetric_kit/calib/core/target.hpp"
 #include "volumetric_kit/calib/core/view_check.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/sensor/rgbd_sensor.hpp"
+#include "volumetric_kit/sensor/rgbd_sensor.hpp"
 
 namespace volumetric_kit::calib::capture {
 
@@ -126,7 +126,7 @@ namespace volumetric_kit::calib::capture {
 /// @endcode
 struct Software {
   std::string calib;       ///< calib's version or commit.
-  std::string recon;       ///< volumetric_kit_recon's.
+  std::string sensor;      ///< volumetric_kit_sensor's.
   std::string gfx;         ///< volumetric_kit_gfx's.
   std::string core;        ///< volumetric_kit_core's.
   std::string opencv;      ///< OpenCV's version.
@@ -155,7 +155,7 @@ struct DepthMode {
 /// @brief One camera of the rig.
 ///
 /// The vendor's facts are strings an application fills from its driver (for
-/// an Orbbec camera, recon's `OrbbecDeviceInfo` and sync configuration), so
+/// an Orbbec camera, sensor's `OrbbecDeviceInfo` and sync configuration), so
 /// this tier names no driver.
 ///
 /// @code
@@ -171,7 +171,7 @@ struct DepthMode {
 struct SessionCamera {
   /// What the sensor is: `id` (its serial), `model`, the factory `color` and
   /// `depth` models at the streamed mode, `depth_to_color`, `role` and `fps`.
-  recon::sensor::SensorInfo info;
+  sensor::SensorInfo info;
   std::string firmware;             ///< Its firmware version.
   std::string ip_address;           ///< Its IP address; empty for a USB camera.
   std::string sync_mode;            ///< Its sync mode as its driver names it.
@@ -340,7 +340,7 @@ class VC_CAPTURE_API SessionWriter {
   ///                 `0 < min_m < max_m`; each serial is a plain file name
   ///                 (letters, digits, `-`, `_`, `.`; not `.` or `..`), and
   ///                 no two differ only in case; each camera has colour and
-  ///                 depth models that, with its `depth_to_color`, recon's
+  ///                 depth models that, with its `depth_to_color`, sensor's
   ///                 calibration file holds (which also needs a camera at
   ///                 least, and no serial twice); every camera streams the
   ///                 same sizes at the same, known `fps`; and the reference

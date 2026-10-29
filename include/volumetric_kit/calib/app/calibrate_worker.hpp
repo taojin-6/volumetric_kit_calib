@@ -13,7 +13,7 @@
 /// runs `solve::initialise`, `solve::bundle_adjust` and
 /// `quality::calibration_metrics`, all in the reference camera's gauge,
 /// locates the origin tag (`solve::origin_tag_frame`), checks the kept raw
-/// depth against the solved rig on recon's device (@ref CalibrateDepth),
+/// depth against the solved rig on sensor's device (@ref CalibrateDepth),
 /// moves the outputs into the tag's world (`solve::anchor_rig`), and formats
 /// the results files (`quality::format_results`); @ref write_results writes
 /// them to the session's `results/<RRR>_<YYYY-MM-DD_HHMMSS>/`.
@@ -36,7 +36,7 @@
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/world_tag.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::core {
 class Allocator;
@@ -116,11 +116,11 @@ struct CalibrateResult {
   /// the origin; and the solved boards on the tag's floor.
   quality::ResultWorld world;
   /// Each camera's colour frame to the world, the inverse of its T_cw, in
-  /// rig order: as recon and the 3D view take a pose.
-  std::vector<recon::camera::Mat4d> color_to_world;
+  /// rig order: as sensor's calibration and the 3D view take a pose.
+  std::vector<sensor::camera::Mat4d> color_to_world;
   /// Each solved board's T_wb in the world, in
   /// @ref solve::RigSolution::boards' order.
-  std::vector<recon::camera::Mat4d> boards_to_world;
+  std::vector<sensor::camera::Mat4d> boards_to_world;
   /// The depth checks over every kept capture (@ref CalibrateDepth), with
   /// `quality::DepthCheckOptions{}`; empty when the depth was not checked.
   std::optional<quality::DepthSummary> depth;
@@ -173,8 +173,8 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
                                         const CalibrateCallback& progress = {},
                                         CalibrateDepth* depth = nullptr);
 
-/// @brief Calibrate's depth checks of the kept raw depth, on recon's device:
-///        a depth-only frame preparation per camera (recon's `GpuFramePrep`)
+/// @brief Calibrate's depth checks of the kept raw depth, on sensor's device:
+///        a depth-only frame preparation per camera (sensor's `GpuFramePrep`)
 ///        and the checks' kernels (calib's `depth::DepthChecks`), built once,
 ///        so a device that cannot run them fails as calib_rig starts.
 ///
@@ -188,7 +188,7 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
 /// output. A camera without depth in a capture, or without a depth model,
 /// takes no part in it. The verdicts are `quality::summarize_depth_checks`'
 /// with `quality::DepthCheckOptions{}`. The preparations and the checks
-/// submit to one queue, recon's, and each batch's last barrier makes its
+/// submit to one queue, sensor's, and each batch's last barrier makes its
 /// writes visible to every later command there, so they need no other
 /// synchronisation.
 ///
@@ -196,15 +196,16 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
 ///
 /// @code
 /// VKC_ASSIGN(std::unique_ptr<CalibrateDepth> depth,
-///            CalibrateDepth::create(recon_device, recon_allocator, cameras));
+///            CalibrateDepth::create(sensor_device, sensor_allocator,
+///                                   cameras));
 /// VKC_ASSIGN(std::unique_ptr<CalibrateWorker> calibrate,
 ///            CalibrateWorker::create(std::move(depth)));
 /// @endcode
 class CalibrateDepth final {
  public:
-  /// @brief Build each camera's preparation, its depth EXCLUSIVE to recon's
+  /// @brief Build each camera's preparation, its depth EXCLUSIVE to sensor's
   ///        queue family, and the checks' kernels.
-  /// @param device     recon's device; it enabled recon's requirements and
+  /// @param device     sensor's device; it enabled sensor's requirements and
   ///                   `depth::DepthChecks::device_requirements`.
   /// @param allocator  Its allocator.
   /// @param cameras    The rig's cameras; at least one.

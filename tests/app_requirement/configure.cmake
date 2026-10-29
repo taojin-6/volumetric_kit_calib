@@ -4,7 +4,7 @@
 # Configures the application (application/) into BINARY_DIR, BUILD_APPS as
 # given, and requires the configure to succeed, or, with EXPECT_ERROR, to fail
 # with output matching it, blanks and line breaks counting as one space.
-# CALIB_SOURCE, CORE_SOURCE and RECON_SOURCE are the sources the calling build
+# CALIB_SOURCE, CORE_SOURCE and SENSOR_SOURCE are the sources the calling build
 # used, and FETCHED its other fetched sources, "<NAME>=<dir>" entries joined by
 # "|"; GENERATOR, CXX_COMPILER, MAKE_PROGRAM, GLM_DIR, GLFW_DIR, OPENCV_DIR,
 # ORBBEC_DIR and, off Apple, CUDA_ROOT repeat its settings
@@ -14,7 +14,7 @@ foreach(
   CALIB_SOURCE
   BINARY_DIR
   CORE_SOURCE
-  RECON_SOURCE
+  SENSOR_SOURCE
   FETCHED
   GENERATOR
   BUILD_APPS)
@@ -43,7 +43,7 @@ execute_process(
     "-DCMAKE_MAKE_PROGRAM=${MAKE_PROGRAM}" "-Dglm_DIR=${GLM_DIR}"
     "-Dglfw3_DIR=${GLFW_DIR}" "-DOpenCV_DIR=${OPENCV_DIR}"
     "-DOrbbecSDK_DIR=${ORBBEC_DIR}" "-DCALIB_SOURCE=${CALIB_SOURCE}"
-    "-DCORE_SOURCE=${CORE_SOURCE}" "-DRECON_SOURCE=${RECON_SOURCE}"
+    "-DCORE_SOURCE=${CORE_SOURCE}" "-DSENSOR_SOURCE=${SENSOR_SOURCE}"
     "-DBUILD_APPS=${BUILD_APPS}" ${_cuda} ${_sources}
   RESULT_VARIABLE _result
   OUTPUT_VARIABLE _output

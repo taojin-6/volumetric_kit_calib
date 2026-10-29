@@ -27,7 +27,7 @@
 namespace volumetric_kit::calib::solve {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using detail::Derivatives;
 using detail::huber;
 using detail::huber_weight;
@@ -872,7 +872,7 @@ core::Status uncertainty(const Problem& p, const BundleAdjustOptions& options,
   return {};
 }
 
-// The poses, recon's calibration, the boards and every adjusted corner's
+// The poses, sensor's calibration, the boards and every adjusted corner's
 // residual.
 void write_solution(const Problem& p, const std::vector<RigCamera>& cameras,
                     const std::size_t observations, const InitialRig& start,

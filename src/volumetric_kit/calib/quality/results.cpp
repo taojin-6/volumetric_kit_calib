@@ -17,12 +17,12 @@
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 #include "volumetric_kit/calib/detect/tag.hpp"
-#include "volumetric_kit/recon/camera/array_calibration.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
 
 namespace volumetric_kit::calib::quality {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using Writer = detail::JsonWriter;
 
 // Refuses a solution or metrics that index cameras the rig does not have,

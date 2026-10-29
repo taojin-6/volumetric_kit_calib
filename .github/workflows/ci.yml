@@ -26,12 +26,12 @@ jobs:
       # The Ubuntu legs run on GitHub-hosted runners, free for a public
       # repository, on OpenCV 5 built from source and cached
       # (.github/actions/opencv), with no Vulkan. The macOS legs run on the
-      # family's Mac (label `mac`), as recon's and gfx's do, on its installed
+      # family's Mac (label `mac`), as the siblings' do, on its installed
       # Homebrew OpenCV 5, Vulkan SDK and GLFW, at the levels its
       # runners' .env sets: a hosted macOS job spends 2-3 minutes installing
       # those formulae and tests on 3 cores (DECISIONS.md, 2026-10-16). Every
       # leg builds every OpenCV tier. The rig legs are static: shared
-      # libraries there would build core, recon and gfx shared too, which none
+      # libraries there would build core, sensor and gfx shared too, which none
       # of them is. The first macOS leg runs the tests of calib's threads under
       # ThreadSanitizer, in RelWithDebInfo, as Debug would make them minutes
       # long.

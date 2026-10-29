@@ -17,7 +17,6 @@ namespace volumetric_kit::calib::viz {
 namespace {
 
 namespace pipelines = gfx::pipelines;
-namespace sensor = recon::sensor;
 
 constexpr std::uint64_t kAlign = 16;
 // As far as a float -- the view's image coordinates -- holds every integer.
@@ -91,7 +90,7 @@ core::Result<pipelines::ImageConversion> conversion_of(
 }  // namespace
 
 core::Result<MosaicLayout> mosaic_layout(
-    const std::vector<recon::camera::ImageSize>& sizes, std::uint32_t gutter,
+    const std::vector<sensor::camera::ImageSize>& sizes, std::uint32_t gutter,
     const MosaicLimits& limits) {
   return compute::guarded("mosaic_layout", [&]() -> core::Result<MosaicLayout> {
     if (sizes.empty()) {
@@ -100,7 +99,7 @@ core::Result<MosaicLayout> mosaic_layout(
     std::uint64_t cell_w = 0;
     std::uint64_t cell_h = 0;
     for (std::size_t i = 0; i < sizes.size(); ++i) {
-      const recon::camera::ImageSize& size = sizes[i];
+      const sensor::camera::ImageSize& size = sizes[i];
       if (size.width == 0 || size.height == 0 || size.width % 2 != 0 ||
           size.height % 2 != 0) {
         return core::Status::invalid_argument(
@@ -280,7 +279,7 @@ RigMosaic::~RigMosaic() = default;
 core::Result<std::unique_ptr<RigMosaic>> RigMosaic::create(
     const core::Device& device, core::Allocator& allocator,
     const gfx::RenderTargetLayout& layout,
-    const std::vector<recon::camera::ImageSize>& pictures,
+    const std::vector<sensor::camera::ImageSize>& pictures,
     const MosaicLimits& limits) {
   return compute::guarded(
       "RigMosaic::create", [&]() -> core::Result<std::unique_ptr<RigMosaic>> {

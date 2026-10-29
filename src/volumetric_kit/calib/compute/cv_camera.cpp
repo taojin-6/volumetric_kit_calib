@@ -10,20 +10,21 @@
 #include <opencv2/geometry.hpp>
 
 #include "volumetric_kit/calib/compute/guarded.hpp"
-#include "volumetric_kit/recon/camera/projection.hpp"
+#include "volumetric_kit/sensor/camera/projection.hpp"
 
 namespace volumetric_kit::calib::compute {
 
-core::Result<CvCamera> cv_camera(const recon::camera::CameraModel& model) {
+core::Result<CvCamera> cv_camera(const sensor::camera::CameraModel& model) {
   return guarded("cv_camera", [&]() -> core::Result<CvCamera> {
-    VKC_TRY(recon::camera::check_camera_model(model).with_context("cv_camera"));
+    VKC_TRY(
+        sensor::camera::check_camera_model(model).with_context("cv_camera"));
     constexpr std::uint32_t kMaxSide = std::numeric_limits<int>::max();
     if (model.size.width > kMaxSide || model.size.height > kMaxSide) {
       return core::Status::invalid_argument(
           "cv_camera: the image is larger than OpenCV's int sizes hold");
     }
-    const recon::camera::PinholeIntrinsics& k = model.intrinsics;
-    const recon::camera::RationalDistortion& d = model.distortion;
+    const sensor::camera::PinholeIntrinsics& k = model.intrinsics;
+    const sensor::camera::RationalDistortion& d = model.distortion;
     CvCamera camera;
     camera.size = cv::Size(static_cast<int>(model.size.width),
                            static_cast<int>(model.size.height));
@@ -35,16 +36,16 @@ core::Result<CvCamera> cv_camera(const recon::camera::CameraModel& model) {
   });
 }
 
-std::optional<recon::camera::Vec2d> project(
-    const CvCamera& camera, const recon::camera::Vec3d& point) noexcept {
+std::optional<sensor::camera::Vec2d> project(
+    const CvCamera& camera, const sensor::camera::Vec3d& point) noexcept {
   if (!(point.z > 0.0)) return std::nullopt;
   double xd = 0.0;
   double yd = 0.0;
-  recon::camera::distort_rational(camera.distortion.val, point.x / point.z,
-                                  point.y / point.z, &xd, &yd);
+  sensor::camera::distort_rational(camera.distortion.val, point.x / point.z,
+                                   point.y / point.z, &xd, &yd);
   const cv::Matx33d& k = camera.camera_matrix;
-  const recon::camera::Vec2d pixel(k(0, 0) * xd + k(0, 2),
-                                   k(1, 1) * yd + k(1, 2));
+  const sensor::camera::Vec2d pixel(k(0, 0) * xd + k(0, 2),
+                                    k(1, 1) * yd + k(1, 2));
   if (!std::isfinite(pixel.x) || !std::isfinite(pixel.y)) return std::nullopt;
   return pixel;
 }

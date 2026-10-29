@@ -23,7 +23,7 @@
 namespace volumetric_kit::calib::solve {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 
 constexpr double kInfinity = std::numeric_limits<double>::infinity();
 constexpr double kHalfSqrt2 = 0.70710678118654752440;

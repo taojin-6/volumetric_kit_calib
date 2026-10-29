@@ -29,25 +29,26 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 option(VC_BUILD_EXAMPLES "Build example programs" ${VC_IS_TOP_LEVEL})
 option(VC_BUILD_TESTS "Build tests" ${VC_IS_TOP_LEVEL})
 # No GPU options: calib's GPU work runs on volumetric_kit_core's vulkan tier, on
-# a VkDevice shared with recon and gfx (DECISIONS.md), not on a backend of its
+# a VkDevice shared with sensor and gfx (DECISIONS.md), not on a backend of its
 # own. On by default only at the top level: a consumer that pulls us in via
 # FetchContent with a newer compiler should see our new warnings, not a broken
 # build.
 option(VC_WARNINGS_AS_ERRORS "Treat first-party compiler warnings as errors"
        ${VC_IS_TOP_LEVEL})
-# OFF by default: the rig tiers -- capture, depth and viz -- take all of recon,
-# which needs the Vulkan SDK (DECISIONS.md, 2026-10-13), and viz fetches
-# volumetric_kit_gfx.
-option(VC_WITH_RIG
-       "Build the rig tiers, capture, depth and viz (all of recon; Vulkan SDK)"
-       OFF)
+# OFF by default: the rig tiers -- capture, depth and viz -- take sensor's tiers
+# beyond its camera tier, which need the Vulkan SDK (DECISIONS.md, 2026-10-13),
+# and viz fetches volumetric_kit_gfx.
+option(
+  VC_WITH_RIG
+  "Build the rig tiers, capture, depth and viz (sensor's tiers; Vulkan SDK)"
+  OFF)
 # calib_rig and its app tier, an application: by default only at the top level,
 # as the examples are, so a project that adds calib builds neither. It needs the
-# viz tier (VC_WITH_RIG above), GLFW and recon's Orbbec driver too
+# viz tier (VC_WITH_RIG above), GLFW and sensor's Orbbec driver too
 # (src/CMakeLists.txt).
 option(
   VC_BUILD_APPS
-  "Build calib_rig and its app tier (with VC_WITH_RIG; needs GLFW and recon's VR_WITH_ORBBEC)"
+  "Build calib_rig and its app tier (with VC_WITH_RIG; needs GLFW and sensor's VS_WITH_ORBBEC)"
   ${VC_IS_TOP_LEVEL})
 
 # Semicolon list of sanitizers (e.g. "address;undefined"); empty = off. Applied
@@ -60,9 +61,10 @@ include(vc_warnings)
 include(vc_sanitizers)
 
 # --- Dependencies + library --------------------------------------------------
-# The oldest volumetric_kit_core calib builds with (DECISIONS.md, 2026-10-13),
-# checked in the core that arrives (third_party/).
-set(VC_CORE_MIN_VERSION 0.25.0)
+# The oldest volumetric_kit_core and volumetric_kit_sensor calib builds with
+# (DECISIONS.md, 2026-10-29), checked in the ones that arrive (third_party/).
+set(VC_CORE_MIN_VERSION 0.29.0)
+set(VC_SENSOR_MIN_VERSION 0.1.0)
 # OpenCV 5, a prerequisite of the compute tier and those built on it
 # (DECISIONS.md, 2026-10-17): Homebrew's on macOS, tools/install-opencv.sh's on
 # Linux (README, "Prerequisites"). Found here so its imported targets reach

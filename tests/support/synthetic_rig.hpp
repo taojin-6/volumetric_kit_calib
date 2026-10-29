@@ -10,7 +10,7 @@
 ///        drawn through a homography, and the origin tag on the floor and
 ///        what the rig sees of it.
 ///
-/// World: z up, the floor at z = 0. Poses are recon's `Mat4d`s, named by what
+/// World: z up, the floor at z = 0. Poses are sensor's `Mat4d`s, named by what
 /// they map (`world_to_camera` is OpenCV's extrinsic). Projections are exact:
 /// a point is moved into the camera in double, then through the lens with
 /// `cv::projectPoints`, with no Rodrigues round trip. @ref camera_image adds
@@ -27,32 +27,32 @@
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/core/detection.hpp"
 #include "volumetric_kit/calib/core/observation.hpp"
-#include "volumetric_kit/recon/camera/camera_model.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::test {
 
 /// @brief A 4K colour lens with a Femto Mega's magnitudes: Brown-Conrady with
 ///        small k4-k6, so the rational denominator is exercised.
-/// @return The model, which recon's `check_camera_model` accepts.
-recon::camera::CameraModel color_like_lens();
+/// @return The model, which sensor's `check_camera_model` accepts.
+sensor::camera::CameraModel color_like_lens();
 
 /// @brief A 640x576 depth lens like the Femto Mega's NFOV unbinned one:
 ///        large k1 and k4 that nearly cancel.
-/// @return The model, which recon's `check_camera_model` accepts.
-recon::camera::CameraModel depth_like_lens();
+/// @return The model, which sensor's `check_camera_model` accepts.
+sensor::camera::CameraModel depth_like_lens();
 
 /// @brief A 1280x720 lens with k1 = 0.4 alone: strong enough that
 ///        `cv::undistortPoints`' default 5 iterations leave 1.5 px at the
 ///        image's corners.
-/// @return The model, which recon's `check_camera_model` accepts.
-recon::camera::CameraModel strongly_distorted_lens();
+/// @return The model, which sensor's `check_camera_model` accepts.
+sensor::camera::CameraModel strongly_distorted_lens();
 
 /// @brief One colour camera of the synthetic rig.
 struct SyntheticCamera {
-  std::string id;                        ///< A stand-in serial.
-  recon::camera::CameraModel model;      ///< Its lens, at 3840x2160.
-  recon::camera::Mat4d world_to_camera;  ///< T_cw.
+  std::string id;                         ///< A stand-in serial.
+  sensor::camera::CameraModel model;      ///< Its lens, at 3840x2160.
+  sensor::camera::Mat4d world_to_camera;  ///< T_cw.
 };
 
 /// @brief Four 4K colour cameras about 2.5 m up in an outside-in ring of about
@@ -66,8 +66,8 @@ std::vector<SyntheticCamera> synthetic_rig();
 /// @param to_camera  The points' frame to the camera's.
 /// @param points     The points.
 /// @return Each point's pixel, OpenCV's convention (centres at integers).
-std::vector<cv::Point2d> project(const recon::camera::CameraModel& model,
-                                 const recon::camera::Mat4d& to_camera,
+std::vector<cv::Point2d> project(const sensor::camera::CameraModel& model,
+                                 const sensor::camera::Mat4d& to_camera,
                                  const std::vector<cv::Point3d>& points);
 
 /// @brief Points around the chessboard's outer edge, or a band outside it.
@@ -80,7 +80,7 @@ std::vector<cv::Point3d> board_outline(const compute::Board& board,
 
 /// @brief One placement of the board, and who sees it.
 struct Placement {
-  recon::camera::Mat4d board_to_world;  ///< T_wb.
+  sensor::camera::Mat4d board_to_world;  ///< T_wb.
   /// The rig's cameras (indices) that see the whole board (@ref PlanOptions).
   std::vector<std::size_t> cameras;
 };
@@ -136,7 +136,7 @@ std::vector<Observation> observe(const std::vector<SyntheticCamera>& rig,
 struct FloorTag {
   double edge_m = 0.15;  ///< Its black border's edge (metres), kOriginTag's.
   /// Its centre in the world; z = 0 lays it on the floor.
-  recon::camera::Vec3d centre{0.0};
+  sensor::camera::Vec3d centre{0.0};
   double yaw_deg = 0.0;  ///< Its x axis's turn from the world's, about z.
 };
 
@@ -204,8 +204,8 @@ struct RenderOptions {
 /// @param board            The board drawn.
 /// @param options          Levels and sampling.
 /// @return An 8-bit luma image of `model.size`.
-cv::Mat render_board(const recon::camera::CameraModel& model,
-                     const recon::camera::Mat4d& board_to_camera,
+cv::Mat render_board(const sensor::camera::CameraModel& model,
+                     const sensor::camera::Mat4d& board_to_camera,
                      const compute::Board& board,
                      const RenderOptions& options = {});
 
@@ -268,9 +268,9 @@ compute::Board femto_board();
 /// @param tilt_deg  The turn about the board's x axis (degrees).
 /// @param roll_deg  The roll about the camera's z axis (degrees).
 /// @return T_cb.
-recon::camera::Mat4d board_facing_camera(const compute::Board& board,
-                                         const recon::camera::Vec3d& centre,
-                                         double tilt_deg, double roll_deg);
+sensor::camera::Mat4d board_facing_camera(const compute::Board& board,
+                                          const sensor::camera::Vec3d& centre,
+                                          double tilt_deg, double roll_deg);
 
 /// @brief What @ref camera_image adds to a render.
 struct CameraOptions {

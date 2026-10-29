@@ -2,7 +2,7 @@ name: build (reusable)
 
 # Build and test for one leg. ci.yml calls this once per entry in its build
 # matrix, on a GitHub-hosted runner (pass just `os`) or a self-hosted one
-# (`runner`), in an OS-matched container on Linux (`container`), as recon's
+# (`runner`), in an OS-matched container on Linux (`container`), as sensor's
 # _build.yml runs its legs. Release here and Debug in the sanitizer job
 # (sanitizers.yml) are both exercised, so an NDEBUG-only or optimizer-exposed
 # break is caught.
@@ -42,12 +42,12 @@ on:
         default: false
       rig:
         description: >-
-          Build the rig tiers (VC_WITH_RIG): recon's sensor, video and Orbbec
-          tiers against calib's core pin, gfx for the viz tier, and calib_rig
-          over gfx's GLFW glue. The viz and app tiers' GPU tests need a device
-          (MoltenVK) and run under the validation layer. macOS only: off
-          Apple the configure also takes recon's FFmpeg and CUDA, which no
-          step here installs.
+          Build the rig tiers (VC_WITH_RIG): sensor's interface, prep,
+          array, video and Orbbec tiers against calib's core pin, gfx for the
+          viz tier, and calib_rig over gfx's GLFW glue. The viz and app tiers'
+          GPU tests need a device (MoltenVK) and run under the validation
+          layer. macOS only: off Apple the configure also takes sensor's
+          FFmpeg and CUDA, which no step here installs.
         required: false
         type: boolean
         default: false
@@ -113,13 +113,13 @@ jobs:
         uses: ./.github/actions/opencv
 
       # A hosted runner installs what its image lacks. On the family's
-      # self-hosted Mac, whose Homebrew recon and gfx share, a job installs
+      # self-hosted Mac, whose Homebrew the siblings share, a job installs
       # nothing and fails naming any formula missing (the core's runner
       # README). pkgs names every formula the leg's build finds,
       # for the Homebrew key below: on the rig leg that includes glfw, for
       # gfx's GLFW glue, and glslang and spirv-tools, whose tools the core's
       # shader rules find.
-      # TODO: take this check-or-install from a core action, as recon and gfx
+      # TODO: take this check-or-install from a core action, as the siblings
       # copy it too, once the core has one.
       - name: Install dependencies (macOS)
         id: formulae
@@ -171,10 +171,10 @@ jobs:
             echo "VK_LAYER_PATH=$(brew --prefix)/share/vulkan/explicit_layer.d" >> "$GITHUB_ENV"
           fi
 
-      # Keep the ref at calib's recon pin (third_party/CMakeLists.txt).
+      # Keep the ref at calib's sensor pin (third_party/CMakeLists.txt).
       - name: Install the Orbbec SDK
         if: inputs.rig
-        uses: taojin-6/volumetric_kit_recon/.github/actions/install-orbbec-sdk@9839fdd158787d7511ec1ec61d2ec666e939636c
+        uses: taojin-6/volumetric_kit_sensor/.github/actions/install-orbbec-sdk@436840cb269553cdcb6cbd6232c5ee1a643efc02
 
       # The installed versions of the leg's formulae and of their dependencies,
       # so the first run after a brew upgrade builds the dependency tree afresh
@@ -185,12 +185,12 @@ jobs:
       - name: Homebrew key
         id: brew
         if: runner.os == 'macOS'
-        uses: taojin-6/volumetric_kit_core/.github/actions/homebrew-key@effc4649acf4c418fe45143c6b728197f2bcbb58
+        uses: taojin-6/volumetric_kit_core/.github/actions/homebrew-key@2120e6294e3c7ead8bb168d757f940b21d21267c
         with:
           formulae: ${{ steps.formulae.outputs.formulae }}
 
       # Cache the FetchContent dependency tree (sources and builds), keyed as
-      # recon's _build.yml keys it, which says why: FetchContent bakes the
+      # sensor's _build.yml keys it, which says why: FetchContent bakes the
       # absolute build path in, so the key carries a hash of the workspace
       # path, and the pins' files. Every key and restore-keys prefix carries
       # the Homebrew key (a pre-commit hook checks), so no tree built on other
@@ -217,13 +217,13 @@ jobs:
           flags=(-DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
                  -DBUILD_SHARED_LIBS=${{ inputs.shared && 'ON' || 'OFF' }}
                  -DVC_WITH_RIG=${{ inputs.rig && 'ON' || 'OFF' }})
-          # recon's Orbbec driver decodes colour on VideoToolbox on Apple, which
-          # takes no FFmpeg, and through FFmpeg and CUDA elsewhere, which recon
-          # requires together (its cmake/vr_ffmpeg.cmake).
+          # sensor's Orbbec driver decodes colour on VideoToolbox on Apple,
+          # which takes no FFmpeg, and through FFmpeg and CUDA elsewhere, which
+          # sensor requires together (its cmake/vs_ffmpeg.cmake).
           if [ "${{ inputs.rig }}" = "true" ]; then
-            flags+=(-DVR_WITH_ORBBEC=ON)
+            flags+=(-DVS_WITH_ORBBEC=ON)
             if [ "${{ runner.os }}" != macOS ]; then
-              flags+=(-DVR_WITH_FFMPEG=ON -DVR_WITH_CUDA=ON)
+              flags+=(-DVS_WITH_FFMPEG=ON -DVS_WITH_CUDA=ON)
             fi
           fi
           if [ "${{ inputs.tsan }}" = "true" ]; then

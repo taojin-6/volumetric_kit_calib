@@ -32,12 +32,12 @@
 namespace volumetric_kit::calib::solve {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using test::FloorTag;
 using test::SyntheticCamera;
 
 // The rig at its truth in camera `reference`'s gauge, as bundle_adjust
-// places it: each T_cw, the reference's exactly zero, and recon's
+// places it: each T_cw, the reference's exactly zero, and sensor's
 // calibration of them, its sensors in id order.
 RigSolution truth_solution(const std::vector<SyntheticCamera>& rig,
                            std::size_t reference) {
@@ -740,7 +740,7 @@ TEST(AnchorRig, LeavesTheReferencesWorldAsItIs) {
   }
 }
 
-// recon's world at the rig's tag: AprilTag 36h11 id 0, 0.15 m across.
+// sensor's world at the rig's tag: AprilTag 36h11 id 0, 0.15 m across.
 void expect_rigs_tag(const camera::WorldFrame& world) {
   EXPECT_TRUE(world.sensor.empty());
   ASSERT_TRUE(world.apriltag);
@@ -830,7 +830,8 @@ TEST(AnchorRig, RefusesWhatItCannotPlace) {
   refused(adrift, s.origin,
           "the solution's board of capture " +
               std::to_string(adrift.boards[0].capture) + " is not finite");
-  // A tag world names its tag in the file: one recon cannot name is refused.
+  // A tag world names its tag in the file: one sensor's file cannot name is
+  // refused.
   WorldOrigin unsought = s.origin;
   unsought.sought = {};
   refused(s.solution, unsought, "the tag world's tag sought: origin_tag.");

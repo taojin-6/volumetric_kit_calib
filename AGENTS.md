@@ -22,11 +22,11 @@ The implemented core and planned tiers are distinguished in
   core, as a task in that repository; cameras and sensors do not
   ([DECISIONS.md](DECISIONS.md#locked-decisions)). From the primary checkout
   it is `../volumetric_kit_core/`.
-- Cameras are `volumetric_kit_recon`'s camera tier (`CameraModel`, rigid
-  transforms), fetched alone (`VR_CAMERA_ONLY`) so the brain needs no Vulkan;
-  calib keeps no camera model of its own. `VC_WITH_RIG` fetches all of recon
-  for the `capture` tier, and gfx for the `viz` tier.
-- GPU work runs on the core's vulkan tier, on a `VkDevice` shared with `recon`
+- Cameras are `volumetric_kit_sensor`'s camera tier (`CameraModel`, rigid
+  transforms), fetched alone (`VS_CAMERA_ONLY`) so the brain needs no Vulkan;
+  calib keeps no camera model of its own. `VC_WITH_RIG` builds the rest of
+  sensor for the rig tiers, and fetches gfx for the `viz` tier.
+- GPU work runs on the core's vulkan tier, on a `VkDevice` shared with `sensor`
   and `gfx` ([DECISIONS.md](DECISIONS.md#locked-decisions)); calib keeps no
   GPU backend of its own. A CPU backend is the correctness oracle.
 - The legacy `camera_calibration` Python checkout is the parity oracle;
@@ -74,7 +74,7 @@ strict: a tier may depend only on tiers to its left. The headless **brain**
 (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no**
 `volumetric_kit_gfx` dependency; only `viz`/`app` pull in the renderer.
 `depth` runs the depth checks' kernels on the core's vulkan tier, with neither
-gfx nor recon's sensor tiers.
+gfx nor sensor's C++ tiers (only its exported `pinhole.glsl`).
 
 ## Error handling
 
@@ -125,7 +125,7 @@ MSVC flags.
 
 Run from the task's worktree. The build requires CMake ≥ 3.21, a C++17
 compiler, GLM, an installed OpenCV 5, and network access on the first
-configure (the core, recon, gfx with `viz`, and googletest are fetched);
+configure (the core, sensor, gfx with `viz`, and googletest are fetched);
 `VC_WITH_RIG` needs the Vulkan SDK. See README and CI for platform
 dependencies.
 
@@ -159,8 +159,8 @@ ctest.
   validation layer with `VKC_TEST_VALIDATION=1` (on macOS, with
   `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib` so the layer loads).
 - The `app` tier and `calib_rig` also need an installed GLFW and
-  `-DVR_WITH_ORBBEC=ON`, as CI's rig job builds them, and off Apple
-  `-DVR_WITH_FFMPEG=ON -DVR_WITH_CUDA=ON`. No test opens a camera: the app's
+  `-DVS_WITH_ORBBEC=ON`, as CI's rig job builds them, and off Apple
+  `-DVS_WITH_FFMPEG=ON -DVS_WITH_CUDA=ON`. No test opens a camera: the app's
   tests drive fake sensors.
 
 ## Keeping guidance current

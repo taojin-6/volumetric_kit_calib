@@ -12,7 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "volumetric_kit/core/base/check.hpp"
-#include "volumetric_kit/recon/sensor/rgbd_sensor.hpp"
+#include "volumetric_kit/sensor/rgbd_sensor.hpp"
 
 namespace volumetric_kit::calib::capture::detail {
 namespace {
@@ -49,7 +49,7 @@ json optional_number(const std::optional<double>& value) {
   return value ? json(*value) : json(nullptr);
 }
 
-json pixel(const recon::camera::Vec2d& p) { return json::array({p.x, p.y}); }
+json pixel(const sensor::camera::Vec2d& p) { return json::array({p.x, p.y}); }
 
 json detection_json(const Detection& detection) {
   json ids = json::array();
@@ -65,7 +65,7 @@ json detection_json(const Detection& detection) {
   for (const DetectedMarker& marker : detection.markers) {
     marker_ids.push_back(marker.id);
     json outline = json::array();
-    for (const recon::camera::Vec2d& corner : marker.corners) {
+    for (const sensor::camera::Vec2d& corner : marker.corners) {
       outline.push_back(pixel(corner));
     }
     marker_corners.push_back(std::move(outline));
@@ -100,7 +100,7 @@ json origin_tag_json(const OriginTag& tag,
                      const std::optional<DetectedMarker>& found) {
   if (!found) return nullptr;
   json corners = json::array();
-  for (const recon::camera::Vec2d& corner : found->corners) {
+  for (const sensor::camera::Vec2d& corner : found->corners) {
     corners.push_back(pixel(corner));
   }
   json j;
@@ -178,7 +178,7 @@ std::string format_session(const SessionInfo& info, const std::string& created,
 
   json& software = doc["software"];
   software["calib"] = info.software.calib;
-  software["recon"] = info.software.recon;
+  software["sensor"] = info.software.sensor;
   software["gfx"] = info.software.gfx;
   software["core"] = info.software.core;
   software["opencv"] = info.software.opencv;
@@ -209,7 +209,7 @@ std::string format_session(const SessionInfo& info, const std::string& created,
   tag["edge_m"] = info.origin_tag.edge_m;
 
   // Every camera streams what the first does.
-  const recon::sensor::SensorInfo& first = info.cameras.front().info;
+  const sensor::SensorInfo& first = info.cameras.front().info;
   const DepthMode& mode = info.depth_mode;
   json& streams = doc["streams"];
   json& color = streams["color"];
@@ -232,7 +232,7 @@ std::string format_session(const SessionInfo& info, const std::string& created,
     c["model"] = camera.info.model;
     c["firmware"] = camera.firmware;
     c["ip"] = camera.ip_address;
-    c["role"] = recon::sensor::to_string(camera.info.role);
+    c["role"] = sensor::to_string(camera.info.role);
     c["sync_mode"] = camera.sync_mode;
     c["depth_delay_us"] = camera.depth_delay_us;
     c["color_lens_model"] = camera.color_lens_model;
