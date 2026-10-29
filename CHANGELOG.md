@@ -8,6 +8,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `Results.TheReportHasItsSchema` gives the solution a time of six decimals
+  and reads it back exactly. The solve's own time, which the report rounds
+  to the microsecond, fell on a half microsecond in 1 run in 24 on Apple
+  Silicon (a 24 MHz `steady_clock`) and then mostly read back a hair over
+  the old 5e-7 bound: about 1 run in 30 failed.
 - `depth_agreement`'s exact signed medians (a half bin, and 0) pass on GPUs
   whose float divide is not correctly rounded, as on NVIDIA's: they hold
   within the 2.5 ULP per divide that Vulkan allows, 5 ULP of 1.0 in bins.
