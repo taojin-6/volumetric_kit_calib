@@ -7,7 +7,7 @@
 /// @brief One view's own pose of the board: IPPE's solutions, how well each
 ///        fits, and how far the board is turned from the camera.
 ///
-/// Poses are recon's `Mat4d`s, named by what they map: `board_to_camera` is
+/// Poses are sensor's `Mat4d`s, named by what they map: `board_to_camera` is
 /// OpenCV's `[R | t]` from the board's frame (@ref compute::Board) to the
 /// camera's (+x right, +y down, +z forward).
 
@@ -18,7 +18,7 @@
 #include "volumetric_kit/calib/core/observation.hpp"
 #include "volumetric_kit/calib/solve/export.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::solve {
 
@@ -29,7 +29,7 @@ namespace volumetric_kit::calib::solve {
 /// if (pose.rms_px > 5.0) return;  // the view does not fit its own pose
 /// @endcode
 struct PoseCandidate {
-  recon::camera::Mat4d board_to_camera{1.0};  ///< T_cb.
+  sensor::camera::Mat4d board_to_camera{1.0};  ///< T_cb.
   /// The RMS of each corner's Euclidean reprojection error (pixels).
   double rms_px = 0.0;
 };
@@ -45,7 +45,7 @@ struct PoseCandidate {
 /// @code
 /// VKC_ASSIGN(const ViewPose pose, view_pose(cam, board, view));
 /// if (pose.ambiguity() < 2.0) return;  // either pose could be the board's
-/// const recon::camera::Mat4d& board_to_camera = pose.best.board_to_camera;
+/// const sensor::camera::Mat4d& board_to_camera = pose.best.board_to_camera;
 /// @endcode
 struct VC_SOLVE_API ViewPose {
   PoseCandidate best;                        ///< The better fit.
@@ -85,6 +85,6 @@ VC_SOLVE_API core::Result<ViewPose> view_pose(const compute::CvCamera& camera,
 ///         camera sees the board's back.
 VC_SOLVE_API double tilt_deg(
     const compute::Board& board,
-    const recon::camera::Mat4d& board_to_camera) noexcept;
+    const sensor::camera::Mat4d& board_to_camera) noexcept;
 
 }  // namespace volumetric_kit::calib::solve

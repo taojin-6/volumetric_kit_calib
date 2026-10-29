@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "volumetric_kit/calib/compute/export.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::compute {
 
@@ -50,22 +50,22 @@ VC_COMPUTE_API double quantile(std::vector<double> values, double q) noexcept;
 /// @code
 /// const double deg = angle_deg({0, 0, 1}, {0, 1, 1});  // 45
 /// @endcode
-VC_COMPUTE_API double angle_deg(const recon::camera::Vec3d& a,
-                                const recon::camera::Vec3d& b) noexcept;
+VC_COMPUTE_API double angle_deg(const sensor::camera::Vec3d& a,
+                                const sensor::camera::Vec3d& b) noexcept;
 
 /// @brief The angle of the rotation from @p a to @p b, accurate near 0 and
-///        180 degrees (recon's `rodrigues_from_rotation`).
+///        180 degrees (sensor's `rodrigues_from_rotation`).
 /// @pre @p a and @p b are rotations.
 /// @param a  A rotation.
 /// @param b  Another.
 /// @return The angle (degrees), in [0, 180].
 ///
 /// @code
-/// const double deg = rotation_angle_deg(recon::camera::Mat3d(T_ab),
-///                                       recon::camera::Mat3d(T_ac));
+/// const double deg = rotation_angle_deg(sensor::camera::Mat3d(T_ab),
+///                                       sensor::camera::Mat3d(T_ac));
 /// @endcode
 VC_COMPUTE_API double rotation_angle_deg(
-    const recon::camera::Mat3d& a, const recon::camera::Mat3d& b) noexcept;
+    const sensor::camera::Mat3d& a, const sensor::camera::Mat3d& b) noexcept;
 
 /// @brief Whether a transform's six numbers are finite.
 /// @param transform  A transform, as OpenCV writes one.
@@ -76,6 +76,6 @@ VC_COMPUTE_API double rotation_angle_deg(
 /// if (!finite(solution.world_to_camera[c])) return refuse(c);
 /// @endcode
 VC_COMPUTE_API bool finite(
-    const recon::camera::RodriguesTransform& transform) noexcept;
+    const sensor::camera::RodriguesTransform& transform) noexcept;
 
 }  // namespace volumetric_kit::calib::compute

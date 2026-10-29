@@ -49,14 +49,13 @@
 #include "volumetric_kit/calib/app/cloud_worker.hpp"
 #include "volumetric_kit/core/testing/vulkan_fixture.hpp"
 #include "volumetric_kit/gfx/core/device_requirements.hpp"
-#include "volumetric_kit/recon/camera/array_calibration.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
 
 namespace volumetric_kit::calib::app {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 namespace fs = std::filesystem;
-namespace sensor = recon::sensor;
 using camera::Mat3d;
 using camera::Mat4d;
 using camera::Vec3d;
@@ -388,8 +387,8 @@ std::vector<double> incidences_deg(const DepthCase& c, const KeptCaptures& kept,
 // understate the bias by up to half; every view's axial offset is within
 // 1 mm of it (the preparation's nearest-pixel depth strays a view's plane),
 // every plane passes, and the results' calibration file carries each offset
-// as recon reads it back. The checks read raw depth, so the offsets are the
-// depth's own.
+// as sensor's reader reads it back. The checks read raw depth, so the offsets
+// are the depth's own.
 TEST_F(CalibrateDepthTest, FindsEachCamerasAxialDepthOffset) {
   DepthCase scene;
   scene.cameras = 4;

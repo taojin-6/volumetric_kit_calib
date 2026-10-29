@@ -1,7 +1,8 @@
 name: lint
 
-# Styling + hygiene gate. Runs the same hooks as the local `pre-commit` install
-# (.pre-commit-config.yaml).
+# Styling + hygiene gate: the workflows' triggers, then the same hooks as the
+# local `pre-commit` install (.pre-commit-config.yaml). No job pushes, so no
+# checkout keeps a token.
 # Linux-only: the formatters' output is deterministic across operating systems,
 # so one runner is enough. Invoked by ci.yml, which owns the push /
 # pull_request triggers and the concurrency group.
@@ -14,9 +15,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No workflow is triggered by an event an outsider can cause, or by a
+      # schedule (the core's tools/runners/README.md, "Who can trigger CI").
+      # The ref is the core commit third_party/CMakeLists.txt pins.
+      - uses: taojin-6/volumetric_kit_core/.github/actions/check-workflow-triggers@2120e6294e3c7ead8bb168d757f940b21d21267c
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.12'
+          python-version: '3.14'
       # Cache pre-commit's installed hook environments (incl. the pinned
       # clang-format) keyed on the config so they're only rebuilt when it changes.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

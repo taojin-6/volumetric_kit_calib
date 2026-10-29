@@ -28,7 +28,7 @@
 namespace volumetric_kit::calib::quality {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using Code = core::Status::Code;
 using test::expect_oom_anywhere;
 

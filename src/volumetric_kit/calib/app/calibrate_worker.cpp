@@ -19,16 +19,15 @@
 #include "volumetric_kit/calib/depth/depth_checks.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
-#include "volumetric_kit/recon/camera/array_calibration.hpp"
-#include "volumetric_kit/recon/sensor/utils/gpu_frame_prep.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
+#include "volumetric_kit/sensor/prep/gpu_frame_prep.hpp"
 
 namespace volumetric_kit::calib::app {
 
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 namespace fs = std::filesystem;
-namespace sensor = recon::sensor;
 using Clock = std::chrono::steady_clock;
 using ResultPtr = std::shared_ptr<const CalibrateResult>;
 
@@ -169,7 +168,7 @@ core::Status check_capture(std::vector<sensor::GpuFramePrep>& preps,
   std::vector<std::optional<depth::DepthImage>> images(n);
   for (std::size_t c = 0; c < n; ++c) {
     if (!prepared[c]) continue;
-    const recon::DepthCameraParams& k = prepared[c]->depth_camera;
+    const sensor::DepthCameraParams& k = prepared[c]->depth_camera;
     depth::DepthImage& image = images[c].emplace();
     image.depth = prepared[c]->depth.get();
     image.intrinsics = {k.fx, k.fy, k.cx, k.cy};

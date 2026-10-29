@@ -61,7 +61,7 @@ inline constexpr const char* kTagCornerRefinement = "subpix";
 /// @code
 /// VKC_ASSIGN(const MarkerSearch search, detect_tag(luma, kOriginTag));
 /// if (search.found) {
-///   const recon::camera::Vec2d first = search.found->corners[0];
+///   const sensor::camera::Vec2d first = search.found->corners[0];
 /// }
 /// @endcode
 VC_DETECT_API core::Result<MarkerSearch> detect_tag(const LumaView& image,

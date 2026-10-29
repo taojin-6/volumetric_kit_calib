@@ -36,9 +36,10 @@ struct CaptureMeta {
   /// When the capture was taken: the host's wall clock
   /// (`std::chrono::system_clock`), in nanoseconds since its epoch.
   std::int64_t time_ns = 0;
-  /// The captured set's trigger time (ns), as recon's `FrameSet::timestamp_ns`.
+  /// The captured set's trigger time (ns), as sensor's
+  /// `FrameSet::timestamp_ns`.
   std::uint64_t trigger_ns = 0;
-  /// The captured set's sequence number, as recon's `FrameSet::sequence`.
+  /// The captured set's sequence number, as sensor's `FrameSet::sequence`.
   std::uint64_t sequence = 0;
   /// The set's latest frame timestamp less its earliest (milliseconds).
   double spread_ms = 0.0;

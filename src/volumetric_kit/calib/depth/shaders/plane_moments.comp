@@ -73,7 +73,7 @@ void main() {
       continue;
     }
     vec3 q = (r.depth_to_board *
-              vec4(vr_unproject_pinhole(vec2(pixel), z, r.k), 1.0)).xyz -
+              vec4(vs_unproject_pinhole(vec2(pixel), z, r.k), 1.0)).xyz -
              ref;
     // Round 0's reference lies on z = 0, so q.z is the point's own z.
     float distance = pc.round == 0u ? q.z : dot(previous.normal, q);

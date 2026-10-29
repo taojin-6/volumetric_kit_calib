@@ -12,7 +12,7 @@
 #include "volumetric_kit/calib/core/observation.hpp"
 #include "volumetric_kit/calib/core/sensor_profile.hpp"
 #include "volumetric_kit/calib/core/view_check.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib {
 namespace {
@@ -51,13 +51,13 @@ TEST(Observation, CountsItsPoints) {
   EXPECT_EQ(obs.size(), 2u);
 }
 
-// A pixel is recon's double vector, so a detection passes to recon's camera
+// A pixel is sensor's double vector, so a detection passes to sensor's camera
 // tier, and from there to OpenCV, unconverted.
-TEST(Observation, PixelIsReconsVec2d) {
+TEST(Observation, PixelIsSensorsVec2d) {
   static_assert(
-      std::is_same_v<decltype(DetectedPoint::pixel), recon::camera::Vec2d>);
+      std::is_same_v<decltype(DetectedPoint::pixel), sensor::camera::Vec2d>);
   const DetectedPoint unset;
-  EXPECT_EQ(unset.pixel, recon::camera::Vec2d(0.0, 0.0));
+  EXPECT_EQ(unset.pixel, sensor::camera::Vec2d(0.0, 0.0));
   EXPECT_EQ(unset.id, -1);
   EXPECT_EQ(unset.weight, 1.0);
 
@@ -115,13 +115,13 @@ TEST(CaptureMeta, StartsWithoutALiveVsFullComparison) {
 }
 
 // A detection that found nothing: no corners and no markers. Its image size
-// and pixels are recon's, so a capture stores and a panel draws them
+// and pixels are sensor's, so a capture stores and a panel draws them
 // unconverted.
 TEST(Detection, StartsWithNothingFound) {
   static_assert(std::is_same_v<decltype(Detection::image_size),
-                               recon::camera::ImageSize>);
+                               sensor::camera::ImageSize>);
   static_assert(std::is_same_v<decltype(DetectedMarker::corners),
-                               std::array<recon::camera::Vec2d, 4>>);
+                               std::array<sensor::camera::Vec2d, 4>>);
   const Detection detection;
   EXPECT_EQ(detection.image_size.width, 0u);
   EXPECT_EQ(detection.image_size.height, 0u);
@@ -129,8 +129,8 @@ TEST(Detection, StartsWithNothingFound) {
   EXPECT_TRUE(detection.markers.empty());
   const DetectedMarker marker;
   EXPECT_EQ(marker.id, -1);
-  for (const recon::camera::Vec2d& corner : marker.corners) {
-    EXPECT_EQ(corner, recon::camera::Vec2d(0.0, 0.0));
+  for (const sensor::camera::Vec2d& corner : marker.corners) {
+    EXPECT_EQ(corner, sensor::camera::Vec2d(0.0, 0.0));
   }
 }
 

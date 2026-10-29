@@ -20,12 +20,12 @@
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
-#include "volumetric_kit/recon/camera/array_calibration.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
 
 namespace volumetric_kit::calib::quality {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using camera::Mat3d;
 using camera::Mat4d;
 using camera::Vec2d;
@@ -35,7 +35,7 @@ bool finite(const Vec3d& v) noexcept {
   return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
 }
 
-// TODO: Give a point's rigid transform one home (recon's camera geometry),
+// TODO: Give a point's rigid transform one home (sensor's camera geometry),
 // for this and the copies in the tests, the solve and the metrics.
 Vec3d apply(const Mat4d& m, const Vec3d& p) noexcept {
   return Vec3d(m * glm::dvec4(p, 1.0));
@@ -95,7 +95,7 @@ DepthVerdict scale_verdict(const RatioStats& ratio,
              : DepthVerdict::Off;
 }
 
-// `carried`: whether recon's calibration file takes the camera's depth
+// `carried`: whether sensor's calibration file takes the camera's depth
 // offset (file_carries).
 DepthVerdict plane_verdict(const CameraDepth& camera, bool carried,
                            const DepthCheckOptions& options) noexcept {
@@ -108,7 +108,7 @@ DepthVerdict plane_verdict(const CameraDepth& camera, bool carried,
                                                      : DepthVerdict::Off;
 }
 
-// Whether recon's calibration file carries `offset_m` as a sensor's depth
+// Whether sensor's calibration file carries `offset_m` as a sensor's depth
 // offset: its validator holds the bound, so it is not copied here. A
 // failure for want of memory is passed on.
 core::Result<bool> file_carries(double offset_m) {

@@ -213,10 +213,10 @@ TEST(AppRigMode, FramesAtTheFirstResultAndANewOrigin) {
 TEST(AppRigMode, LevelsATagWorldOnly) {
   for (const std::size_t reference : {0u, 2u}) {
     SCOPED_TRACE(reference);
-    const std::optional<recon::camera::Vec3d> up =
+    const std::optional<sensor::camera::Vec3d> up =
         world_up(RigOrigin{reference, true});
     ASSERT_TRUE(up);
-    EXPECT_EQ(*up, recon::camera::Vec3d(0.0, 0.0, 1.0));
+    EXPECT_EQ(*up, sensor::camera::Vec3d(0.0, 0.0, 1.0));
     EXPECT_FALSE(world_up(RigOrigin{reference}));
   }
 }

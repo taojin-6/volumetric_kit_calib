@@ -86,23 +86,24 @@ TEST(Board, CentreIsTheChessboardsMiddle) {
 TEST(Board, APosePutsItsCentreAndTurnsItsFace) {
   const core::Result<Board> board = Board::create(legacy_femto_board());
   ASSERT_TRUE(board.ok()) << board.status().message();
-  const recon::camera::Mat3d turn =
-      recon::camera::rotation_from_rodrigues({0.3, -0.2, 0.5});
-  recon::camera::Mat4d pose(turn);
+  const sensor::camera::Mat3d turn =
+      sensor::camera::rotation_from_rodrigues({0.3, -0.2, 0.5});
+  sensor::camera::Mat4d pose(turn);
   pose[3] = glm::dvec4(0.1, -0.2, 2.0, 1.0);
   const cv::Point3d c = board->centre();
-  const recon::camera::Vec3d centre = centre_in(*board, pose);
-  const recon::camera::Vec3d expected =
-      turn * recon::camera::Vec3d(c.x, c.y, c.z) +
-      recon::camera::Vec3d(0.1, -0.2, 2.0);
+  const sensor::camera::Vec3d centre = centre_in(*board, pose);
+  const sensor::camera::Vec3d expected =
+      turn * sensor::camera::Vec3d(c.x, c.y, c.z) +
+      sensor::camera::Vec3d(0.1, -0.2, 2.0);
   EXPECT_NEAR(glm::length(centre - expected), 0.0, 1e-15);
-  const recon::camera::Vec3d normal = face_normal(pose);
-  EXPECT_NEAR(glm::length(normal - turn * recon::camera::Vec3d(0.0, 0.0, -1.0)),
-              0.0, 1e-15);
-  EXPECT_EQ(face_normal(recon::camera::Mat4d(1.0)),
-            recon::camera::Vec3d(0.0, 0.0, -1.0));
-  EXPECT_EQ(centre_in(*board, recon::camera::Mat4d(1.0)),
-            recon::camera::Vec3d(c.x, c.y, c.z));
+  const sensor::camera::Vec3d normal = face_normal(pose);
+  EXPECT_NEAR(
+      glm::length(normal - turn * sensor::camera::Vec3d(0.0, 0.0, -1.0)), 0.0,
+      1e-15);
+  EXPECT_EQ(face_normal(sensor::camera::Mat4d(1.0)),
+            sensor::camera::Vec3d(0.0, 0.0, -1.0));
+  EXPECT_EQ(centre_in(*board, sensor::camera::Mat4d(1.0)),
+            sensor::camera::Vec3d(c.x, c.y, c.z));
 }
 
 // The top-left square is black, and the markers fill the white squares,

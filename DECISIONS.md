@@ -30,30 +30,29 @@ domain model and rationale remain in the intentionally gitignored local
   `VKC_ASSIGN`, `VKC_CHECK` and the log sink from its base tier. calib names
   them as the core does -- `core::Status` in calib's namespaces, `vkc::Status`
   outside -- with no `vc::` re-exports (amended 2026-10-05; see the dated
-  entry), so a calib error passes to `recon` or `gfx` unchanged. The core is
+  entry), so a calib error passes to `sensor` or `gfx` unchanged. The core is
   fetched pinned by commit (`third_party/`), and calib's configure refuses
   one older than calib builds with (`vkc_require_core`). Why:
   `recon`'s and `gfx`'s copies of the same bottom layer had drifted (the core's
   DECISIONS.md has the evidence); one copy means a fix lands once.
 - **GPU work runs on the core's vulkan tier, on a `VkDevice` shared with
-  `recon` and `gfx`** (MoltenVK on Apple). calib carries no GPU backend of its
+  `sensor` and `gfx`** (MoltenVK on Apple). calib carries no GPU backend of its
   own, so the reserved `VC_WITH_VULKAN` / `VC_WITH_CUDA` options are gone. Why:
-  frames `recon`'s decoders leave in Vulkan buffers can be read in place only
+  frames `sensor`'s decoders leave in Vulkan buffers can be read in place only
   on the same device -- a calib device of its own would copy every frame
   through the host -- and the family keeps one Vulkan core, not three. CUDA is
   added per kernel only where profiling shows a need, in the core; native Metal
   stays deferred. A CPU backend remains the correctness oracle. calib turns
   the core's vulkan tier on (`VKC_WITH_VULKAN`) only for the rig tiers
   (`VC_WITH_RIG`), so the brain needs no Vulkan SDK.
-- **The camera model is recon's; capture drivers come from
-  `volumetric_kit_recon`'s sensor tier** (2026-10-08, amended 2026-10-12; see
-  the dated entry). calib's cameras are recon's `camera::CameraModel`, from its
-  camera tier, and its `capture` tier will take frames from recon's
-  `IRgbdSensor` and `SensorArray` rather than drive a device itself. Why: the
-  core has no camera or sensor tier (core PR #14 proposed one and was
-  closed), and recon's DECISIONS.md (2026-10-06, "The family's camera
-  vocabulary is recon's `camera` tier") makes recon what calib builds on for
-  cameras and sensors.
+- **The camera model and capture drivers are `volumetric_kit_sensor`'s**
+  (2026-10-08, amended 2026-10-12 and 2026-10-29; see the dated entries).
+  calib's cameras are sensor's `camera::CameraModel`, from its camera tier,
+  and the rig tiers take frames from its `IRgbdSensor` and `SensorArray`
+  rather than drive a device themselves. Why: the core has no camera or sensor
+  tier (core PR #14 proposed one and was closed), and the family's camera
+  vocabulary is the `camera` tier, now sensor's (its DECISIONS.md,
+  2026-10-06).
 - **Linux, macOS, iOS and Android, with GCC or Clang; never Windows or MSVC**
   (2026-10-04). See "Platforms" below.
 
@@ -72,13 +71,50 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-10-29 — Built on sensor, not recon
+
+recon's camera and sensor tiers are now
+[volumetric_kit_sensor](https://github.com/taojin-6/volumetric_kit_sensor)
+(recon #311 and #312), a repository of its own on the core alone: the camera
+model and calibration file, the sensor interface, frame preparation, picture
+readback, the sensor array, image files, the Orbbec driver and its decoders,
+and the frame contract (`DeviceFrame`, `pinhole.glsl`). Everything calib took
+from recon is there; none of what went to volumetric_kit_grid or stayed in
+recon (fusion, texturing), so calib fetches core, sensor and gfx, and neither
+recon nor grid.
+
+- **The same code under sensor's names, with no aliases.** sensor 0.1.0's
+  tiers are recon's at their move, and its CHANGELOG.md maps every old name
+  to its new one: headers `volumetric_kit/sensor/…`, namespaces
+  `volumetric_kit::sensor` and `volumetric_kit::sensor::camera`, targets
+  `volumetric_kit::sensor_<tier>`, options `VS_*`, GLSL `vs_*`. Why: a re-pin
+  is then a rename, and a forwarding name would be one more to retire.
+- **sensor is declared after the core and before gfx, and checked with
+  `vkc_require_sibling(volumetric_kit::sensor 0.1.0 TARGETS …)`**: camera-only
+  (`VS_CAMERA_ONLY`) without `VC_WITH_RIG`, with the camera, frame,
+  interface, prep, array and image I/O tiers with it. Why: the core comes
+  first so every sibling shares it, and the check (core 0.27.0's) refuses, at
+  configure time, an older sensor or an override without a tier calib links.
+  The core floor is sensor's, 0.29.0 (the 2026-10-13 entry).
+- **`calib_depth`'s kernels include sensor's `pinhole.glsl` through
+  `INCLUDE_TARGETS volumetric_kit::sensor_frame`**, the core's export, in
+  place of recon's `VR_SHADER_INCLUDE_DIR`; its body is unchanged.
+- **The rig's device asks for sensor's requirements**, which are what recon's
+  were: `scalarBlockLayout`, and the external-memory and Metal-object
+  extensions where offered.
+- **A session's `software` names sensor's commit** where it named recon's
+  (`capture::Software::sensor`). Why: a session names the code that captured
+  it; nothing reads a session back (the 2026-10-13 entry), so its format
+  version stays 1.
+- Earlier entries say recon for what is now sensor's; their decisions stand.
+
 ## 2026-10-27 — Each camera's depth offset
 
 A depth that reads too far or too near is a correction, not only a
 verdict: Calibrate's depth checks give each camera's offset along its depth
 camera's axis (`quality/depth_checks.hpp` has the definitions).
 
-- **Axial, as recon applies it.** recon subtracts a camera's offset from
+- **Axial, as sensor applies it.** sensor subtracts a camera's offset from
   every return, along the depth camera's axis. A board's plane offset is
   measured along the board's normal, which an axial error of b moves by
   about `b (n . d) / d_z`, so each view's offset is made axial,
@@ -94,7 +130,7 @@ camera's axis (`quality/depth_checks.hpp` has the definitions).
   since what is left is depth error another camera would see. One view has
   no scatter, so its camera's plane is insufficient and no offset is written
   for it. The verdict also fails a median angle past `max_angle_deg`, and
-  an offset recon's calibration file cannot carry, which recon's validator
+  an offset sensor's calibration file cannot carry, which sensor's validator
   decides, so its bound is not copied here. The median offset along the
   normals is still reported.
 - **Measured on raw depth.** The checks prepare the kept raw depth with no
@@ -102,7 +138,7 @@ camera's axis (`quality/depth_checks.hpp` has the definitions).
   earlier one.
 - **Written when the plane passes.** `format_results` puts each camera's
   offset whose plane verdict passed into the results' calibration file
-  (recon's `depth_offset_m`, which makes it version 3), and none for any
+  (sensor's `depth_offset_m`, which makes it version 3), and none for any
   other camera: an offset belongs with the poses solved beside it, so a
   session's always replace an earlier file's, and a camera whose plane did
   not pass keeps its raw depth.
@@ -657,10 +693,10 @@ The `capture` tier writes the rig application's calibration sessions
 - **How it builds.** `VC_WITH_RIG`, OFF by default, fetches all of recon and
   turns on the core's vulkan tier, so it needs the Vulkan SDK. gfx comes with
   the `viz` tier, its first user.
-- **Core 0.25.0** is the oldest calib builds with (`VC_CORE_MIN_VERSION`),
+- **Core 0.29.0** is the oldest calib builds with (`VC_CORE_MIN_VERSION`),
   the floor its configure checks: the highest of the pinned siblings' floors,
-  recon's, which every build fetches, so one floor covers every build
-  (amended 2026-10-27).
+  sensor's, which every build fetches, so one floor covers every build
+  (amended 2026-10-27 and 2026-10-29).
 
 ## 2026-10-12 — OpenCV, behind calib's types
 

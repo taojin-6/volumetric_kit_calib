@@ -32,32 +32,32 @@ using test::expect_oom_when_reporting;
 TEST(VizOom, MosaicLayout) {
   MosaicLimits limits;
   limits.max_extent = {144, 112};  // paged
-  const std::vector<recon::camera::ImageSize> sizes(5, {64, 48});
+  const std::vector<sensor::camera::ImageSize> sizes(5, {64, 48});
   expect_oom_anywhere(
       [&] { return mosaic_layout(sizes, kMosaicGutter, limits); });
-  const std::vector<recon::camera::ImageSize> odd = {{65, 48}};
+  const std::vector<sensor::camera::ImageSize> odd = {{65, 48}};
   expect_oom_when_reporting([&] { return mosaic_layout(odd); },
                             Code::InvalidArgument);
 }
 
 TEST(VizOom, TileWriteAndConversionRefusals) {
-  recon::sensor::YuvImage picture;
-  picture.layout = recon::sensor::YuvLayout::Nv12;
+  sensor::YuvImage picture;
+  picture.layout = sensor::YuvLayout::Nv12;
   picture.image[0] = std::make_shared<core::Image>();
   picture.image[1] = std::make_shared<core::Image>();
   picture.width = 64;
   picture.height = 48;
-  picture.chroma_location = recon::sensor::ChromaLocation::TopLeft;
+  picture.chroma_location = sensor::ChromaLocation::TopLeft;
   // Built outside the calls, whose own allocations alone are swept.
-  const std::vector<const recon::sensor::YuvImage*> unsited = {&picture};
+  const std::vector<const sensor::YuvImage*> unsited = {&picture};
   expect_oom_when_reporting([&] { return tile_conversion(unsited); },
                             Code::Unsupported);
   expect_oom_when_reporting([&] { return tile_write(picture, {32, 24}, {}); },
                             Code::InvalidArgument);
-  recon::sensor::YuvImage other = picture;
-  picture.chroma_location = recon::sensor::ChromaLocation::Center;
-  other.chroma_location = recon::sensor::ChromaLocation::Left;
-  const std::vector<const recon::sensor::YuvImage*> mixed = {&picture, &other};
+  sensor::YuvImage other = picture;
+  picture.chroma_location = sensor::ChromaLocation::Center;
+  other.chroma_location = sensor::ChromaLocation::Left;
+  const std::vector<const sensor::YuvImage*> mixed = {&picture, &other};
   expect_oom_when_reporting([&] { return tile_conversion(mixed); },
                             Code::InvalidArgument);
   picture.image[1].reset();
@@ -87,7 +87,7 @@ TEST(VizOom, Panels) {
     return camera_panel(camera, quality::CameraSummary{}, legacy_femto_board());
   });
 
-  recon::sensor::FrameSet set;
+  sensor::FrameSet set;
   set.frames.resize(2);
   set.frames[0].emplace();
   const std::vector<std::string> ids = {"CL2A141000N", "CL2A14100A4"};
@@ -267,7 +267,7 @@ TEST(VizOom, BoardEditorRefusals) {
 
 // The 3D view's lines, through OpenCV's undistortion, and its turn's refusal.
 TEST(VizOom, SceneLinesAndTurn) {
-  recon::camera::CameraModel lens;
+  sensor::camera::CameraModel lens;
   lens.size = {1280, 720};
   lens.intrinsics = {900.0, 901.0, 640.5, 359.5};
   lens.distortion.k1 = -0.12;
@@ -277,39 +277,40 @@ TEST(VizOom, SceneLinesAndTurn) {
     camera.color = lens;
     camera.depth = lens;
   }
-  cameras[0].color_to_world = recon::camera::Mat4d(1.0);
+  cameras[0].color_to_world = sensor::camera::Mat4d(1.0);
   SceneOptions options;
   options.depth_frusta = true;
   options.tag_edge_m = 0.15;
   const compute::Board board =
       compute::Board::create(legacy_femto_board()).value();
-  const std::vector<recon::camera::Mat4d> boards(2, recon::camera::Mat4d(1.0));
+  const std::vector<sensor::camera::Mat4d> boards(2,
+                                                  sensor::camera::Mat4d(1.0));
   expect_oom_anywhere(
       [&] { return scene_lines(cameras, &board, boards, options); });
   expect_oom_when_reporting(
       [&] { return scene_lines(cameras, nullptr, boards, options); },
       Code::InvalidArgument);
   expect_oom_when_reporting(
-      [&] { return frustum_lines(lens, recon::camera::Mat4d(1.0), 0.0, 0); },
+      [&] { return frustum_lines(lens, sensor::camera::Mat4d(1.0), 0.0, 0); },
       Code::InvalidArgument);
   expect_oom_anywhere([] { return tag_lines(0.15, 0); });
   expect_oom_when_reporting([] { return tag_lines(0.0, 0); },
                             Code::InvalidArgument);
   // A turn allocates nothing but its refusal.
-  const std::vector<recon::camera::Mat4d> none;
+  const std::vector<sensor::camera::Mat4d> none;
   expect_oom_when_reporting([&] { return display_rotation(none); },
                             Code::InvalidArgument);
-  const std::vector<recon::camera::Mat4d> one(1, recon::camera::Mat4d(1.0));
+  const std::vector<sensor::camera::Mat4d> one(1, sensor::camera::Mat4d(1.0));
   expect_oom_when_reporting(
-      [&] { return display_rotation(one, recon::camera::Vec3d(0.0)); },
+      [&] { return display_rotation(one, sensor::camera::Vec3d(0.0)); },
       Code::InvalidArgument);
 }
 
 // The points' draws, and their refusals, from frames with no buffer.
 TEST(VizOom, CloudDraws) {
   std::vector<SceneCamera> cameras(3);  // none placed: nothing to draw
-  const std::vector<std::optional<recon::sensor::DeviceFrame>> frames(
-      3, recon::sensor::DeviceFrame{});
+  const std::vector<std::optional<sensor::DeviceFrame>> frames(
+      3, sensor::DeviceFrame{});
   CloudStyle style;
   style.producer_family = 0;  // so a frame with no depth is what is refused
   style.renderer_family = 0;
@@ -317,7 +318,7 @@ TEST(VizOom, CloudDraws) {
   cameras.pop_back();
   expect_oom_when_reporting([&] { return cloud_draws(frames, cameras, style); },
                             Code::InvalidArgument);
-  const recon::camera::Mat4d identity(1.0);
+  const sensor::camera::Mat4d identity(1.0);
   expect_oom_when_reporting(
       [&] { return cloud_draw(frames[0].value(), identity, identity, style); },
       Code::InvalidArgument);

@@ -12,7 +12,7 @@
 ///        it posts.
 ///
 /// Each panel is a model -- lines of text, each in a @ref Tone -- built from
-/// host data alone (the quality tier's checks and metrics, recon's counters,
+/// host data alone (the quality tier's checks and metrics, sensor's counters,
 /// the capture records), and drawn with ImGui by @ref draw_panel_lines and
 /// @ref draw_session_panel. The thresholds behind each tone are the quality
 /// tier's own (@ref PanelOptions).
@@ -37,8 +37,8 @@
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/base/stage_metrics.hpp"
 #include "volumetric_kit/gfx/core/frame_metrics.hpp"
-#include "volumetric_kit/recon/sensor/array/sensor_array.hpp"
-#include "volumetric_kit/recon/sensor/rgbd_sensor.hpp"
+#include "volumetric_kit/sensor/array/sensor_array.hpp"
+#include "volumetric_kit/sensor/rgbd_sensor.hpp"
 
 namespace volumetric_kit::calib::viz {
 
@@ -85,7 +85,7 @@ struct CameraLive {
   /// How far its corners moved since the set before (pixels); empty when no
   /// corner is in both.
   std::optional<double> stillness_px;
-  recon::sensor::SensorStats frames;  ///< Its frame counters.
+  sensor::SensorStats frames;  ///< Its frame counters.
   /// The frames its driver lost; empty where the driver does not count them.
   std::optional<std::uint64_t> lost;
 };
@@ -150,8 +150,7 @@ struct SaverQueue {
 ///            set_panel(*snapshot.set, array_stats, serials, saver));
 /// @endcode
 core::Result<std::vector<PanelLine>> set_panel(
-    const recon::sensor::FrameSet& set,
-    const recon::sensor::SensorArrayStats& stats,
+    const sensor::FrameSet& set, const sensor::SensorArrayStats& stats,
     const std::vector<std::string>& ids, const SaverQueue& saver,
     const PanelOptions& options = {});
 

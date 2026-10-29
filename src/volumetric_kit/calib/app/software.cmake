@@ -2,13 +2,13 @@
 # Copyright (c) 2026 Tao Jin
 
 # Writes OUT from IN (software.cpp.in): what a session records it was captured
-# with. Each checkout (CALIB_DIR, CORE_DIR, RECON_DIR, GFX_DIR) gives its commit
-# as it stands now, 40 hex digits with "-dirty" when tracked files have
+# with. Each checkout (CALIB_DIR, CORE_DIR, SENSOR_DIR, GFX_DIR) gives its
+# commit as it stands now, 40 hex digits with "-dirty" when tracked files have
 # uncommitted changes, or nothing where the directory is not a git checkout's
 # top; ORBBEC_SDK_VERSION is the configure's. calib_app runs it at every build
 # (CMakeLists.txt). configure_file rewrites OUT only when its text changes, so
 # an unchanged checkout recompiles nothing.
-foreach(_var IN ITEMS IN OUT CALIB_DIR CORE_DIR RECON_DIR GFX_DIR)
+foreach(_var IN ITEMS IN OUT CALIB_DIR CORE_DIR SENSOR_DIR GFX_DIR)
   if(NOT DEFINED ${_var})
     message(FATAL_ERROR "software.cmake: ${_var} is not set")
   endif()
@@ -56,7 +56,7 @@ endfunction()
 
 _vc_checkout_commit(VC_APP_CALIB_COMMIT "${CALIB_DIR}")
 _vc_checkout_commit(VC_APP_CORE_COMMIT "${CORE_DIR}")
-_vc_checkout_commit(VC_APP_RECON_COMMIT "${RECON_DIR}")
+_vc_checkout_commit(VC_APP_SENSOR_COMMIT "${SENSOR_DIR}")
 _vc_checkout_commit(VC_APP_GFX_COMMIT "${GFX_DIR}")
 set(VC_APP_ORBBEC_SDK_VERSION "${ORBBEC_SDK_VERSION}")
 configure_file("${IN}" "${OUT}" @ONLY)

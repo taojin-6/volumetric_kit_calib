@@ -23,11 +23,11 @@ target_sources(
           tone.cpp)
 
 # The public headers name quality's checks and summaries, gfx's pipelines,
-# overlay, views and metrics, and recon's pictures, sets, counters and prepared
+# overlay, views and metrics, and sensor's pictures, sets, counters and prepared
 # frames. gfx_pipelines brings gfx_camera, the views' tier.
 target_link_libraries(
   calib_viz
   PUBLIC calib_quality volumetric_kit::gfx_pipelines volumetric_kit::gfx_ui
-         volumetric_kit::recon_sensor_array volumetric_kit::recon_sensor_utils)
+         volumetric_kit::sensor_array volumetric_kit::sensor_prep)
 
 vc_target_warnings(calib_viz)

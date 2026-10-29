@@ -19,7 +19,7 @@
 namespace volumetric_kit::calib::detect {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 
 // The hybrid's refinement (charuco.hpp, detect_charuco).
 constexpr double kMinHalfWindow = 2.0;

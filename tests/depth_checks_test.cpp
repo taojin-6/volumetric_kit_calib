@@ -35,7 +35,7 @@
 namespace volumetric_kit::calib::quality {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using camera::Mat3d;
 using camera::Mat4d;
 using camera::Vec2d;
@@ -981,7 +981,7 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
 // Each camera's depth offset is the median of its views' axial offsets, not
 // of their offsets along the normals, and its plane is judged on what is left
 // once it is taken off: a consistent offset past the old 10 mm bound passes,
-// views that disagree fail, and so does an axial offset recon's calibration
+// views that disagree fail, and so does an axial offset sensor's calibration
 // file cannot carry (past 0.05 m), however small along the normals, or none
 // at all; one view has no scatter, so its plane is insufficient.
 TEST(SummarizeDepthChecks, TakesEachCamerasDepthOffsetAndJudgesWhatIsLeft) {

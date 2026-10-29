@@ -22,6 +22,10 @@ repos:
     hooks:
       - id: cmake-format
         additional_dependencies: [cmakelang, pyyaml]
+        # cmakelang 0.6.13 cannot start on Python 3.15 (re.Scanner refuses its
+        # capturing groups), which a Homebrew pre-commit now runs on. CI's lint
+        # job sets up the same version.
+        language_version: python3.14
 
   # _build.yml's Homebrew key wiring (the core's tools/runners/README.md,
   # "Upgrading Homebrew"), which no build checks: a deps cache key or
@@ -40,13 +44,3 @@ repos:
         entry: '^\s+formulae: \$\{\{ steps\.formulae\.outputs\.formulae \}\}$'
         args: [--negate]
         files: ^\.github/workflows/_build\.yml$
-
-# pre-commit.ci (https://pre-commit.ci) runs these same hooks on every PR and
-# pushes the auto-fixes back to the branch, so formatting lands even when a
-# contributor has not run `pre-commit install` locally. The repo's required
-# `lint` check stays the merge gate; this just removes the manual step.
-ci:
-  autofix_prs: true
-  autofix_commit_msg: "style: auto-fixes from pre-commit.ci hooks"
-  autoupdate_schedule: monthly
-  autoupdate_commit_msg: "chore: pre-commit autoupdate"

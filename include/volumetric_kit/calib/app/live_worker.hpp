@@ -11,7 +11,7 @@
 ///
 /// The worker is the only user of the rig's `SensorArray`, which is not
 /// thread-safe. Each set it polls is read back to the host in one submit
-/// (recon's `PictureReadback`, luma alone), the board is found in every
+/// (sensor's `PictureReadback`, luma alone), the board is found in every
 /// camera's luma at once (hybrid detection, then `quality::check_view`), and
 /// the result is published as a @ref LiveSnapshot: newest wins, so a slow
 /// window skips sets rather than queueing them, and the worker holds at most
@@ -37,7 +37,7 @@
 #include "volumetric_kit/calib/quality/live_checks.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/base/stage_metrics.hpp"
-#include "volumetric_kit/recon/sensor/array/sensor_array.hpp"
+#include "volumetric_kit/sensor/array/sensor_array.hpp"
 
 namespace volumetric_kit::core {
 class Allocator;
@@ -144,10 +144,10 @@ class CaptureSink {
 /// @code
 /// class Keep final : public SetSink {
 ///  public:
-///   void offer(std::shared_ptr<const recon::sensor::FrameSet> set) override {
+///   void offer(std::shared_ptr<const sensor::FrameSet> set) override {
 ///     latest = std::move(set);  // under a mutex
 ///   }
-///   std::shared_ptr<const recon::sensor::FrameSet> latest;
+///   std::shared_ptr<const sensor::FrameSet> latest;
 /// };
 /// @endcode
 class SetSink {
@@ -156,7 +156,7 @@ class SetSink {
 
   /// @brief Take a set the live worker polled.
   /// @param set  The set, shared with the live worker's snapshot of it.
-  virtual void offer(std::shared_ptr<const recon::sensor::FrameSet> set) = 0;
+  virtual void offer(std::shared_ptr<const sensor::FrameSet> set) = 0;
 
  protected:
   SetSink() = default;
@@ -181,7 +181,7 @@ class SetSink {
 struct LiveSnapshot {
   std::uint64_t number = 0;  ///< The sets the worker has published, from 1.
   /// The set, its frames as the driver handed them out.
-  std::shared_ptr<const recon::sensor::FrameSet> set;
+  std::shared_ptr<const sensor::FrameSet> set;
   /// Each camera's live (hybrid) detection, in rig order: empty where the set
   /// has no frame, its frame no picture, or the board was not found, and
   /// every camera's while the set is not searched
@@ -198,8 +198,8 @@ struct LiveSnapshot {
   /// The frames each camera's driver lost (an Orbbec camera's
   /// `OrbbecStreamStats::lost`); empty where the driver does not count them.
   std::vector<std::optional<std::uint64_t>> lost;
-  recon::sensor::SensorArrayStats stats;  ///< The array's counters.
-  quality::CaptureDecision decision;      ///< The capture rule's answer.
+  sensor::SensorArrayStats stats;     ///< The array's counters.
+  quality::CaptureDecision decision;  ///< The capture rule's answer.
   /// The stages' times: `"poll"`, then, for a set searched, `"readback"`
   /// (with its device time) and `"detect"`.
   core::StageMetrics stages;
@@ -225,7 +225,7 @@ struct LiveOptions {
 ///
 /// Every other member is for the window's thread. The worker starts the
 /// array on its own thread; a failure there, a sensor's failure while
-/// polling -- a camera disconnected among them, as recon's Orbbec driver
+/// polling -- a camera disconnected among them, as sensor's Orbbec driver
 /// fails every poll after it -- or anything its thread throws ends it,
 /// posting why (@ref take_errors). A set it cannot read back, or a camera it
 /// cannot detect in, is reported and skipped, and the live view goes on.
@@ -269,7 +269,7 @@ class LiveWorker {
   ///         or an idle wait that is negative; the readback's failure;
   ///         `IoError` if the thread cannot start; or `OutOfMemory`.
   static core::Result<std::unique_ptr<LiveWorker>> create(
-      recon::sensor::SensorArray&& array, const core::Device& device,
+      sensor::SensorArray&& array, const core::Device& device,
       core::Allocator& allocator, const Target& board, bool square_measured,
       CaptureSink* sink, SetSink* sets = nullptr,
       const LiveOptions& options = {});

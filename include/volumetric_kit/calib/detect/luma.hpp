@@ -6,7 +6,7 @@
 /// @file luma.hpp
 /// @brief The 8-bit luma image the detectors read.
 ///
-/// Pixels are OpenCV's and recon's: pixel centres sit at integer coordinates,
+/// Pixels are OpenCV's and sensor's: pixel centres sit at integer coordinates,
 /// so a W-pixel-wide image spans `[-0.5, W - 0.5]`.
 
 #include <cstddef>
@@ -17,7 +17,7 @@ namespace volumetric_kit::calib::detect {
 /// @brief An 8-bit luma image the caller owns: @ref height rows of
 ///        @ref width bytes, @ref stride bytes apart.
 ///
-/// recon's `PictureView` maps onto it field for field.
+/// sensor's `PictureView` maps onto it field for field.
 ///
 /// @code
 /// const LumaView luma{view.width, view.height, view.stride, view.luma};

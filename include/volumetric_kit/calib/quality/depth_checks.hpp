@@ -31,7 +31,7 @@
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::quality {
 
@@ -146,34 +146,34 @@ VC_QUALITY_API core::Status check_depth_options(
 struct BoardRegion {
   /// T_cb: the solved board in the colour camera, which carries the fitted
   /// plane into the colour camera's frame (@ref board_depth_check).
-  recon::camera::Mat4d board_to_color{1.0};
+  sensor::camera::Mat4d board_to_color{1.0};
   /// The depth camera's frame to the board's: `T_cb^-1 depth_to_color`.
-  recon::camera::Mat4d depth_to_board{1.0};
+  sensor::camera::Mat4d depth_to_board{1.0};
   /// The inset chessboard's corner nearest the board frame's origin, on
   /// z = 0 (metres).
-  recon::camera::Vec2d min{0.0};
-  recon::camera::Vec2d max{0.0};  ///< Its far corner (metres).
+  sensor::camera::Vec2d min{0.0};
+  sensor::camera::Vec2d max{0.0};  ///< Its far corner (metres).
 };
 
 /// @brief The region one view's plane fit takes.
 /// @param board           The board seen.
 /// @param board_to_color  T_cb: the solved board in the view's colour camera,
 ///                        e.g. `T_cw T_wb` of the solution.
-/// @param depth_to_color  The camera's depth-to-colour transform (recon's
+/// @param depth_to_color  The camera's depth-to-colour transform (sensor's
 ///                        `SensorInfo::depth_to_color`).
 /// @param options         The settings; its inset must leave some of the
 ///                        board.
 /// @return The region; or `InvalidArgument` for a transform that is not
-///         rigid (recon's `check_rigid`), an option out of range (naming it,
+///         rigid (sensor's `check_rigid`), an option out of range (naming it,
 ///         as @ref summarize_depth_checks does) or an inset that leaves none
 ///         of the board, its message starting `board_region: `.
 VC_QUALITY_API core::Result<BoardRegion> board_region(
-    const compute::Board& board, const recon::camera::Mat4d& board_to_color,
-    const recon::camera::Mat4d& depth_to_color,
+    const compute::Board& board, const sensor::camera::Mat4d& board_to_color,
+    const sensor::camera::Mat4d& depth_to_color,
     const DepthCheckOptions& options = {});
 
 /// @brief Whether @p region is one a plane can be fitted in: both transforms
-///        rigid (recon's `check_rigid`), and its rectangle finite and not
+///        rigid (sensor's `check_rigid`), and its rectangle finite and not
 ///        empty.
 /// @param region  The region.
 /// @return OK; or `InvalidArgument` naming what is wrong; or `OutOfMemory`.
@@ -200,7 +200,7 @@ VC_QUALITY_API core::Status check_board_region(const BoardRegion& region);
 /// EXPECT_EQ(device_member[i], in_board_region(region, ray_of(i)));
 /// @endcode
 VC_QUALITY_API bool in_board_region(const BoardRegion& region,
-                                    const recon::camera::Vec3d& ray) noexcept;
+                                    const sensor::camera::Vec3d& ray) noexcept;
 
 /// @brief One view of a solved rig whose depth a plane is fitted to.
 ///
@@ -229,7 +229,7 @@ struct DepthView {
 /// @param start           `solve::initialise`'s rig, which @p solution
 ///                        refined: a record per observation.
 /// @param solution        `solve::bundle_adjust`'s solution of it.
-/// @param depth_to_color  Each camera's depth-to-colour transform (recon's
+/// @param depth_to_color  Each camera's depth-to-colour transform (sensor's
 ///                        `SensorInfo::depth_to_color`), in the rig's order.
 /// @param options         The settings; @ref board_region takes them.
 /// @return The views, by capture, then camera; `InvalidArgument` for a
@@ -245,7 +245,7 @@ struct DepthView {
 VC_QUALITY_API core::Result<std::vector<DepthView>> depth_views(
     const compute::Board& board, const solve::InitialRig& start,
     const solve::RigSolution& solution,
-    const std::vector<recon::camera::Mat4d>& depth_to_color,
+    const std::vector<sensor::camera::Mat4d>& depth_to_color,
     const DepthCheckOptions& options = {});
 
 /// @brief A plane fitted to one view's depth in its @ref BoardRegion, as the
@@ -264,10 +264,10 @@ struct DepthPlane {
   /// @ref normal and @ref rms_m mean nothing.
   bool valid = false;
   /// A point on the plane, the inliers' centroid (metres, board frame).
-  recon::camera::Vec3d point{std::numeric_limits<double>::quiet_NaN()};
+  sensor::camera::Vec3d point{std::numeric_limits<double>::quiet_NaN()};
   /// The plane's normal (board frame): either sign, of any finite length
   /// but 0.
-  recon::camera::Vec3d normal{std::numeric_limits<double>::quiet_NaN()};
+  sensor::camera::Vec3d normal{std::numeric_limits<double>::quiet_NaN()};
   /// The inliers' RMS distance from the plane (metres).
   double rms_m = std::numeric_limits<double>::quiet_NaN();
   /// The depth pixels in the region (@ref in_board_region), with depth or
@@ -442,7 +442,7 @@ struct CameraDepth {
   double angle_deg = std::numeric_limits<double>::quiet_NaN();
   /// How far its depth reads along its axis, too far when positive: the
   /// median of their axial offsets (@ref BoardDepthCheck::axial_offset_mm),
-  /// in metres, recon's `SensorCalibration::depth_offset_m`, which
+  /// in metres, sensor's `SensorCalibration::depth_offset_m`, which
   /// @ref format_results writes when @ref plane is `Ok`. Not a number for
   /// none.
   double depth_offset_m = std::numeric_limits<double>::quiet_NaN();
@@ -452,7 +452,7 @@ struct CameraDepth {
   double scatter_mm = std::numeric_limits<double>::quiet_NaN();
   /// Its plane against the solved boards once @ref depth_offset_m is taken
   /// off: `Insufficient` for no valid view; else `Off` when the median angle
-  /// is beyond `max_angle_deg` or the depth offset is one recon's
+  /// is beyond `max_angle_deg` or the depth offset is one sensor's
   /// calibration file does not carry (its `validate_array_calibration`
   /// refuses it, as it does one not a number); else `Insufficient` when the
   /// scatter is not a number (one view), and `Off` when it is beyond

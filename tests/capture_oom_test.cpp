@@ -25,7 +25,7 @@
 namespace volumetric_kit::calib::capture {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 namespace vkc = volumetric_kit::core;
 using Code = vkc::Status::Code;
 using test::expect_oom_when_reporting;
@@ -121,7 +121,7 @@ TEST(CaptureOom, CreateRefusingAnOriginTag) {
       Code::InvalidArgument);
 }
 
-TEST(CaptureOom, CreateRefusingWhatReconRefuses) {
+TEST(CaptureOom, CreateRefusingWhatSensorRefuses) {
   SessionInfo info = make_info();
   info.cameras[0].info.color->intrinsics.fx =
       std::numeric_limits<double>::quiet_NaN();

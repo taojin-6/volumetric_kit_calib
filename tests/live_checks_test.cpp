@@ -24,7 +24,7 @@
 namespace volumetric_kit::calib::quality {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using Code = core::Status::Code;
 
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();

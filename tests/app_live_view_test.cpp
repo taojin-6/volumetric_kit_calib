@@ -49,7 +49,6 @@
 namespace volumetric_kit::calib::app {
 namespace {
 
-namespace sensor = recon::sensor;
 using Code = core::Status::Code;
 
 constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
@@ -162,7 +161,7 @@ class AppLiveView : public core::test::VulkanDeviceTest {
     core::Result<std::unique_ptr<viz::RigMosaic>> mosaic =
         viz::RigMosaic::create(
             device(), allocator(), color_layout(),
-            std::vector<recon::camera::ImageSize>(n, {kTileW, kTileH}));
+            std::vector<sensor::camera::ImageSize>(n, {kTileW, kTileH}));
     EXPECT_TRUE(mosaic.ok()) << mosaic.status().message();
     if (!mosaic.ok()) return nullptr;
     mosaic.value()->view().set_viewport({0.0f, 0.0f},
@@ -241,7 +240,7 @@ class AppLiveCrossFamily : public core::test::SharedDeviceTest {
 };
 
 // As calib_rig runs: the camera's decoded picture CONCURRENT across both
-// families (recon's color_queue_families), the live worker finding the board
+// families (sensor's color_queue_families), the live worker finding the board
 // in it on the compute family, and the window drawing it, one texel a pixel,
 // on the graphics family.
 TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
@@ -251,7 +250,7 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
   // A 960 x 544 picture, the mosaic's own size, so the view fits it 1:1.
   constexpr std::uint32_t kW = 960;
   constexpr std::uint32_t kH = 544;
-  recon::camera::CameraModel lens = test::color_like_lens();
+  sensor::camera::CameraModel lens = test::color_like_lens();
   lens.size = {kW, kH};
   lens.intrinsics.fx /= 4.0;
   lens.intrinsics.fy /= 4.0;
@@ -497,7 +496,7 @@ TEST(AppLiveViewModels, PlacesTheReferenceAndTintsEachCameraByItsIndex) {
     tints.push_back(camera.tint);
   }
   EXPECT_EQ(scene_camera(info, 0, true).color_to_world,
-            recon::camera::Mat4d(1.0));
+            sensor::camera::Mat4d(1.0));
   std::sort(tints.begin(), tints.end());
   EXPECT_EQ(std::adjacent_find(tints.begin(), tints.end()), tints.end());
 }
@@ -513,27 +512,27 @@ TEST(AppLiveViewModels, PlacesEveryCameraAtItsPoseInRigOrder) {
     SCOPED_TRACE(n);
     const std::size_t reference = n / 2;
     std::vector<viz::SceneCamera> cameras;
-    std::vector<recon::camera::Mat4d> poses;
+    std::vector<sensor::camera::Mat4d> poses;
     for (std::size_t i = 0; i < n; ++i) {
       cameras.push_back(scene_camera(info, i, i == reference));
       cameras.back().shown = i % 2 == 0;
       cameras.back().depth_to_color[3][0] = -0.01 * static_cast<double>(i);
       // A turn about y and a step along x, each camera's own.
       const double turn = 0.3 * static_cast<double>(i);
-      recon::camera::Mat4d pose(1.0);
+      sensor::camera::Mat4d pose(1.0);
       pose[0][0] = std::cos(turn);
       pose[0][2] = -std::sin(turn);
       pose[2][0] = std::sin(turn);
       pose[2][2] = std::cos(turn);
       pose[3][0] = 0.5 * static_cast<double>(i);
-      poses.push_back(i == reference ? recon::camera::Mat4d(1.0) : pose);
+      poses.push_back(i == reference ? sensor::camera::Mat4d(1.0) : pose);
     }
     const std::vector<viz::SceneCamera> before = cameras;
 
-    std::vector<recon::camera::Mat4d> extra = poses;
-    extra.push_back(recon::camera::Mat4d(1.0));
-    const std::vector<recon::camera::Mat4d> fewer(poses.begin(),
-                                                  poses.end() - 1);
+    std::vector<sensor::camera::Mat4d> extra = poses;
+    extra.push_back(sensor::camera::Mat4d(1.0));
+    const std::vector<sensor::camera::Mat4d> fewer(poses.begin(),
+                                                   poses.end() - 1);
     for (const auto& wrong : {extra, fewer}) {
       const core::Status refused = placed_cameras(cameras, wrong);
       EXPECT_EQ(refused.domain(), Code::InvalidArgument);

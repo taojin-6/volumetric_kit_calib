@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-// recon's rigid transforms in OpenCV's types: glm's column-major Mat4d against
-// cv::Matx's row-major layout, and rvec/tvec through recon's geometry.
+// sensor's rigid transforms in OpenCV's types: glm's column-major Mat4d against
+// cv::Matx's row-major layout, and rvec/tvec through sensor's geometry.
 
 #include "volumetric_kit/calib/compute/cv_pose.hpp"
 
@@ -17,7 +17,7 @@
 namespace volumetric_kit::calib::compute {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 
 constexpr double kPi = 3.14159265358979323846;
 
@@ -43,7 +43,7 @@ TEST(CvPose, MatrixLayoutIsTransposedElementForElement) {
 }
 
 // OpenCV's extrinsic [R | t] from cv::Rodrigues sits in cv_matrix's rows and
-// recon's columns: the translation in OpenCV's last column, recon's m[3].
+// sensor's columns: the translation in OpenCV's last column, sensor's m[3].
 TEST(CvPose, MatrixOfAnAsymmetricTransformIsOpenCVs) {
   const CvPose pose = asymmetric_pose();
   cv::Matx33d rotation;
@@ -86,7 +86,7 @@ TEST(CvPose, RoundTripsThroughTheMatrix) {
   }
 }
 
-// Through recon's rodrigues_from_matrix, rotations round-trip where
+// Through sensor's rodrigues_from_matrix, rotations round-trip where
 // cv::Rodrigues returns exactly zero (below about 1e-5 rad) and toward a half
 // turn.
 TEST(CvPose, RoundTripsTinyRotationsAndNearlyHalfTurns) {

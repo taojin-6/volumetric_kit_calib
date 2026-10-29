@@ -21,7 +21,7 @@
 namespace volumetric_kit::calib::test {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kDeg = kPi / 180.0;

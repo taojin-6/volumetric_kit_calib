@@ -25,7 +25,7 @@
 
 #extension GL_GOOGLE_include_directive : require
 #include "volumetric_kit/calib/depth/shaders/depth_range.glsl"
-#include "volumetric_kit/recon/core/shaders/pinhole.glsl"
+#include "volumetric_kit/sensor/frame/shaders/pinhole.glsl"
 
 #define VC_AGREEMENT_LOCAL_SIZE 256
 // The most bins a histogram has (quality::kMaxAgreementBins): all the shared
@@ -123,12 +123,12 @@ void main() {
       continue;
     }
     vec3 q = (p.to_from *
-              vec4(vr_unproject_pinhole(vec2(s), z, p.k_from), 1.0)).xyz;
+              vec4(vs_unproject_pinhole(vec2(s), z, p.k_from), 1.0)).xyz;
     vec2 px;
-    if (!vr_project_pinhole(q, p.k_to, p.size_to, px)) {
+    if (!vs_project_pinhole(q, p.k_to, p.size_to, px)) {
       continue;
     }
-    uvec2 t = vr_nearest_pixel(px, p.size_to);
+    uvec2 t = vs_nearest_pixel(px, p.size_to);
     float measured = to_depth[t.y * p.size_to.x + t.x];
     if (!vc_in_range(measured, p.range_to) ||
         at_edge(true, t, p.size_to, measured, p.range_to)) {

@@ -22,7 +22,7 @@ Detection detection() {
   d.observation.points.push_back({5, {1012.0, 391.75}, 1.0});
   DetectedMarker marker;
   marker.id = 3;
-  marker.corners = {recon::camera::Vec2d{700.0, 300.0},
+  marker.corners = {sensor::camera::Vec2d{700.0, 300.0},
                     {780.0, 300.5},
                     {779.5, 380.0},
                     {699.5, 379.5}};

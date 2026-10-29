@@ -8,7 +8,7 @@
 #ifndef VC_DEPTH_BOARD_REGION_GLSL
 #define VC_DEPTH_BOARD_REGION_GLSL
 
-#include "volumetric_kit/recon/core/shaders/pinhole.glsl"
+#include "volumetric_kit/sensor/frame/shaders/pinhole.glsl"
 
 // Whether depth pixel `pixel` belongs to the region: its ray, the pixel
 // unprojected at depth 1 through the pinhole `k` (fx, fy, cx, cy), moved into
@@ -18,7 +18,7 @@
 // does. The tests are negated, so a NaN fails them.
 bool vc_board_member(uvec2 pixel, vec4 k, mat4 depth_to_board, vec4 rect) {
   vec3 origin = depth_to_board[3].xyz;
-  vec3 ray = vr_unproject_pinhole(vec2(pixel), 1.0, k);
+  vec3 ray = vs_unproject_pinhole(vec2(pixel), 1.0, k);
   vec3 direction = mat3(depth_to_board) * ray;
   float s = -origin.z / direction.z;
   if (!(s > 0.0) || isinf(s)) {

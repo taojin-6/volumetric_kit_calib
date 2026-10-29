@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Tao Jin
 
 # --- calib_compute: Tier 1 ---------------------------------------------------
-# The OpenCV bridge, calib's CPU maths backend: recon's camera model and rigid
+# The OpenCV bridge, calib's CPU maths backend: sensor's camera model and rigid
 # transforms in OpenCV's types, the ChArUco board and whether a view of it fixes
 # a pose, the measures the solve and the checks share, and guarded(), which
 # returns what OpenCV throws as a Status.

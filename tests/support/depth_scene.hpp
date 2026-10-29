@@ -24,8 +24,8 @@
 
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
-#include "volumetric_kit/recon/camera/camera_model.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::test {
 
@@ -35,28 +35,28 @@ namespace volumetric_kit::calib::test {
 /// @return The rotation.
 ///
 /// @code
-/// const recon::camera::Mat3d down = rotation({1.0, 0.0, 0.0}, -5.5);
+/// const sensor::camera::Mat3d down = rotation({1.0, 0.0, 0.0}, -5.5);
 /// @endcode
-inline recon::camera::Mat3d rotation(const recon::camera::Vec3d& axis,
-                                     double deg) {
-  return recon::camera::rotation_from_rodrigues(glm::normalize(axis) * deg *
-                                                glm::pi<double>() / 180.0);
+inline sensor::camera::Mat3d rotation(const sensor::camera::Vec3d& axis,
+                                      double deg) {
+  return sensor::camera::rotation_from_rodrigues(glm::normalize(axis) * deg *
+                                                 glm::pi<double>() / 180.0);
 }
 
 /// @brief A prepared depth's pinhole, its pixel centres at integers.
 ///
 /// @code
 /// const Pinhole p = nfov();
-/// const recon::camera::Vec3d ray = ray_of(p, 320, 288);
+/// const sensor::camera::Vec3d ray = ray_of(p, 320, 288);
 /// @endcode
 struct Pinhole {
-  recon::camera::ImageSize size;       ///< The image's size.
-  recon::camera::PinholeIntrinsics k;  ///< Its intrinsics.
+  sensor::camera::ImageSize size;       ///< The image's size.
+  sensor::camera::PinholeIntrinsics k;  ///< Its intrinsics.
 };
 
 /// @return A Femto's narrow depth: @ref depth_like_lens's pinhole.
 inline Pinhole nfov() {
-  const recon::camera::CameraModel lens = depth_like_lens();
+  const sensor::camera::CameraModel lens = depth_like_lens();
   return {lens.size, lens.intrinsics};
 }
 /// @return The narrow depth binned 2 x 2.
@@ -69,8 +69,8 @@ inline Pinhole wide() { return {{512, 512}, {252.4, 252.5, 255.6, 256.2}}; }
 /// @param u  The column.
 /// @param v  The row.
 /// @return The ray, in the camera's frame.
-inline recon::camera::Vec3d ray_of(const Pinhole& p, std::uint32_t u,
-                                   std::uint32_t v) {
+inline sensor::camera::Vec3d ray_of(const Pinhole& p, std::uint32_t u,
+                                    std::uint32_t v) {
   return {(u - p.k.cx) / p.k.fx, (v - p.k.cy) / p.k.fy, 1.0};
 }
 
@@ -80,23 +80,23 @@ inline recon::camera::Vec3d ray_of(const Pinhole& p, std::uint32_t u,
 /// const Plane floor{{0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}};
 /// @endcode
 struct Plane {
-  recon::camera::Vec3d point;   ///< A point on it.
-  recon::camera::Vec3d normal;  ///< Its normal, of any length but 0.
+  sensor::camera::Vec3d point;   ///< A point on it.
+  sensor::camera::Vec3d normal;  ///< Its normal, of any length but 0.
 };
 
 /// @brief Where a ray from an origin along a direction (the scene's frame;
 ///        the camera's z grows by 1 per unit along it) meets a surface: its
 ///        depth, or 0.
-using Surface = std::function<double(const recon::camera::Vec3d&,
-                                     const recon::camera::Vec3d&)>;
+using Surface = std::function<double(const sensor::camera::Vec3d&,
+                                     const sensor::camera::Vec3d&)>;
 
 /// @brief Where a ray meets @p plane, as a @ref Surface.
 /// @param plane      The plane.
 /// @param origin     The ray's origin.
 /// @param direction  Its direction.
 /// @return The depth; 0 behind the origin, along the plane or not finite.
-inline double hit_plane(const Plane& plane, const recon::camera::Vec3d& origin,
-                        const recon::camera::Vec3d& direction) {
+inline double hit_plane(const Plane& plane, const sensor::camera::Vec3d& origin,
+                        const sensor::camera::Vec3d& direction) {
   const double s = glm::dot(plane.normal, plane.point - origin) /
                    glm::dot(plane.normal, direction);
   return s > 0.0 && std::isfinite(s) ? s : 0.0;
@@ -109,10 +109,10 @@ inline double hit_plane(const Plane& plane, const recon::camera::Vec3d& origin,
 /// @param origin     The ray's origin.
 /// @param direction  Its direction.
 /// @return The depth of its nearest face; 0 when the ray misses it.
-inline double hit_box(const recon::camera::Vec3d& lo,
-                      const recon::camera::Vec3d& hi,
-                      const recon::camera::Vec3d& origin,
-                      const recon::camera::Vec3d& direction) {
+inline double hit_box(const sensor::camera::Vec3d& lo,
+                      const sensor::camera::Vec3d& hi,
+                      const sensor::camera::Vec3d& origin,
+                      const sensor::camera::Vec3d& direction) {
   double near = 0.0;
   double far = std::numeric_limits<double>::infinity();
   for (int i = 0; i < 3; ++i) {
@@ -130,10 +130,10 @@ inline double hit_box(const recon::camera::Vec3d& lo,
 /// @param surface          What its rays meet.
 /// @return Each pixel's depth, rounded to float, 0 where it meets nothing.
 inline std::vector<float> render(const Pinhole& p,
-                                 const recon::camera::Mat4d& camera_to_scene,
+                                 const sensor::camera::Mat4d& camera_to_scene,
                                  const Surface& surface) {
-  const recon::camera::Vec3d origin(camera_to_scene[3]);
-  const recon::camera::Mat3d turn(camera_to_scene);
+  const sensor::camera::Vec3d origin(camera_to_scene[3]);
+  const sensor::camera::Mat3d turn(camera_to_scene);
   std::vector<float> depth(std::size_t{p.size.width} * p.size.height);
   for (std::uint32_t v = 0; v < p.size.height; ++v) {
     for (std::uint32_t u = 0; u < p.size.width; ++u) {
@@ -148,8 +148,8 @@ inline std::vector<float> render(const Pinhole& p,
 ///        (`compute::undistort_points` at its centre).
 /// @param lens  The lens; one `compute::cv_camera` takes.
 /// @return The rays, row-major.
-inline std::vector<recon::camera::Vec3d> lens_rays(
-    const recon::camera::CameraModel& lens) {
+inline std::vector<sensor::camera::Vec3d> lens_rays(
+    const sensor::camera::CameraModel& lens) {
   std::vector<cv::Point2d> pixels;
   pixels.reserve(std::size_t{lens.size.width} * lens.size.height);
   for (std::uint32_t v = 0; v < lens.size.height; ++v) {
@@ -160,7 +160,7 @@ inline std::vector<recon::camera::Vec3d> lens_rays(
   const std::vector<cv::Point2d> points =
       compute::undistort_points(compute::cv_camera(lens).value(), pixels)
           .value();
-  std::vector<recon::camera::Vec3d> rays;
+  std::vector<sensor::camera::Vec3d> rays;
   rays.reserve(points.size());
   for (const cv::Point2d& p : points) rays.emplace_back(p.x, p.y, 1.0);
   return rays;
@@ -177,11 +177,11 @@ inline std::vector<recon::camera::Vec3d> lens_rays(
 /// @return Each pixel's raw depth; 0 where it meets nothing or the depth is
 ///         past what the units hold.
 inline std::vector<std::uint16_t> render_raw(
-    const std::vector<recon::camera::Vec3d>& rays,
-    const recon::camera::Mat4d& camera_to_scene, const Surface& surface,
+    const std::vector<sensor::camera::Vec3d>& rays,
+    const sensor::camera::Mat4d& camera_to_scene, const Surface& surface,
     double metres_per_unit, double bias_m = 0.0) {
-  const recon::camera::Vec3d origin(camera_to_scene[3]);
-  const recon::camera::Mat3d turn(camera_to_scene);
+  const sensor::camera::Vec3d origin(camera_to_scene[3]);
+  const sensor::camera::Mat3d turn(camera_to_scene);
   std::vector<std::uint16_t> raw(rays.size(), 0);
   for (std::size_t i = 0; i < rays.size(); ++i) {
     const double z = surface(origin, turn * rays[i]);

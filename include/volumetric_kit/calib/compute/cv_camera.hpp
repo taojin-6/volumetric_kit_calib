@@ -4,13 +4,13 @@
 #pragma once
 
 /// @file cv_camera.hpp
-/// @brief recon's camera model in OpenCV's types: the image size, the camera
+/// @brief sensor's camera model in OpenCV's types: the image size, the camera
 ///        matrix and the eight distortion coefficients; where that lens images
 ///        a point; and each pixel's ray back through it.
 ///
-/// recon's `RationalDistortion` is OpenCV's rational lens in OpenCV's order,
+/// sensor's `RationalDistortion` is OpenCV's rational lens in OpenCV's order,
 /// so the conversion is exact: `cv::projectPoints` with these values computes
-/// recon's `distort_rational`.
+/// sensor's `distort_rational`.
 
 #include <optional>
 #include <vector>
@@ -19,15 +19,15 @@
 
 #include "volumetric_kit/calib/compute/export.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/camera/camera_model.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::compute {
 
 /// @brief A camera as OpenCV's functions take it.
 ///
 /// @code
-/// if (info.color) {  // a recon SensorInfo
+/// if (info.color) {  // a sensor::SensorInfo
 ///   VKC_ASSIGN(const CvCamera cam, cv_camera(*info.color));
 ///   std::vector<cv::Point2d> pixels;
 ///   cv::projectPoints(points, rvec, tvec, cam.camera_matrix, cam.distortion,
@@ -45,12 +45,12 @@ struct CvCamera {
 /// @brief @p model in OpenCV's types.
 /// @param model  The camera.
 /// @return The camera; or `InvalidArgument`, its message starting
-///         `cv_camera: `, for a model recon's `check_camera_model` refuses or
+///         `cv_camera: `, for a model sensor's `check_camera_model` refuses or
 ///         a side longer than OpenCV's `int` holds.
 VC_COMPUTE_API core::Result<CvCamera> cv_camera(
-    const recon::camera::CameraModel& model);
+    const sensor::camera::CameraModel& model);
 
-/// @brief Where @p camera images @p point: recon's `distort_rational`, then
+/// @brief Where @p camera images @p point: sensor's `distort_rational`, then
 ///        the camera matrix's focal lengths and centre, as `cv::projectPoints`
 ///        computes for a point in the camera's frame.
 /// @param camera  The camera.
@@ -64,8 +64,8 @@ VC_COMPUTE_API core::Result<CvCamera> cv_camera(
 ///   mark(*pixel);  // a caller's own drawing
 /// }
 /// @endcode
-VC_COMPUTE_API std::optional<recon::camera::Vec2d> project(
-    const CvCamera& camera, const recon::camera::Vec3d& point) noexcept;
+VC_COMPUTE_API std::optional<sensor::camera::Vec2d> project(
+    const CvCamera& camera, const sensor::camera::Vec3d& point) noexcept;
 
 /// @brief Each pixel's ray as normalized coordinates `(X / Z, Y / Z)`:
 ///        `cv::undistortPoints`, iterated until the lens takes each ray back

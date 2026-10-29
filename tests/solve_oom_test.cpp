@@ -165,8 +165,8 @@ TEST(SolveOom, OriginTagFrame) {
   // is refused for its fit.
   std::vector<TagView> apart(tagged.views.begin(), tagged.views.begin() + 2);
   ASSERT_EQ(apart[1].capture, apart[0].capture);
-  for (recon::camera::Vec2d& c : apart[0].marker.corners) {
-    c += recon::camera::Vec2d(44.0, 22.0);
+  for (sensor::camera::Vec2d& c : apart[0].marker.corners) {
+    c += sensor::camera::Vec2d(44.0, 22.0);
   }
   const core::Result<WorldOrigin> disagree = origin_tag_frame(
       tagged.scene.cameras, tagged.solution, apart, kOriginTag);
@@ -188,7 +188,7 @@ TEST(SolveOom, AnchorRig) {
   expect_oom_anywhere([&] { return anchor_rig(tagged.solution, origin); });
   expect_oom_anywhere([&] { return anchor_rig(tagged.solution, {}); });
   expect_oom_anywhere([&] { return anchor_rig(RigSolution{}, origin); });
-  // A tag recon's file cannot name.
+  // A tag sensor's file cannot name.
   WorldOrigin aruco = origin;
   aruco.sought.dictionary = MarkerDictionary::ArUco4x4_50;
   expect_oom_anywhere([&] { return anchor_rig(tagged.solution, aruco); });

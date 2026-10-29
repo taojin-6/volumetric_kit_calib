@@ -31,8 +31,8 @@
 #include "volumetric_kit/gfx/core/render_target.hpp"
 #include "volumetric_kit/gfx/pipelines/image_pipeline.hpp"
 #include "volumetric_kit/gfx/ui/image_overlay.hpp"
-#include "volumetric_kit/recon/camera/camera_model.hpp"
-#include "volumetric_kit/recon/sensor/yuv_image.hpp"
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
+#include "volumetric_kit/sensor/yuv_image.hpp"
 
 namespace volumetric_kit::core {
 class Allocator;
@@ -134,7 +134,7 @@ struct MosaicLayout {
 ///            mosaic_layout({{3840, 2160}, {3840, 2160}, {640, 576}}));
 /// @endcode
 core::Result<MosaicLayout> mosaic_layout(
-    const std::vector<recon::camera::ImageSize>& sizes,
+    const std::vector<sensor::camera::ImageSize>& sizes,
     std::uint32_t gutter = kMosaicGutter, const MosaicLimits& limits = {});
 
 /// @brief A decoder's picture as gfx's write of its tile: its two NV12 image
@@ -143,7 +143,7 @@ core::Result<MosaicLayout> mosaic_layout(
 /// The write borrows the picture's images, so the picture -- the frame that
 /// holds it -- must outlive the write's execution on the GPU, not merely its
 /// recording. The images must be readable from the renderer's queue family
-/// (recon's `color_queue_families`).
+/// (sensor's `color_queue_families`).
 /// @param picture   The picture, as `RgbdFrame::color` holds it.
 /// @param expected  The tile's size (@ref MosaicTile::extent).
 /// @param at        The tile's place in its page (@ref MosaicTile::at).
@@ -162,7 +162,7 @@ core::Result<MosaicLayout> mosaic_layout(
 // (nvJPEG's, on Linux), which need their ownership taken over first, and I420,
 // once gfx maps it.
 core::Result<gfx::pipelines::ImageWrite> tile_write(
-    const recon::sensor::YuvImage& picture, VkExtent2D expected, VkOffset2D at);
+    const sensor::YuvImage& picture, VkExtent2D expected, VkOffset2D at);
 
 /// @brief How pictures written together become display colour: the Y'CbCr
 ///        matrix, range and chroma siting they share.
@@ -181,7 +181,7 @@ core::Result<gfx::pipelines::ImageWrite> tile_write(
 ///            tile_conversion(pictures));
 /// @endcode
 core::Result<gfx::pipelines::ImageConversion> tile_conversion(
-    const std::vector<const recon::sensor::YuvImage*>& pictures);
+    const std::vector<const sensor::YuvImage*>& pictures);
 
 /// @brief A camera's new picture that @ref RigMosaic::record left out, and
 ///        why.
@@ -251,7 +251,7 @@ class RigMosaic {
   static core::Result<std::unique_ptr<RigMosaic>> create(
       const core::Device& device, core::Allocator& allocator,
       const gfx::RenderTargetLayout& layout,
-      const std::vector<recon::camera::ImageSize>& pictures,
+      const std::vector<sensor::camera::ImageSize>& pictures,
       const MosaicLimits& limits = {});
 
   /// @brief Destroy the textures and the pipeline.
@@ -289,9 +289,8 @@ class RigMosaic {
   ///         `OutOfMemory`, after which the mosaic may have forgotten its
   ///         pictures, as @ref discard does, so it is valid whether or not
   ///         @p cmd runs.
-  core::Status record(
-      VkCommandBuffer cmd,
-      const std::vector<const recon::sensor::YuvImage*>& pictures);
+  core::Status record(VkCommandBuffer cmd,
+                      const std::vector<const sensor::YuvImage*>& pictures);
 
   /// @return The pictures the last @ref record left out, by camera; empty
   ///         after one that returned an error.
@@ -351,8 +350,7 @@ class RigMosaic {
   RigMosaic() = default;
 
   core::Status record_pages(
-      VkCommandBuffer cmd,
-      const std::vector<const recon::sensor::YuvImage*>& pictures,
+      VkCommandBuffer cmd, const std::vector<const sensor::YuvImage*>& pictures,
       bool& started);
   // Leave out the pictures of page `page`'s writes, for `status`.
   void refuse_page(std::size_t page, const core::Status& status);
@@ -378,7 +376,7 @@ class RigMosaic {
   std::vector<std::size_t> page_count_;
   std::vector<gfx::pipelines::ImageWrite> writes_;
   std::vector<std::size_t> write_tile_;
-  std::vector<const recon::sensor::YuvImage*> page_pictures_;
+  std::vector<const sensor::YuvImage*> page_pictures_;
   std::vector<gfx::pipelines::ImageConversion> page_conversion_;
   std::vector<gfx::pipelines::ImageDraw> draws_;  // reused by draw
 };

@@ -30,7 +30,7 @@
 namespace volumetric_kit::calib::depth {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using detail::AgreementParams;
 using detail::FitBlock;
 using detail::MomentsParams;

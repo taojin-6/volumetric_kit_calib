@@ -176,7 +176,7 @@ core::Result<std::vector<PanelLine>> camera_panel(
         lines.push_back(
             {"coverage", fixed(100.0 * session.coverage_filled, 0) + " %",
              session.coverage_filled > 0.0 ? Tone::Normal : Tone::Muted});
-        const recon::sensor::SensorStats& frames = camera.frames;
+        const sensor::SensorStats& frames = camera.frames;
         std::string counts = std::to_string(frames.received) + " received, " +
                              std::to_string(frames.delivered) + " delivered, " +
                              std::to_string(frames.dropped) + " dropped, " +
@@ -192,8 +192,7 @@ core::Result<std::vector<PanelLine>> camera_panel(
 }
 
 core::Result<std::vector<PanelLine>> set_panel(
-    const recon::sensor::FrameSet& set,
-    const recon::sensor::SensorArrayStats& stats,
+    const sensor::FrameSet& set, const sensor::SensorArrayStats& stats,
     const std::vector<std::string>& ids, const SaverQueue& saver,
     const PanelOptions& options) {
   return compute::guarded(
@@ -511,7 +510,7 @@ core::Result<std::vector<PanelLine>> calibration_panel(
           lines.push_back(std::move(verdict));
         }
         for (std::size_t c = 0; c < n; ++c) {
-          const recon::camera::Vec3d& centre = metrics.geometry.centres_m[c];
+          const sensor::camera::Vec3d& centre = metrics.geometry.centres_m[c];
           lines.push_back({"centre " + ids[c],
                            "(" + fixed(centre.x, 3, true) + ", " +
                                fixed(centre.y, 3, true) + ", " +

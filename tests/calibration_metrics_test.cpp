@@ -38,7 +38,7 @@
 namespace volumetric_kit::calib::quality {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using Code = core::Status::Code;
 using solve::BundleAdjustOptions;
 using solve::InitialRig;

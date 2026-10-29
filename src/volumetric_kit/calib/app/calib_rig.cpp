@@ -58,16 +58,15 @@
 #include "volumetric_kit/gfx/ui/imgui_overlay.hpp"
 #include "volumetric_kit/gfx/ui/metrics_panel.hpp"
 #include "volumetric_kit/gfx/windowing/swapchain.hpp"
-#include "volumetric_kit/recon/core/device_requirements.hpp"
-#include "volumetric_kit/recon/sensor/array/sensor_array.hpp"
-#include "volumetric_kit/recon/sensor/orbbec/orbbec_sensor.hpp"
-#include "volumetric_kit/recon/sensor/orbbec/orbbec_sync_config.hpp"
+#include "volumetric_kit/sensor/array/sensor_array.hpp"
+#include "volumetric_kit/sensor/frame/device_requirements.hpp"
+#include "volumetric_kit/sensor/orbbec/orbbec_sensor.hpp"
+#include "volumetric_kit/sensor/orbbec/orbbec_sync_config.hpp"
 
 namespace volumetric_kit::calib::app {
 
 namespace {
 
-namespace sensor = recon::sensor;
 namespace glfw = gfx::glfw;
 using Clock = std::chrono::steady_clock;
 
@@ -183,10 +182,10 @@ struct View3d {
   // Its mode, stride and point size; the rest is set each frame.
   viz::CloudStyle style;
   viz::SceneOptions options;
-  std::vector<viz::SceneCamera> cameras;     // in the rig's order
-  std::optional<compute::Board> board;       // the solved boards'
-  std::vector<recon::camera::Mat4d> boards;  // each solved board's T_wb
-  std::optional<recon::camera::Vec3d> up;    // the world's (world_up)
+  std::vector<viz::SceneCamera> cameras;      // in the rig's order
+  std::optional<compute::Board> board;        // the solved boards'
+  std::vector<sensor::camera::Mat4d> boards;  // each solved board's T_wb
+  std::optional<sensor::camera::Vec3d> up;    // the world's (world_up)
   viz::SceneView view;
   std::shared_ptr<const CloudSnapshot> latest;  // released before the worker
   std::shared_ptr<core::Buffer> lines;          // the scene's lines, uploaded
@@ -196,8 +195,8 @@ struct View3d {
   std::string last_error;  // the last failure said, said once
 
   // The placed cameras' poses.
-  std::vector<recon::camera::Mat4d> placed() const {
-    std::vector<recon::camera::Mat4d> poses;
+  std::vector<sensor::camera::Mat4d> placed() const {
+    std::vector<sensor::camera::Mat4d> poses;
     for (const viz::SceneCamera& camera : cameras) {
       if (camera.color_to_world) poses.push_back(*camera.color_to_world);
     }
@@ -767,7 +766,7 @@ core::Status show_result(const CalibrateResult& result,
   lines.insert(lines.end(), world.begin(), world.end());
   VKC_ASSIGN(const std::vector<std::string> said,
              viz::calibration_notices(result.number, result.directory, world));
-  std::vector<recon::camera::Mat4d> boards = result.boards_to_world;
+  std::vector<sensor::camera::Mat4d> boards = result.boards_to_world;
   VKC_TRY(placed_cameras(v.cameras, result.color_to_world));
   const std::optional<solve::TagWorld>& tag = result.world.origin.tag;
   const RigOrigin origin{result.reference, tag.has_value()};
@@ -827,7 +826,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
                         const RigScenario& scenario) {
   const RigPreset& preset = scenario.preset;
   Notices notices;
-  // --- One VkDevice: gfx draws on its graphics side, recon decodes, reads
+  // --- One VkDevice: gfx draws on its graphics side, sensor decodes, reads
   // back and prepares frames on its compute side. Wide points where the GPU
   // has them, one-pixel points where it does not.
   gfx::app::WindowedAppConfig app_config;
@@ -861,20 +860,20 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
                  [&shared](VkInstance) -> core::Result<VkSurfaceKHR> {
                    return shared->release_surface();
                  }));
-  VKC_ASSIGN(core::Device recon_device,
+  VKC_ASSIGN(core::Device sensor_device,
              core::Device::adopt(shared->compute_payload(), needs.compute));
   VKC_ASSIGN(
-      core::Allocator recon_allocator,
-      core::Allocator::create(shared->instance().handle(), recon_device));
+      core::Allocator sensor_allocator,
+      core::Allocator::create(shared->instance().handle(), sensor_device));
 
   // --- The rig, at the preset.
-  // TODO: open the rig from scenario.sync once recon's open_orbbec_sensors
+  // TODO: open the rig from scenario.sync once sensor's open_orbbec_sensors
   // takes a parsed sync configuration, so the file is read once.
   VKC_ASSIGN(auto sensors,
              sensor::open_orbbec_sensors(
                  config.source.sync_config,
                  orbbec_options(
-                     preset, recon_device, recon_allocator,
+                     preset, sensor_device, sensor_allocator,
                      {shared->compute_family(), shared->graphics_family()})));
   std::vector<sensor::SensorInfo> infos;
   for (const auto& camera : sensors) infos.push_back(camera->info());
@@ -888,7 +887,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   setup.sync_path = config.source.sync_config;
   setup.reference = array.primary();
   setup.depth_mode = preset.depth_mode;
-  std::vector<recon::camera::ImageSize> sizes;
+  std::vector<sensor::camera::ImageSize> sizes;
   std::vector<viz::SceneCamera> scene_cameras;
   for (std::size_t i = 0; i < array.size(); ++i) {
     VKC_ASSIGN(capture::SessionCamera camera,
@@ -906,13 +905,13 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   // The 3D view's worker, prepared frames shared with the renderer's family.
   VKC_ASSIGN(std::unique_ptr<CloudWorker> cloud,
              CloudWorker::create(
-                 recon_device, recon_allocator, array.size(),
+                 sensor_device, sensor_allocator, array.size(),
                  {shared->compute_family(), shared->graphics_family()}));
   // Calibrate's worker (T4), after the 3D view's, so it goes first, with its
-  // depth checks on recon's device, built now so a failure shows here.
+  // depth checks on sensor's device, built now so a failure shows here.
   VKC_ASSIGN(
       std::unique_ptr<CalibrateDepth> depth,
-      CalibrateDepth::create(recon_device, recon_allocator, array.size()));
+      CalibrateDepth::create(sensor_device, sensor_allocator, array.size()));
   VKC_ASSIGN(std::unique_ptr<CalibrateWorker> calibrate,
              CalibrateWorker::create(std::move(depth)));
 
@@ -952,10 +951,11 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   // --- The live worker last, as its thread starts the cameras: from here
   // every way out stops Calibrate's worker, then it, then the 3D view's
   // (Teardown), so no set is held when the array closes.
-  VKC_ASSIGN(std::unique_ptr<LiveWorker> live,
-             LiveWorker::create(std::move(array), recon_device, recon_allocator,
-                                editor.board(), editor.square_measured(),
-                                captures.get(), cloud.get()));
+  VKC_ASSIGN(
+      std::unique_ptr<LiveWorker> live,
+      LiveWorker::create(std::move(array), sensor_device, sensor_allocator,
+                         editor.board(), editor.square_measured(),
+                         captures.get(), cloud.get()));
   const std::vector<std::string>& ids = live->ids();
   std::shared_ptr<const LiveSnapshot> latest;  // released before live
   const Teardown teardown(*calibrate, *live, *cloud, app, retire);
@@ -1116,7 +1116,7 @@ core::Result<RigRequirements> rig_requirements(bool large_points) {
       "rig_requirements", [&]() -> core::Result<RigRequirements> {
         RigRequirements needs;
         VKC_ASSIGN(needs.compute,
-                   core::merge(recon::device_requirements(),
+                   core::merge(sensor::device_requirements(),
                                depth::DepthChecks::device_requirements()));
         needs.graphics = gfx::device_requirements();
         needs.graphics.features.largePoints = large_points ? VK_TRUE : VK_FALSE;
@@ -1133,7 +1133,7 @@ core::Result<RigScenario> check_scenario(const core::config::Config& config) {
       return core::Status::not_found("output.path: " + config.output.path +
                                      " is not an existing directory");
     }
-    // recon refuses a file that lists no camera.
+    // sensor's reader refuses a file that lists no camera.
     core::Result<sensor::OrbbecRigSyncConfig> sync =
         sensor::read_orbbec_sync_config(config.source.sync_config);
     if (!sync.ok()) return sync.status().with_context("source.sync_config");

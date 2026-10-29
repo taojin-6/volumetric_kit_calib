@@ -25,7 +25,7 @@
 namespace volumetric_kit::calib::solve {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using compute::finite;
 using detail::Derivatives;
 using detail::kLevMarqTolerance;

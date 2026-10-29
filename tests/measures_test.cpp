@@ -16,7 +16,7 @@
 namespace volumetric_kit::calib::compute {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 
 constexpr double kPi = 3.14159265358979323846;
 

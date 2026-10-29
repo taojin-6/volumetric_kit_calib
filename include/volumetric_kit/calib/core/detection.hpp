@@ -8,15 +8,15 @@
 ///        draws, the live checks read and a capture stores.
 ///
 /// A plain record in the `core` tier, so the tiers that fill, show and store
-/// it need not depend on each other. Pixels are OpenCV's and recon's: pixel
+/// it need not depend on each other. Pixels are OpenCV's and sensor's: pixel
 /// centres sit at integer coordinates.
 
 #include <array>
 #include <vector>
 
 #include "volumetric_kit/calib/core/observation.hpp"
-#include "volumetric_kit/recon/camera/camera_model.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib {
 
@@ -31,7 +31,7 @@ struct DetectedMarker {
   int id = -1;  ///< Its id in its dictionary.
   /// Its corners, clockwise from the top-left of OpenCV's image of the
   /// marker (`generateImageMarker`): OpenCV's order.
-  std::array<recon::camera::Vec2d, 4> corners{};
+  std::array<sensor::camera::Vec2d, 4> corners{};
 };
 
 /// @brief What a detector found of a board in one image.
@@ -44,7 +44,7 @@ struct DetectedMarker {
 /// detection.observation.points.push_back({0, {812.4, 390.1}, 1.0});
 /// @endcode
 struct Detection {
-  recon::camera::ImageSize image_size;  ///< The image searched.
+  sensor::camera::ImageSize image_size;  ///< The image searched.
   /// The board's corners found, by id.
   Observation observation;
   std::vector<DetectedMarker> markers;  ///< The board's markers found.

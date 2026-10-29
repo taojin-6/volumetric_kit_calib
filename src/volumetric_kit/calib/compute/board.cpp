@@ -79,15 +79,15 @@ cv::Point3d Board::centre() const noexcept {
   return {0.5 * s * (target_.cols + 1), 0.5 * s * (target_.rows + 1), 0.0};
 }
 
-recon::camera::Vec3d centre_in(
-    const Board& board, const recon::camera::Mat4d& board_to_frame) noexcept {
+sensor::camera::Vec3d centre_in(
+    const Board& board, const sensor::camera::Mat4d& board_to_frame) noexcept {
   const cv::Point3d c = board.centre();
-  return recon::camera::Vec3d(board_to_frame * glm::dvec4(c.x, c.y, c.z, 1.0));
+  return sensor::camera::Vec3d(board_to_frame * glm::dvec4(c.x, c.y, c.z, 1.0));
 }
 
-recon::camera::Vec3d face_normal(
-    const recon::camera::Mat4d& board_to_frame) noexcept {
-  return -recon::camera::Vec3d(board_to_frame[2]);
+sensor::camera::Vec3d face_normal(
+    const sensor::camera::Mat4d& board_to_frame) noexcept {
+  return -sensor::camera::Vec3d(board_to_frame[2]);
 }
 
 core::Result<Board> Board::create(const Target& target) {

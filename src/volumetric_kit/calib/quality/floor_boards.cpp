@@ -16,7 +16,7 @@ namespace volumetric_kit::calib::quality {
 
 core::Result<std::vector<FloorBoard>> floor_boards(
     const compute::Board& board, const std::vector<solve::SolvedBoard>& boards,
-    const std::vector<recon::camera::Mat4d>& boards_to_world,
+    const std::vector<sensor::camera::Mat4d>& boards_to_world,
     const FloorBoardOptions& options) {
   constexpr const char* kWhat = "floor_boards";
   return compute::guarded(
@@ -38,8 +38,8 @@ core::Result<std::vector<FloorBoard>> floor_boards(
         }
         std::vector<FloorBoard> floor;
         for (std::size_t b = 0; b < boards.size(); ++b) {
-          const recon::camera::Mat4d& pose = boards_to_world[b];
-          VKC_TRY(recon::camera::check_rigid(pose).with_context(
+          const sensor::camera::Mat4d& pose = boards_to_world[b];
+          VKC_TRY(sensor::camera::check_rigid(pose).with_context(
               std::string(kWhat) + ": the board of capture " +
               std::to_string(boards[b].capture)));
           const double angle =

@@ -15,20 +15,19 @@
 #include "volumetric_kit/core/vulkan/allocator.hpp"
 #include "volumetric_kit/core/vulkan/buffer.hpp"
 #include "volumetric_kit/core/vulkan/device.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::app {
 
 namespace {
 
-namespace sensor = recon::sensor;
 using SetPtr = std::shared_ptr<const sensor::FrameSet>;
 using SnapshotPtr = std::shared_ptr<const CloudSnapshot>;
 
 }  // namespace
 
 struct CloudWorker::State {
-  explicit State(core::Device& recon_device) : device(recon_device) {}
+  explicit State(core::Device& sensor_device) : device(sensor_device) {}
 
   // The worker's thread's alone, once it runs.
   core::Device& device;
@@ -75,7 +74,7 @@ struct CloudWorker::State {
         if (!set->frames[i]) continue;
         sensor::RgbdFrame& frame = frames[i].emplace(*set->frames[i]);
         // The window poses each camera when it draws.
-        frame.color_to_world = recon::camera::Mat4d(1.0);
+        frame.color_to_world = sensor::camera::Mat4d(1.0);
         if (!with_color) {
           frame.color = {};
           frame.color_packed = nullptr;
