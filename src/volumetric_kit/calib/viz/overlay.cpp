@@ -18,7 +18,7 @@ namespace {
 constexpr float kFirstAlpha = 48.0f;
 constexpr float kFullAlpha = 160.0f;
 
-glm::vec2 to_mark(const recon::camera::Vec2d& pixel) noexcept {
+glm::vec2 to_mark(const sensor::camera::Vec2d& pixel) noexcept {
   return {static_cast<float>(pixel.x), static_cast<float>(pixel.y)};
 }
 

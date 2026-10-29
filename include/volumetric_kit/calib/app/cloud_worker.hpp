@@ -5,12 +5,12 @@
 
 /// @file cloud_worker.hpp
 /// @brief calib_rig's 3D-view worker (its T2 thread): each camera's frame of
-///        a live set prepared on recon's queue family -- undistorted depth,
+///        a live set prepared on sensor's queue family -- undistorted depth,
 ///        and colour unless the view is solid -- and handed to the window,
 ///        which draws its points in place.
 ///
 /// The live worker offers each set it polls (@ref SetSink); this worker
-/// takes the newest, every `live_every`-th, prepares it with recon's
+/// takes the newest, every `live_every`-th, prepares it with sensor's
 /// `GpuFramePrep` (one per camera) in one batch, lets the set go, and
 /// publishes a @ref CloudSnapshot: newest wins. A snapshot carries no poses:
 /// it is prepared with the colour camera at the world's origin, and the
@@ -30,8 +30,8 @@
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/base/stage_metrics.hpp"
 #include "volumetric_kit/core/vulkan/sync.hpp"
-#include "volumetric_kit/recon/sensor/array/sensor_array.hpp"
-#include "volumetric_kit/recon/sensor/utils/gpu_frame_prep.hpp"
+#include "volumetric_kit/sensor/array/sensor_array.hpp"
+#include "volumetric_kit/sensor/prep/gpu_frame_prep.hpp"
 
 namespace volumetric_kit::core {
 class Allocator;
@@ -64,13 +64,13 @@ struct CloudSnapshot {
   /// Each camera's prepared frame, in the rig's order: its depth (metres) and
   /// colour shared with the renderer's queue family, posed with the colour
   /// camera at the origin. Empty where the set had no frame from it.
-  std::vector<std::optional<recon::sensor::DeviceFrame>> frames;
+  std::vector<std::optional<sensor::DeviceFrame>> frames;
   /// Reached once the preparation's writes are complete, on the worker's
   /// timeline: a frame that draws the snapshot waits for it at
   /// `VERTEX_SHADER`, which makes the writes visible to its vertices. Already
   /// reached when the snapshot is published.
   core::TimelinePoint ready;
-  /// The preparation's times: recon's `"frame prep"` row, host and device.
+  /// The preparation's times: sensor's `"frame prep"` row, host and device.
   core::StageMetrics stages;
 };
 
@@ -105,7 +105,7 @@ struct CloudOptions {
 ///
 /// @code
 /// VKC_ASSIGN(std::unique_ptr<CloudWorker> cloud,
-///            CloudWorker::create(recon_device, recon_allocator, cameras,
+///            CloudWorker::create(sensor_device, sensor_allocator, cameras,
 ///                                {compute_family, graphics_family}));
 /// // The live worker offers it each set (LiveWorker::create's `sets`).
 /// // Each frame of the window:
@@ -116,13 +116,13 @@ struct CloudOptions {
 class CloudWorker final : public SetSink {
  public:
   /// @brief Build each camera's preparation and start the thread.
-  /// @param device     recon's device, on the compute library's queue family,
-  ///                   where the cameras' pictures are; it enabled recon's
+  /// @param device     sensor's device, on the compute library's queue family,
+  ///                   where the cameras' pictures are; it enabled sensor's
   ///                   requirements.
   /// @param allocator  Its allocator, for the prepared buffers.
   /// @param cameras    The rig's cameras; at least one.
   /// @param families   The queue families that read the prepared frames:
-  ///                   recon's and the renderer's, at most
+  ///                   sensor's and the renderer's, at most
   ///                   `core::BufferDesc::kMaxQueueFamilies`; a duplicate
   ///                   collapses, so one family leaves them EXCLUSIVE.
   /// @param options    How the live sets are sampled.
@@ -147,7 +147,7 @@ class CloudWorker final : public SetSink {
   ///        one it has not taken; let go at once while the worker is not live
   ///        or skips it (`live_every`).
   /// @param set  The set, one frame per camera, in the rig's order.
-  void offer(std::shared_ptr<const recon::sensor::FrameSet> set) override;
+  void offer(std::shared_ptr<const sensor::FrameSet> set) override;
 
   /// @brief Whether sets offered are prepared: false while the view is
   ///        frozen, hidden or minimized (@ref cloud_live), when offers are

@@ -17,7 +17,7 @@
 namespace volumetric_kit::calib::quality {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 
 core::Status refuse_option(const char* name, const char* rule) {
   return core::Status::invalid_argument(std::string("SessionChecks: options.") +

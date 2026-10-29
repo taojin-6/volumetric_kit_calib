@@ -50,7 +50,7 @@ inline app::KeptCaptures kept_captures(const Scene& scene,
   kept.board = legacy_femto_board();
   kept.cameras = scene.cameras;
   for (const solve::RigCamera& cam : scene.cameras) {
-    recon::sensor::SensorInfo info;
+    sensor::SensorInfo info;
     info.id = cam.id;
     info.model = "synthetic";
     info.color = cam.model;

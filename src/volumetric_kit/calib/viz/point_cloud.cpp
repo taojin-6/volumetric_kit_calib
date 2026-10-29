@@ -14,8 +14,9 @@ namespace {
 
 namespace pipelines = gfx::pipelines;
 
-// Whether the renderer may read `buffer` where recon left it: as a storage
-// buffer, and shared with the renderer's queue family when it is not recon's.
+// Whether the renderer may read `buffer` where sensor's frame preparation left
+// it: as a storage buffer, and shared with the renderer's queue family when it
+// is not sensor's.
 core::Status readable(const core::Buffer& buffer, const char* what,
                       const CloudStyle& style) {
   if ((buffer.usage() & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) == 0) {
@@ -45,9 +46,9 @@ gfx::camera::PinholeCamera pinhole(const Params& params) noexcept {
 }  // namespace
 
 core::Result<pipelines::DepthCloudDraw> cloud_draw(
-    const recon::sensor::DeviceFrame& frame,
-    const recon::camera::Mat4d& color_to_world,
-    const recon::camera::Mat4d& depth_to_color, const CloudStyle& style) {
+    const sensor::DeviceFrame& frame,
+    const sensor::camera::Mat4d& color_to_world,
+    const sensor::camera::Mat4d& depth_to_color, const CloudStyle& style) {
   return compute::guarded(
       "cloud_draw", [&]() -> core::Result<pipelines::DepthCloudDraw> {
         // Two unset families would look like one, and let an EXCLUSIVE
@@ -66,9 +67,9 @@ core::Result<pipelines::DepthCloudDraw> cloud_draw(
         const bool colour = style.mode != pipelines::CloudColor::Solid &&
                             frame.color != nullptr;
         if (colour) VKC_TRY(readable(*frame.color, "colour", style));
-        VKC_TRY(recon::camera::check_rigid(color_to_world)
+        VKC_TRY(sensor::camera::check_rigid(color_to_world)
                     .with_context("cloud_draw: color_to_world"));
-        VKC_TRY(recon::camera::check_rigid(depth_to_color)
+        VKC_TRY(sensor::camera::check_rigid(depth_to_color)
                     .with_context("cloud_draw: depth_to_color"));
 
         pipelines::DepthCloudDraw draw;
@@ -81,7 +82,7 @@ core::Result<pipelines::DepthCloudDraw> cloud_draw(
           draw.color.buffer = frame.color.get();
           draw.color.camera = pinhole(frame.color_camera);
           draw.color.to_world = glm::mat4(color_to_world);
-          draw.color.alpha_is_coverage = true;  // recon's coverage byte
+          draw.color.alpha_is_coverage = true;  // sensor's coverage byte
         }
         draw.mode = style.mode;
         draw.tint = style.tint;

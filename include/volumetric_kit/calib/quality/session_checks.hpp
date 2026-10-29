@@ -24,7 +24,7 @@
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::quality {
 
@@ -207,8 +207,8 @@ class VC_QUALITY_API SessionChecks {
     bool frontal = false;
     // A usable view's fate, as solve::view_fate gives it.
     solve::ViewFate fate = solve::ViewFate::NotUsable;
-    recon::camera::Mat4d board_to_camera{1.0};
-    std::vector<recon::camera::Vec2d> corners;  // usable views only
+    sensor::camera::Mat4d board_to_camera{1.0};
+    std::vector<sensor::camera::Vec2d> corners;  // usable views only
   };
   struct Capture {
     int index = 0;

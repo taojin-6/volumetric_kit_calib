@@ -34,15 +34,15 @@
 
 #include "scratch_dir.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
-#include "volumetric_kit/recon/camera/array_calibration.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
-#include "volumetric_kit/recon/io/image_io.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
+#include "volumetric_kit/sensor/io/image_io.hpp"
 
 namespace volumetric_kit::calib::capture {
 namespace {
 
 namespace fs = std::filesystem;
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 namespace vkc = volumetric_kit::core;
 using json = nlohmann::json;
 using Code = vkc::Status::Code;
@@ -112,7 +112,7 @@ camera::CameraModel depth_model(int seed) {
 }
 
 SessionCamera make_camera(const std::string& serial, int seed,
-                          recon::sensor::SyncRole role) {
+                          sensor::SyncRole role) {
   SessionCamera c;
   c.info.id = serial;
   c.info.model = "Orbbec Femto Mega";
@@ -125,7 +125,7 @@ SessionCamera make_camera(const std::string& serial, int seed,
   c.firmware = "1.2.9";
   c.ip_address = "192.168.1." + std::to_string(10 + seed);
   c.sync_mode =
-      role == recon::sensor::SyncRole::Primary ? "primary" : "secondary-synced";
+      role == sensor::SyncRole::Primary ? "primary" : "secondary-synced";
   c.depth_delay_us = 160 * seed;
   c.color_lens_model = "brown-conrady";
   c.depth_lens_model = "brown-conrady-k6";
@@ -146,8 +146,8 @@ DepthMode nfov_unbinned() {
 SessionInfo make_info(const ScratchDir& dir) {
   SessionInfo info;
   info.directory = dir / "2026-10-13_094107";
-  info.software = {"calib-sha", "recon-sha", "gfx-sha",
-                   "core-sha",  "5.0.0",     "2.10.6"};
+  info.software = {"calib-sha", "sensor-sha", "gfx-sha",
+                   "core-sha",  "5.0.0",      "2.10.6"};
   info.sync_path = dir / "sync.json";
   write(info.sync_path, "abc");
   info.reference = "CL2A141000N";
@@ -156,9 +156,8 @@ SessionInfo make_info(const ScratchDir& dir) {
   info.board.planarity_bow_m = 0.0005;
   info.square_measured = true;
   info.depth_mode = nfov_unbinned();
-  info.cameras = {
-      make_camera("CL2A14100A4", 1, recon::sensor::SyncRole::Secondary),
-      make_camera("CL2A141000N", 2, recon::sensor::SyncRole::Primary)};
+  info.cameras = {make_camera("CL2A14100A4", 1, sensor::SyncRole::Secondary),
+                  make_camera("CL2A141000N", 2, sensor::SyncRole::Primary)};
   return info;
 }
 
@@ -352,7 +351,7 @@ TEST(SessionWriter, KeepsTheCamerasJpegBytes) {
   }
 }
 
-TEST(SessionWriter, WritesDepthAsSixteenBitPngReconReads) {
+TEST(SessionWriter, WritesDepthAsSixteenBitPngSensorReads) {
   const ScratchDir dir;
   const SessionInfo info = make_info(dir);
   auto writer = make_writer(info);
@@ -363,9 +362,9 @@ TEST(SessionWriter, WritesDepthAsSixteenBitPngReconReads) {
   for (std::size_t i = 0; i < info.cameras.size(); ++i) {
     const std::string& serial = info.cameras[i].info.id;
     vkc::Result<std::vector<std::uint16_t>> depth =
-        recon::io::load_depth_u16(info.directory + "/depth/" + serial +
-                                      "/calib_depth_" + serial + "_000.png",
-                                  kDepthW, kDepthH);
+        sensor::io::load_depth_u16(info.directory + "/depth/" + serial +
+                                       "/calib_depth_" + serial + "_000.png",
+                                   kDepthW, kDepthH);
     ASSERT_TRUE(depth.ok()) << depth.status().message();
     EXPECT_EQ(*depth, *job.cameras[i].depth);
   }
@@ -392,9 +391,9 @@ TEST(SessionWriter, LetsTheSharedDepthGoOnceWritten) {
   EXPECT_EQ(kept.use_count(), 1);
   const std::string& serial = info.cameras[1].info.id;
   vkc::Result<std::vector<std::uint16_t>> depth =
-      recon::io::load_depth_u16(info.directory + "/depth/" + serial +
-                                    "/calib_depth_" + serial + "_000.png",
-                                kDepthW, kDepthH);
+      sensor::io::load_depth_u16(info.directory + "/depth/" + serial +
+                                     "/calib_depth_" + serial + "_000.png",
+                                 kDepthW, kDepthH);
   ASSERT_TRUE(depth.ok()) << depth.status().message();
   EXPECT_EQ(*depth, *kept);
 }
@@ -466,7 +465,7 @@ TEST(SessionWriter, SessionJsonHoldsWhatWasGivenExactly) {
   EXPECT_EQ(doc["format"], "volumetric_kit_calib.session");
   EXPECT_EQ(doc["version"], 1);
   EXPECT_EQ(doc["software"],
-            json::parse(R"({"calib": "calib-sha", "recon": "recon-sha",
+            json::parse(R"({"calib": "calib-sha", "sensor": "sensor-sha",
                             "gfx": "gfx-sha", "core": "core-sha",
                             "opencv": "5.0.0", "orbbec_sdk": "2.10.6"})"));
   EXPECT_EQ(doc["rig"]["sync_file"], info.sync_path);

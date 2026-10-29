@@ -2,9 +2,10 @@
 // Copyright (c) 2026 Tao Jin
 
 // 01_project_point: the smallest end-to-end use of calib's camera model, which
-// is recon's. Map the scenario's camera into a recon CameraModel, check it,
-// and project a camera-space point to a pixel through its lens. Demonstrates
-// the exception-free Result/Status API and its VKC_TRY propagation.
+// is sensor's. Map the scenario's camera into a sensor::camera::CameraModel,
+// check it, and project a camera-space point to a pixel through its lens.
+// Demonstrates the exception-free Result/Status API and its VKC_TRY
+// propagation.
 
 #include <cmath>
 #include <cstdint>
@@ -13,13 +14,13 @@
 
 #include "volumetric_kit/calib/version.hpp"
 #include "volumetric_kit/core/config/config.hpp"
-#include "volumetric_kit/recon/camera/camera_model.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
-#include "volumetric_kit/recon/camera/projection.hpp"
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/projection.hpp"
 
 namespace vc = volumetric_kit::calib;
 namespace vkc = volumetric_kit::core;
-namespace camera = volumetric_kit::recon::camera;
+namespace camera = volumetric_kit::sensor::camera;
 
 namespace {
 

@@ -52,7 +52,7 @@
 namespace volumetric_kit::calib::depth {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using camera::Mat3d;
 using camera::Mat4d;
 using camera::Vec3d;

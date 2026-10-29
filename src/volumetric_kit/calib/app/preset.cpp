@@ -13,8 +13,7 @@ namespace volumetric_kit::calib::app {
 
 namespace {
 
-namespace camera = recon::camera;
-namespace sensor = recon::sensor;
+namespace camera = sensor::camera;
 
 std::string size_text(const camera::ImageSize& size) {
   return std::to_string(size.width) + "x" + std::to_string(size.height);
@@ -25,7 +24,7 @@ bool same_size(const camera::ImageSize& a, const camera::ImageSize& b) {
 }
 
 // The Femto Mega's depth modes, as its maker names and ranges them.
-// TODO: take the modes from recon's Orbbec driver once it names them.
+// TODO: take the modes from sensor's Orbbec driver once it names them.
 struct NamedDepthMode {
   camera::ImageSize size;
   const char* name;

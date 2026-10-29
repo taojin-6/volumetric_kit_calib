@@ -5,7 +5,7 @@
 
 /// @file results.hpp
 /// @brief The files a Calibrate press leaves in its results directory, as
-///        text: recon's calibration file of the solution, the report and the
+///        text: sensor's calibration file of the solution, the report and the
 ///        residuals.
 ///
 /// The brain formats them and writes nothing: the application creates the
@@ -106,7 +106,7 @@
 
 namespace volumetric_kit::calib::quality {
 
-/// The results directory's calibration file: recon's, posed.
+/// The results directory's calibration file: sensor's, posed.
 inline constexpr const char* kArrayCalibrationFile = "array_calibration.json";
 inline constexpr const char* kReportFile = "report.json";  ///< The report.
 /// Every corner's residual.
@@ -121,7 +121,7 @@ inline constexpr const char* kResidualsFile = "residuals.csv";
 ///                          core::WriteMode::CreateNew));
 /// @endcode
 struct ResultFiles {
-  /// @ref kArrayCalibrationFile: recon's `format_array_calibration` of the
+  /// @ref kArrayCalibrationFile: sensor's `format_array_calibration` of the
   /// solution's calibration in the world (`solve::anchor_rig`), whose `pose`
   /// is each camera's T_cw there and whose `world` is the tag or the
   /// reference camera.
@@ -162,7 +162,7 @@ struct ResultWorld {
 ///         id, or a @p solution, @p metrics, @p depth or tag world that names
 ///         a camera the rig does not have or has another camera count, or a
 ///         calibration whose sensors are not the cameras (naming what);
-///         what `solve::anchor_rig` refuses; recon's error for a calibration
+///         what `solve::anchor_rig` refuses; sensor's error for a calibration
 ///         its writer refuses; or `OutOfMemory`. Each message starts
 ///         `format_results: `.
 VC_QUALITY_API core::Result<ResultFiles> format_results(

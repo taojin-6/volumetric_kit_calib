@@ -18,7 +18,7 @@ if(NOT result EQUAL 0 OR NOT output MATCHES "35\\.000, 120\\.000")
   message(
     FATAL_ERROR "Configured projection failed: ${result}: ${output}${error}")
 endif()
-# Each coefficient lands in its own place in recon's lens: OpenCV's order, k1,
+# Each coefficient lands in its own place in sensor's lens: OpenCV's order, k1,
 # k2, p1, p2, k3 (cv::projectPoints gives this pixel).
 file(
   WRITE "${WORK_DIR}/distorted.json"

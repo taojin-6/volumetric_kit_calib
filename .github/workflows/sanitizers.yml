@@ -7,8 +7,9 @@ name: sanitizers
 # app's (no GLFW or Orbbec SDK here; the app's threads run under
 # ThreadSanitizer on a macOS leg, _build.yml): the OpenCV tiers on OpenCV 5
 # from .github/actions/opencv, itself not sanitized, and the rig tiers
-# (VC_WITH_RIG), whose session writer runs a thread of its own; they take all
-# of recon and gfx, so the Vulkan SDK's headers, loader and shader compiler.
+# (VC_WITH_RIG), whose session writer runs a thread of its own; they take
+# sensor's tiers and gfx, so the Vulkan SDK's headers, loader and shader
+# compiler.
 # The depth and viz tiers' GPU tests run on lavapipe, Mesa's software Vulkan
 # driver. Invoked by ci.yml, which owns the push / pull_request triggers and
 # the concurrency group.
@@ -18,7 +19,7 @@ on:
 jobs:
   asan-ubsan-lsan:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60 # recon and gfx build too, sanitized; OpenCV on a miss
+    timeout-minutes: 60 # sensor and gfx build too, sanitized; OpenCV on a miss
     env:
       ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
@@ -52,7 +53,7 @@ jobs:
       # Cache the FetchContent dependency tree, as _build.yml does. Here the
       # dependencies are compiled with the sanitizers too (VC_SANITIZE sets its
       # flags globally), so besides the pins the key carries everything that
-      # changes their objects, as recon's sanitizer job keys it: the compiler,
+      # changes their objects, as sensor's sanitizer job keys it: the compiler,
       # the runner image, this workflow and vc_sanitizers.cmake, and the
       # workspace path, which FetchContent bakes in. No restore-keys: a stale
       # match would link objects built for something else.

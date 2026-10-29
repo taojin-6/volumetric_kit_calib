@@ -19,9 +19,9 @@ namespace volumetric_kit::calib::viz {
 namespace {
 
 namespace pipelines = gfx::pipelines;
-using recon::camera::Mat3d;
-using recon::camera::Mat4d;
-using recon::camera::Vec3d;
+using sensor::camera::Mat3d;
+using sensor::camera::Mat4d;
+using sensor::camera::Vec3d;
 using Lines = std::vector<pipelines::ColorVertex>;
 
 // How far the view aims ahead of the cameras, and how far back and how high
@@ -70,7 +70,7 @@ core::Status append(Lines& out, core::Result<Lines> lines,
 
 }  // namespace
 
-core::Result<Lines> frustum_lines(const recon::camera::CameraModel& camera,
+core::Result<Lines> frustum_lines(const sensor::camera::CameraModel& camera,
                                   const Mat4d& to_world, double depth_m,
                                   std::uint32_t rgba) {
   return compute::guarded("frustum_lines", [&]() -> core::Result<Lines> {
@@ -78,7 +78,8 @@ core::Result<Lines> frustum_lines(const recon::camera::CameraModel& camera,
       return core::Status::invalid_argument(
           "frustum_lines: the depth must be positive and finite");
     }
-    VKC_TRY(recon::camera::check_rigid(to_world).with_context("frustum_lines"));
+    VKC_TRY(
+        sensor::camera::check_rigid(to_world).with_context("frustum_lines"));
     VKC_ASSIGN(const compute::CvCamera cv, compute::cv_camera(camera));
     // The image's outer edges: half a pixel past the corner pixels' centres.
     const double right = static_cast<double>(camera.size.width) - 0.5;
@@ -131,8 +132,8 @@ core::Result<Lines> board_lines(const compute::Board& board,
                                 const Mat4d& board_to_world,
                                 std::uint32_t rgba) {
   return compute::guarded("board_lines", [&]() -> core::Result<Lines> {
-    VKC_TRY(
-        recon::camera::check_rigid(board_to_world).with_context("board_lines"));
+    VKC_TRY(sensor::camera::check_rigid(board_to_world)
+                .with_context("board_lines"));
     // The chessboard spans twice its centre, from the frame's origin.
     const cv::Point3d middle = board.centre();
     const double w = 2.0 * middle.x;
@@ -213,7 +214,7 @@ core::Result<Lines> scene_lines(const std::vector<SceneCamera>& cameras,
 }
 
 core::Result<std::vector<pipelines::DepthCloudDraw>> cloud_draws(
-    const std::vector<std::optional<recon::sensor::DeviceFrame>>& frames,
+    const std::vector<std::optional<sensor::DeviceFrame>>& frames,
     const std::vector<SceneCamera>& cameras, const CloudStyle& style) {
   return compute::guarded(
       "cloud_draws",
@@ -252,7 +253,7 @@ core::Result<Mat3d> display_rotation(const std::vector<Mat4d>& color_to_world,
     Vec3d forwards(0.0);
     for (const Mat4d& pose : color_to_world) {
       VKC_TRY(
-          recon::camera::check_rigid(pose).with_context("display_rotation"));
+          sensor::camera::check_rigid(pose).with_context("display_rotation"));
       const Mat3d turn(pose);
       ups -= turn[1];  // the camera's -y, its image's up, in the world
       forwards += turn[2];

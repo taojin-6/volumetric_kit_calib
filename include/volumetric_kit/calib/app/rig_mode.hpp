@@ -207,6 +207,6 @@ bool frame_on_result(const std::optional<RigOrigin>& framed,
 /// @code
 /// VKC_TRY(view.frame(poses, world_up(origin)));
 /// @endcode
-std::optional<recon::camera::Vec3d> world_up(const RigOrigin& origin) noexcept;
+std::optional<sensor::camera::Vec3d> world_up(const RigOrigin& origin) noexcept;
 
 }  // namespace volumetric_kit::calib::app

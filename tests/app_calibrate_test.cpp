@@ -41,14 +41,14 @@
 #include "synthetic_scene.hpp"
 #include "volumetric_kit/calib/capture/session_writer.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
-#include "volumetric_kit/recon/camera/array_calibration.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::app {
 namespace {
 
 namespace fs = std::filesystem;
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using json = nlohmann::json;
 using Code = core::Status::Code;
 using SteadyClock = std::chrono::steady_clock;

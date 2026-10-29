@@ -13,7 +13,7 @@
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/core/observation.hpp"
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::solve::detail {
 
@@ -22,7 +22,7 @@ namespace volumetric_kit::calib::solve::detail {
 using Pose = cv::Vec6d;
 
 // `t` as a Pose.
-inline Pose pose_of(const recon::camera::RodriguesTransform& t) noexcept {
+inline Pose pose_of(const sensor::camera::RodriguesTransform& t) noexcept {
   return {t.rvec.x, t.rvec.y, t.rvec.z, t.tvec.x, t.tvec.y, t.tvec.z};
 }
 
@@ -62,9 +62,8 @@ void project(const compute::CvCamera& camera, const Pose& world_to_camera,
 // the lens, as `project` projects. A corner not in front of the camera
 // (z <= 0, or not finite) is infinity. `view`'s ids must be the board's
 // (compute::usable_for_pose). Throws what OpenCV throws.
-std::vector<double> squared_errors(const compute::CvCamera& camera,
-                                   const compute::Board& board,
-                                   const Observation& view,
-                                   const recon::camera::Mat4d& board_to_camera);
+std::vector<double> squared_errors(
+    const compute::CvCamera& camera, const compute::Board& board,
+    const Observation& view, const sensor::camera::Mat4d& board_to_camera);
 
 }  // namespace volumetric_kit::calib::solve::detail

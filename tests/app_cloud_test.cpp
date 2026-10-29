@@ -10,7 +10,7 @@
 // two queue families, under synchronization validation: a known point,
 // prepared on the compute family and drawn on the graphics family through
 // gfx's depth-cloud pipeline, the frame waiting for the preparation's
-// semaphore, lands on its pixel with its colour by recon's rule, the snapshot
+// semaphore, lands on its pixel with its colour by sensor's rule, the snapshot
 // held until its frame retires; a frozen snapshot redraws at a new pose with
 // no second preparation; a frame EXCLUSIVE to the compute family is refused,
 // and with no camera placed nothing is drawn, neither holding anything. When
@@ -43,14 +43,13 @@
 #include "volumetric_kit/core/vulkan/vk_result.hpp"
 #include "volumetric_kit/gfx/core/device_requirements.hpp"
 #include "volumetric_kit/gfx/core/offscreen_target.hpp"
-#include "volumetric_kit/recon/core/device_requirements.hpp"
+#include "volumetric_kit/sensor/frame/device_requirements.hpp"
 
 namespace volumetric_kit::calib::app {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 namespace pipelines = gfx::pipelines;
-namespace sensor = recon::sensor;
 using camera::Mat4d;
 using camera::Vec3d;
 using Code = core::Status::Code;
@@ -193,7 +192,7 @@ CloudOptions every_set() {
 class AppCloud : public core::test::VulkanDeviceTest {
  protected:
   core::DeviceRequirements requirements() const override {
-    return recon::device_requirements();
+    return sensor::device_requirements();
   }
 
   // A worker preparing every set offered, unless `options` say otherwise.
@@ -232,8 +231,8 @@ TEST_F(AppCloud, PreparesEveryCameraAtTheOriginForAnyNumberOfCameras) {
       EXPECT_EQ(f.depth_camera.fx, 14.0f);
       EXPECT_EQ(f.depth_camera.width, kDepthW);
       EXPECT_EQ(f.color_camera.cy, 7.2f);
-      EXPECT_EQ(f.color_camera.cam_to_world, recon::Mat4f(1.0f));
-      EXPECT_EQ(f.depth_camera.cam_to_world, recon::Mat4f(depth_to_color()));
+      EXPECT_EQ(f.color_camera.cam_to_world, sensor::Mat4f(1.0f));
+      EXPECT_EQ(f.depth_camera.cam_to_world, sensor::Mat4f(depth_to_color()));
     }
     ASSERT_NE(s->ready.semaphore, nullptr);
     EXPECT_GT(s->ready.value, 0u);  // signalled, not the semaphore's start
@@ -476,7 +475,7 @@ Vec3d the_point() {
 class AppCloudAcrossFamilies : public core::test::SharedDeviceTest {
  protected:
   core::DeviceRequirements compute_requirements() const override {
-    return recon::device_requirements();
+    return sensor::device_requirements();
   }
   core::DeviceRequirements graphics_requirements() const override {
     return gfx::device_requirements();
@@ -659,7 +658,7 @@ class AppCloudAcrossFamilies : public core::test::SharedDeviceTest {
 
 // A synthetic frame prepared on the compute family and drawn on the graphics
 // family in place: its one point lands on its depth pixel through a view of
-// its own depth camera, in the colour of the colour pixel recon's rule gives
+// its own depth camera, in the colour of the colour pixel sensor's rule gives
 // it -- the nearest centre, through the factory extrinsic. The frame waits at
 // the vertex stage for the value the preparation signalled, which
 // record_cloud returns, as gfx's contract asks of a producer on another
@@ -806,7 +805,7 @@ TEST(AppCloudLive, PreparesOnlyWhileTheViewIsLiveAndSeen) {
 // --- The device -------------------------------------------------------------
 
 // calib_rig's renderer asks for wide points, which every point it draws may
-// use, and its compute side for recon's and the depth checks' needs.
+// use, and its compute side for sensor's and the depth checks' needs.
 TEST(AppCloudDevice, TheRigsDeviceAsksForLargePoints) {
   const core::Result<RigRequirements> wide = rig_requirements();
   ASSERT_TRUE(wide.ok()) << wide.status().message();

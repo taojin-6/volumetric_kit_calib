@@ -144,7 +144,7 @@ void project(const compute::CvCamera& camera, const Pose& world_to_camera,
 
 std::vector<double> squared_errors(
     const compute::CvCamera& camera, const compute::Board& board,
-    const Observation& view, const recon::camera::Mat4d& board_to_camera) {
+    const Observation& view, const sensor::camera::Mat4d& board_to_camera) {
   const std::size_t n = view.points.size();
   std::vector<cv::Point3d> in_camera;
   std::vector<cv::Point2d> detected;

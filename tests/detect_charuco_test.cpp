@@ -33,7 +33,7 @@
 namespace volumetric_kit::calib::detect {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using Code = core::Status::Code;
 
 using test::board_facing_camera;

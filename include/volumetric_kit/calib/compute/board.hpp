@@ -26,7 +26,7 @@
 #include "volumetric_kit/calib/compute/export.hpp"
 #include "volumetric_kit/calib/core/target.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::compute {
 
@@ -104,8 +104,8 @@ class VC_COMPUTE_API Board {
 /// @code
 /// const double distance_m = glm::length(centre_in(board, board_to_camera));
 /// @endcode
-VC_COMPUTE_API recon::camera::Vec3d centre_in(
-    const Board& board, const recon::camera::Mat4d& board_to_frame) noexcept;
+VC_COMPUTE_API sensor::camera::Vec3d centre_in(
+    const Board& board, const sensor::camera::Mat4d& board_to_frame) noexcept;
 
 /// @brief Which way a pose of the board turns its printed face: minus the
 ///        board's z, which points into the board.
@@ -116,7 +116,7 @@ VC_COMPUTE_API recon::camera::Vec3d centre_in(
 /// const double deg = angle_deg(face_normal(a.board_to_camera),
 ///                              face_normal(b.board_to_camera));
 /// @endcode
-VC_COMPUTE_API recon::camera::Vec3d face_normal(
-    const recon::camera::Mat4d& board_to_frame) noexcept;
+VC_COMPUTE_API sensor::camera::Vec3d face_normal(
+    const sensor::camera::Mat4d& board_to_frame) noexcept;
 
 }  // namespace volumetric_kit::calib::compute

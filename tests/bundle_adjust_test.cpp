@@ -4,7 +4,7 @@
 // The bundle adjustment on the synthetic rig: accuracy over seeds, outliers,
 // the Jacobian at rotations near 0 and pi, rotations brought within pi, the
 // covariance against Monte Carlo and the dense inverse, the sensitivity
-// against a re-solve, the solution without them, the reference, recon's
+// against a re-solve, the solution without them, the reference, sensor's
 // calibration, failures, OpenCV's calibrateMultiview, order, and each option.
 
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
@@ -33,7 +33,7 @@
 namespace volumetric_kit::calib::solve {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using Code = core::Status::Code;
 using test::angle_deg;
 using test::centre_of;
@@ -358,7 +358,7 @@ TEST(BundleAdjust, DropsAViewItsOutliersLeaveUnusable) {
 }
 
 // The analytic blocks against central differences of the residuals, and the
-// depths against recon's matrices, with the camera's and the board's
+// depths against sensor's matrices, with the camera's and the board's
 // rotations 1e-7, 0.8 and pi - 1e-6 rad.
 TEST(ViewResiduals, JacobiansMatchCentralDifferences) {
   const compute::Board board = test::femto_board();
@@ -673,9 +673,9 @@ TEST(BundleAdjust, TheReferenceIsExactlyTheIdentity) {
   EXPECT_LT(m, 0.001);
 }
 
-// The solution as recon's calibration: valid, the poses' inverses, the
-// lenses as given; and it reads back through recon's writer and reader.
-TEST(BundleAdjust, ItsCalibrationIsRecons) {
+// The solution as sensor's calibration: valid, the poses' inverses, the
+// lenses as given; and it reads back through sensor's writer and reader.
+TEST(BundleAdjust, ItsCalibrationIsSensors) {
   const Scene scene = make_scene(20);
   const RigSolution solution = solved(scene, first_rig(scene));
   const camera::ArrayCalibration& calibration = solution.calibration;

@@ -19,7 +19,7 @@ namespace {
 
 using Code = core::Status::Code;
 using test::expect_oom_when_reporting;
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 
 TEST(ComputeOom, BoardTargetValidation) {
   Target target = legacy_femto_board();

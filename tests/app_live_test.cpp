@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Tao Jin
 
 // calib_rig's live worker on a device: fake cameras push synthetic NV12 board
-// pictures in device images, with depth and a JPEG, through recon's sensor
+// pictures in device images, with depth and a JPEG, through sensor's
 // array; the worker reads each set's luma back, finds the board and checks
 // each view, and publishes a snapshot whose corners sit within 0.1 px of where
 // the board projects, for 1, 3 and 4 cameras. Then a capture: the request the
@@ -45,8 +45,7 @@
 namespace volumetric_kit::calib::app {
 namespace {
 
-namespace camera = recon::camera;
-namespace sensor = recon::sensor;
+namespace camera = sensor::camera;
 using Code = core::Status::Code;
 
 constexpr std::uint64_t kPeriodNs = 40'000'000;  // 25 fps
@@ -507,7 +506,7 @@ TEST_F(AppLive, AThrowingSensorEndsTheThreadWithAStatus) {
   EXPECT_FALSE(live->arm());  // nothing left to take a capture
 }
 
-// A camera disconnected fails every poll after it, as recon's Orbbec driver
+// A camera disconnected fails every poll after it, as sensor's Orbbec driver
 // does: the thread ends, saying why once, with the rig stopped.
 TEST_F(AppLive, ACameraDisconnectedEndsTheThread) {
   make_rig(3);

@@ -14,8 +14,6 @@
 
 namespace volumetric_kit::calib::app {
 
-namespace sensor = recon::sensor;
-
 core::Status record_snapshot(
     viz::RigMosaic& mosaic, gfx::RetireQueue& retire, VkCommandBuffer cmd,
     const std::shared_ptr<const LiveSnapshot>& snapshot,
@@ -141,9 +139,9 @@ core::Result<std::optional<core::TimelinePoint>> record_cloud(
         VKC_ASSIGN(const std::vector<gfx::pipelines::DepthCloudDraw> draws,
                    viz::cloud_draws(snapshot->frames, cameras, style));
         if (draws.empty()) return std::optional<core::TimelinePoint>();
-        // Held, not freed: recon reuses a prepared buffer only once no frame
-        // holds it, after the GPU is done with the frame that drew it. Held
-        // before the draws are recorded, so an allocation failure cannot
+        // Held, not freed: sensor's prep reuses a prepared buffer only once no
+        // frame holds it, after the GPU is done with the frame that drew it.
+        // Held before the draws are recorded, so an allocation failure cannot
         // leave them recorded with nothing holding their buffers.
         retire.push(frame_number, [held = snapshot] { (void)held; });
         VKC_TRY(
@@ -165,14 +163,14 @@ viz::SceneCamera scene_camera(const sensor::SensorInfo& info, std::size_t index,
   camera.color = *info.color;
   camera.depth = info.depth;
   camera.depth_to_color = info.depth_to_color;
-  if (reference) camera.color_to_world = recon::camera::Mat4d(1.0);
+  if (reference) camera.color_to_world = sensor::camera::Mat4d(1.0);
   camera.tint = gfx::pipelines::categorical_rgba8(index);
   return camera;
 }
 
 core::Status placed_cameras(
     std::vector<viz::SceneCamera>& cameras,
-    const std::vector<recon::camera::Mat4d>& color_to_world) {
+    const std::vector<sensor::camera::Mat4d>& color_to_world) {
   return compute::guarded("placed_cameras", [&]() -> core::Status {
     if (color_to_world.size() != cameras.size()) {
       return core::Status::invalid_argument(

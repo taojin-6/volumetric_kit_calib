@@ -31,9 +31,9 @@
 #include "volumetric_kit/calib/solve/export.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/camera/array_calibration.hpp"
-#include "volumetric_kit/recon/camera/camera_model.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::solve {
 
@@ -50,7 +50,7 @@ struct TagView {
   std::string camera;        ///< Its camera's id, as @ref RigCamera::id.
   std::int64_t capture = 0;  ///< Its capture, as `Observation::frame_id`.
   /// The image the tag was found in: its camera's lens's size.
-  recon::camera::ImageSize image_size;
+  sensor::camera::ImageSize image_size;
   /// The tag's id and corners in the image's pixels, as `detect::detect_tag`
   /// finds them.
   DetectedMarker marker;
@@ -172,9 +172,9 @@ struct TagCamera {
 struct TagWorld {
   /// The reference camera's colour frame, the solution's world, to the
   /// tag's.
-  recon::camera::Mat4d reference_to_world{1.0};
+  sensor::camera::Mat4d reference_to_world{1.0};
   /// The corners placed, in the tag's world, in @ref DetectedMarker's order.
-  std::array<recon::camera::Vec3d, 4> corners_m{};
+  std::array<sensor::camera::Vec3d, 4> corners_m{};
   /// The edges (metres): corner k to corner k + 1, the last back to 0.
   std::array<double, 4> edges_m{};
   /// The diagonals (metres): corner 0 to 2, and 1 to 3.
@@ -201,7 +201,7 @@ struct TagWorld {
 /// @code
 /// VKC_ASSIGN(const WorldOrigin origin,
 ///            origin_tag_frame(cameras, solution, views, kOriginTag));
-/// const recon::camera::Mat4d w = origin.reference_to_world();
+/// const sensor::camera::Mat4d w = origin.reference_to_world();
 /// @endcode
 struct WorldOrigin {
   /// The tag sought, as @ref origin_tag_frame took it; its dictionary `None`
@@ -219,8 +219,8 @@ struct WorldOrigin {
 
   /// @return The reference camera's frame to the world: @ref tag's
   ///         `reference_to_world`, or exactly the identity without one.
-  recon::camera::Mat4d reference_to_world() const noexcept {
-    return tag ? tag->reference_to_world : recon::camera::Mat4d(1.0);
+  sensor::camera::Mat4d reference_to_world() const noexcept {
+    return tag ? tag->reference_to_world : sensor::camera::Mat4d(1.0);
   }
 };
 
@@ -287,19 +287,19 @@ VC_SOLVE_API core::Result<WorldOrigin> origin_tag_frame(
 ///
 /// @code
 /// VKC_ASSIGN(const AnchoredRig rig, anchor_rig(solution, origin));
-/// VKC_TRY(recon::camera::write_array_calibration(
+/// VKC_TRY(sensor::camera::write_array_calibration(
 ///     path, rig.calibration, core::WriteMode::CreateNew));
 /// @endcode
 struct AnchoredRig {
   /// The solution's calibration in the world: each sensor's
   /// `color_to_world` `W C`, W the origin's `reference_to_world`.
-  recon::camera::ArrayCalibration calibration;
+  sensor::camera::ArrayCalibration calibration;
   /// Each camera's colour frame to the world, `W C`, in the rig's order: the
   /// inverse of its T_cw, so its T_cw in the world is `T_cw W^-1`.
-  std::vector<recon::camera::Mat4d> color_to_world;
+  std::vector<sensor::camera::Mat4d> color_to_world;
   /// Each solved board's T_wb in the world, `W T_wb`, in
   /// @ref RigSolution::boards' order.
-  std::vector<recon::camera::Mat4d> boards_to_world;
+  std::vector<sensor::camera::Mat4d> boards_to_world;
 };
 
 /// @brief @p solution's outputs moved into @p origin's world, applied last:
@@ -308,7 +308,7 @@ struct AnchoredRig {
 /// Every camera sees every point where it did: `T_cw W^-1` of `W X` is
 /// `T_cw X`. Without a tag world W is the identity and the outputs are the
 /// solution's own, its calibration's world the reference's id. With one the
-/// calibration's world is the tag, recon's `world.apriltag`: the
+/// calibration's world is the tag, sensor's `world.apriltag`: the
 /// @ref apriltag_family of the tag sought's dictionary, its id, and its
 /// printed edge as `size_m`.
 /// @param solution  @ref bundle_adjust's solution.

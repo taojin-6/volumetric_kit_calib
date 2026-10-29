@@ -51,14 +51,13 @@
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/detect/charuco.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
-#include "volumetric_kit/recon/io/image_io.hpp"
+#include "volumetric_kit/sensor/io/image_io.hpp"
 
 namespace volumetric_kit::calib::app {
 namespace {
 
 namespace fs = std::filesystem;
-namespace camera = recon::camera;
-namespace sensor = recon::sensor;
+namespace camera = sensor::camera;
 using json = nlohmann::json;
 using Code = core::Status::Code;
 
@@ -365,7 +364,7 @@ TEST(AppCapture, WritesEachCaptureDetectedAtFullResolution) {
         read(dir / "images" / serial / ("calib_img_" + serial + "_000.jpg")),
         std::string(jpeg.begin(), jpeg.end()));
     const core::Result<std::vector<std::uint16_t>> depth =
-        recon::io::load_depth_u16(
+        sensor::io::load_depth_u16(
             (dir / "depth" / serial / ("calib_depth_" + serial + "_000.png"))
                 .string(),
             640, 576);
@@ -703,7 +702,7 @@ TEST(AppCapture, KeepsEachWrittenCaptureForCalibrate) {
       EXPECT_EQ(capture.depth[i]->data(), buffers[k][i]);
       EXPECT_TRUE(*capture.depth[i] == depth_of(i));
       const core::Result<std::vector<std::uint16_t>> png =
-          recon::io::load_depth_u16(
+          sensor::io::load_depth_u16(
               (dir / "depth" / serial /
                ("calib_depth_" + serial + "_00" + std::to_string(k) + ".png"))
                   .string(),
@@ -1234,7 +1233,7 @@ TEST(AppCapture, RecordsTheSoftwareItWasBuiltFrom) {
   EXPECT_EQ(software.opencv, CV_VERSION);
   const std::regex commit("([0-9a-f]{40}(-dirty)?)?");
   for (const std::string* sha :
-       {&software.calib, &software.core, &software.recon, &software.gfx}) {
+       {&software.calib, &software.core, &software.sensor, &software.gfx}) {
     EXPECT_TRUE(std::regex_match(*sha, commit)) << *sha;
   }
   if (const char* expected = std::getenv("VC_EXPECT_CALIB_COMMIT")) {

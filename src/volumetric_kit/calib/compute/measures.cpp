@@ -37,19 +37,19 @@ double quantile(std::vector<double> values, double q) noexcept {
   return below + fraction * (values[hi] - below);
 }
 
-double angle_deg(const recon::camera::Vec3d& a,
-                 const recon::camera::Vec3d& b) noexcept {
+double angle_deg(const sensor::camera::Vec3d& a,
+                 const sensor::camera::Vec3d& b) noexcept {
   return glm::degrees(
       std::atan2(glm::length(glm::cross(a, b)), glm::dot(a, b)));
 }
 
-double rotation_angle_deg(const recon::camera::Mat3d& a,
-                          const recon::camera::Mat3d& b) noexcept {
+double rotation_angle_deg(const sensor::camera::Mat3d& a,
+                          const sensor::camera::Mat3d& b) noexcept {
   return glm::degrees(glm::length(
-      recon::camera::rodrigues_from_rotation(glm::transpose(a) * b)));
+      sensor::camera::rodrigues_from_rotation(glm::transpose(a) * b)));
 }
 
-bool finite(const recon::camera::RodriguesTransform& transform) noexcept {
+bool finite(const sensor::camera::RodriguesTransform& transform) noexcept {
   for (int i = 0; i < 3; ++i) {
     if (!std::isfinite(transform.rvec[i]) ||
         !std::isfinite(transform.tvec[i])) {

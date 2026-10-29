@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- build: **calib builds on volumetric_kit_sensor, not recon** (BREAKING for
+  consumers; DECISIONS.md, 2026-10-29). recon's camera and sensor tiers are
+  now [volumetric_kit_sensor](https://github.com/taojin-6/volumetric_kit_sensor)
+  (recon #311 and #312), which holds all calib took from recon; calib fetches
+  neither recon nor grid. It pins core main at #70's merge (2120e62, 0.30.0)
+  and sensor 0.1.0 (436840c), keeps gfx at f147e00, and requires core 0.29.0
+  (sensor's floor; was 0.25.0) and sensor 0.1.0 with each tier it links
+  (`vkc_require_sibling`). Every name calib takes is sensor's, as sensor's
+  CHANGELOG.md 0.1.0 maps it: a program built on calib includes
+  `volumetric_kit/sensor/…`, writes
+  `volumetric_kit::sensor::camera::CameraModel` and
+  `volumetric_kit::sensor::SensorInfo`, links `volumetric_kit::sensor_<tier>`,
+  and sets `VS_CAMERA_ONLY`, `VS_WITH_ORBBEC`, `VS_WITH_FFMPEG` and
+  `VS_WITH_CUDA` where it set the `VR_` ones. `calib_depth`'s kernels include sensor's `pinhole.glsl` through
+  `INCLUDE_TARGETS volumetric_kit::sensor_frame`, and its
+  `VC_SHADER_INCLUDE_DIRS` property is gone. A session's `software` names
+  sensor's commit (`Software::sensor`) where it named recon's; otherwise the
+  rig's device requirements, kernels and files are unchanged.
+- CI: the Orbbec SDK comes from sensor's action at the sensor pin, and the
+  core's actions are taken at the core pin. `.pre-commit-config.yaml` has no
+  pre-commit.ci block: no such app runs, and its monthly autoupdate would bump
+  the hooks, which are bumped by hand.
+
 ### Fixed
 
 - `Results.TheReportHasItsSchema` gives the solution a time of six decimals

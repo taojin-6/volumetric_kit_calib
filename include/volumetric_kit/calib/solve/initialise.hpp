@@ -30,8 +30,8 @@
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
 #include "volumetric_kit/calib/solve/view_pose.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/camera/camera_model.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::solve {
 
@@ -40,13 +40,13 @@ namespace volumetric_kit::calib::solve {
 ///
 /// @code
 /// RigCamera cam;
-/// cam.id = info.id;        // a recon SensorInfo: the serial
+/// cam.id = info.id;        // a sensor::SensorInfo: the serial
 /// cam.model = *info.color;  // the factory model at the streamed mode
 /// @endcode
 struct RigCamera {
   std::string id;  ///< As `Observation::camera_id`: unique, not empty.
   /// The lens, at the size of the images its views were detected in.
-  recon::camera::CameraModel model;
+  sensor::camera::CameraModel model;
 };
 
 /// @brief Refuse a rig's camera ids that are none, empty or repeated.
@@ -168,13 +168,13 @@ struct ViewRecord {
 ///
 /// @code
 /// for (const BoardPose& board : rig.boards) {
-///   const recon::camera::Mat4d board_to_camera =
+///   const sensor::camera::Mat4d board_to_camera =
 ///       rig.world_to_camera[c] * board.board_to_world;  // T_cb in camera c
 /// }
 /// @endcode
 struct BoardPose {
   std::int64_t capture = 0;  ///< The capture, as `Observation::frame_id`.
-  recon::camera::Mat4d board_to_world{1.0};  ///< T_wb.
+  sensor::camera::Mat4d board_to_world{1.0};  ///< T_wb.
 };
 
 /// @brief A link of the tree (@ref TreeLink) as @ref initialise placed its
@@ -196,13 +196,13 @@ struct PlacedLink : TreeLink {
 /// @code
 /// VKC_ASSIGN(const InitialRig rig,
 ///            initialise(cameras, board, observations, primary));
-/// const recon::camera::Mat4d& world_to_camera = rig.world_to_camera[1];
+/// const sensor::camera::Mat4d& world_to_camera = rig.world_to_camera[1];
 /// @endcode
 struct InitialRig {
   std::size_t reference = 0;  ///< The camera the world is.
   /// T_cw for each camera, in the rig's order; the reference's is exactly
   /// the identity.
-  std::vector<recon::camera::Mat4d> world_to_camera;
+  std::vector<sensor::camera::Mat4d> world_to_camera;
   /// The board in each capture with a view used or ambiguous, in the
   /// captures' order; a capture with neither has no pose.
   std::vector<BoardPose> boards;
@@ -226,7 +226,7 @@ struct InitialRig {
 ///    reference outwards. Each capture both use gives a relative pose
 ///    `T_cb(camera) T_cb(parent)^-1`. Of those, the rotation with the least
 ///    median angle to the others is the medoid; the captures within
-///    `inlier_deg` of it give the rotation, as their chordal mean (recon's
+///    `inlier_deg` of it give the rotation, as their chordal mean (sensor's
 ///    `nearest_rotation` of their sum), and the translation, as their
 ///    median on each axis.
 /// 4. **Boards.** For each capture, each used view's poses, both of IPPE's,

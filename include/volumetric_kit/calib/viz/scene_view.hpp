@@ -14,7 +14,7 @@
 /// `OrbitCamera` keeps +Y up, so the view turns the world by a display
 /// rotation (@ref display_rotation) that takes the world's up to +Y: the
 /// tag's +z, or the cameras' mean up, their -y. Points are gfx's draws from
-/// recon's prepared frames in place (@ref cloud_draws); lines are a few KB of
+/// sensor's prepared frames in place (@ref cloud_draws); lines are a few KB of
 /// `ColorVertex` made on the host from the cameras' models and poses
 /// (@ref scene_lines), uploaded only when they change.
 
@@ -32,9 +32,9 @@
 #include "volumetric_kit/gfx/camera/orbit_camera.hpp"
 #include "volumetric_kit/gfx/pipelines/depth_cloud_pipeline.hpp"
 #include "volumetric_kit/gfx/pipelines/primitive_pipeline.hpp"
-#include "volumetric_kit/recon/camera/camera_model.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
-#include "volumetric_kit/recon/sensor/utils/gpu_frame_prep.hpp"
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
+#include "volumetric_kit/sensor/prep/gpu_frame_prep.hpp"
 
 namespace volumetric_kit::calib::viz {
 
@@ -46,19 +46,19 @@ namespace volumetric_kit::calib::viz {
 /// camera.color = *info.color;
 /// camera.depth = info.depth;
 /// camera.depth_to_color = info.depth_to_color;
-/// camera.color_to_world = recon::camera::Mat4d(1.0);  // the reference
+/// camera.color_to_world = sensor::camera::Mat4d(1.0);  // the reference
 /// @endcode
 struct SceneCamera {
   /// The colour camera's model, lens included.
-  recon::camera::CameraModel color;
+  sensor::camera::CameraModel color;
   /// The depth camera's model, lens included; empty for none.
-  std::optional<recon::camera::CameraModel> depth;
+  std::optional<sensor::camera::CameraModel> depth;
   /// The depth camera's frame to the colour camera's: the factory extrinsic.
-  recon::camera::Mat4d depth_to_color{1.0};
+  sensor::camera::Mat4d depth_to_color{1.0};
   /// The colour camera's pose in the rig's world; empty while the camera is
   /// not placed (before the rig is solved, every camera but the reference),
   /// which the view then leaves out.
-  std::optional<recon::camera::Mat4d> color_to_world;
+  std::optional<sensor::camera::Mat4d> color_to_world;
   /// Its tint, an sRGB-encoded `pack_rgba8` word: its frustum's colour, and
   /// its points' in `Solid` and `TintedLuma`.
   std::uint32_t tint = gfx::pipelines::pack_rgba8(255, 255, 255);
@@ -100,17 +100,17 @@ struct SceneOptions {
 /// @param rgba       The lines' colour.
 /// @return 8 lines, 16 vertices in the world: centre to each corner, top-left,
 ///         top-right, bottom-right, bottom-left, then the corners in that
-///         order; or `InvalidArgument` for a model recon refuses, a pose that
-///         is not rigid, or a depth that is not positive and finite; or what
-///         `compute::undistort_points` returns.
+///         order; or `InvalidArgument` for a model sensor's camera tier
+///         refuses, a pose that is not rigid, or a depth that is not positive
+///         and finite; or what `compute::undistort_points` returns.
 ///
 /// @code
 /// VKC_ASSIGN(const auto lines,
 ///            frustum_lines(*info.color, color_to_world, 0.3, tint));
 /// @endcode
 core::Result<std::vector<gfx::pipelines::ColorVertex>> frustum_lines(
-    const recon::camera::CameraModel& camera,
-    const recon::camera::Mat4d& to_world, double depth_m, std::uint32_t rgba);
+    const sensor::camera::CameraModel& camera,
+    const sensor::camera::Mat4d& to_world, double depth_m, std::uint32_t rgba);
 
 /// @brief The world's axes from its origin: x red, y green, z blue.
 /// @param length_m  Each axis's length (metres); positive.
@@ -136,7 +136,7 @@ core::Result<std::vector<gfx::pipelines::ColorVertex>> axes_lines(
 /// VKC_ASSIGN(const auto quad, board_lines(board, solution.boards[k], rgba));
 /// @endcode
 core::Result<std::vector<gfx::pipelines::ColorVertex>> board_lines(
-    const compute::Board& board, const recon::camera::Mat4d& board_to_world,
+    const compute::Board& board, const sensor::camera::Mat4d& board_to_world,
     std::uint32_t rgba);
 
 /// @brief The origin tag's outline at the origin of its world: the square of
@@ -173,7 +173,7 @@ core::Result<std::vector<gfx::pipelines::ColorVertex>> tag_lines(
 /// @endcode
 core::Result<std::vector<gfx::pipelines::ColorVertex>> scene_lines(
     const std::vector<SceneCamera>& cameras, const compute::Board* board,
-    const std::vector<recon::camera::Mat4d>& boards_to_world,
+    const std::vector<sensor::camera::Mat4d>& boards_to_world,
     const SceneOptions& options);
 
 /// @brief The draws of each shown and placed camera's points, at its pose
@@ -193,7 +193,7 @@ core::Result<std::vector<gfx::pipelines::ColorVertex>> scene_lines(
 ///                              static_cast<std::uint32_t>(draws.size())}));
 /// @endcode
 core::Result<std::vector<gfx::pipelines::DepthCloudDraw>> cloud_draws(
-    const std::vector<std::optional<recon::sensor::DeviceFrame>>& frames,
+    const std::vector<std::optional<sensor::DeviceFrame>>& frames,
     const std::vector<SceneCamera>& cameras, const CloudStyle& style);
 
 /// @brief The turn from the rig's world into the view's: the world's up to
@@ -213,15 +213,15 @@ core::Result<std::vector<gfx::pipelines::DepthCloudDraw>> cloud_draws(
 ///
 /// @code
 /// // The reference camera alone: a half turn about x.
-/// VKC_ASSIGN(const recon::camera::Mat3d turn,
-///            display_rotation({recon::camera::Mat4d(1.0)}));
+/// VKC_ASSIGN(const sensor::camera::Mat3d turn,
+///            display_rotation({sensor::camera::Mat4d(1.0)}));
 /// // A tag's world: +z to +Y.
-/// VKC_ASSIGN(const recon::camera::Mat3d level,
-///            display_rotation(poses, recon::camera::Vec3d(0.0, 0.0, 1.0)));
+/// VKC_ASSIGN(const sensor::camera::Mat3d level,
+///            display_rotation(poses, sensor::camera::Vec3d(0.0, 0.0, 1.0)));
 /// @endcode
-core::Result<recon::camera::Mat3d> display_rotation(
-    const std::vector<recon::camera::Mat4d>& color_to_world,
-    const std::optional<recon::camera::Vec3d>& up = std::nullopt);
+core::Result<sensor::camera::Mat3d> display_rotation(
+    const std::vector<sensor::camera::Mat4d>& color_to_world,
+    const std::optional<sensor::camera::Vec3d>& up = std::nullopt);
 
 /// @brief Where the 3D view sits in the window.
 enum class ScenePlacement : std::uint8_t {
@@ -275,15 +275,15 @@ class SceneView {
   ///                        for the cameras' mean up.
   /// @return OK; or what @ref display_rotation refuses, the view unchanged.
   core::Status frame(
-      const std::vector<recon::camera::Mat4d>& color_to_world,
-      const std::optional<recon::camera::Vec3d>& up = std::nullopt);
+      const std::vector<sensor::camera::Mat4d>& color_to_world,
+      const std::optional<sensor::camera::Vec3d>& up = std::nullopt);
 
   /// @return The orbiting camera, in the turned world, for pointer input.
   gfx::camera::OrbitCamera& orbit() noexcept { return orbit_; }
   /// @copydoc orbit
   const gfx::camera::OrbitCamera& orbit() const noexcept { return orbit_; }
   /// @return The turn from the rig's world into the view's.
-  const recon::camera::Mat3d& rotation() const noexcept { return rotation_; }
+  const sensor::camera::Mat3d& rotation() const noexcept { return rotation_; }
 
   /// @brief The rig's world to Vulkan clip space, for a viewport.
   /// @param viewport  The rectangle drawn into, for its aspect; an empty one
@@ -293,7 +293,7 @@ class SceneView {
 
  private:
   gfx::camera::OrbitCamera orbit_;
-  recon::camera::Mat3d rotation_{1.0};
+  sensor::camera::Mat3d rotation_{1.0};
 };
 
 }  // namespace volumetric_kit::calib::viz

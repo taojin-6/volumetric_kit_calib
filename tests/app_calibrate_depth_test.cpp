@@ -51,9 +51,8 @@
 namespace volumetric_kit::calib::app {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 namespace fs = std::filesystem;
-namespace sensor = recon::sensor;
 using camera::Mat3d;
 using camera::Mat4d;
 using camera::Vec3d;

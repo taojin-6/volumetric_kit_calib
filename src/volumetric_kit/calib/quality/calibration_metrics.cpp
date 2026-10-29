@@ -27,7 +27,7 @@
 namespace volumetric_kit::calib::quality {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 using compute::finite;
 using Code = core::Status::Code;
 

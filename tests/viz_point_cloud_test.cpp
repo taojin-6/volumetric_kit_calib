@@ -32,9 +32,8 @@
 namespace volumetric_kit::calib::viz {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 namespace pipelines = gfx::pipelines;
-namespace sensor = recon::sensor;
 using camera::Mat4d;
 using camera::Vec3d;
 using Code = core::Status::Code;
@@ -53,8 +52,8 @@ sensor::DeviceFrame frame_of(std::shared_ptr<const core::Buffer> depth,
   sensor::DeviceFrame frame;
   frame.depth = std::move(depth);
   frame.color = std::move(color);
-  const recon::Mat4f baked =
-      glm::translate(recon::Mat4f(1.0f), glm::vec3(5.0f, 6.0f, 7.0f));
+  const sensor::Mat4f baked =
+      glm::translate(sensor::Mat4f(1.0f), glm::vec3(5.0f, 6.0f, 7.0f));
   frame.depth_camera = {500.25f, 499.75f, 321.5f, 287.25f, 0.5f,
                         3.86f,   640,     576,    baked};
   frame.color_camera = {1800.5f, 1799.25f, 1919.75f, 1081.5f,
@@ -187,7 +186,7 @@ TEST_F(VizPointCloud, RefusesWhatTheRendererCannotRead) {
           "color_to_world");
   refused(good, style, identity, glm::scale(identity, Vec3d(0.5)),
           "depth_to_color");
-  // A buffer EXCLUSIVE to recon's family, drawn on another.
+  // A buffer EXCLUSIVE to sensor's family, drawn on another.
   CloudStyle across = style;
   across.renderer_family = style.producer_family + 1;
   refused(good, across, identity, identity, "EXCLUSIVE");

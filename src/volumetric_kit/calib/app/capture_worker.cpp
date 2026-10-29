@@ -23,13 +23,11 @@
 #include "volumetric_kit/calib/detect/charuco.hpp"
 #include "volumetric_kit/calib/detect/tag.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
-#include "volumetric_kit/recon/sensor/orbbec/orbbec_sensor.hpp"
+#include "volumetric_kit/sensor/orbbec/orbbec_sensor.hpp"
 
 namespace volumetric_kit::calib::app {
 
 namespace {
-
-namespace sensor = recon::sensor;
 
 // How often the worker looks for the writer's outcomes while nothing is
 // queued.
@@ -328,7 +326,7 @@ struct CaptureWorker::State {
   void detect_one(std::size_t i, const CameraFrameCopy& part, Detection& found,
                   ViewCheck& view, core::Status& detect_error,
                   core::Status& check_error) const {
-    const recon::camera::ImageSize size{part.width, part.height};
+    const sensor::camera::ImageSize size{part.width, part.height};
     detect_error = compute::guarded("full detection", [&]() -> core::Status {
       const detect::LumaView luma{part.width, part.height, part.width,
                                   part.luma.data()};
@@ -566,7 +564,7 @@ core::Result<bool> CaptureWorker::submit(CaptureRequest request) {
     }
     for (std::size_t i = 0; i < cameras.size(); ++i) {
       const CameraFrameCopy& part = request.cameras[i];
-      const recon::camera::ImageSize& size = cameras[i].info.color->size;
+      const sensor::camera::ImageSize& size = cameras[i].info.color->size;
       if (part.width != size.width || part.height != size.height ||
           part.luma.size() !=
               static_cast<std::size_t>(part.width) * part.height) {

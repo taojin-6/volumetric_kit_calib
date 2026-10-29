@@ -25,7 +25,7 @@
 namespace volumetric_kit::calib::solve {
 namespace {
 
-namespace camera = recon::camera;
+namespace camera = sensor::camera;
 
 // A robust mean of transforms that each estimate one: the rotation with the
 // least median angle to the others (the first, on a tie) is the medoid; those

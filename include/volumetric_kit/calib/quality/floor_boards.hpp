@@ -16,7 +16,7 @@
 #include "volumetric_kit/calib/quality/export.hpp"
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/recon/camera/geometry.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::quality {
 
@@ -70,7 +70,7 @@ struct FloorBoard {
 // call for it; until then z is the tag's alone.
 VC_QUALITY_API core::Result<std::vector<FloorBoard>> floor_boards(
     const compute::Board& board, const std::vector<solve::SolvedBoard>& boards,
-    const std::vector<recon::camera::Mat4d>& boards_to_world,
+    const std::vector<sensor::camera::Mat4d>& boards_to_world,
     const FloorBoardOptions& options = {});
 
 }  // namespace volumetric_kit::calib::quality
