@@ -169,9 +169,9 @@ TEST(Results, TheReportHasItsSchema) {
   solution.links[1].weak = !solution.links[0].weak;
   // The solve's own time differs on every run and is written to the
   // microsecond (TheSolveTimeHasSixDecimals). One on a half microsecond, as
-  // 1 in 24 durations of Apple Silicon's 24 MHz steady_clock are, reads back
-  // a hair over half a microsecond off; a time of six decimals reads back
-  // exactly.
+  // 1 in 24 durations of Apple Silicon's 24 MHz steady_clock are, mostly
+  // reads back a hair over half a microsecond off; a time of six decimals
+  // reads back exactly.
   solution.seconds = 1.234567;
   CalibrationMetrics m = s.metrics;
   m.leave_one_out.cameras[1].centre_capture = 3;
