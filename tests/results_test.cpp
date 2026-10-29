@@ -167,6 +167,12 @@ TEST(Results, TheReportHasItsSchema) {
   ASSERT_GE(solution.links.size(), 2u);
   solution.links[0].weak = !solution.links[0].weak;
   solution.links[1].weak = !solution.links[0].weak;
+  // The solve's own time differs on every run and is written to the
+  // microsecond (TheSolveTimeHasSixDecimals). One on a half microsecond, as
+  // 1 in 24 durations of Apple Silicon's 24 MHz steady_clock are, reads back
+  // a hair over half a microsecond off; a time of six decimals reads back
+  // exactly.
+  solution.seconds = 1.234567;
   CalibrationMetrics m = s.metrics;
   m.leave_one_out.cameras[1].centre_capture = 3;
   m.leave_one_out.cameras[1].rotation_capture = 5;
@@ -235,7 +241,7 @@ TEST(Results, TheReportHasItsSchema) {
   EXPECT_EQ(solver["initial_energy"].get<double>(), solution.initial_energy);
   EXPECT_EQ(solver["final_energy"].get<double>(), solution.final_energy);
   EXPECT_EQ(solver["variance"].get<double>(), solution.variance);
-  EXPECT_NEAR(solver["seconds"].get<double>(), solution.seconds, 5e-7);
+  EXPECT_EQ(solver["seconds"].get<double>(), solution.seconds);
   ASSERT_EQ(doc["tree"].size(), solution.links.size());
   for (std::size_t l = 0; l < solution.links.size(); ++l) {
     const solve::PlacedLink& link = solution.links[l];
