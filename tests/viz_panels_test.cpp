@@ -616,19 +616,25 @@ quality::PairCheck pair_check(std::size_t from, std::size_t to,
   return p;
 }
 
-// N and G pass, 6G fails its plane; of the six pairs, G -> 6G fails and
-// 6G -> N has no overlap; on their own, G -> 6G fails in captures 5 and 7,
-// with N -> G in 5, and none in 9.
+// N passes, G's one view has no scatter, so its plane is insufficient, and 6G
+// fails its plane (its views scatter 6.4 mm about its depth offset); of the
+// six pairs, G -> 6G fails and 6G -> N has no overlap; on their own, G -> 6G
+// fails in captures 5 and 7, with N -> G in 5, and none in 9.
 quality::DepthSummary three_camera_depth() {
   using V = quality::DepthVerdict;
+  const double nan = std::numeric_limits<double>::quiet_NaN();
   quality::DepthSummary d;
   d.ratio = {412, 1.00084, 0.00113};
   d.scale = V::Ok;
   d.cameras.resize(3);
-  d.cameras[0] = {14, {140, 1.0003, 0.001}, V::Ok, 0.42, 0.214, V::Ok, V::Ok};
-  d.cameras[1] = {1, {12, 0.99951, 0.002}, V::Ok, -1.24, 0.5, V::Ok, V::Ok};
-  d.cameras[2] = {13, {130, 1.0019, 0.001}, V::Ok, 12.5, 0.38, V::Off, V::Off};
-  const double nan = std::numeric_limits<double>::quiet_NaN();
+  d.cameras[0] = {
+      14,   {140, 1.0003, 0.001}, V::Ok, 0.42, 0.214, 0.00072, 0.31, V::Ok,
+      V::Ok};
+  d.cameras[1] = {
+      1,   {12, 0.99951, 0.002}, V::Ok,          -1.24, 0.5, -0.00186,
+      nan, V::Insufficient,      V::Insufficient};
+  d.cameras[2] = {
+      13, {130, 1.0019, 0.001}, V::Ok, 12.5, 0.38, 0.0123, 6.4, V::Off, V::Off};
   d.pairs = {pair_check(0, 1, V::Ok, 0.12),
              pair_check(0, 2, V::Ok, -1.4),
              pair_check(1, 0, V::Ok, -0.3),
@@ -663,12 +669,16 @@ TEST(DepthPanel, ShowsEachCameraAndThePairsThatFail) {
             "pass: ratio 1.0008 (sd 0.0011, 412 ratios)");
   EXPECT_EQ(line(l, "depth scale").tone, Tone::Good);
   EXPECT_EQ(line(l, "depth N").value,
-            "pass, 14 views: ratio 1.0003, offset +0.4 mm, angle 0.21 deg");
+            "pass, 14 views: ratio 1.0003, depth offset +0.7 mm, scatter "
+            "0.3 mm, angle 0.21 deg");
   EXPECT_EQ(line(l, "depth N").tone, Tone::Good);
   EXPECT_EQ(line(l, "depth G").value,
-            "pass, 1 view: ratio 0.9995, offset -1.2 mm, angle 0.50 deg");
+            "insufficient, 1 view: ratio 0.9995, depth offset -1.9 mm, "
+            "scatter -, angle 0.50 deg");
+  EXPECT_EQ(line(l, "depth G").tone, Tone::Muted);
   EXPECT_EQ(line(l, "depth 6G").value,
-            "fail, 13 views: ratio 1.0019, offset +12.5 mm, angle 0.38 deg");
+            "fail, 13 views: ratio 1.0019, depth offset +12.3 mm, scatter "
+            "6.4 mm, angle 0.38 deg");
   EXPECT_EQ(line(l, "depth 6G").tone, Tone::Bad);
   EXPECT_EQ(line(l, "depth pairs").value,
             "4 of 6 pass, 1 fail, 1 no overlap; largest signed median "
@@ -700,7 +710,8 @@ TEST(DepthPanel, TonesThePairsAndAnInsufficientCamera) {
             "+6.2 mm (G -> 6G)");
   EXPECT_EQ(line(l, "depth pairs").tone, Tone::Good);
   EXPECT_EQ(line(l, "depth 6G").value,
-            "insufficient, 0 views: ratio -, offset -, angle -");
+            "insufficient, 0 views: ratio -, depth offset -, scatter -, "
+            "angle -");
   EXPECT_EQ(line(l, "depth 6G").tone, Tone::Muted);
   EXPECT_EQ(line(l, "depth scale").value,
             "insufficient: ratio - (sd -, 0 ratios)");

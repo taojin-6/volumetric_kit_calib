@@ -108,6 +108,46 @@ recon nor grid.
   version stays 1.
 - Earlier entries say recon for what is now sensor's; their decisions stand.
 
+## 2026-10-27 — Each camera's depth offset
+
+A depth that reads too far or too near is a correction, not only a
+verdict: Calibrate's depth checks give each camera's offset along its depth
+camera's axis (`quality/depth_checks.hpp` has the definitions).
+
+- **Axial, as sensor applies it.** sensor subtracts a camera's offset from
+  every return, along the depth camera's axis. A board's plane offset is
+  measured along the board's normal, which an axial error of b moves by
+  about `b (n . d) / d_z`, so each view's offset is made axial,
+  `offset d_z / (n . d)`, with `d` the ray from the depth camera to the
+  chessboard's centre and `n` the board's normal: a board seen square on
+  the axis gives its offset, one seen at 60 degrees twice it.
+- **The median over the views**, per camera, as the other verdicts take
+  medians.
+- **Judged after the offset.** The plane verdict no longer fails a camera
+  for having an offset. It fails views that disagree once the offset is
+  taken off: the median of `|a - offset|` over their axial offsets `a`,
+  against `max_scatter_mm`, 5 mm, a pair's bound on its signed median,
+  since what is left is depth error another camera would see. One view has
+  no scatter, so its camera's plane is insufficient and no offset is written
+  for it. The verdict also fails a median angle past `max_angle_deg`, and
+  an offset sensor's calibration file cannot carry, which sensor's validator
+  decides, so its bound is not copied here. The median offset along the
+  normals is still reported.
+- **Measured on raw depth.** The checks prepare the kept raw depth with no
+  calibration, so an offset is the depth's own, never a correction of an
+  earlier one.
+- **Written when the plane passes.** `format_results` puts each camera's
+  offset whose plane verdict passed into the results' calibration file
+  (sensor's `depth_offset_m`, which makes it version 3), and none for any
+  other camera: an offset belongs with the poses solved beside it, so a
+  session's always replace an earlier file's, and a camera whose plane did
+  not pass keeps its raw depth.
+- **Oblique views weigh most.** A view's axial offset multiplies its plane
+  fit's error by `d_z / (n . d)`, about 3 at 70 degrees. The median keeps
+  one such view from moving the offset; weighing or leaving out oblique
+  views waits until a session shows the need (the `TODO:` in
+  `quality/depth_checks.cpp`).
+
 ## 2026-10-22 — Consumed by commit, never installed
 
 The family's packages are not installable (the owner's decision): an
@@ -166,9 +206,10 @@ steps, the numbering and the write order).
   depth checks are done, so a refusal or a cancel leaves nothing behind. The
   directory's stamp is the press's, in the session's own format (the user's
   call).
-- **Colour lenses and poses only** in the results' calibration file (the
-  user's call): `SensorArray` reads only the poses, and the session's
-  factory file already has the depth models.
+- **Colour lenses, poses and depth offsets** in the results' calibration
+  file (the user's call; the offsets amended 2026-10-27, "Each camera's
+  depth offset"): `SensorArray` reads the poses and the offsets, and the
+  session's factory file already has the depth models.
 - **Cancelled between steps.** `bundle_adjust` is not interruptible, so a
   cancel takes effect at the next progress call (`app::CalibrateCallback`
   lists them); the writing, a few files, is not cancelled.
@@ -441,7 +482,8 @@ calib measures the depth; recon only prepares it, and gfx draws it
 - **Two kinds of check.** The board's scale does not depend on the solved
   board, so it checks the depth against the printed board. The plane's offset
   and angle do depend on it, so they check `depth_to_color` and the depth's
-  units.
+  units; the offset is each camera's depth offset, judged once it is taken
+  off (amended 2026-10-27, "Each camera's depth offset").
 - **At Calibrate, on its worker (T4)** (amended 2026-10-19, the user's
   calls). T4 owns a depth-only preparation per camera and the checks
   (`app::CalibrateDepth`), built as calib_rig starts, and checks each kept

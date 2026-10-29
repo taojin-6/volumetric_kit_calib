@@ -121,6 +121,24 @@ core::Status check_depth_fits(std::size_t k, const DepthSummary& d) {
       " cameras");
 }
 
+// Each sensor's depth offset: its camera's when the depth checks' plane
+// verdict passed, else none. The checks measured it at these poses, so it
+// replaces whatever the calibration held.
+void take_depth_offsets(const std::vector<std::string>& ids,
+                        const DepthSummary& d,
+                        camera::ArrayCalibration& calibration) {
+  for (camera::SensorCalibration& sensor : calibration.sensors) {
+    const auto at = std::find(ids.begin(), ids.end(), sensor.id);
+    if (at == ids.end()) continue;
+    const CameraDepth& cam =
+        d.cameras[static_cast<std::size_t>(at - ids.begin())];
+    sensor.depth_offset_m =
+        cam.plane == DepthVerdict::Ok && std::isfinite(cam.depth_offset_m)
+            ? cam.depth_offset_m
+            : 0.0;
+  }
+}
+
 // Refuses a tag world whose cameras are not the rig's, in its order, or
 // whose views name another camera.
 core::Status check_world_fits(const std::vector<std::string>& ids,
@@ -309,7 +327,7 @@ void depth_section(Writer& w, const DepthSummary& d,
   w.key("agreement_stride").value(std::size_t{o.agreement_stride});
   w.key("min_overlap").value(o.min_overlap);
   w.key("max_scale_error").value(o.max_scale_error);
-  w.key("max_offset_mm").value(o.max_offset_mm);
+  w.key("max_scatter_mm").value(o.max_scatter_mm);
   w.key("max_angle_deg").value(o.max_angle_deg);
   w.key("max_signed_median_mm").value(o.max_signed_median_mm);
   w.key("max_median_abs_mm").value(o.max_median_abs_mm);
@@ -325,6 +343,8 @@ void depth_section(Writer& w, const DepthSummary& d,
     w.key("scale").value(to_string(cam.scale));
     w.key("offset_mm").value(cam.offset_mm);
     w.key("angle_deg").value(cam.angle_deg);
+    w.key("depth_offset_m").value(cam.depth_offset_m);
+    w.key("scatter_mm").value(cam.scatter_mm);
     w.key("plane").value(to_string(cam.plane));
     w.key("verdict").value(to_string(cam.verdict));
     w.close_object();
@@ -349,6 +369,7 @@ void depth_section(Writer& w, const DepthSummary& d,
     for (const double r : view.ratios) w.value(r);
     w.close_array();
     w.key("offset_mm").value(view.offset_mm);
+    w.key("axial_offset_mm").value(view.axial_offset_mm);
     w.key("angle_deg").value(view.angle_deg);
     w.close_object();
   }
@@ -749,6 +770,7 @@ core::Result<ResultFiles> format_results(
     core::Result<solve::AnchoredRig> anchored =
         solve::anchor_rig(solution, world.origin);
     if (!anchored.ok()) return anchored.status().with_context(kWhat);
+    if (depth) take_depth_offsets(ids, *depth, anchored->calibration);
     core::Result<std::string> calibration =
         camera::format_array_calibration(anchored->calibration);
     if (!calibration.ok()) return calibration.status().with_context(kWhat);

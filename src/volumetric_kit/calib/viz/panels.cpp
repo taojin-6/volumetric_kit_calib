@@ -569,9 +569,10 @@ core::Result<std::vector<PanelLine>> depth_panel(
                depth_word(cam.verdict, "insufficient") + ", " +
                    std::to_string(cam.views) +
                    (cam.views == 1 ? " view: ratio " : " views: ratio ") +
-                   figure(cam.ratio.mean, 4, "") + ", offset " +
-                   signed_figure(cam.offset_mm, 1, " mm") + ", angle " +
-                   figure(cam.angle_deg, 2, " deg"),
+                   figure(cam.ratio.mean, 4, "") + ", depth offset " +
+                   signed_figure(1000.0 * cam.depth_offset_m, 1, " mm") +
+                   ", scatter " + figure(cam.scatter_mm, 1, " mm") +
+                   ", angle " + figure(cam.angle_deg, 2, " deg"),
                depth_tone(cam.verdict)});
         }
         std::size_t pass = 0;

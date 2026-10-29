@@ -469,7 +469,8 @@ TEST(Results, TheReportHasItsSchema) {
 
 // Depth checks of the solved rig's 4 cameras, with options not the defaults
 // and values that differ wherever two members could be swapped: views of two
-// captures, one plane not valid; pairs pooled and of one capture.
+// captures, one plane not valid, one camera with two views; pairs pooled and
+// of one capture.
 DepthSummary depth_checks() {
   DepthCheckOptions options;
   options.inset_m = 0.025;
@@ -483,17 +484,18 @@ DepthSummary depth_checks() {
   options.agreement_stride = 2;
   options.min_overlap = 900;
   options.max_scale_error = 0.003;
-  options.max_offset_mm = 8.5;
+  options.max_scatter_mm = 8.5;
   options.max_angle_deg = 1.25;
   options.max_signed_median_mm = 4.5;
   options.max_median_abs_mm = 9.5;
-  std::vector<BoardDepthCheck> views(3);
+  std::vector<BoardDepthCheck> views(4);
   views[0].camera = 2;
   views[0].capture = 5;
   views[0].plane = {
       true, {0.3, 0.2, 0.001}, {0.0, 0.01, 1.0}, 0.00125, 9100, 210, 8700};
   views[0].ratios = {1.0021, 1.0019, 1.0024};
   views[0].offset_mm = 2.75;
+  views[0].axial_offset_mm = 4.125;
   views[0].angle_deg = 0.375;
   views[1].camera = 0;
   views[1].capture = 5;
@@ -507,7 +509,15 @@ DepthSummary depth_checks() {
       true, {0.3, 0.2, -0.002}, {0.02, 0.0, -1.0}, 0.0021, 7300, 64, 7001};
   views[2].ratios = {0.9985};
   views[2].offset_mm = -11.5;
-  views[2].angle_deg = 1.125;
+  views[2].axial_offset_mm = -23.25;
+  views[2].angle_deg = 1.375;
+  views[3].camera = 2;
+  views[3].capture = 3;
+  views[3].plane = {
+      true, {0.25, 0.15, 0.0015}, {0.01, 0.0, 1.0}, 0.0015, 8800, 120, 8400};
+  views[3].offset_mm = 3.0;
+  views[3].axial_offset_mm = 4.625;
+  views[3].angle_deg = 0.5;
   std::vector<PairAgreement> pairs(2);
   pairs[0].from = 3;
   pairs[0].to = 1;
@@ -569,7 +579,7 @@ TEST(Results, TheReportHasItsDepthSection) {
                             "min_inliers": 250, "window_mm": 50.0,
                             "bin_mm": 0.25, "edge_ratio": 0.04,
                             "agreement_stride": 2, "min_overlap": 900,
-                            "max_scale_error": 0.003, "max_offset_mm": 8.5,
+                            "max_scale_error": 0.003, "max_scatter_mm": 8.5,
                             "max_angle_deg": 1.25,
                             "max_signed_median_mm": 4.5,
                             "max_median_abs_mm": 9.5})"));
@@ -582,18 +592,25 @@ TEST(Results, TheReportHasItsDepthSection) {
     const json& j = depth["cameras"][cams[c].id];
     EXPECT_EQ(keys_of(ordered["cameras"][cams[c].id]),
               (std::vector<std::string>{"views", "ratio", "scale", "offset_mm",
-                                        "angle_deg", "plane", "verdict"}));
+                                        "angle_deg", "depth_offset_m",
+                                        "scatter_mm", "plane", "verdict"}));
     EXPECT_EQ(j["views"], cam.views);
     expect_ratio(j["ratio"], cam.ratio);
     EXPECT_EQ(j["scale"], to_string(cam.scale));
     expect_number(j["offset_mm"], cam.offset_mm);
     expect_number(j["angle_deg"], cam.angle_deg);
+    expect_number(j["depth_offset_m"], cam.depth_offset_m);
+    expect_number(j["scatter_mm"], cam.scatter_mm);
     EXPECT_EQ(j["plane"], to_string(cam.plane));
     EXPECT_EQ(j["verdict"], to_string(cam.verdict));
   }
   EXPECT_EQ(depth["cameras"][cams[1].id]["plane"], "off");
   EXPECT_EQ(depth["cameras"][cams[1].id]["verdict"], "off");
   EXPECT_EQ(depth["cameras"][cams[2].id]["scale"], "ok");
+  EXPECT_EQ(depth["cameras"][cams[2].id]["depth_offset_m"], 0.004375);
+  EXPECT_EQ(depth["cameras"][cams[2].id]["scatter_mm"], 0.25);
+  EXPECT_EQ(depth["cameras"][cams[2].id]["plane"], "ok");
+  EXPECT_TRUE(depth["cameras"][cams[0].id]["depth_offset_m"].is_null());
   EXPECT_EQ(depth["cameras"][cams[0].id]["plane"], "insufficient");
   EXPECT_EQ(depth["cameras"][cams[0].id]["verdict"], "insufficient");
   EXPECT_TRUE(doc["depth_unchecked"].is_null());
@@ -601,10 +618,11 @@ TEST(Results, TheReportHasItsDepthSection) {
   for (std::size_t v = 0; v < d.views.size(); ++v) {
     const BoardDepthCheck& view = d.views[v];
     const json& j = depth["views"][v];
-    EXPECT_EQ(keys_of(ordered["views"][v]),
-              (std::vector<std::string>{"camera", "capture", "valid", "members",
-                                        "out_of_range", "inliers", "rms_mm",
-                                        "ratios", "offset_mm", "angle_deg"}));
+    EXPECT_EQ(
+        keys_of(ordered["views"][v]),
+        (std::vector<std::string>{
+            "camera", "capture", "valid", "members", "out_of_range", "inliers",
+            "rms_mm", "ratios", "offset_mm", "axial_offset_mm", "angle_deg"}));
     EXPECT_EQ(j["camera"], cams[view.camera].id);
     EXPECT_EQ(j["capture"], view.capture);
     EXPECT_EQ(j["valid"], view.plane.valid);
@@ -618,10 +636,11 @@ TEST(Results, TheReportHasItsDepthSection) {
     }
     EXPECT_EQ(j["ratios"].get<std::vector<double>>(), view.ratios);
     expect_number(j["offset_mm"], view.offset_mm);
+    expect_number(j["axial_offset_mm"], view.axial_offset_mm);
     expect_number(j["angle_deg"], view.angle_deg);
   }
   EXPECT_EQ(depth["views"][0]["capture"], 3);
-  EXPECT_FALSE(depth["views"][1]["valid"].get<bool>());
+  EXPECT_FALSE(depth["views"][2]["valid"].get<bool>());
   expect_pairs(depth["pairs"], d.pairs, cams);
   ASSERT_EQ(depth["pairs"].size(), 12u);
   ASSERT_EQ(depth["captures"].size(), 1u);
@@ -1119,6 +1138,61 @@ TEST(Results, RefusesATagWorldThatDoesNotFit) {
   ResultWorld aruco = tagged().world;
   aruco.origin.sought.dictionary = MarkerDictionary::ArUco4x4_50;
   refused(aruco, "anchor_rig: the tag world's tag sought, of DICT_4X4_50");
+}
+
+// Each camera's depth offset whose plane verdict passed is in the calibration
+// file, as sensor's reader reads it back, version 3; none for a camera whose
+// plane did not pass, or whose offset is not a number; none at all, the file
+// as without the checks (version 2), when every plane failed or was
+// insufficient. In a tag world as in the reference's.
+TEST(Results, TheCalibrationFileCarriesEachDepthOffsetThatPassed) {
+  const Solved& s = solved();
+  const std::vector<solve::RigCamera>& cams = s.scene.cameras;
+  ASSERT_EQ(cams.size(), 4u);
+  DepthSummary d = depth_checks();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const std::vector<std::pair<double, DepthVerdict>> each = {
+      {0.00417, DepthVerdict::Ok},
+      {-0.00096, DepthVerdict::Ok},
+      {0.0123, DepthVerdict::Off},
+      {nan, DepthVerdict::Ok}};
+  for (std::size_t c = 0; c < cams.size(); ++c) {
+    d.cameras[c].depth_offset_m = each[c].first;
+    d.cameras[c].plane = each[c].second;
+  }
+  const ResultWorld reference;
+  for (const ResultWorld* world : {&reference, &tagged().world}) {
+    SCOPED_TRACE(world->origin.tag ? "tag world" : "reference world");
+    const ResultFiles files =
+        value_of(format_results(cams, s.solution, s.metrics, &d, {}, *world));
+    const json doc = json::parse(files.array_calibration);
+    EXPECT_EQ(doc["version"], 3);
+    const camera::ArrayCalibration back =
+        value_of(camera::parse_array_calibration(files.array_calibration));
+    for (std::size_t c = 0; c < cams.size(); ++c) {
+      const camera::SensorCalibration* sensor =
+          camera::find_sensor(back, cams[c].id);
+      ASSERT_NE(sensor, nullptr);
+      const bool written = c < 2;
+      EXPECT_EQ(sensor->depth_offset_m, written ? each[c].first : 0.0)
+          << cams[c].id;
+      EXPECT_EQ(
+          doc["device_calibration"][cams[c].id].contains("depth_offset_m"),
+          written)
+          << cams[c].id;
+    }
+  }
+  for (std::size_t c = 0; c < cams.size(); ++c) {
+    d.cameras[c].depth_offset_m = 0.002;
+    d.cameras[c].plane =
+        c % 2 == 0 ? DepthVerdict::Insufficient : DepthVerdict::Off;
+  }
+  const ResultFiles none =
+      value_of(format_results(cams, s.solution, s.metrics, &d));
+  EXPECT_EQ(json::parse(none.array_calibration)["version"], 2);
+  EXPECT_EQ(
+      none.array_calibration,
+      value_of(format_results(cams, s.solution, s.metrics)).array_calibration);
 }
 
 }  // namespace

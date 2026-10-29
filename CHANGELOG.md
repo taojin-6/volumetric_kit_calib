@@ -84,6 +84,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Each camera's depth offset (DECISIONS.md, 2026-10-27):
+  `quality::BoardDepthCheck::axial_offset_mm`, a view's board offset made
+  axial with the ray from the depth camera to the chessboard's centre, and
+  `quality::CameraDepth::depth_offset_m`, the median of a camera's, with
+  `scatter_mm`, how far its views lie from it. `report.json`'s depth section
+  lists them (`depth_offset_m` and `scatter_mm` per camera,
+  `axial_offset_mm` per view), and the Calibration window's depth lines
+  show each camera's depth offset and scatter. `quality::format_results`
+  writes each camera's depth offset whose plane verdict passed into
+  `array_calibration.json` (sensor's `depth_offset_m`, calibration file
+  version 3), so a live rig that reads the file subtracts it from that
+  camera's depth; the depth checks still read raw depth.
 - `solve::BundleAdjustOptions::uncertainty`: off, `bundle_adjust` skips the
   covariance and the intrinsics sensitivity; its guards still run.
 - Calibrate's world at the origin tag (DECISIONS.md, 2026-10-19):
@@ -319,6 +331,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- A camera's plane verdict (`quality::CameraDepth::plane`) is judged once
+  its depth offset is taken off: its views' scatter against
+  `DepthCheckOptions::max_scatter_mm` (5 mm), which replaces
+  `max_offset_mm`, the bound on the median offset, with the median angle as
+  before, and an offset sensor's calibration file cannot carry fails. A
+  camera with one view has no scatter, so its plane is insufficient.
+  `report.json`'s depth settings name `max_scatter_mm`.
 - build: **calib pins core 0.25.0** (effc464, core #62's merge), gfx at
   #152's merge (f147e00) and recon at #298's merge (9839fdd), and every
   build requires core 0.25.0 or newer (`VC_CORE_MIN_VERSION`, from 0.6.1),

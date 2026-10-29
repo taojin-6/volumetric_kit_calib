@@ -70,14 +70,14 @@
 /// - `depth` (@ref DepthSummary), `null` when the depth was not checked:
 ///   `settings` (its @ref DepthCheckOptions, by their names); `ratio`
 ///   (`count`, `mean`, `sd`) and its `scale` verdict; `cameras` (by id:
-///   `views`, `ratio`, `scale`, `offset_mm`, `angle_deg`, `plane`,
-///   `verdict`); `views` (`camera`, `capture`, `valid`, `members`,
-///   `out_of_range`, `inliers`, `rms_mm`, `ratios`, `offset_mm`,
-///   `angle_deg`); `pairs`, pooled, and `captures` (`capture`, `pairs`), each
-///   pair `from`, `to`, `overlap`, `in_window`, `signed_median_mm`,
-///   `median_abs_mm`, `p90_abs_mm`, `verdict`. Verdicts are
-///   @ref to_string(DepthVerdict)'s names; an invalid plane's `rms_mm` is
-///   `null`;
+///   `views`, `ratio`, `scale`, `offset_mm`, `angle_deg`, `depth_offset_m`,
+///   `scatter_mm`, `plane`, `verdict`); `views` (`camera`, `capture`,
+///   `valid`, `members`, `out_of_range`, `inliers`, `rms_mm`, `ratios`,
+///   `offset_mm`, `axial_offset_mm`, `angle_deg`); `pairs`, pooled, and
+///   `captures` (`capture`, `pairs`), each pair `from`, `to`, `overlap`,
+///   `in_window`, `signed_median_mm`, `median_abs_mm`, `p90_abs_mm`,
+///   `verdict`. Verdicts are @ref to_string(DepthVerdict)'s names; an
+///   invalid plane's `rms_mm` is `null`;
 /// - `depth_unchecked`: why `depth` is `null` though the depth was to be
 ///   checked, such as the device's failure; `null` otherwise.
 ///
@@ -124,7 +124,9 @@ struct ResultFiles {
   /// @ref kArrayCalibrationFile: sensor's `format_array_calibration` of the
   /// solution's calibration in the world (`solve::anchor_rig`), whose `pose`
   /// is each camera's T_cw there and whose `world` is the tag or the
-  /// reference camera.
+  /// reference camera; with each camera's `depth_offset_m`
+  /// (@ref CameraDepth::depth_offset_m) whose plane verdict passed, which
+  /// makes it sensor's version 3.
   std::string array_calibration;
   std::string report;     ///< @ref kReportFile.
   std::string residuals;  ///< @ref kResidualsFile.
@@ -151,7 +153,9 @@ struct ResultWorld {
 /// @param solution  The adjustment's solution.
 /// @param metrics   @ref calibration_metrics of it.
 /// @param depth     @ref summarize_depth_checks of its depth; null when the
-///                  depth was not checked.
+///                  depth was not checked. Each camera whose plane verdict
+///                  passed has its depth offset in the calibration file,
+///                  and no other has one.
 /// @param depth_unchecked  Why the depth was not checked though it was to
 ///                  be, which the report writes as `depth_unchecked`; empty,
 ///                  written `null`, when it was checked or not asked for.

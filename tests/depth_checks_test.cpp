@@ -5,9 +5,11 @@
 // the board region and its membership rule against the inset outline, the
 // views a solved rig's checks fit and their regions, a 4K colour lens's
 // corner rays met with an exact plane (a board printed 0.3 % large), a plane
-// 5 mm off and 1 degree turned, the ratios' pairs and order on boards of any
-// size, and the summary's pooling and verdicts over rigs of 1, 3, 4 and 5
-// cameras, each camera's verdict over every scale and plane; and refusals.
+// 5 mm off and 1 degree turned, a depth camera's axial bias read back from
+// its plane's offset from square to 70 degrees, the ratios' pairs and order
+// on boards of any size, and the summary's pooling and verdicts over rigs of
+// 1, 3, 4 and 5 cameras, each camera's verdict over every scale and plane;
+// and refusals.
 
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
 
@@ -23,6 +25,7 @@
 
 #include <gtest/gtest.h>
 #include <glm/glm.hpp>
+#include <opencv2/core.hpp>
 
 #include "depth_scene.hpp"
 #include "result_checks.hpp"
@@ -498,8 +501,102 @@ TEST(BoardDepthCheck, FindsAPlaneFiveMillimetresOffAndOneDegreeTurned) {
     const BoardDepthCheck check =
         value_of(board_depth_check(rig, board, view, region, across));
     EXPECT_TRUE(std::isnan(check.offset_mm)) << at.x;
+    EXPECT_TRUE(std::isnan(check.axial_offset_mm)) << at.x;
     EXPECT_NEAR(check.angle_deg, 90.0, 1e-12);
   }
+}
+
+// The plane a depth camera that reads `bias_m` too far along its own axis
+// sees of the solved board, in `region`'s board frame: each pixel of a
+// Femto-like narrow depth whose ray meets the board in the region, met with
+// it and moved by the bias along the ray, as a raw depth z reads z + bias;
+// then the least-squares plane z = a x + b y + c of those points.
+DepthPlane plane_read_with_bias(const BoardRegion& region, double bias_m) {
+  const test::Pinhole depth = test::nfov();
+  const Vec3d origin(region.depth_to_board[3]);
+  const Mat3d turn(region.depth_to_board);
+  // The normal equations of (x, y, 1) . (a, b, c) = z, about the region's
+  // centre so they stay well conditioned.
+  const Vec2d mid = 0.5 * (region.min + region.max);
+  cv::Matx33d m = cv::Matx33d::zeros();
+  cv::Vec3d r(0.0, 0.0, 0.0);
+  std::size_t members = 0;
+  for (std::uint32_t v = 0; v < depth.size.height; ++v) {
+    for (std::uint32_t u = 0; u < depth.size.width; ++u) {
+      const Vec3d ray = test::ray_of(depth, u, v);
+      if (!in_board_region(region, ray)) continue;
+      const Vec3d along = turn * ray;
+      const double s = -origin.z / along.z;  // the depth z of the board
+      const Vec3d p = origin + (s + bias_m) * along;
+      const cv::Vec3d x(p.x - mid.x, p.y - mid.y, 1.0);
+      m += x * x.t();
+      r += p.z * x;
+      ++members;
+    }
+  }
+  cv::Vec3d abc;
+  EXPECT_TRUE(cv::solve(m, r, abc));
+  DepthPlane plane;
+  plane.valid = true;
+  plane.point = Vec3d(mid.x, mid.y, abc[2]);
+  plane.normal = Vec3d(-abc[0], -abc[1], 1.0);
+  plane.rms_m = 0.0;
+  plane.members = members;
+  plane.inliers = members;
+  return plane;
+}
+
+// A depth camera that reads 4 mm too far, or 1 mm too near, along its own
+// axis, turned off its colour camera's: each board, turned from facing the
+// colour camera to 70 degrees, 13 and 23 degrees off the axis, has its
+// plane's offset made axial back to the bias within 0.2 mm, while the offset
+// itself, along the board's normal, is half the bias or less at 70. Off the
+// axis, the bias read along the ray instead would miss 4 mm by more than
+// 0.3 mm. A board behind the depth camera has no axial offset.
+TEST(BoardDepthCheck, MakesTheOffsetAxialAtAnyTilt) {
+  const compute::Board board = test::femto_board();
+  const std::vector<solve::RigCamera> rig = rig_of(1);
+  for (const Vec3d& centre : {Vec3d(0.3, -0.2, 2.2), Vec3d(0.9, 0.2, 2.0)}) {
+    // The centre's ray from the depth camera, along its axis: 1 / d_z - 1
+    // is how far a reading along the ray strays, over the bias.
+    const Vec3d seen =
+        apply(camera::rigid_inverse(femto_depth_to_color()), centre);
+    const double d_z = seen.z / glm::length(seen);
+    if (centre.x > 0.5) {
+      EXPECT_GT(4.0 * (1.0 / d_z - 1.0), 0.3);
+    }
+    for (const double tilt_deg : {0.0, 30.0, 50.0, 70.0}) {
+      for (const double bias_mm : {4.0, -1.0}) {
+        SCOPED_TRACE(std::to_string(centre.x) + " m across, " +
+                     std::to_string(tilt_deg) + " degrees, " +
+                     std::to_string(bias_mm) + " mm");
+        const Mat4d pose =
+            test::board_facing_camera(board, centre, tilt_deg, 20.0);
+        const BoardRegion region =
+            value_of(board_region(board, pose, femto_depth_to_color()));
+        const BoardDepthCheck check = value_of(
+            board_depth_check(rig, board, view_of(rig[0], board, pose), region,
+                              plane_read_with_bias(region, bias_mm / 1000.0)));
+        EXPECT_NEAR(check.axial_offset_mm, bias_mm, 0.2);
+        EXPECT_GT(check.offset_mm * bias_mm, 0.0);
+        // At 70 degrees the ray meets the board at 60 or more.
+        if (tilt_deg == 70.0) {
+          EXPECT_LT(std::abs(check.offset_mm), 0.6 * std::abs(bias_mm));
+        }
+      }
+    }
+  }
+  const Mat4d behind =
+      test::board_facing_camera(board, {0.0, 0.0, -1.5}, 0.0, 0.0);
+  const BoardRegion region =
+      value_of(board_region(board, behind, femto_depth_to_color()));
+  DepthPlane plane = plane_in(region, Vec3d(0.0, 0.0, -1.5),
+                              Mat3d(behind) * Vec3d(0.0, 0.0, 1.0));
+  plane.point.z += 0.004;
+  const BoardDepthCheck check = value_of(board_depth_check(
+      rig, board, view_of(rig[0], board, behind), region, plane));
+  EXPECT_NEAR(check.offset_mm, 4.0, 1e-9);
+  EXPECT_TRUE(std::isnan(check.axial_offset_mm));
 }
 
 // Each two adjacent corners both detected, in row-major order of the first,
@@ -592,6 +689,7 @@ TEST(BoardDepthCheck, MeasuresNothingThatMeetsNoPlane) {
       value_of(board_depth_check(rig, board, view, region, invalid));
   EXPECT_TRUE(skipped.ratios.empty());
   EXPECT_TRUE(std::isnan(skipped.offset_mm));
+  EXPECT_TRUE(std::isnan(skipped.axial_offset_mm));
   EXPECT_TRUE(std::isnan(skipped.angle_deg));
   EXPECT_FALSE(skipped.plane.valid);
   EXPECT_EQ(skipped.plane.members, 40u);
@@ -683,6 +781,8 @@ TEST(BoardDepthCheck, RefusesWhatDoesNotFit) {
 
 // --- The summary ------------------------------------------------------------
 
+// A view's check; its axial offset its offset, as for a board seen square on
+// its depth camera's axis.
 BoardDepthCheck check_of(std::size_t camera, std::int64_t capture,
                          std::vector<double> ratios, double offset_mm,
                          double angle_deg, bool valid = true) {
@@ -692,7 +792,16 @@ BoardDepthCheck check_of(std::size_t camera, std::int64_t capture,
   check.plane.valid = valid;
   check.ratios = std::move(ratios);
   check.offset_mm = offset_mm;
+  check.axial_offset_mm = offset_mm;
   check.angle_deg = angle_deg;
+  return check;
+}
+
+// A view's check with an axial offset of its own.
+BoardDepthCheck axial_of(std::size_t camera, std::int64_t capture,
+                         double offset_mm, double axial_offset_mm) {
+  BoardDepthCheck check = check_of(camera, capture, {}, offset_mm, 0.25);
+  check.axial_offset_mm = axial_offset_mm;
   return check;
 }
 
@@ -755,6 +864,8 @@ TEST(SummarizeDepthChecks, PoolsTheRatiosOverCapturesAndCameras) {
   EXPECT_EQ(s.cameras[2].ratio.count, 0u);
   EXPECT_TRUE(std::isnan(s.cameras[2].ratio.mean));
   EXPECT_TRUE(std::isnan(s.cameras[2].offset_mm));
+  EXPECT_TRUE(std::isnan(s.cameras[2].depth_offset_m));
+  EXPECT_TRUE(std::isnan(s.cameras[2].scatter_mm));
   expect_stats(s.ratio, {1.002, 1.0025, 1.0045, 1.0001, 1.0031, 1.001, 1.0035,
                          1.004, 1.002, 1.003});
   // Medians of an even count: the mean of the middle two.
@@ -772,19 +883,21 @@ TEST(SummarizeDepthChecks, PoolsTheRatiosOverCapturesAndCameras) {
 TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
   DepthCheckOptions options;
   options.max_scale_error = 0.002;
-  options.max_offset_mm = 10.0;
+  options.max_scatter_mm = 5.0;
   options.max_angle_deg = 1.0;
   const std::vector<BoardDepthCheck> views = {
-      // 0: scale 1.0015, within; median offset -9, angle 0.9: ok.
+      // 0: scale 1.0015, within; depth offset -9, scatter 3, angle 0.9: ok.
       check_of(0, 1, {1.001, 1.002}, -9.0, 0.9),
       check_of(0, 2, {1.0015}, -12.0, 0.2),
       check_of(0, 3, {}, 3.0, 1.5),
-      // 1: scale 1.0025, beyond; median offset 11: off.
+      // 1: scale 1.0025, beyond; a depth offset of 11, taken off: ok.
       check_of(1, 1, {1.0025}, 11.0, 0.1),
-      // 2: scale 0.9975, beyond below; median angle 1.2: off.
+      check_of(1, 2, {}, 11.0, 0.1),
+      // 2: scale 0.9975, beyond below; one view, but its angle, 1.2: off.
       check_of(2, 1, {0.9975}, 0.0, 1.2),
-      // 3: a valid plane but no ratios (its rays met nothing).
+      // 3: valid planes but no ratios (their rays met nothing).
       check_of(3, 1, {}, 2.0, 0.5),
+      check_of(3, 2, {}, 2.0, 0.5),
       // 4: an offset not a number (the plane across the board).
       check_of(4, 1, {1.0}, kNaN, 90.0),
       // 5: no valid view.
@@ -794,7 +907,7 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
       value_of(summarize_depth_checks(6, views, {}, options));
   const std::vector<std::pair<DepthVerdict, DepthVerdict>> want = {
       {DepthVerdict::Ok, DepthVerdict::Ok},
-      {DepthVerdict::Off, DepthVerdict::Off},
+      {DepthVerdict::Off, DepthVerdict::Ok},
       {DepthVerdict::Off, DepthVerdict::Off},
       {DepthVerdict::Insufficient, DepthVerdict::Ok},
       {DepthVerdict::Ok, DepthVerdict::Off},
@@ -811,8 +924,14 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
   EXPECT_EQ(s.cameras[3].verdict, DepthVerdict::Insufficient);
   EXPECT_EQ(s.cameras[4].verdict, DepthVerdict::Off);
   EXPECT_DOUBLE_EQ(s.cameras[0].offset_mm, -9.0);
+  EXPECT_DOUBLE_EQ(s.cameras[0].depth_offset_m, -0.009);
+  EXPECT_DOUBLE_EQ(s.cameras[0].scatter_mm, 3.0);
   EXPECT_DOUBLE_EQ(s.cameras[0].angle_deg, 0.9);
+  EXPECT_DOUBLE_EQ(s.cameras[1].depth_offset_m, 0.011);
+  EXPECT_EQ(s.cameras[1].scatter_mm, 0.0);
   EXPECT_TRUE(std::isnan(s.cameras[4].offset_mm));
+  EXPECT_TRUE(std::isnan(s.cameras[4].depth_offset_m));
+  EXPECT_TRUE(std::isnan(s.cameras[4].scatter_mm));
   // The board's: every valid view's ratio, 1.00075 on average.
   EXPECT_EQ(s.scale, DepthVerdict::Ok);
   options.max_scale_error = 0.0004;
@@ -821,19 +940,28 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
   EXPECT_EQ(value_of(summarize_depth_checks(6, {}, {})).scale,
             DepthVerdict::Insufficient);
 
-  // Exactly at each bound: ok (values a double holds exactly).
+  // Exactly at each bound: ok (values a double holds exactly); a scatter a
+  // quarter beyond: off.
   options.max_scale_error = 0.25;
   const DepthSummary edge = value_of(summarize_depth_checks(
       1,
-      {check_of(0, 1, {1.25}, -12.0, 1.5), check_of(0, 2, {}, -10.0, 1.0),
-       check_of(0, 3, {}, 3.0, 0.2)},
+      {check_of(0, 1, {1.25}, -15.0, 1.5), check_of(0, 2, {}, -10.0, 1.0),
+       check_of(0, 3, {}, -5.0, 0.2)},
       {}, options));
-  EXPECT_EQ(edge.cameras[0].offset_mm, -10.0);
+  EXPECT_EQ(edge.cameras[0].depth_offset_m, -0.01);
+  EXPECT_EQ(edge.cameras[0].scatter_mm, 5.0);
   EXPECT_EQ(edge.cameras[0].angle_deg, 1.0);
   EXPECT_EQ(edge.cameras[0].ratio.mean, 1.25);
   EXPECT_EQ(edge.cameras[0].scale, DepthVerdict::Ok);
   EXPECT_EQ(edge.cameras[0].plane, DepthVerdict::Ok);
   EXPECT_EQ(edge.scale, DepthVerdict::Ok);
+  const DepthSummary beyond = value_of(summarize_depth_checks(
+      1,
+      {check_of(0, 1, {}, -15.25, 0.5), check_of(0, 2, {}, -10.0, 0.5),
+       check_of(0, 3, {}, -4.75, 0.5)},
+      {}, options));
+  EXPECT_EQ(beyond.cameras[0].scatter_mm, 5.25);
+  EXPECT_EQ(beyond.cameras[0].plane, DepthVerdict::Off);
 
   // A view across the board has no offset, which its camera's median leaves
   // out; its angle counts.
@@ -844,8 +972,78 @@ TEST(SummarizeDepthChecks, JudgesEachCamerasScaleAndPlane) {
       {}, options));
   EXPECT_EQ(across.cameras[0].views, 3u);
   EXPECT_DOUBLE_EQ(across.cameras[0].offset_mm, 1.5);
+  EXPECT_DOUBLE_EQ(across.cameras[0].depth_offset_m, 0.0015);
+  EXPECT_DOUBLE_EQ(across.cameras[0].scatter_mm, 0.5);
   EXPECT_DOUBLE_EQ(across.cameras[0].angle_deg, 0.2);
   EXPECT_EQ(across.cameras[0].plane, DepthVerdict::Ok);
+}
+
+// Each camera's depth offset is the median of its views' axial offsets, not
+// of their offsets along the normals, and its plane is judged on what is left
+// once it is taken off: a consistent offset past the old 10 mm bound passes,
+// views that disagree fail, and so does an axial offset sensor's calibration
+// file cannot carry (past 0.05 m), however small along the normals, or none
+// at all; one view has no scatter, so its plane is insufficient.
+TEST(SummarizeDepthChecks, TakesEachCamerasDepthOffsetAndJudgesWhatIsLeft) {
+  const std::vector<BoardDepthCheck> views = {
+      // 0: oblique views whose offsets understate the axial ones.
+      axial_of(0, 1, 5.5, 7.25),
+      axial_of(0, 2, 3.75, 8.0),
+      axial_of(0, 3, 3.75, 11.5),
+      axial_of(0, 4, 4.25, 7.0),
+      // 1: 20 mm, consistently.
+      axial_of(1, 1, 20.0, 20.0),
+      axial_of(1, 2, 20.5, 20.5),
+      axial_of(1, 3, 19.5, 19.5),
+      // 2: views 12 mm either side of 0.
+      axial_of(2, 1, 0.0, 0.0),
+      axial_of(2, 2, 12.0, 12.0),
+      axial_of(2, 3, -12.0, -12.0),
+      // 3: 60 mm axial, 40 along the normals; 4: 50 mm, the file's bound;
+      // 5: -1.75 mm, one view.
+      axial_of(3, 1, 40.0, 60.0),
+      axial_of(3, 2, 40.0, 60.0),
+      axial_of(4, 1, 45.0, 50.0),
+      axial_of(4, 2, 45.0, 50.0),
+      axial_of(5, 1, -1.0, -1.75),
+      // 6: offsets, but no axial one (the board behind the depth camera).
+      axial_of(6, 1, 2.0, kNaN),
+      axial_of(6, 2, 3.0, kNaN),
+  };
+  const DepthSummary s = value_of(summarize_depth_checks(7, views, {}));
+  ASSERT_EQ(s.cameras.size(), 7u);
+  const CameraDepth& oblique = s.cameras[0];
+  EXPECT_EQ(oblique.views, 4u);
+  EXPECT_DOUBLE_EQ(oblique.offset_mm, 4.0);
+  EXPECT_DOUBLE_EQ(oblique.depth_offset_m, 7.625 / 1000.0);
+  EXPECT_DOUBLE_EQ(oblique.scatter_mm, 0.5);
+  EXPECT_EQ(oblique.plane, DepthVerdict::Ok);
+  EXPECT_DOUBLE_EQ(s.cameras[1].depth_offset_m, 0.02);
+  EXPECT_DOUBLE_EQ(s.cameras[1].scatter_mm, 0.5);
+  EXPECT_EQ(s.cameras[1].plane, DepthVerdict::Ok);
+  EXPECT_EQ(s.cameras[2].depth_offset_m, 0.0);
+  EXPECT_EQ(s.cameras[2].scatter_mm, 12.0);
+  EXPECT_EQ(s.cameras[2].plane, DepthVerdict::Off);
+  EXPECT_DOUBLE_EQ(s.cameras[3].offset_mm, 40.0);
+  EXPECT_DOUBLE_EQ(s.cameras[3].depth_offset_m, 0.06);
+  EXPECT_EQ(s.cameras[3].scatter_mm, 0.0);
+  EXPECT_EQ(s.cameras[3].plane, DepthVerdict::Off);
+  EXPECT_EQ(s.cameras[4].depth_offset_m, 0.05);
+  EXPECT_EQ(s.cameras[4].plane, DepthVerdict::Ok);
+  EXPECT_EQ(s.cameras[5].views, 1u);
+  EXPECT_DOUBLE_EQ(s.cameras[5].depth_offset_m, -0.00175);
+  EXPECT_TRUE(std::isnan(s.cameras[5].scatter_mm));
+  EXPECT_EQ(s.cameras[5].plane, DepthVerdict::Insufficient);
+  EXPECT_DOUBLE_EQ(s.cameras[6].offset_mm, 2.5);
+  EXPECT_TRUE(std::isnan(s.cameras[6].depth_offset_m));
+  EXPECT_TRUE(std::isnan(s.cameras[6].scatter_mm));
+  EXPECT_EQ(s.cameras[6].plane, DepthVerdict::Off);
+  // The bound on the scatter is the setting's.
+  DepthCheckOptions options;
+  options.max_scatter_mm = 12.0;
+  EXPECT_EQ(
+      value_of(summarize_depth_checks(7, views, {}, options)).cameras[2].plane,
+      DepthVerdict::Ok);
 }
 
 // A camera's verdict over every scale and plane: fail if either fails, pass
@@ -991,8 +1189,8 @@ TEST(SummarizeDepthChecks, RefusesWhatDoesNotFit) {
        {0.0, -1.0, kNaN, std::numeric_limits<double>::infinity()}) {
     option([&](DepthCheckOptions& o) { o.max_scale_error = bad; },
            "max_scale_error");
-    option([&](DepthCheckOptions& o) { o.max_offset_mm = bad; },
-           "max_offset_mm");
+    option([&](DepthCheckOptions& o) { o.max_scatter_mm = bad; },
+           "max_scatter_mm");
     option([&](DepthCheckOptions& o) { o.max_angle_deg = bad; },
            "max_angle_deg");
     option([&](DepthCheckOptions& o) { o.max_signed_median_mm = bad; },

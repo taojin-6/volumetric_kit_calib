@@ -20,6 +20,7 @@
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
 
 namespace volumetric_kit::calib::quality {
 namespace {
@@ -94,13 +95,30 @@ DepthVerdict scale_verdict(const RatioStats& ratio,
              : DepthVerdict::Off;
 }
 
-DepthVerdict plane_verdict(const CameraDepth& camera,
+// `carried`: whether sensor's calibration file takes the camera's depth
+// offset (file_carries).
+DepthVerdict plane_verdict(const CameraDepth& camera, bool carried,
                            const DepthCheckOptions& options) noexcept {
   if (camera.views == 0) return DepthVerdict::Insufficient;
-  return std::abs(camera.offset_mm) <= options.max_offset_mm &&
-                 camera.angle_deg <= options.max_angle_deg
-             ? DepthVerdict::Ok
-             : DepthVerdict::Off;
+  if (!carried || !(camera.angle_deg <= options.max_angle_deg)) {
+    return DepthVerdict::Off;
+  }
+  if (std::isnan(camera.scatter_mm)) return DepthVerdict::Insufficient;
+  return camera.scatter_mm <= options.max_scatter_mm ? DepthVerdict::Ok
+                                                     : DepthVerdict::Off;
+}
+
+// Whether sensor's calibration file carries `offset_m` as a sensor's depth
+// offset: its validator holds the bound, so it is not copied here. A
+// failure for want of memory is passed on.
+core::Result<bool> file_carries(double offset_m) {
+  camera::ArrayCalibration array;
+  array.sensors.emplace_back();
+  array.sensors.back().id = "depth";
+  array.sensors.back().depth_offset_m = offset_m;
+  core::Status valid = camera::validate_array_calibration(array);
+  if (valid.domain() == core::Status::Code::OutOfMemory) return valid;
+  return valid.ok();
 }
 
 DepthVerdict pair_verdict(const PairAgreement& pair,
@@ -179,7 +197,7 @@ core::Status check_depth_options(const DepthCheckOptions& options) {
           std::pair{"bin_mm", options.bin_mm},
           std::pair{"edge_ratio", options.edge_ratio},
           std::pair{"max_scale_error", options.max_scale_error},
-          std::pair{"max_offset_mm", options.max_offset_mm},
+          std::pair{"max_scatter_mm", options.max_scatter_mm},
           std::pair{"max_angle_deg", options.max_angle_deg},
           std::pair{"max_signed_median_mm", options.max_signed_median_mm},
           std::pair{"max_median_abs_mm", options.max_median_abs_mm}}) {
@@ -383,6 +401,15 @@ core::Result<BoardDepthCheck> board_depth_check(
                                         normal.y * (centre.y - plane.point.y)) /
                                            normal.z;
       out.offset_mm = 1000.0 * z;
+      // The ray from the depth camera to the centre, in the board frame: its
+      // length along the depth camera's z over its length along the board's
+      // is d_z / (n . d).
+      const Vec3d ray =
+          Vec3d(centre.x, centre.y, centre.z) - Vec3d(region.depth_to_board[3]);
+      const double along_axis = glm::dot(Vec3d(region.depth_to_board[2]), ray);
+      if (along_axis > 0.0 && ray.z != 0.0) {
+        out.axial_offset_mm = out.offset_mm * along_axis / ray.z;
+      }
     }
 
     if (view.points.empty()) return out;
@@ -497,6 +524,7 @@ core::Result<DepthSummary> summarize_depth_checks(
     out.cameras.resize(cameras);
     std::vector<std::vector<double>> ratios(cameras);
     std::vector<std::vector<double>> offsets(cameras);
+    std::vector<std::vector<double>> axial(cameras);
     std::vector<std::vector<double>> angles(cameras);
     std::vector<double> every_ratio;
     for (const BoardDepthCheck& view : out.views) {
@@ -507,6 +535,9 @@ core::Result<DepthSummary> summarize_depth_checks(
       every_ratio.insert(every_ratio.end(), view.ratios.begin(),
                          view.ratios.end());
       if (!std::isnan(view.offset_mm)) offsets[c].push_back(view.offset_mm);
+      if (!std::isnan(view.axial_offset_mm)) {
+        axial[c].push_back(view.axial_offset_mm);
+      }
       if (!std::isnan(view.angle_deg)) angles[c].push_back(view.angle_deg);
     }
     for (std::size_t c = 0; c < cameras; ++c) {
@@ -515,7 +546,19 @@ core::Result<DepthSummary> summarize_depth_checks(
       camera.scale = scale_verdict(camera.ratio, options);
       camera.offset_mm = compute::median(offsets[c]);
       camera.angle_deg = compute::median(angles[c]);
-      camera.plane = plane_verdict(camera, options);
+      // TODO: Weigh the views by how square they are, or leave out the most
+      // oblique, if sessions show those pulling the median: a board seen at
+      // 70 degrees multiplies its offset's error by about 3.
+      const double depth_offset_mm = compute::median(axial[c]);
+      camera.depth_offset_m = depth_offset_mm / 1000.0;
+      // One view has no scatter, as one ratio has no spread.
+      if (axial[c].size() >= 2) {
+        for (double& a : axial[c]) a = std::abs(a - depth_offset_mm);
+        camera.scatter_mm = compute::median(std::move(axial[c]));
+      }
+      core::Result<bool> carried = file_carries(camera.depth_offset_m);
+      if (!carried.ok()) return carried.status().with_context(kWhat);
+      camera.plane = plane_verdict(camera, *carried, options);
       camera.verdict = camera_verdict(camera.scale, camera.plane);
     }
     out.ratio = stats_of(every_ratio);
