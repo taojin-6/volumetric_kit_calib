@@ -115,16 +115,17 @@ endif()
 # declared after the core, so gfx's own core pin yields to calib's. gfx's tests,
 # examples and -Werror stay off in a subproject.
 #
-# The pin is gfx main at #152's merge (f147e00), on core 0.19.0. calib takes
-# #145's overlay_config for the swapchain's ImGui overlay, #142's
-# categorical_rgba8, the cameras' default tints, #141's 0 x 0 framebuffer while
-# iconified, #138's DepthCloudPipeline and the region writes, and the marks over
-# a region and the fractional-scale scissor repair of #136 and #137.
+# The pin is gfx main at #168's merge (df3a0de), on core 0.20.0, where every
+# window renders at 4x MSAA. calib takes #145's overlay_config for the
+# swapchain's ImGui overlay, #142's categorical_rgba8, the cameras' default
+# tints, #141's 0 x 0 framebuffer while iconified, #138's DepthCloudPipeline and
+# the region writes, and the marks over a region and the fractional-scale
+# scissor repair of #136 and #137.
 if(VC_WITH_RIG)
   FetchContent_Declare(
     volumetric_kit_gfx
     GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_gfx.git
-    GIT_TAG f147e00e7fb45382da8874198684656496f09b7c)
+    GIT_TAG df3a0de4184f6b989faa8d8ffbe0a338e00642a5)
   FetchContent_MakeAvailable(volumetric_kit_gfx)
 endif()
 
