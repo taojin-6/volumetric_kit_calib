@@ -26,6 +26,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `VC_SHADER_INCLUDE_DIRS` property is gone. A session's `software` names
   sensor's commit (`Software::sensor`) where it named recon's; otherwise the
   rig's device requirements, kernels and files are unchanged.
+- build: **calib pins gfx at #168's merge** (df3a0de), where it was at #152's
+  (f147e00). calib_rig's window now renders at 4x MSAA (gfx #167 and #168):
+  the mosaic, its marks, the 3D view and the panels draw multisampled and
+  resolve into the swapchain image. calib's code and tests build unchanged.
 - CI: the Orbbec SDK comes from sensor's action at the sensor pin, and the
   core's actions are taken at the core pin. `.pre-commit-config.yaml` has no
   pre-commit.ci block: no such app runs, and its monthly autoupdate would bump
