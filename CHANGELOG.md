@@ -30,6 +30,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (f147e00). calib_rig's window now renders at 4x MSAA (gfx #167 and #168):
   the mosaic, its marks, the 3D view and the panels draw multisampled and
   resolve into the swapchain image. calib's code and tests build unchanged.
+- build: **calib pins core at #76's merge** (c52a86a, 0.35.0), where it was at
+  #70's (2120e62, 0.30.0), as are the core's actions in CI. calib_rig's 4x
+  MSAA window images, which are transient attachments, now take lazily
+  allocated memory where the device has it (Metal's memoryless storage on
+  Apple GPUs). calib's code and tests build unchanged.
 - CI: the Orbbec SDK comes from sensor's action at the sensor pin, and the
   core's actions are taken at the core pin. `.pre-commit-config.yaml` has no
   pre-commit.ci block: no such app runs, and its monthly autoupdate would bump
