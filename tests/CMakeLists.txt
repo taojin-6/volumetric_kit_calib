@@ -251,6 +251,15 @@ if(TARGET calib_app)
   target_sources(vc_app_calibrate_test PRIVATE support/allocation_failure.cpp)
   target_include_directories(vc_app_calibrate_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
+  # app: Calibrate on the synthetic Femto rig against its goldens
+  # (goldens/femto_calibrate/), numbers within tolerances.
+  vc_add_test(app_calibrate_goldens volumetric_kit::calib_app vc_synthetic_rig)
+  target_include_directories(vc_app_calibrate_goldens_test SYSTEM
+                             PRIVATE "${VC_JSON_INCLUDE_DIR}")
+  target_compile_definitions(
+    vc_app_calibrate_goldens_test
+    PRIVATE VC_GOLDENS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/goldens/femto_calibrate"
+  )
   # app: Calibrate's depth checks on a device, over raw depth rendered through
   # the synthetic depth lens, beside the 3D view's worker across two queue
   # families, through the core's Vulkan test fixtures (they skip without one).

@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- tests: **the Femto goldens.** `app_calibrate_goldens` runs Calibrate on
+  the synthetic Femto rig (four Femto-like 4K colour cameras, 40 placements
+  of the rig's board, the origin tag seen) and holds its
+  `array_calibration.json` and `residuals.csv` to the copies in
+  `tests/goldens/femto_calibrate/`: numbers within 1e-9 m, 1e-9 rad and
+  1e-6 px, keys, ids and words byte for byte. Its noise is drawn the same
+  with every standard library (`test::ObserveOptions::portable`).
+
 ### Changed
 
 - build: **calib builds on volumetric_kit_sensor, not recon** (BREAKING for
