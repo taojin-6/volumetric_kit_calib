@@ -104,10 +104,10 @@ MSVC flags.
   `/// @return`.
 - **Mark deferred work inline with a greppable `// TODO:`** rather than tracking
   it only in prose or commits.
-- **The stable API is README.md's table.** Additive changes to it are free;
-  any other is a `!` commit with a CHANGELOG migration and a DECISIONS.md
-  line, and `tests/api_test.cpp` builds the sample programs on it. Every
-  feature PR bumps the minor version
+- **The stable API is README.md's table** and calib's types its headers use.
+  Additive changes to it are free; any other is a `!` commit with a CHANGELOG
+  migration and a DECISIONS.md line, and `tests/api_test.cpp` builds the
+  sample programs on it. Every feature PR bumps the minor version
   ([DECISIONS.md](DECISIONS.md#2026-11-01--the-stable-api)).
 - Prefer plain, behavior-level tests over friend-class backdoors into private
   state; the `core` tier is pure CPU so its tests run on every machine.

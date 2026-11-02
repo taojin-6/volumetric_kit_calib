@@ -76,9 +76,12 @@ std::vector<double> moved_by_id(const Corners& from, const Corners& to) {
 // How far each corner of `from` moved to the nearest corner of `to`, when that
 // is within a third of the distance to its own nearest neighbour in `from`. Two
 // corners of `from` cannot pair with one of `to`: each is at least its own
-// spacing from the other, more than the thirds of both spacings together.
+// spacing from the other, more than the thirds of both spacings together. If
+// no corner pairs, the board moved at least that far: the smallest third
+// alone.
 std::vector<double> moved_by_position(const Corners& from, const Corners& to) {
   std::vector<double> moved;
+  double third = std::numeric_limits<double>::infinity();
   for (std::size_t i = 0; i < from.size(); ++i) {
     double spacing = std::numeric_limits<double>::infinity();
     for (std::size_t k = 0; k < from.size(); ++k) {
@@ -88,12 +91,14 @@ std::vector<double> moved_by_position(const Corners& from, const Corners& to) {
       }
     }
     if (!std::isfinite(spacing)) continue;  // a lone corner has no spacing
+    third = std::min(third, spacing / 3.0);
     double nearest = std::numeric_limits<double>::infinity();
     for (const auto& corner : to) {
       nearest = std::min(nearest, glm::length(corner.second - from[i].second));
     }
     if (nearest <= spacing / 3.0) moved.push_back(nearest);
   }
+  if (moved.empty() && std::isfinite(third)) moved.push_back(third);
   return moved;
 }
 

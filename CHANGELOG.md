@@ -22,13 +22,15 @@ release may break it, and each such entry says how to migrate
   `findChessboardCornersSB` asked for 5 x 4 inner corners with
   `CALIB_CB_LARGER`, so a board cut by the picture's edge is found, its grid
   numbered from its own first corner; corners SB adds that are not the
-  board's are dropped. With `DetectOptions::half`, the picture halved, the
-  board is searched there and each corner refined in the picture. calib_rig's
-  captures detect through it.
+  board's, and grids that skip squares, are dropped; each corner is refined
+  in the picture; and each search seeds OpenCV's random numbers and puts them
+  back, so a picture always gives one detection. With `DetectOptions::half`,
+  the picture halved, the board is searched there. calib_rig's captures detect
+  through it.
 - `quality::CornerMatch` and `corner_match(board)`: `corner_shift` takes a
   trailing `match`. `Nearest` pairs a checkerboard's corners by position, for
-  the capture rule's stillness and the live-vs-full flag; calib_rig asks for
-  its board's.
+  the capture rule's stillness and the live-vs-full flag, and reads a third of
+  their spacing when none pair; calib_rig asks for its board's.
 - tests: **the Femto goldens.** `app_calibrate_goldens` runs Calibrate on
   the synthetic Femto rig (four Femto-like 4K colour cameras, 40 placements
   of the rig's board, the origin tag seen) and holds its
@@ -42,8 +44,10 @@ release may break it, and each such entry says how to migrate
 - **Breaking:** `compute::Board::charuco()` returns a pointer, null for a
   checkerboard (DECISIONS.md, 2026-11-01). Migration: write
   `*board.charuco()` where `board.charuco()` was, for a ChArUco board.
-- `check_target` needs at least 5 x 4 inner corners for a checkerboard,
-  either way round (it took 1 x 1).
+- **Breaking:** `check_target` needs at least 5 x 4 inner corners for a
+  checkerboard, either way round (DECISIONS.md, 2026-11-01); it took 1 x 1,
+  though no `Board` could be built from a checkerboard. Migration: enter a
+  checkerboard of at least that size.
 - `compute::usable_for_pose` tests collinearity on the board's corners for
   both kinds, where it asked OpenCV's ChArUco board; its verdicts on ChArUco
   views are unchanged.

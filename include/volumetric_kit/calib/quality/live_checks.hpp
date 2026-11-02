@@ -100,7 +100,10 @@ enum class CornerMatch : std::uint8_t {
   /// nearest, within a third of the distance to its own nearest neighbour.
   /// A checkerboard's ids name its corners in one view only, so a still
   /// board cut by the image's edge can number its corners differently from
-  /// frame to frame.
+  /// frame to frame. With corners in both and none paired, the shift is the
+  /// smallest such third, a floor on the motion. A board that moved almost
+  /// exactly a whole number of squares reads still: its corners pair with
+  /// their neighbours'.
   Nearest,
 };
 
@@ -123,7 +126,8 @@ VC_QUALITY_API CornerMatch corner_match(const compute::Board& board) noexcept;
 /// @endcode
 struct CornerShift {
   /// For each camera, the median distance its corners moved (pixels); empty
-  /// when no corner is in both of its detections.
+  /// when either detection has no corners, when no id is in both (`ById`), or
+  /// when the earlier one has a lone corner, with no spacing (`Nearest`).
   std::vector<std::optional<double>> cameras;
   /// The median over every corner in both, all cameras together (pixels);
   /// empty when there is none.

@@ -78,9 +78,11 @@ README.md's [table](README.md#stable-api) (board, detect, views, solve,
 quality, and sensor's calibration file, which calib formats and the caller
 writes). From 0.1.0:
 
-1. The API is the headers in that table, and the OpenCV 5 and sensor camera
-   types they use (`cv::Point3d`, `cv::aruco::CharucoBoard`, `CameraModel`,
-   `ArrayCalibration`, ...): a break there is a calib break.
+1. The API is the headers in that table, calib's own types they use, wherever
+   declared (`compute::CvCamera`, `compute::ViewUse`, `quality::FloorBoard`,
+   ...), and the OpenCV 5 and sensor camera types they use (`cv::Point3d`,
+   `cv::aruco::CharucoBoard`, `CameraModel`, `ArrayCalibration`, ...): a break
+   there is a calib break.
 2. Additive changes are free: new headers, functions or overloads; trailing
    parameters and struct fields with defaults; trailing enum values.
 3. Anything else is breaking: a `!` commit, a CHANGELOG "Breaking" line with
@@ -96,8 +98,8 @@ writes). From 0.1.0:
 7. The house rules stay: `core::Status` and `Result`, no exception across the
    API, a `@code` example per class.
 
-Every other header is internal and changes freely: `app/`, `viz/`,
-`capture/`, `depth/`, the rest of `compute/` and `quality/`, and
+Every other header is internal and, those types aside, changes freely: `app/`,
+`viz/`, `capture/`, `depth/`, the rest of `compute/` and `quality/`, and
 `detect/charuco.hpp`. Why: other programs (an offline lens solve, the second
 camera pair) assemble the brain, and a rule that shows in review costs
 little. Freezing everything would stall the app; an ABI promise means
@@ -123,27 +125,38 @@ corners, past where a whole board fits.
   edge included. Why 5 x 4: asked for the whole board, SB finds no cut board;
   asked for 4 x 3, a still board cut by the edge comes back as a different
   grid from frame to frame; 5 x 4 and 6 x 5 are stable. So `check_target`
-  needs at least 5 x 4, either way round. In the picture (captures) SB runs
-  with `NORMALIZE_IMAGE` and `EXHAUSTIVE`, not `ACCURACY` (four times the time
-  for 0.01-0.02 px); in the half (`DetectOptions::half`, the live view) with
-  `NORMALIZE_IMAGE`, each corner then refined in the picture by the ChArUco
-  hybrid's refinement, which both kinds share.
+  needs at least 5 x 4, either way round (a break: it took 1 x 1, though no
+  `Board` could be built from a checkerboard). In the picture (captures) SB
+  runs with `NORMALIZE_IMAGE` and `EXHAUSTIVE`, not `ACCURACY` (four times the
+  time for 0.01-0.02 px); in the half (`DetectOptions::half`, the live view)
+  with `NORMALIZE_IMAGE`.
+- **Each corner is refined in the picture**, on both paths, by the ChArUco
+  hybrid's refinement, which both kinds share. Why: SB's own corners err
+  0.14-0.19 px (median) on a board square to the pixels, 0.02-0.09 px turned
+  from them, on both renderers; refined, 0.02-0.05 px either way. These
+  corners fit lenses.
 - **Each corner SB returns is checked.** It is kept when it is in step with
   its neighbours along its row and column, and its four squares, seen at
-  their centres, are dark and light by turns with at least half the grid's
-  median contrast; a grid with half its corners failing is dropped whole.
-  Why: grown past the size asked for, SB at times returns corners that are
-  not the board's. On the design review's renderer 5 of 24 views in the
-  fisheye's corners had corners 20-80 px off the board; on calib's, a whole
-  board turned 45 degrees gained a row of the T-junctions where it meets its
-  white margin (1 noise draw in 12), and a half search returned a grid
-  skipping every other row. Unchecked, such corners would be fitted, with
-  wrong ids.
-- **Measured on the way:** SB's corners err 0.14-0.19 px (median) on a board
-  square to the pixels, 0.02-0.09 px turned from them, on both renderers;
-  and on several threads SB can return a different grid from run to run on
-  one picture (8 x 4 or 7 x 4 corners), one more reason stillness pairs
-  corners by position. The detector's tests run OpenCV on one thread.
+  their centres, are dark and light by turns, with at least half the grid's
+  median contrast and half the span from black to white around them; a grid
+  with half its corners failing is dropped whole. Beside the picture's edge
+  one square's centre may be off it. Why: grown past the size asked for, SB
+  at times returns corners that are not the board's. On the design review's
+  renderer 5 of 24 views in the fisheye's corners had corners 20-80 px off
+  the board; on calib's, a whole board turned 45 degrees gained a row of the
+  T-junctions where it meets its white margin (1 noise draw in 12), and
+  searches returned grids skipping every other row or column. A skipping
+  grid's corners are true, and its own median contrast is low, so only the
+  span around each corner tells. Unchecked, such corners would be fitted,
+  with wrong ids.
+- **Each search seeds OpenCV's random numbers.** SB builds a k-d tree from
+  `cv::theRNG()`, on the calling thread, and its grid depends on that tree:
+  from different states, on one thread or several, one picture gave a 4 x 8
+  grid, a 5 x 4 grid or none. `detect_board` starts them from one seed and
+  puts them back after, so a picture always gives one detection and a
+  caller's numbers stay its own. This makes SB repeatable, not right: noise
+  moves its grid as the seed did, one more reason stillness pairs corners by
+  position.
 - **The grid found is numbered row-major from its own first corner**, turned
   a quarter when it fits the board only that way round; a grid larger than
   the board either way round is refused, naming both sizes. Its first corner
@@ -153,7 +166,10 @@ corners, past where a whole board fits.
   (`quality::CornerMatch::Nearest`, within a third of the corner's spacing),
   a ChArUco board's by id. Why: by id, a still board whose numbering moved
   reads a square or more of motion, and the capture would time out in the
-  corners the lens needs.
+  corners the lens needs. With corners in both and none paired, the shift is
+  a third of the spacing, so the capture rule says the board is moving, not
+  gone. A move of almost exactly a whole number of squares between two live
+  sets reads still; position cannot tell, and the odds are low.
 - **The rig's solve refuses a checkerboard** (`initialise`,
   `bundle_adjust`): extrinsics pair corners across cameras by id, which only
   a board with markers gives.

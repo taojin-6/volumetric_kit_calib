@@ -111,7 +111,7 @@ vc_add_test(detect_tag volumetric_kit::calib_detect vc_synthetic_rig)
 # `detect_board.timing`.
 vc_add_test(detect_board volumetric_kit::calib_quality
             volumetric_kit::calib_detect vc_synthetic_rig)
-# About 40 s on an M5 Max: SB at 4K, on one thread.
+# About 25 s on an M5 Max: SB at 4K, a few dozen times.
 set_tests_properties(detect_board PROPERTIES TIMEOUT 300)
 add_test(NAME detect_board.timing COMMAND vc_detect_board_test
                                           --gtest_filter=DetectBoardTiming.*)

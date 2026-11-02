@@ -39,16 +39,20 @@ struct DetectOptions {
 ///   corners with `CALIB_CB_LARGER`, so any larger grid counts, a board cut
 ///   by the picture's edge included. In the picture it runs with
 ///   `CALIB_CB_NORMALIZE_IMAGE` and `CALIB_CB_EXHAUSTIVE`; in the half with
-///   `CALIB_CB_NORMALIZE_IMAGE`. A corner whose four squares, seen at their
-///   centres in the picture, are not dark and light by turns is dropped: so
-///   grown, SB at times adds corners past the board (where it meets its white
-///   margin, or off it). From the half, each corner is then refined in the
-///   picture with `cornerSubPix`, its half-window half the distance to its
-///   nearest neighbour, rounded down and held to 2-10 px; a corner that moves
-///   more than 2 px is dropped. The grid the corners kept span is numbered
-///   row-major from its own first corner into the board's ids, turned a
-///   quarter when it fits the board only that way round; so an id names a
-///   corner in this view only (`Observation`). No markers.
+///   `CALIB_CB_NORMALIZE_IMAGE`. Its grid depends on OpenCV's random numbers:
+///   each search starts them from one seed and puts them back after, so a
+///   picture always gives the same detection, on any number of OpenCV
+///   threads. A corner out of step with its neighbours, or whose four
+///   squares, seen at their centres in the picture, are not dark and light by
+///   turns, is dropped: so grown, SB at times adds corners past the board
+///   (where it meets its white margin, or off it) or skips squares; a grid
+///   with half its corners dropped is dropped whole. Each corner is then
+///   refined in the picture with `cornerSubPix`, its half-window half the
+///   distance to its nearest neighbour, rounded down and held to 2-10 px; a
+///   corner that moves more than 2 px is dropped. The grid the corners kept
+///   span is numbered row-major from its own first corner into the board's
+///   ids, turned a quarter when it fits the board only that way round; so an
+///   id names a corner in this view only (`Observation`). No markers.
 ///
 /// No board is not a failure: the detection is then empty. Calls may run on
 /// several threads at once, sharing @p board.

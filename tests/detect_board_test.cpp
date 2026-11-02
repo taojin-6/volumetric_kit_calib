@@ -5,9 +5,10 @@
 // a fisheye truth (KB4, f 1702, k1 -0.033: the lab's Blackmagic lens) is
 // found turned any way, cut by each edge of the picture and in each corner,
 // in the picture and in its half, its grid numbered as a grid; corners SB
-// adds off the board are dropped; a grid larger than the board is refused; a
-// still board reads still, by position, between noise-only pictures. A
-// ChArUco board is found as detect_charuco finds it. DetectBoardTiming prints
+// adds off the board and grids that skip squares are dropped; a grid larger
+// than the board is refused; a picture gives one detection; a still board
+// reads still, by position, between noise-only pictures. A ChArUco board is
+// found as detect_charuco finds it. DetectBoardTiming prints
 // findChessboardCornersSB's times on 20 pictures (`detect_board.timing`,
 // labelled slow).
 
@@ -49,15 +50,6 @@ constexpr double kDeg = kPi / 180.0;
 
 // The lab's Blackmagic lens at 4K.
 const test::FisheyeTruth kLens;
-
-// On several threads, SB's grid can differ from run to run on one picture
-// (8 x 4 or 7 x 4 corners); on one, each picture gives one answer.
-class OneOpenCvThread : public ::testing::Environment {
- public:
-  void SetUp() override { cv::setNumThreads(1); }
-};
-::testing::Environment* const kOneThread =
-    ::testing::AddGlobalTestEnvironment(new OneOpenCvThread);
 
 // The board's centre `off_axis_deg` off the optical axis, toward
 // `azimuth_deg` (0 the picture's right, 90 its bottom), `distance_m` away,
@@ -173,8 +165,9 @@ double median_error(const Detection& found,
 }
 
 // Whether the ids found number the corners as a grid: one of the square's
-// eight symmetries and a shift takes each corner's (row, column) by its id
-// to the (row, column) of the true corner nearest it.
+// four rotations and a shift takes each corner's (row, column) by its id to
+// the (row, column) of the true corner nearest it. A mirror would not do: it
+// flips the board in every pose posed from those ids.
 ::testing::AssertionResult NumberedAsAGrid(
     const Detection& found, const std::vector<cv::Point2d>& corners, int cols) {
   if (found.observation.empty()) return ::testing::AssertionFailure() << "none";
@@ -197,6 +190,7 @@ double median_error(const Detection& found,
     for (int b = -1; b <= 1; ++b) {
       for (const bool swap : {false, true}) {
         if (a == 0 || b == 0) continue;
+        if ((a * b > 0) == swap) continue;  // a mirror
         const auto map = [&](const std::array<int, 4>& p) {
           return swap ? std::array<int, 2>{a * p[1], b * p[0]}
                       : std::array<int, 2>{a * p[0], b * p[1]};
@@ -268,9 +262,9 @@ const Scene kCut[] = {
 };
 
 // A whole board turned any way about the line of sight: every corner, each
-// within half a pixel, numbered as a grid. SB's corners err least on a grid
-// turned from the pixels' axes: under 0.1 px (median) at 45 degrees, 0.14 to
-// 0.19 px square to them, here and on the design review's own renderer.
+// within half a pixel, under 0.1 px at the median, numbered as a grid. On a
+// board square to the pixels SB's own corners err 0.14 to 0.19 px: only the
+// refinement holds this.
 TEST(DetectBoard, FindsAWholeBoardTurnedAnyWay) {
   const compute::Board board = test::lab_checkerboard();
   for (const Scene& scene : kTurned) {
@@ -281,8 +275,7 @@ TEST(DetectBoard, FindsAWholeBoardTurnedAnyWay) {
     EXPECT_TRUE(found.markers.empty()) << scene.name;
     EXPECT_TRUE(NumberedAsAGrid(found, corners, 13)) << scene.name;
     const std::vector<double> e = errors(found, corners);
-    const bool square = std::fmod(scene.roll_deg, 90.0) == 0.0;
-    EXPECT_LT(compute::median(e), square ? 0.25 : 0.1) << scene.name;
+    EXPECT_LT(compute::median(e), 0.1) << scene.name;
     EXPECT_LT(*std::max_element(e.begin(), e.end()), 0.5) << scene.name;
     for (std::size_t i = 1; i < found.observation.size(); ++i) {
       EXPECT_LT(found.observation.points[i - 1].id,
@@ -292,7 +285,7 @@ TEST(DetectBoard, FindsAWholeBoardTurnedAnyWay) {
   const Detection frontal = detect(picture(clean(kFrontal), 1), board);
   ASSERT_EQ(frontal.observation.size(), 104u);
   EXPECT_TRUE(NumberedAsAGrid(frontal, truth(kFrontal), 13));
-  EXPECT_LT(median_error(frontal, truth(kFrontal)), 0.25);
+  EXPECT_LT(median_error(frontal, truth(kFrontal)), 0.1);
 }
 
 // A board the picture's edge cuts, at a side or in a corner, is found: SB is
@@ -308,7 +301,7 @@ TEST(DetectBoard, FindsABoardCutByEachEdgeAndInEachCorner) {
     const Detection found = detect(image, board);
     EXPECT_GE(found.observation.size(), 20u) << scene.name;
     EXPECT_TRUE(NumberedAsAGrid(found, corners, 13)) << scene.name;
-    EXPECT_LT(median_error(found, corners), 0.15) << scene.name;
+    EXPECT_LT(median_error(found, corners), 0.1) << scene.name;
 
     std::vector<cv::Point2f> whole;
     EXPECT_FALSE(cv::findChessboardCornersSB(image, cv::Size(13, 8), whole,
@@ -316,6 +309,24 @@ TEST(DetectBoard, FindsABoardCutByEachEdgeAndInEachCorner) {
                                                  cv::CALIB_CB_EXHAUSTIVE |
                                                  cv::CALIB_CB_LARGER))
         << scene.name;
+  }
+}
+
+// A corner beside the picture's edge, one of its squares' centres off the
+// picture, is judged by the other three. (With a whole side of its squares
+// off the picture, no diagonal pair is left, and it is dropped.)
+TEST(DetectBoard, KeepsCornersBesideThePicturesEdge) {
+  const compute::Board board = test::lab_checkerboard();
+  for (const Scene& scene : {kCut[4], kCut[5], kCut[6], kCut[7]}) {
+    const Detection found = detect(picture(clean(scene), 1), board);
+    ASSERT_FALSE(found.observation.empty()) << scene.name;
+    double nearest = 1e300;
+    for (const DetectedPoint& point : found.observation.points) {
+      nearest = std::min({nearest, point.pixel.x, point.pixel.y,
+                          kLens.size.width - 1.0 - point.pixel.x,
+                          kLens.size.height - 1.0 - point.pixel.y});
+    }
+    EXPECT_LT(nearest, 35.0) << scene.name;
   }
 }
 
@@ -548,6 +559,87 @@ TEST(DetectBoard, KeepsOnlyCornersOnTheBoard) {
   EXPECT_GE(kept, 8u) << "few searches kept a board";
 }
 
+// On these pictures SB, from the seed detect_board gives it, returns a grid
+// that skips every other column of squares (the last with a corner 64 px off
+// the board too): true corners, numbered as neighbours. Replayed from that
+// seed, the test says whether this OpenCV still does; detect_board must drop
+// such a grid, or keep only a grid's true corners.
+TEST(DetectBoard, DropsAGridThatSkipsSquares) {
+  const compute::Board board = test::lab_checkerboard();
+  const Scene skips = {"skips columns", 62.0, 0.0, 0.55, 30.0, 0.0};
+  const Scene strays = {
+      "skips columns, one astray", 64.0, 0.0, 0.55, 30.0, 0.0};
+  std::size_t broken = 0;
+  const std::pair<Scene, std::uint64_t> pictures[] = {
+      {skips, 3}, {skips, 16}, {strays, 8}};
+  for (const auto& [scene, seed] : pictures) {
+    const std::vector<cv::Point2d> corners = truth(scene);
+    const cv::Mat image = picture(clean(scene), seed);
+
+    cv::theRNG() = cv::RNG();
+    std::vector<cv::Point2f> grid;
+    cv::Mat meta;
+    cv::findChessboardCornersSB(image, cv::Size(5, 4), grid,
+                                cv::CALIB_CB_NORMALIZE_IMAGE |
+                                    cv::CALIB_CB_EXHAUSTIVE |
+                                    cv::CALIB_CB_LARGER,
+                                meta);
+    Detection raw;
+    for (std::size_t i = 0; !meta.empty() && i < grid.size(); ++i) {
+      const int row = static_cast<int>(i) / meta.cols;
+      const int column = static_cast<int>(i) % meta.cols;
+      raw.observation.points.push_back(
+          {row * 13 + column, {grid[i].x, grid[i].y}, 1.0});
+    }
+    if (!raw.observation.empty() && !NumberedAsAGrid(raw, corners, 13)) {
+      ++broken;
+    }
+
+    const Detection found = detect(image, board);
+    if (found.observation.empty()) continue;
+    const std::vector<double> e = errors(found, corners);
+    EXPECT_LT(*std::max_element(e.begin(), e.end()), 1.0)
+        << scene.name << ", noise " << seed;
+    EXPECT_TRUE(NumberedAsAGrid(found, corners, 13))
+        << scene.name << ", noise " << seed;
+  }
+  std::printf("SB's own grid was broken on %zu of %zu pictures\n", broken,
+              std::size(pictures));
+}
+
+// SB's grid depends on OpenCV's random numbers, which it draws on one thread.
+// detect_board seeds them for each search and puts them back: one picture
+// gives one detection whatever they were, on any number of OpenCV threads.
+TEST(DetectBoard, APictureGivesOneDetection) {
+  const compute::Board board = test::lab_checkerboard();
+  const Scene depends = {"depends on the numbers", 62.0, 0.0, 0.55, 25.0, 0.0};
+  for (const Scene& scene : {depends, kCut[6]}) {
+    const cv::Mat image = picture(clean(scene), 1);
+    const cv::Mat half = halved(image);
+    for (const cv::Mat* searched : {static_cast<const cv::Mat*>(nullptr),
+                                    static_cast<const cv::Mat*>(&half)}) {
+      std::vector<Detection> runs;
+      for (const std::uint64_t state : {1u, 2u, 3u, 4u, 5u, 6u}) {
+        cv::setNumThreads(state % 2 == 0 ? 1 : -1);
+        cv::theRNG().state = state;
+        runs.push_back(detect(image, board, searched));
+        EXPECT_EQ(cv::theRNG().state, state) << scene.name;
+      }
+      cv::setNumThreads(-1);
+      for (const Detection& run : runs) {
+        ASSERT_EQ(run.observation.size(), runs[0].observation.size())
+            << scene.name;
+        for (std::size_t i = 0; i < run.observation.size(); ++i) {
+          EXPECT_EQ(run.observation.points[i].id,
+                    runs[0].observation.points[i].id);
+          EXPECT_EQ(run.observation.points[i].pixel,
+                    runs[0].observation.points[i].pixel);
+        }
+      }
+    }
+  }
+}
+
 // U1: findChessboardCornersSB's time on 20 pictures at 4K, in the picture
 // (captures) and in its half (the live view), board or none. Run on the lab
 // box once: `ctest -L slow -R detect_board.timing -V`.
@@ -555,7 +647,6 @@ TEST(DetectBoardTiming, PrintsSearchTimes) {
   if (std::getenv("VC_TEST_TIMING") == nullptr) {
     GTEST_SKIP() << "set VC_TEST_TIMING (detect_board.timing)";
   }
-  cv::setNumThreads(-1);  // OpenCV's own threads, as calib_rig runs it
   const compute::Board board = test::lab_checkerboard();
   std::vector<cv::Mat> images;
   for (int i = 0; i < 18; ++i) {

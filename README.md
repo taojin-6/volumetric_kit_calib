@@ -139,9 +139,10 @@ renderer.
 ## Stable API
 
 A program built on calib uses the brain through these headers, under
-`include/volumetric_kit/calib/`; each builds without Vulkan or gfx. What
-stays stable, and how a break is flagged, is
-[DECISIONS.md](DECISIONS.md#2026-11-01--the-stable-api)'s rule; every other
+`include/volumetric_kit/calib/`; each builds without Vulkan or gfx. The API is
+these headers and calib's types they use, wherever declared; what stays
+stable, and how a break is flagged, is
+[DECISIONS.md](DECISIONS.md#2026-11-01--the-stable-api)'s rule. Every other
 header is internal.
 
 | Layer | Headers |

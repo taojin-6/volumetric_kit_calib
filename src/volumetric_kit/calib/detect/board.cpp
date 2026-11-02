@@ -4,6 +4,7 @@
 #include "volumetric_kit/calib/detect/board.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -39,6 +40,21 @@ std::string size_text(int across, int down) {
   return std::to_string(across) + " x " + std::to_string(down);
 }
 
+// OpenCV's random numbers on this thread, from one fixed seed while it lives,
+// then as they were. findChessboardCornersSB builds a k-d tree from them, on
+// the calling thread, and its grid depends on that tree: seeded, a picture
+// always gives one grid, whatever came before and on any number of threads.
+class SeededRng {
+ public:
+  SeededRng() : saved_(cv::theRNG().state) { cv::theRNG() = cv::RNG(); }
+  ~SeededRng() { cv::theRNG().state = saved_; }
+  SeededRng(const SeededRng&) = delete;
+  SeededRng& operator=(const SeededRng&) = delete;
+
+ private:
+  std::uint64_t saved_;
+};
+
 core::Status check_half(const LumaView& image, const LumaView& half) {
   VKC_TRY(detail::check_luma(half, "detect_board: options.half"));
   if (half.width != image.width / 2 || half.height != image.height / 2) {
@@ -64,27 +80,68 @@ std::optional<double> patch_mean(const cv::Mat& image, const cv::Point2f& at) {
   return cv::mean(patch)[0];
 }
 
+// The span from the 10th to the 90th percentile of `image`'s pixels in the
+// box around `points` (cut to the image): its black to its white there.
+int black_to_white(const cv::Mat& image, const cv::Point2f (&points)[4]) {
+  float x0 = points[0].x, y0 = points[0].y, x1 = x0, y1 = y0;
+  for (const cv::Point2f& p : points) {
+    x0 = std::min(x0, p.x);
+    y0 = std::min(y0, p.y);
+    x1 = std::max(x1, p.x);
+    y1 = std::max(y1, p.y);
+  }
+  const cv::Rect box =
+      cv::Rect(cv::Point(static_cast<int>(std::floor(x0)),
+                         static_cast<int>(std::floor(y0))),
+               cv::Point(static_cast<int>(std::ceil(x1)) + 1,
+                         static_cast<int>(std::ceil(y1)) + 1)) &
+      cv::Rect(0, 0, image.cols, image.rows);
+  if (box.empty()) return 0;
+  std::array<int, 256> count{};
+  for (int y = box.y; y < box.y + box.height; ++y) {
+    const std::uint8_t* row = image.ptr<std::uint8_t>(y);
+    for (int x = box.x; x < box.x + box.width; ++x) ++count[row[x]];
+  }
+  const long long total = static_cast<long long>(box.area());
+  long long seen = 0;
+  int black = -1;
+  for (int v = 0; v < 256; ++v) {
+    seen += count[static_cast<std::size_t>(v)];
+    if (black < 0 && 10 * seen >= total) black = v;
+    if (10 * seen >= 9 * total) return v - black;
+  }
+  return 0;
+}
+
 // Whether each corner of the grid found (`across` x `down`, row by row, in
 // `image`'s pixels) is a checkerboard's corner:
 // - **in step:** along its row and its column, the step from the corner
 //   before differs from the step to the corner after by under a quarter of
 //   their mean (a lens bends a grid far less from one square to the next);
+//   an end corner's step is held to the next one in;
 // - **dark and light by turns:** its four squares, seen at their centres
-//   (half a step along the grid each way) and all in the image, have each
-//   diagonal pair within half the contrast between the pairs, and that
-//   contrast at least half the grid's median.
+//   (half a step along the grid each way), have each diagonal pair within
+//   half the contrast between the pairs, and that contrast is at least half
+//   the grid's median and half the span from black to white around them.
+//   Near the image's edge one centre of a pair may be off it, if the other
+//   pair is whole.
 // Grown past the size asked for (CALIB_CB_LARGER), SB at times adds corners
 // past the board -- a row of the T-junctions where the board meets its white
 // margin, or a corner off the board altogether -- or returns a grid that is
-// no grid, in the fisheye's corners. Such corners fail; and when half or more
-// of the grid's fail, it is no board's, and every corner is dropped.
+// no grid, in the fisheye's corners: one that skips squares, its corners true
+// but its steps two squares long. There half a step lands near the board's
+// own corners and edges, so the contrast seen is low, the grid's median with
+// it, and only the span around the corner tells. Such corners fail; and when
+// half or more of the grid's fail, it is no board's, and every corner is
+// dropped.
 std::vector<bool> board_corners(const cv::Mat& image,
                                 const std::vector<cv::Point2f>& corners,
                                 int across, int down) {
+  if (across < 3 || down < 3) return std::vector<bool>(corners.size(), false);
   const auto at = [&](int r, int c) {
     return corners[static_cast<std::size_t>(r) * across + c];
   };
-  // Whether the steps before and after `here` agree; true at an end.
+  // Whether the steps before and after `here` agree.
   const auto in_step = [](const cv::Point2f& before, const cv::Point2f& here,
                           const cv::Point2f& after) {
     const cv::Point2f in = here - before;
@@ -109,23 +166,38 @@ std::vector<bool> board_corners(const cv::Mat& image,
       const cv::Point2f p = at(r, c);
       const bool left = c > 0, right = c + 1 < across;
       const bool up = r > 0, below = r + 1 < down;
-      if ((left && right && !in_step(at(r, c - 1), p, at(r, c + 1))) ||
-          (up && below && !in_step(at(r - 1, c), p, at(r + 1, c)))) {
+      // An end corner's step is held to the next one in.
+      const int cm = std::clamp(c, 1, across - 2);
+      const int rm = std::clamp(r, 1, down - 2);
+      if (!in_step(at(r, cm - 1), at(r, cm), at(r, cm + 1)) ||
+          !in_step(at(rm - 1, c), at(rm, c), at(rm + 1, c))) {
         continue;
       }
       const cv::Point2f a = half_step(left ? at(r, c - 1) : p, p,
                                       right ? at(r, c + 1) : p, left, right);
       const cv::Point2f b = half_step(up ? at(r - 1, c) : p, p,
                                       below ? at(r + 1, c) : p, up, below);
-      const std::optional<double> m1 = patch_mean(image, p + a + b);
-      const std::optional<double> m2 = patch_mean(image, p - a - b);
-      const std::optional<double> m3 = patch_mean(image, p + a - b);
-      const std::optional<double> m4 = patch_mean(image, p - a + b);
-      if (!m1 || !m2 || !m3 || !m4) continue;
-      contrast[k] = std::abs((*m1 + *m2) - (*m3 + *m4)) / 2.0;
+      // Its squares' centres, as two diagonal pairs.
+      const cv::Point2f centres[4] = {p + a + b, p - a - b, p + a - b,
+                                      p - a + b};
+      std::optional<double> m[4];
+      for (int i = 0; i < 4; ++i) m[i] = patch_mean(image, centres[i]);
+      // Near the image's edge, a pair may have one centre in it; at least
+      // one pair must be whole.
+      if (!(m[0] && m[1]) && !(m[2] && m[3])) continue;
+      if ((!m[0] && !m[1]) || (!m[2] && !m[3])) continue;
+      const auto level = [](const std::optional<double>& x,
+                            const std::optional<double>& y) {
+        return x && y ? 0.5 * (*x + *y) : x ? *x : *y;
+      };
+      contrast[k] = std::abs(level(m[0], m[1]) - level(m[2], m[3]));
       contrasts.push_back(contrast[k]);
-      kept[k] = std::abs(*m1 - *m2) < 0.5 * contrast[k] &&
-                std::abs(*m3 - *m4) < 0.5 * contrast[k];
+      const auto alike = [&](const std::optional<double>& x,
+                             const std::optional<double>& y) {
+        return !x || !y || std::abs(*x - *y) < 0.5 * contrast[k];
+      };
+      kept[k] = alike(m[0], m[1]) && alike(m[2], m[3]) &&
+                contrast[k] >= 0.5 * black_to_white(image, centres);
     }
   }
   if (contrasts.empty()) return kept;
@@ -150,6 +222,7 @@ core::Result<Detection> find_checkerboard(const cv::Mat& full,
   std::vector<cv::Point2f> found;
   cv::Mat meta;
   Detection detection;
+  const SeededRng seeded;
   if (!cv::findChessboardCornersSB(half != nullptr ? *half : full,
                                    kSmallestGrid, found, flags, meta)) {
     return detection;
@@ -208,9 +281,9 @@ core::Result<Detection> find_checkerboard(const cv::Mat& full,
                         : (c - c0) * target.cols + (grid_down - 1 - (r - r0)));
     }
   }
-  if (half != nullptr) {
-    detail::refine_corners(full, detail::nearest_other(corners), corners, ids);
-  }
+  // SB's own corners err 0.15-0.2 px on a grid square to the pixels (median);
+  // refined, about 0.04 px.
+  detail::refine_corners(full, detail::nearest_other(corners), corners, ids);
 
   std::vector<DetectedPoint>& points = detection.observation.points;
   points.reserve(corners.size());

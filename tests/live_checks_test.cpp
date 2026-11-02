@@ -360,15 +360,27 @@ TEST(CornerShift, PairsACheckerboardsCornersByPosition) {
   EXPECT_NEAR(*still.max_px, 0.1, 1e-9);
   EXPECT_GT(*shift_of({corners(first)}, {corners(again)}).median_px, 30.0);
 
-  // A corner pairs within a third of its spacing (30 px), not beyond.
-  for (const auto& [step, pairs] :
-       {std::pair{9.9, true}, std::pair{10.1, false}}) {
+  // A corner pairs within a third of its spacing (30 px). Beyond it none
+  // does, and the board moved at least that third: it reads as moving, not
+  // as gone.
+  for (const auto& [step, reads] :
+       {std::pair{9.9, 9.9}, std::pair{10.1, 10.0}, std::pair{15.0, 10.0}}) {
     std::vector<std::pair<int, camera::Vec2d>> moved = first;
     for (auto& corner : moved) corner.second.x += step;
     const CornerShift shift =
         shift_of({corners(first)}, {corners(moved)}, CornerMatch::Nearest);
-    EXPECT_EQ(shift.median_px.has_value(), pairs) << step;
+    ASSERT_TRUE(shift.median_px.has_value()) << step;
+    EXPECT_NEAR(*shift.median_px, reads, 1e-9) << step;
+    EXPECT_NEAR(*shift.max_px, reads, 1e-9) << step;
+    ASSERT_TRUE(shift.cameras[0].has_value()) << step;
+    EXPECT_NEAR(*shift.cameras[0], reads, 1e-9) << step;
   }
+  // The smallest third, when spacings differ: 3 px here, 30 px there.
+  EXPECT_NEAR(
+      *shift_of({corners({{0, {10, 10}}, {1, {13, 10}}, {2, {43, 10}}})},
+                {corners({{0, {500, 500}}})}, CornerMatch::Nearest)
+           .median_px,
+      1.0, 1e-9);
   // A lone corner has no spacing, and pairs with nothing.
   EXPECT_FALSE(shift_of({corners({{0, {10, 10}}})}, {corners({{5, {10, 10}}})},
                         CornerMatch::Nearest)
