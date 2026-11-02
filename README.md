@@ -17,10 +17,10 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > tier's OpenCV bridge, the `detect` tier's board and tag detection, the `solve`
 > tier's rig and lens solves and the `quality` tier's live checks, solved-rig
 > metrics, lens gates and pair row check; with `VC_WITH_RIG`, the `capture`
-> tier's session
-> writer, the `viz` tier's live and 3D views and the `depth` tier's board-plane
-> fit and pairwise depth agreement; and, with GLFW and sensor's Orbbec driver
-> too, the `app` tier's `calib_rig`, live view, 3D view, capture and Calibrate.
+> tier's session writer, the `viz` tier's live and 3D views and the `depth`
+> tier's board-plane fit and pairwise depth agreement; and, with GLFW and
+> sensor's Orbbec driver too, the `app` tier's `calib_rig`, live view, 3D
+> view, capture and Calibrate.
 > The color tier is not yet implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain
 > the reference oracle.
