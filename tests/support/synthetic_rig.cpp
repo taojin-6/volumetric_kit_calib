@@ -882,6 +882,29 @@ std::vector<Observation> fisheye_views(const compute::Board& board,
   return views;
 }
 
+camera::Mat4d facing(const compute::Board& board, double off_axis_deg,
+                     double azimuth_deg, double distance_m, double roll_deg,
+                     double tilt_deg) {
+  const double t = off_axis_deg * kDeg;
+  const double a = azimuth_deg * kDeg;
+  const camera::Vec3d centre =
+      distance_m * camera::Vec3d(std::sin(t) * std::cos(a),
+                                 std::sin(t) * std::sin(a), std::cos(t));
+  const camera::Vec3d z = glm::normalize(centre);
+  const camera::Vec3d x =
+      glm::normalize(glm::cross(camera::Vec3d(0.0, 1.0, 0.0), z));
+  const camera::Vec3d y = glm::cross(z, x);
+  const camera::Mat3d turn =
+      camera::Mat3d(x, y, z) *
+      camera::rotation_from_rodrigues({0.0, 0.0, roll_deg * kDeg}) *
+      camera::rotation_from_rodrigues({tilt_deg * kDeg, 0.0, 0.0});
+  camera::Mat4d pose(turn);
+  const cv::Point3d middle = board.centre();
+  pose[3] = glm::dvec4(
+      centre - turn * camera::Vec3d(middle.x, middle.y, middle.z), 1.0);
+  return pose;
+}
+
 camera::Mat4d board_facing_camera(const compute::Board& board,
                                   const camera::Vec3d& centre, double tilt_deg,
                                   double roll_deg) {

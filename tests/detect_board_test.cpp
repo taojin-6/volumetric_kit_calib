@@ -45,38 +45,8 @@ namespace camera = sensor::camera;
 using Code = core::Status::Code;
 using test::luma;
 
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kDeg = kPi / 180.0;
-
 // The lab's Blackmagic lens at 4K.
 const test::FisheyeTruth kLens;
-
-// The board's centre `off_axis_deg` off the optical axis, toward
-// `azimuth_deg` (0 the picture's right, 90 its bottom), `distance_m` away,
-// its printed face turned to the camera, then rolled `roll_deg` about the
-// line of sight, then tilted `tilt_deg` about its own x axis.
-camera::Mat4d facing(const compute::Board& board, double off_axis_deg,
-                     double azimuth_deg, double distance_m, double roll_deg,
-                     double tilt_deg) {
-  const double t = off_axis_deg * kDeg;
-  const double a = azimuth_deg * kDeg;
-  const camera::Vec3d centre =
-      distance_m * camera::Vec3d(std::sin(t) * std::cos(a),
-                                 std::sin(t) * std::sin(a), std::cos(t));
-  const camera::Vec3d z = glm::normalize(centre);
-  const camera::Vec3d x =
-      glm::normalize(glm::cross(camera::Vec3d(0.0, 1.0, 0.0), z));
-  const camera::Vec3d y = glm::cross(z, x);
-  const camera::Mat3d turn =
-      camera::Mat3d(x, y, z) *
-      camera::rotation_from_rodrigues({0.0, 0.0, roll_deg * kDeg}) *
-      camera::rotation_from_rodrigues({tilt_deg * kDeg, 0.0, 0.0});
-  camera::Mat4d pose(turn);
-  const cv::Point3d middle = board.centre();
-  pose[3] = glm::dvec4(
-      centre - turn * camera::Vec3d(middle.x, middle.y, middle.z), 1.0);
-  return pose;
-}
 
 // The board's corners where the lens images them, by id.
 std::vector<cv::Point2d> truth(const compute::Board& board,
@@ -208,8 +178,9 @@ struct Scene {
 };
 
 camera::Mat4d pose_of(const Scene& scene) {
-  return facing(test::lab_checkerboard(), scene.off_axis_deg, scene.azimuth_deg,
-                scene.distance_m, scene.roll_deg, scene.tilt_deg);
+  return test::facing(test::lab_checkerboard(), scene.off_axis_deg,
+                      scene.azimuth_deg, scene.distance_m, scene.roll_deg,
+                      scene.tilt_deg);
 }
 
 const cv::Mat& clean(const Scene& scene) {
