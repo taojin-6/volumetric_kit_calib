@@ -68,6 +68,8 @@ struct RigSource::Impl {
   // `pictures[k]`'s luma made and read back: camera `camera[k]`'s. The host
   // pictures in `host`, by camera; each grey tile's device luma held by the
   // set's owner, its picture in `set`.
+  // TODO: one submit for the pass and the read, with NV12 luma images read in
+  // place, once sensor's LumaPass offers them.
   core::Status make_luma(const std::vector<sensor::YuvImage*>& pictures,
                          const std::vector<std::size_t>& camera,
                          const std::vector<bool>& grey, PictureSet& set,
@@ -185,9 +187,9 @@ struct RigSource::Impl {
               true, nullptr,
               frame.timestamp_ns + static_cast<std::uint64_t>(skew)};
           set.spread_ns = magnitude;
-          ++pairs;
           if (!luma) {
             host.clear();
+            ++pairs;
             return std::optional<PictureSet>(std::move(set));
           }
           sensor::YuvImage* sides[2] = {&frame.left, &frame.right};
@@ -203,6 +205,7 @@ struct RigSource::Impl {
           }
           VKC_TRY(make_luma({sides[0], sides[1]}, {0, 1}, {true, true}, set,
                             metrics));
+          ++pairs;
           return std::optional<PictureSet>(std::move(set));
         });
   }

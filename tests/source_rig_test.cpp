@@ -28,6 +28,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "detect_helpers.hpp"
 #include "fake_sensor.hpp"
 #include "fake_stereo.hpp"
 #include "synthetic_rig.hpp"
@@ -66,23 +67,13 @@ std::vector<std::uint8_t> pattern(std::uint32_t width, std::uint32_t height,
   return bytes;
 }
 
-// The GPU's half, made on the host: each pixel the mean of 2 x 2, rounded half
-// up.
+// The half of packed rows `full` as the GPU makes it (test::halved), packed.
 std::vector<std::uint8_t> half_of(const std::vector<std::uint8_t>& full,
                                   std::uint32_t width, std::uint32_t height) {
-  const std::uint32_t w = width / 2;
-  const std::uint32_t h = height / 2;
-  std::vector<std::uint8_t> half(std::size_t{w} * h);
-  for (std::uint32_t y = 0; y < h; ++y) {
-    for (std::uint32_t x = 0; x < w; ++x) {
-      const auto at = [&](std::uint32_t dx, std::uint32_t dy) {
-        return unsigned{full[std::size_t{2 * y + dy} * width + 2 * x + dx]};
-      };
-      half[std::size_t{y} * w + x] = static_cast<std::uint8_t>(
-          (at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1) + 2) / 4);
-    }
-  }
-  return half;
+  const cv::Mat picture(static_cast<int>(height), static_cast<int>(width),
+                        CV_8UC1, const_cast<std::uint8_t*>(full.data()));
+  const cv::Mat half = test::halved(picture);
+  return {half.data, half.data + half.total()};
 }
 
 // The rows of `view`, packed.
@@ -294,7 +285,7 @@ TEST_F(SourceRig, ASetTakenWithoutLumaHasItsTimesAlone) {
 }
 
 // The sensor's failure is the take's, and says so through failed(); a picture
-// of another size drops its set alone, and the source goes on.
+// of another size drops its set alone, uncounted, and the source goes on.
 TEST_F(SourceRig, APollsFailureIsNotAPicturesFailure) {
   test::FakeStereo* fake = nullptr;
   std::unique_ptr<RigSource> rig = stereo(&fake);
@@ -315,6 +306,7 @@ TEST_F(SourceRig, APollsFailureIsNotAPicturesFailure) {
                              pattern(kWidth, kHeight, 1), kStartNs, 0, 2));
   core::Result<std::optional<PictureSet>> right = rig->take();
   ASSERT_TRUE(right.ok() && right.value().has_value());
+  EXPECT_EQ(rig->stats().sets, 1u);
 
   fake->fail();
   core::Result<std::optional<PictureSet>> gone = rig->take();
@@ -482,13 +474,16 @@ TEST_F(SourceArray, AnArraysSetComesAsEveryCamerasGreyPicture) {
   }
 }
 
-// The array's newest complete set wins; one missing a secondary still comes,
-// that camera marked absent, with no host picture.
+// The array's newest complete set wins; one missing a middle secondary still
+// comes, that camera marked absent, with no host picture, and each camera
+// after it with its own picture.
 TEST_F(SourceArray, TakesTheNewestSetAndOneMissingACamera) {
-  const std::vector<std::uint8_t> luma = pattern(kWidth, kHeight, 6);
-  make_array({host_luma(luma, kWidth, kHeight),
-              host_luma(luma, kWidth, kHeight),
-              host_luma(luma, kWidth, kHeight)});
+  const std::vector<std::uint8_t> luma[3] = {pattern(kWidth, kHeight, 6),
+                                             pattern(kWidth, kHeight, 16),
+                                             pattern(kWidth, kHeight, 26)};
+  make_array({host_luma(luma[0], kWidth, kHeight),
+              host_luma(luma[1], kWidth, kHeight),
+              host_luma(luma[2], kWidth, kHeight)});
   std::unique_ptr<RigSource> rig = open();
   ASSERT_NE(rig, nullptr);
   ASSERT_TRUE(rig->start().ok());
@@ -501,15 +496,21 @@ TEST_F(SourceArray, TakesTheNewestSetAndOneMissingACamera) {
   EXPECT_FALSE(none.value().has_value());
   EXPECT_GT(rig->stats().unmatched, 0u);
 
-  push(4, {}, 2);
+  push(4, {}, 1);
   const std::optional<PictureSet> short_one = next(*rig);
   ASSERT_TRUE(short_one.has_value());
   EXPECT_FALSE(short_one->complete());
   EXPECT_EQ(short_one->count(), 2u);
-  EXPECT_FALSE(short_one->cameras[2].present);
-  EXPECT_EQ(short_one->cameras[2].tile, nullptr);
-  EXPECT_EQ(rig->host()[2].luma.data, nullptr);
-  EXPECT_EQ(rows_of(rig->host()[1].luma), luma);
+  EXPECT_FALSE(short_one->cameras[1].present);
+  EXPECT_EQ(short_one->cameras[1].tile, nullptr);
+  EXPECT_EQ(rig->host()[1].luma.data, nullptr);
+  for (const std::size_t i : {std::size_t{0}, std::size_t{2}}) {
+    SCOPED_TRACE("camera " + std::to_string(i));
+    EXPECT_TRUE(short_one->cameras[i].present);
+    EXPECT_EQ(rows_of(rig->host()[i].luma), luma[i]);
+    ASSERT_NE(short_one->cameras[i].tile, nullptr);
+    EXPECT_EQ(tile_bytes(*short_one->cameras[i].tile), luma[i]);
+  }
 }
 
 // The decoder's NV12 images show as the colour tile: no grey tile is held.
