@@ -560,61 +560,71 @@ TEST(DetectBoard, KeepsOnlyCornersOnTheBoard) {
 }
 
 // On these pictures SB, from the seed detect_board gives it, returns a grid
-// that skips every other column of squares (the last with a corner 64 px off
-// the board too): true corners, numbered as neighbours. Replayed from that
-// seed, the test says whether this OpenCV still does; detect_board must drop
-// such a grid, or keep only a grid's true corners.
+// that skips every other column of squares (one with a corner 64 px off the
+// board too): true corners, numbered as neighbours. Replayed from that seed,
+// the test says whether this OpenCV still does; detect_board must drop such a
+// grid, or keep only a grid's true corners.
 TEST(DetectBoard, DropsAGridThatSkipsSquares) {
   const compute::Board board = test::lab_checkerboard();
   const Scene skips = {"skips columns", 62.0, 0.0, 0.55, 30.0, 0.0};
   const Scene strays = {
       "skips columns, one astray", 64.0, 0.0, 0.55, 30.0, 0.0};
+  const Scene ends = {"skips at its ends", 20.0, 90.0, 0.75, 90.0, 35.0};
+  struct Picture {
+    const Scene& scene;
+    std::uint64_t noise;
+    bool in_half;
+  };
+  const Picture pictures[] = {{skips, 3, false},
+                              {skips, 16, false},
+                              {strays, 8, false},
+                              {ends, 3, true}};
   std::size_t broken = 0;
-  const std::pair<Scene, std::uint64_t> pictures[] = {
-      {skips, 3}, {skips, 16}, {strays, 8}};
-  for (const auto& [scene, seed] : pictures) {
-    const std::vector<cv::Point2d> corners = truth(scene);
-    const cv::Mat image = picture(clean(scene), seed);
+  for (const Picture& p : pictures) {
+    const std::vector<cv::Point2d> corners = truth(p.scene);
+    const cv::Mat image = picture(clean(p.scene), p.noise);
+    const cv::Mat half = halved(image);
 
     cv::theRNG() = cv::RNG();
     std::vector<cv::Point2f> grid;
     cv::Mat meta;
-    cv::findChessboardCornersSB(image, cv::Size(5, 4), grid,
+    cv::findChessboardCornersSB(p.in_half ? half : image, cv::Size(5, 4), grid,
                                 cv::CALIB_CB_NORMALIZE_IMAGE |
-                                    cv::CALIB_CB_EXHAUSTIVE |
-                                    cv::CALIB_CB_LARGER,
+                                    cv::CALIB_CB_LARGER |
+                                    (p.in_half ? 0 : cv::CALIB_CB_EXHAUSTIVE),
                                 meta);
+    const float scale = p.in_half ? 2.0f : 1.0f;
     Detection raw;
     for (std::size_t i = 0; !meta.empty() && i < grid.size(); ++i) {
       const int row = static_cast<int>(i) / meta.cols;
       const int column = static_cast<int>(i) % meta.cols;
       raw.observation.points.push_back(
-          {row * 13 + column, {grid[i].x, grid[i].y}, 1.0});
+          {row * 13 + column, {scale * grid[i].x, scale * grid[i].y}, 1.0});
     }
     if (!raw.observation.empty() && !NumberedAsAGrid(raw, corners, 13)) {
       ++broken;
     }
 
-    const Detection found = detect(image, board);
+    const Detection found = detect(image, board, p.in_half ? &half : nullptr);
     if (found.observation.empty()) continue;
     const std::vector<double> e = errors(found, corners);
     EXPECT_LT(*std::max_element(e.begin(), e.end()), 1.0)
-        << scene.name << ", noise " << seed;
+        << p.scene.name << ", noise " << p.noise;
     EXPECT_TRUE(NumberedAsAGrid(found, corners, 13))
-        << scene.name << ", noise " << seed;
+        << p.scene.name << ", noise " << p.noise;
   }
   std::printf("SB's own grid was broken on %zu of %zu pictures\n", broken,
               std::size(pictures));
 }
 
-// SB's grid depends on OpenCV's random numbers, which it draws on one thread.
+// SB's grid depends on OpenCV's random numbers: unseeded, the half of the first
+// picture here is found from one of these states and not from the others.
 // detect_board seeds them for each search and puts them back: one picture
 // gives one detection whatever they were, on any number of OpenCV threads.
 TEST(DetectBoard, APictureGivesOneDetection) {
   const compute::Board board = test::lab_checkerboard();
-  const Scene depends = {"depends on the numbers", 62.0, 0.0, 0.55, 25.0, 0.0};
-  for (const Scene& scene : {depends, kCut[6]}) {
-    const cv::Mat image = picture(clean(scene), 1);
+  for (const Scene& scene : {kTurned[3], kCut[6]}) {
+    const cv::Mat image = picture(clean(scene), 2);
     const cv::Mat half = halved(image);
     for (const cv::Mat* searched : {static_cast<const cv::Mat*>(nullptr),
                                     static_cast<const cv::Mat*>(&half)}) {
