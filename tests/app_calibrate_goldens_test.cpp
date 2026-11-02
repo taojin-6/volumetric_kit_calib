@@ -103,7 +103,8 @@ std::vector<std::vector<std::string>> rows_of(const std::string& text) {
 }
 
 // residuals.csv: the same header and corners, each corner's capture, camera,
-// corner and verdict byte for byte, its numbers within their tolerances.
+// corner and verdict byte for byte, its numbers within their tolerances. The
+// first few cells that differ are named, then how many did.
 void expect_same_residuals(const std::string& got, const std::string& want) {
   const std::vector<std::vector<std::string>> got_rows = rows_of(got);
   const std::vector<std::vector<std::string>> want_rows = rows_of(want);
@@ -112,21 +113,25 @@ void expect_same_residuals(const std::string& got, const std::string& want) {
   ASSERT_EQ(got_rows.size(), want_rows.size());
   EXPECT_EQ(got_rows.front(), header);
   const std::set<std::string> numbers = {"u", "v", "du", "dv", "weight"};
+  std::size_t differ = 0;
   for (std::size_t r = 1; r < want_rows.size(); ++r) {
     const std::vector<std::string>& g = got_rows[r];
     const std::vector<std::string>& w = want_rows[r];
     ASSERT_EQ(g.size(), header.size()) << "row " << r;
     ASSERT_EQ(w.size(), header.size()) << "row " << r;
     for (std::size_t c = 0; c < header.size(); ++c) {
-      if (numbers.count(header[c]) == 0) {
-        EXPECT_EQ(g[c], w[c]) << "row " << r << " " << header[c];
-        continue;
+      const bool same = numbers.count(header[c]) == 0
+                            ? g[c] == w[c]
+                            : near(std::strtod(g[c].c_str(), nullptr),
+                                   std::strtod(w[c].c_str(), nullptr),
+                                   tolerance_of(header[c]));
+      if (!same && ++differ <= 5) {
+        ADD_FAILURE() << "residuals.csv row " << r << " " << header[c] << ": "
+                      << g[c] << ", the golden " << w[c];
       }
-      EXPECT_PRED3(near, std::strtod(g[c].c_str(), nullptr),
-                   std::strtod(w[c].c_str(), nullptr), tolerance_of(header[c]))
-          << "row " << r << " " << header[c] << ": " << g[c] << " vs " << w[c];
     }
   }
+  EXPECT_EQ(differ, 0u) << "cells of residuals.csv differ";
 }
 
 // The synthetic Femto rig's captures as Calibrate takes them, the tag seen.

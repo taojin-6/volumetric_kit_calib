@@ -14,11 +14,11 @@
 // rule, the snapshot held until its frame retires; a lone return, which
 // sensor's depth outlier filter drops, draws nothing; a frozen snapshot
 // redraws at a new pose with no second preparation; a frame EXCLUSIVE to the
-// compute family is refused,
-// and with no camera placed nothing is drawn, neither holding anything. When
-// the worker prepares: not while the view is frozen, hidden or minimized. And
-// the device calib_rig asks for. The GPU cases skip without a Vulkan device,
-// the cross-family ones also with one family.
+// compute family is refused, and with no camera placed nothing is drawn,
+// neither holding anything. When the worker prepares: not while the view is
+// frozen, hidden or minimized. And the device calib_rig asks for. The GPU
+// cases skip without a Vulkan device, the cross-family ones also with one
+// family.
 
 #include <gtest/gtest.h>
 
@@ -683,12 +683,12 @@ class AppCloudAcrossFamilies : public core::test::SharedDeviceTest {
 // family in place: each of its points lands on its depth pixel through a view
 // of its own depth camera, the known one in the colour of the colour pixel
 // sensor's rule gives it -- the nearest centre, through the factory
-// extrinsic. The frame waits at
-// the vertex stage for the value the preparation signalled, which
-// record_cloud returns, as gfx's contract asks of a producer on another
-// queue, and validation, synchronization included, stays clean. The snapshot
-// is held until its frame retires: executed but not yet retired, with the
-// test's own reference gone, the retire queue alone keeps it.
+// extrinsic. The frame waits at the vertex stage for the value the
+// preparation signalled, which record_cloud returns, as gfx's contract asks
+// of a producer on another queue, and validation, synchronization included,
+// stays clean. The snapshot is held until its frame retires: executed but not
+// yet retired, with the test's own reference gone, the retire queue alone
+// keeps it.
 TEST_F(AppCloudAcrossFamilies, AKnownPointLandsOnItsPixelWithItsColour) {
   std::unique_ptr<CloudWorker> cloud = start(both());
   ASSERT_NE(cloud, nullptr);
