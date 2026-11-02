@@ -3,8 +3,9 @@
 
 // 02_lens_from_images: one camera's lens from saved pictures of a
 // checkerboard, offline: find the board in each picture, fit the lens, judge
-// it and write the lens-only calibration file. The first pictures of a lens
-// session can be judged again here without going back to the lab.
+// it, print every gate it missed, and write the lens-only calibration file,
+// the report and the residuals. The first pictures of a lens session can be
+// judged again here without going back to the lab.
 //
 //   lens_from_images <camera id> <squares across> <squares down> <square mm>
 //                    <out dir> <img.pgm>...
@@ -22,6 +23,7 @@
 #include "volumetric_kit/calib/core/target.hpp"
 #include "volumetric_kit/calib/detect/board.hpp"
 #include "volumetric_kit/calib/quality/lens_gate.hpp"
+#include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/solve/lens.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
 #include "volumetric_kit/core/base/result.hpp"
@@ -62,11 +64,20 @@ core::Status run(int argc, char** argv) {
   VKC_ASSIGN(const calib::quality::LensVerdict verdict,
              calib::quality::judge_lens(std::move(fit)));
   std::printf("%s: hold-out %.2f px, %s\n", argv[1], verdict.fit.holdout_rms_px,
-              verdict.pass ? "pass" : verdict.failed.front().c_str());
+              verdict.pass ? "pass" : "fail");
+  for (const std::string& why : verdict.failed) {
+    std::printf("  %s\n", why.c_str());
+  }
   VKC_ASSIGN(const calib::quality::ResultFiles files,
              calib::quality::format_lens_results({verdict}, {}, nullptr));
-  return core::write_file(std::string(argv[5]) + "/array_calibration.json",
-                          files.array_calibration, core::WriteMode::CreateNew);
+  const std::string dir = std::string(argv[5]) + "/";
+  VKC_TRY(core::write_file(dir + calib::quality::kArrayCalibrationFile,
+                           files.array_calibration,
+                           core::WriteMode::CreateNew));
+  VKC_TRY(core::write_file(dir + calib::quality::kReportFile, files.report,
+                           core::WriteMode::CreateNew));
+  return core::write_file(dir + calib::quality::kResidualsFile, files.residuals,
+                          core::WriteMode::CreateNew);
 }
 
 }  // namespace

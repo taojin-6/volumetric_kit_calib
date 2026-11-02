@@ -7,15 +7,7 @@
 // examples/02_lens_from_images. A break in a call they make fails this build;
 // the rest of the table is held in review (DECISIONS.md, 2026-11-01).
 
-#include <cstddef>
-#include <cstdint>
-#include <cstdio>
-#include <utility>
-#include <vector>
-
-#include <gtest/gtest.h>
-
-#include "synthetic_rig.hpp"
+// First, before anything that could stand in for an include one of them lacks.
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/core/target.hpp"
 #include "volumetric_kit/calib/detect/board.hpp"
@@ -23,6 +15,18 @@
 #include "volumetric_kit/calib/solve/lens.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
 #include "volumetric_kit/core/base/result.hpp"
+
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+// The test's own pictures, as views: no part of the sample mains.
+#include "synthetic_rig.hpp"
 
 namespace calib = volumetric_kit::calib;
 namespace core = volumetric_kit::core;
@@ -67,7 +71,10 @@ core::Result<calib::quality::ResultFiles> lens_from_views(
   VKC_ASSIGN(calib::quality::LensVerdict verdict,
              calib::quality::judge_lens(std::move(fit)));
   std::printf("%s: hold-out %.2f px, %s\n", id, verdict.fit.holdout_rms_px,
-              verdict.pass ? "pass" : verdict.failed.front().c_str());
+              verdict.pass ? "pass" : "fail");
+  for (const std::string& why : verdict.failed) {
+    std::printf("  %s\n", why.c_str());
+  }
   return calib::quality::format_lens_results({verdict}, {}, nullptr);
 }
 
