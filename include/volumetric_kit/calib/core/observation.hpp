@@ -9,9 +9,12 @@
 /// The atomic unit the solve consumes: which target feature (`id`) was seen at
 /// which subpixel location (`pixel`), with what confidence (`weight`, the
 /// inverse-variance from subpixel refinement). Identified features (ChArUco /
-/// AprilGrid) carry stable ids; for a plain checkerboard the id is the
-/// row-major corner index. Pixels follow sensor's camera model and OpenCV:
-/// pixel centres sit at integer coordinates.
+/// AprilGrid) carry stable ids. A checkerboard corner's id is its row-major
+/// index in the grid found in that view, numbered from the grid's own first
+/// corner: another view may give the same corner another id, so its corners
+/// are never matched across views by id. Pixels follow
+/// sensor's camera model and OpenCV: pixel centres sit at integer
+/// coordinates.
 
 #include <cstddef>
 #include <cstdint>
@@ -31,7 +34,9 @@ namespace volumetric_kit::calib {
 /// corner.weight = 1.0 / (0.05 * 0.05);  // refined to sigma = 0.05 px
 /// @endcode
 struct DetectedPoint {
-  int id = -1;  ///< Stable target-feature id (corner/marker).
+  /// Target-feature id (corner/marker): stable, but a checkerboard's only
+  /// within its own view (see above).
+  int id = -1;
   sensor::camera::Vec2d pixel{0.0, 0.0};  ///< Subpixel location (pixels).
   /// Inverse-variance weight from refinement (1/px^2).
   double weight = 1.0;

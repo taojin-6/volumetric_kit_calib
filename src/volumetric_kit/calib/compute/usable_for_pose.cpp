@@ -3,6 +3,7 @@
 
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
@@ -13,6 +14,25 @@ namespace {
 
 constexpr std::size_t kMinCorners = 4;
 constexpr double kInsidePx = 2.0;  // from the image's edge, at -0.5 and size
+
+// Whether the corners `ids` names lie on one line on the board: each on the
+// line through the first two. The corners are on a grid of `square`-sided
+// cells, so three not on one line make a triangle of at least half a cell:
+// twice its area, the cross product below, is at least square^2, where three
+// on a line give 0 but for rounding. The ids are the board's, each once.
+bool on_one_line(const std::vector<cv::Point3d>& corners,
+                 const std::vector<int>& ids, double square) {
+  const cv::Point3d& a = corners[static_cast<std::size_t>(ids[0])];
+  const cv::Point3d& b = corners[static_cast<std::size_t>(ids[1])];
+  const double tolerance = 0.5 * square * square;
+  for (std::size_t i = 2; i < ids.size(); ++i) {
+    const cv::Point3d& p = corners[static_cast<std::size_t>(ids[i])];
+    const double twice_area =
+        (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    if (std::abs(twice_area) > tolerance) return false;
+  }
+  return true;
+}
 
 }  // namespace
 
@@ -50,15 +70,15 @@ core::Result<ViewUse> usable_for_pose(const Board& board,
       }
     }
 
-    // Every corner but one on a line, which every corner on it is too. OpenCV
-    // indexes the board's corners by these ids unchecked: they are checked
-    // above.
+    // Every corner but one on a line, which every corner on it is too. The
+    // ids index the board's corners: they are checked above.
     std::vector<int> others(ids.size() - 1);
     for (std::size_t skip = 0; skip < ids.size(); ++skip) {
       for (std::size_t i = 0, j = 0; i < ids.size(); ++i) {
         if (i != skip) others[j++] = ids[i];
       }
-      if (board.charuco().checkCharucoCornersCollinear(others)) {
+      if (on_one_line(board.object_points(), others,
+                      board.target().square_size_m)) {
         return ViewUse::Collinear;
       }
     }

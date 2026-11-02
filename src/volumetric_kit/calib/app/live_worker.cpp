@@ -246,8 +246,8 @@ struct LiveWorker::State {
     out->stillness_px.assign(ids.size(), std::nullopt);
     std::optional<double> motion;
     if (have_previous) {
-      const core::Result<quality::CornerShift> shift =
-          quality::corner_shift(previous, out->detections);
+      const core::Result<quality::CornerShift> shift = quality::corner_shift(
+          previous, out->detections, quality::corner_match(*detector_board));
       if (shift.ok()) {
         out->stillness_px = shift.value().cameras;
         motion = shift.value().median_px;

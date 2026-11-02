@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include "allocation_failure.hpp"
+#include "volumetric_kit/calib/detect/board.hpp"
 #include "volumetric_kit/calib/detect/charuco.hpp"
 #include "volumetric_kit/calib/detect/tag.hpp"
 
@@ -32,6 +33,27 @@ TEST(DetectOom, ImageValidation) {
       Code::InvalidArgument);
   expect_oom_when_reporting([&] { return detect_tag(narrow, kOriginTag); },
                             Code::InvalidArgument);
+}
+
+TEST(DetectOom, BoardRefusals) {
+  const compute::Board board =
+      compute::Board::create(legacy_checkerboard()).value();
+  const std::vector<std::uint8_t> pixels(64, 0);
+  const LumaView narrow{8, 8, 7, pixels.data()};
+  const LumaView good{8, 8, 8, pixels.data()};
+  const LumaView wrong_half{3, 4, 3, pixels.data()};
+  expect_oom_when_reporting([&] { return detect_board(narrow, board); },
+                            Code::InvalidArgument);
+  DetectOptions options;
+  options.half = &narrow;
+  expect_oom_when_reporting([&] { return detect_board(good, board, options); },
+                            Code::InvalidArgument);
+  options.half = &wrong_half;
+  expect_oom_when_reporting([&] { return detect_board(good, board, options); },
+                            Code::InvalidArgument);
+  expect_oom_when_reporting(
+      [&] { return detect_charuco(good, board, Mode::Full); },
+      Code::InvalidArgument);
 }
 
 TEST(DetectOom, TagRefusal) {

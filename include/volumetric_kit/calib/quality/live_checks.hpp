@@ -13,6 +13,7 @@
 /// Pure and geometric (DECISIONS.md, 2026-10-14); every function may run on
 /// several threads at once.
 
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -90,8 +91,34 @@ VC_QUALITY_API core::Result<CheckedView> check_view(
     const compute::CvCamera& camera, const compute::Board& board,
     const Detection& detection, const ViewCheckOptions& options = {});
 
+/// @brief How @ref corner_shift pairs a corner of one detection with one of
+///        another of the same camera.
+enum class CornerMatch : std::uint8_t {
+  /// By id: a ChArUco id names one physical corner in every frame.
+  ById,
+  /// By position, ids ignored: each corner pairs with the other detection's
+  /// nearest, within a third of the distance to its own nearest neighbour.
+  /// A checkerboard's ids name its corners in one view only, so a still
+  /// board cut by the image's edge can number its corners differently from
+  /// frame to frame. With corners in both and none paired, the shift is the
+  /// smallest such third, a floor on the motion. A board that moved almost
+  /// exactly a whole number of squares reads still: its corners pair with
+  /// their neighbours'.
+  Nearest,
+};
+
+/// @brief How @p board's corners pair across detections.
+/// @param board  The board.
+/// @return `ById` for a ChArUco board; `Nearest` for a checkerboard.
+///
+/// @code
+/// VKC_ASSIGN(const CornerShift moved,
+///            corner_shift(previous, current, corner_match(board)));
+/// @endcode
+VC_QUALITY_API CornerMatch corner_match(const compute::Board& board) noexcept;
+
 /// @brief How far each corner moved from one set of detections to another,
-///        each matched by its id in the same camera.
+///        each paired with one in the same camera (@ref CornerMatch).
 ///
 /// @code
 /// VKC_ASSIGN(const CornerShift shift, corner_shift(previous, current));
@@ -99,7 +126,8 @@ VC_QUALITY_API core::Result<CheckedView> check_view(
 /// @endcode
 struct CornerShift {
   /// For each camera, the median distance its corners moved (pixels); empty
-  /// when no corner is in both of its detections.
+  /// when either detection has no corners, when no id is in both (`ById`), or
+  /// when the earlier one has a lone corner, with no spacing (`Nearest`).
   std::vector<std::optional<double>> cameras;
   /// The median over every corner in both, all cameras together (pixels);
   /// empty when there is none.
@@ -113,18 +141,21 @@ struct CornerShift {
 /// @param before  One detection per camera, in the rig's order; a camera
 ///                with no frame or no board has an empty one.
 /// @param after   The same cameras' detections, in the same order.
+/// @param match   How corners pair (@ref corner_match gives a board's).
 /// @return The shift; `InvalidArgument` for lists of different lengths, a
-///         corner not finite, an id repeated in one detection, or two
+///         corner not finite, an id repeated in one detection (`ById`), two
 ///         detections of one camera, both with corners, in images of
-///         different sizes (each naming the camera's index); or
-///         `OutOfMemory`.
+///         different sizes (each naming the camera's index), or a @p match
+///         that is not a @ref CornerMatch; or `OutOfMemory`.
 ///
 /// @code
-/// VKC_ASSIGN(const CornerShift moved, corner_shift(previous, current));
+/// VKC_ASSIGN(const CornerShift moved,
+///            corner_shift(previous, current, corner_match(board)));
 /// set.motion_px = moved.median_px;  // the capture rule's stillness
 /// @endcode
 VC_QUALITY_API core::Result<CornerShift> corner_shift(
-    const std::vector<Detection>& before, const std::vector<Detection>& after);
+    const std::vector<Detection>& before, const std::vector<Detection>& after,
+    CornerMatch match = CornerMatch::ById);
 
 /// @brief When a capture's live corners and its full ones disagree.
 ///

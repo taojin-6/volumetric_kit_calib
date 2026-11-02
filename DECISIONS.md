@@ -71,6 +71,111 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-11-01 — The stable API
+
+The brain is calib's API for programs built on it: the headers in
+README.md's [table](README.md#stable-api) (board, detect, views, solve,
+quality, and sensor's calibration file, which calib formats and the caller
+writes). From 0.1.0:
+
+1. The API is the headers in that table, calib's own types they use, wherever
+   declared (`compute::CvCamera`, `compute::ViewUse`, `quality::FloorBoard`,
+   ...), and the OpenCV 5 and sensor camera types they use (`cv::Point3d`,
+   `cv::aruco::CharucoBoard`, `CameraModel`, `ArrayCalibration`, ...): a break
+   there is a calib break.
+2. Additive changes are free: new headers, functions or overloads; trailing
+   parameters and struct fields with defaults; trailing enum values.
+3. Anything else is breaking: a `!` commit, a CHANGELOG "Breaking" line with
+   its one-line migration, and a line here saying why.
+4. Every feature PR bumps the minor version, in merge order, as sensor and
+   the core do.
+5. `tests/api_test.cpp` builds and runs the sample programs on the table's
+   headers alone, on synthetic data. A break in a call they make fails the
+   build; a break elsewhere in the table is caught in review against it.
+6. calib stays consumed by commit, never installed (the 2026-10-22 entry):
+   no ABI promise. Output files keep their own versions (sensor's file,
+   `report.json`, `session.json`).
+7. The house rules stay: `core::Status` and `Result`, no exception across the
+   API, a `@code` example per class.
+
+Every other header is internal and, those types aside, changes freely: `app/`,
+`viz/`, `capture/`, `depth/`, the rest of `compute/` and `quality/`, and
+`detect/charuco.hpp`. Why: other programs (an offline lens solve, the second
+camera pair) assemble the brain, and a rule that shows in review costs
+little. Freezing everything would stall the app; an ABI promise means
+nothing for a library nobody installs.
+
+## 2026-11-01 — Plain checkerboards, one detector
+
+A lens is fitted from a plain checkerboard, the lab's (13 x 8 inner corners
+of 0.02 m, `legacy_checkerboard()`), which must reach the fisheye's image
+corners, past where a whole board fits.
+
+- **`compute::Board` builds a checkerboard**, with no OpenCV board: its
+  corners sit on the ChArUco board's grid, row by row. `charuco()` is a
+  pointer, null for a checkerboard (a break). Why: a checkerboard has no
+  OpenCV board, and a pointer says so where it is read.
+- **One geometric collinearity test** on the board's corners for both kinds,
+  in place of OpenCV's ChArUco-only one: three corners not on one line span
+  at least half a square. Its verdict on every ChArUco test view is
+  OpenCV's.
+- **`detect::detect_board` for both kinds.** A checkerboard is found by
+  `findChessboardCornersSB` asked for 5 x 4 inner corners with
+  `CALIB_CB_LARGER`, so any larger grid counts, a board cut by the picture's
+  edge included. Why 5 x 4: asked for the whole board, SB finds no cut board;
+  asked for 4 x 3, a still board cut by the edge comes back as a different
+  grid from frame to frame; 5 x 4 and 6 x 5 are stable. So `check_target`
+  needs at least 5 x 4, either way round (a break: it took 1 x 1, though no
+  `Board` could be built from a checkerboard). In the picture (captures) SB
+  runs with `NORMALIZE_IMAGE` and `EXHAUSTIVE`, not `ACCURACY` (four times the
+  time for 0.01-0.02 px); in the half (`DetectOptions::half`, the live view)
+  with `NORMALIZE_IMAGE`.
+- **Each corner is refined in the picture**, on both paths, by the ChArUco
+  hybrid's refinement, which both kinds share. Why: SB's own corners err
+  0.14-0.19 px (median) on a board square to the pixels, 0.02-0.09 px turned
+  from them, on both renderers; refined, 0.02-0.05 px either way. These
+  corners fit lenses.
+- **Each corner SB returns is checked.** It is kept when it is in step with
+  its neighbours along its row and column, and its four squares, seen at
+  their centres, are dark and light by turns, with at least half the grid's
+  median contrast and half the span from black to white around them; a grid
+  with half its corners failing is dropped whole. Beside the picture's edge
+  one square's centre may be off it. Why: grown past the size asked for, SB
+  at times returns corners that are not the board's. On the design review's
+  renderer 5 of 24 views in the fisheye's corners had corners 20-80 px off
+  the board; on calib's, a whole board turned 45 degrees gained a row of the
+  T-junctions where it meets its white margin (1 noise draw in 12), and
+  searches returned grids skipping every other row or column. A skipping
+  grid's corners are true, and its own median contrast is low, so only the
+  span around each corner tells. Unchecked, such corners would be fitted,
+  with wrong ids.
+- **Each search seeds OpenCV's random numbers.** SB builds a k-d tree from
+  `cv::theRNG()`, on the calling thread, and its grid depends on that tree:
+  from different states, on one thread or several, one picture gave a 4 x 8
+  grid, a 5 x 4 grid or none. `detect_board` starts them from one seed and
+  puts them back after, so a picture always gives one detection and a
+  caller's numbers stay its own. This makes SB repeatable, not right: noise
+  moves its grid as the seed did, one more reason stillness pairs corners by
+  position.
+- **The grid found is numbered row-major from its own first corner**, turned
+  a quarter when it fits the board only that way round; a grid larger than
+  the board either way round is refused, naming both sizes. Its first corner
+  can change between frames of a still board, which a lens does not mind:
+  each view has its own pose. So an id names a corner in its own view only.
+- **Stillness and live-vs-full pair a checkerboard's corners by position**
+  (`quality::CornerMatch::Nearest`, within a third of the corner's spacing),
+  a ChArUco board's by id. Why: by id, a still board whose numbering moved
+  reads a square or more of motion, and the capture would time out in the
+  corners the lens needs. With corners in both and none paired, the shift is
+  a third of the spacing, so the capture rule says the board is moving, not
+  gone. A move of almost exactly a whole number of squares between two live
+  sets reads still; position cannot tell, and the odds are low.
+- **The rig's solve refuses a checkerboard** (`initialise`,
+  `bundle_adjust`): extrinsics pair corners across cameras by id, which only
+  a board with markers gives.
+- The board editor and the session writer take ChArUco only until intrinsic
+  mode gives them a checkerboard's fields.
+
 ## 2026-11-01 — Depth as sensor prepares it, outliers dropped
 
 Calibrate's depth checks and the 3D view prepare depth with sensor's

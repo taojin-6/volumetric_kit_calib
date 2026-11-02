@@ -19,6 +19,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -180,6 +181,38 @@ std::vector<MarkerSighting> observe_marker(
     const std::array<cv::Point3d, 4>& corners, std::size_t captures,
     const ObserveOptions& options = {}, double margin_px = 40.0);
 
+/// @brief A pixel's ray in the camera's frame (any length, +z forward), for a
+///        lens sensor's model does not hold (@ref FisheyeTruth).
+using PixelToRay = std::function<cv::Point3d(const cv::Point2d& pixel)>;
+
+/// @brief A Kannala-Brandt fisheye with OpenCV's `cv::fisheye` model (KB4):
+///        a pixel `r` from the centre at an angle `theta` off axis has
+///        `r = f theta_d`, `theta_d = theta (1 + k1 theta^2 + k2 theta^4 +
+///        k3 theta^6 + k4 theta^8)`. A lens sensor's model cannot hold; its
+///        defaults are the lab's Blackmagic lens at 4K (f 1702, k1 -0.033),
+///        near-equisolid, about 78 degrees off axis at the image's corners.
+struct FisheyeTruth {
+  sensor::camera::ImageSize size{3840, 2160};      ///< The image's size.
+  double f = 1702.0;                               ///< Focal length (px).
+  double cx = 1919.5;                              ///< Principal point x (px).
+  double cy = 1079.5;                              ///< Principal point y (px).
+  std::array<double, 4> k{-0.033, 0.0, 0.0, 0.0};  ///< k1 to k4.
+
+  /// @brief Where a point in the camera's frame images.
+  /// @param point  The point (+z forward, or anywhere off the axis's back).
+  /// @return Its pixel, OpenCV's convention (centres at integers).
+  cv::Point2d project(const cv::Point3d& point) const;
+  /// @brief A pixel's ray: @ref project's inverse, to 1e-14 rad.
+  /// @param pixel  The pixel.
+  /// @return The ray, of unit length.
+  cv::Point3d ray(const cv::Point2d& pixel) const;
+  /// @return @ref ray as `RenderOptions::ray` takes it.
+  PixelToRay pixel_to_ray() const;
+  /// @return A sensor model of the image's size and focal length, with no
+  ///         distortion: what @ref render_board takes beside @ref ray.
+  sensor::camera::CameraModel frame() const;
+};
+
 /// @brief How @ref render_board draws.
 struct RenderOptions {
   /// The board texture's resolution; the board's edges should fall on its
@@ -190,12 +223,17 @@ struct RenderOptions {
   float white = 220.0f;       ///< A white square's level.
   float background = 110.0f;  ///< Everything off the board.
   int supersampling = 3;      ///< Samples per pixel on each axis.
+  /// Each pixel's ray through another lens, the model's size kept; empty:
+  /// the model's own lens, inverted exactly.
+  PixelToRay ray;
 };
 
 /// @brief The board as @p model images it at @p board_to_camera: a clean,
 ///        geometric render (no blur, noise or compression).
 ///
-/// Each sample is a pixel's ray (@ref compute::undistort_points) meeting the
+/// A checkerboard is drawn as OpenCV draws a ChArUco board's squares: the
+/// top-left square black. Each sample is a pixel's ray
+/// (@ref compute::undistort_points, or `options.ray`) meeting the
 /// board's plane, so the lens is inverted exactly rather than approximated by a
 /// forward warp. A sample is the board's mean over the bounding box of its
 /// footprint there, from a summed-area table of the texture, so a pixel is
@@ -203,8 +241,10 @@ struct RenderOptions {
 /// Accuracy at the defaults (`SyntheticRig.PlacesSquaresWhereTheyProject`):
 /// an edge sits where it projects to within 0.005 px on average along it,
 /// front-on, turned or tilted, and within 0.02 px on any one pixel row; a
-/// slanted edge's spread on a row narrows with more supersampling.
-/// @param model            The lens.
+/// slanted edge's spread on a row narrows with more supersampling. With
+/// `options.ray`, the pixels the board reaches are found on an 8 px grid of
+/// rays, so a sliver of board narrower than that may be missed.
+/// @param model            The lens (with `options.ray`, its size only).
 /// @param board_to_camera  T_cb.
 /// @param board            The board drawn.
 /// @param options          Levels and sampling.
@@ -264,6 +304,11 @@ cv::Matx33d marker_placement(const cv::Point2d& centre, double side_px,
 /// @brief The rig's board, @ref legacy_femto_board, as compute builds it.
 /// @return The board.
 compute::Board femto_board();
+
+/// @brief The lab's checkerboard, @ref legacy_checkerboard, as compute builds
+///        it.
+/// @return The board.
+compute::Board lab_checkerboard();
 
 /// @brief @p board in front of a camera: its centre at @p centre, its printed
 ///        face turned @p tilt_deg about its x axis from facing the camera,

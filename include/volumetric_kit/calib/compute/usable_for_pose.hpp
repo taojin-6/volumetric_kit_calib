@@ -24,8 +24,8 @@ enum class ViewUse {
   UnknownCorner,  ///< A corner id the board does not have, or one repeated.
   /// A corner not finite, or less than 2 px inside the image.
   OutsideImage,
-  /// The corners, or all but one of them, lie on one line (OpenCV's check),
-  /// so no 4 of them fix the board's plane.
+  /// The corners, or all but one of them, lie on one line on the board, so
+  /// no 4 of them fix the board's plane.
   Collinear,
 };
 

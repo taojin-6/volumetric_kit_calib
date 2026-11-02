@@ -20,7 +20,7 @@
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
-#include "volumetric_kit/calib/detect/charuco.hpp"
+#include "volumetric_kit/calib/detect/board.hpp"
 #include "volumetric_kit/calib/detect/tag.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/sensor/orbbec/orbbec_sensor.hpp"
@@ -273,7 +273,7 @@ struct CaptureWorker::State {
     event.kind = CaptureEvent::Kind::Saved;
     event.meta = request.meta;
     const core::Result<quality::CornerShift> shift =
-        quality::corner_shift(live, full);
+        quality::corner_shift(live, full, quality::corner_match(*board));
     if (shift.ok()) {
       event.meta.live_vs_full_px = shift.value().median_px;
       event.flagged =
@@ -330,8 +330,7 @@ struct CaptureWorker::State {
     detect_error = compute::guarded("full detection", [&]() -> core::Status {
       const detect::LumaView luma{part.width, part.height, part.width,
                                   part.luma.data()};
-      VKC_ASSIGN(found,
-                 detect::detect_charuco(luma, *board, detect::Mode::Full));
+      VKC_ASSIGN(found, detect::detect_board(luma, *board));
       return {};
     });
     if (!detect_error.ok()) {

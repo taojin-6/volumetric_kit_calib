@@ -375,7 +375,7 @@ struct RigSolution {
 /// of the observations, and, but for @ref RigSolution::seconds, is the same
 /// on every run.
 /// @param cameras  The rig's cameras, as @ref initialise took them.
-/// @param board    The board seen.
+/// @param board    The board seen, as @ref initialise took it: ChArUco.
 /// @param views    The observations, as @ref initialise took them; corner
 ///                 weights are used as given.
 /// @param start    @ref initialise's rig for them, or a rig like it: its
@@ -383,7 +383,8 @@ struct RigSolution {
 ///                 the observations' order.
 /// @param options  The thresholds and amounts.
 /// @return The solution; `InvalidArgument` for an option out of range
-///         (naming it), cameras @ref initialise would refuse, a @p start that
+///         (naming it), cameras or a board @ref initialise would refuse, a
+///         @p start that
 ///         does not fit them or @p views (naming what does not), a view
 ///         adjusted that is not usable, a weight negative or not finite, more
 ///         captures than `max_captures`, or a link left short of

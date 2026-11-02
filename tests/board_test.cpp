@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-// The ChArUco board: OpenCV's board for a Target, its frame, corners and
-// centre, where a pose puts them, each dictionary as OpenCV's and its codes,
-// and the targets it refuses.
+// The board: OpenCV's board for a ChArUco Target, its frame, corners and
+// centre, where a pose puts them, each dictionary as OpenCV's and its codes; a
+// checkerboard's corners; and the targets it refuses.
 
 #include "volumetric_kit/calib/compute/board.hpp"
 
@@ -33,7 +33,8 @@ core::Status create_status(const Target& target) {
 TEST(Board, IsTheRigsBoard) {
   const core::Result<Board> board = Board::create(legacy_femto_board());
   ASSERT_TRUE(board.ok()) << board.status().message();
-  const cv::aruco::CharucoBoard& charuco = board->charuco();
+  ASSERT_NE(board->charuco(), nullptr);
+  const cv::aruco::CharucoBoard& charuco = *board->charuco();
   EXPECT_EQ(charuco.getChessboardSize(), cv::Size(5, 3));
   EXPECT_EQ(charuco.getSquareLength(), 0.15f);
   EXPECT_EQ(charuco.getMarkerLength(), 0.112f);
@@ -69,7 +70,7 @@ TEST(Board, CentreIsTheChessboardsMiddle) {
     target.cols = cols;
     const core::Result<Board> board = Board::create(target);
     ASSERT_TRUE(board.ok()) << board.status().message();
-    const cv::Point3f far = board->charuco().getRightBottomCorner();
+    const cv::Point3f far = board->charuco()->getRightBottomCorner();
     const cv::Point3d centre = board->centre();
     EXPECT_NEAR(centre.x, 0.5 * far.x, 1e-7);
     EXPECT_NEAR(centre.y, 0.5 * far.y, 1e-7);
@@ -112,7 +113,7 @@ TEST(Board, TopLeftSquareIsBlack) {
   const core::Result<Board> board = Board::create(legacy_femto_board());
   ASSERT_TRUE(board.ok()) << board.status().message();
   cv::Mat image;  // 150 px per square, (row, column) below
-  board->charuco().generateImage(cv::Size(750, 450), image, 0, 1);
+  board->charuco()->generateImage(cv::Size(750, 450), image, 0, 1);
   EXPECT_EQ(image.at<unsigned char>(75, 75), 0);    // square (0, 0)
   EXPECT_EQ(image.at<unsigned char>(75, 375), 0);   // square (2, 0)
   EXPECT_EQ(image.at<unsigned char>(225, 225), 0);  // square (1, 1)
@@ -141,13 +142,13 @@ TEST(Board, LaysOutTheLegacyPatternAsTargetSays) {
     target.legacy_pattern = layout.legacy;
     const core::Result<Board> board = Board::create(target);
     ASSERT_TRUE(board.ok()) << board.status().message();
-    EXPECT_EQ(board->charuco().getLegacyPattern(), layout.legacy);
+    EXPECT_EQ(board->charuco()->getLegacyPattern(), layout.legacy);
     cv::Mat image;  // 150 px per square
-    board->charuco().generateImage(cv::Size(750, 150 * (layout.rows + 1)),
-                                   image, 0, 1);
+    board->charuco()->generateImage(cv::Size(750, 150 * (layout.rows + 1)),
+                                    image, 0, 1);
     EXPECT_EQ(image.at<unsigned char>(5, 5), layout.top_left)
         << layout.rows << " " << layout.legacy;
-    const cv::Point3f first = board->charuco().getObjPoints()[0][0];
+    const cv::Point3f first = board->charuco()->getObjPoints()[0][0];
     EXPECT_NEAR(first.x, layout.marker_0_x, 1e-6)
         << layout.rows << " " << layout.legacy;
     EXPECT_NEAR(first.y, inset, 1e-6) << layout.rows << " " << layout.legacy;
@@ -159,7 +160,7 @@ TEST(Board, NumbersTheMarkersFromTheFirstId) {
   target.first_marker_id = 93;  // the last seven of DICT_4X4_100's codes
   const core::Result<Board> board = Board::create(target);
   ASSERT_TRUE(board.ok()) << board.status().message();
-  EXPECT_EQ(board->charuco().getIds(),
+  EXPECT_EQ(board->charuco()->getIds(),
             (std::vector<int>{93, 94, 95, 96, 97, 98, 99}));
 }
 
@@ -225,7 +226,7 @@ TEST(Board, EachDictionaryIsOpenCVsOfTheSameName) {
     const core::Result<Board> board = Board::create(target);
     ASSERT_TRUE(board.ok())
         << static_cast<int>(ours) << ": " << board.status().message();
-    const cv::aruco::Dictionary& got = board->charuco().getDictionary();
+    const cv::aruco::Dictionary& got = board->charuco()->getDictionary();
     EXPECT_EQ(got.markerSize, expected.markerSize) << static_cast<int>(ours);
     EXPECT_EQ(got.bytesList.size(), expected.bytesList.size())
         << static_cast<int>(ours);
@@ -249,7 +250,61 @@ TEST(Board, RefusesWhatCheckTargetRefuses) {
                             "square_size_m"));
 }
 
-TEST(Board, BuildsOnlyAChArUcoBoard) {
+// A ChArUco board's corners are OpenCV's, as float, exactly.
+TEST(Board, ChArUcoCornersAreOpenCVsExactly) {
+  Target other = legacy_femto_board();
+  other.rows = 5;
+  other.cols = 3;
+  other.legacy_pattern = false;
+  for (const Target& target : {legacy_femto_board(), other}) {
+    const core::Result<Board> board = Board::create(target);
+    ASSERT_TRUE(board.ok()) << board.status().message();
+    const std::vector<cv::Point3f> opencv =
+        board->charuco()->getChessboardCorners();
+    ASSERT_EQ(board->object_points().size(), opencv.size());
+    for (std::size_t i = 0; i < opencv.size(); ++i) {
+      EXPECT_EQ(board->object_points()[i], cv::Point3d(opencv[i])) << i;
+    }
+  }
+}
+
+// A checkerboard: no OpenCV board, and its corners on the same grid, row by
+// row from the top-left, its centre their middle.
+TEST(Board, BuildsACheckerboard) {
+  const core::Result<Board> board = Board::create(legacy_checkerboard());
+  ASSERT_TRUE(board.ok()) << board.status().message();
+  EXPECT_EQ(board->charuco(), nullptr);
+  EXPECT_EQ(board->target(), legacy_checkerboard());
+  const std::vector<cv::Point3d>& corners = board->object_points();
+  ASSERT_EQ(corners.size(), 104u);
+  for (std::size_t i = 0; i < corners.size(); ++i) {
+    const int row = static_cast<int>(i) / 13;
+    const int col = static_cast<int>(i) % 13;
+    EXPECT_EQ(corners[i], cv::Point3d((col + 1) * 0.02, (row + 1) * 0.02, 0.0))
+        << i;
+  }
+  const cv::Point3d centre = board->centre();
+  EXPECT_NEAR(centre.x, 0.14, 1e-15);
+  EXPECT_NEAR(centre.y, 0.09, 1e-15);
+  cv::Point3d mean(0.0, 0.0, 0.0);
+  for (const cv::Point3d& corner : corners) mean += corner;
+  mean *= 1.0 / static_cast<double>(corners.size());
+  EXPECT_NEAR(cv::norm(mean - centre), 0.0, 1e-15);
+
+  // Its lengths are held to float's range too, as the solves take them.
+  Target tiny = legacy_checkerboard();
+  tiny.square_size_m = 1e-42;
+  EXPECT_TRUE(RefusedNaming(create_status(tiny),
+                            core::Status::Code::InvalidArgument,
+                            "square_size_m"));
+  Target small = legacy_checkerboard();
+  small.cols = 4;
+  small.rows = 3;
+  EXPECT_TRUE(RefusedNaming(create_status(small),
+                            core::Status::Code::InvalidArgument, "rows"));
+}
+
+TEST(Board, BuildsAChArUcoBoardOrACheckerboardOnly) {
   Target grid;
   grid.kind = TargetKind::AprilGrid;
   grid.rows = 4;
@@ -291,7 +346,7 @@ TEST(Board, RefusesLengthsAFloatCannotHold) {
   const core::Result<Board> widest =
       Board::create(sized(0.199 * kFloatMax, 0.1 * kFloatMax));
   ASSERT_TRUE(widest.ok()) << widest.status().message();
-  EXPECT_TRUE(std::isfinite(widest->charuco().getRightBottomCorner().x));
+  EXPECT_TRUE(std::isfinite(widest->charuco()->getRightBottomCorner().x));
   EXPECT_TRUE(
       RefusedNaming(create_status(sized(0.201 * kFloatMax, 0.1 * kFloatMax)),
                     core::Status::Code::InvalidArgument, "square_size_m"));

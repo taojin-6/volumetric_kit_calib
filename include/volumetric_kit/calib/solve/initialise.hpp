@@ -239,7 +239,8 @@ struct InitialRig {
 /// The result depends on the cameras' ids, not on the order of the cameras
 /// or of the observations, and is the same on every run.
 /// @param cameras    The rig's cameras.
-/// @param board      The board seen.
+/// @param board      The board seen: a ChArUco board, whose ids name the
+///                   same corner in every camera's view.
 /// @param views      Every camera's view of the board in every capture: at
 ///                   most one per camera and capture.
 /// @param reference  The camera the world is, by index in @p cameras.
@@ -249,7 +250,8 @@ struct InitialRig {
 ///         option out of range (naming it), no cameras, a repeated or empty
 ///         id, a camera model @ref compute::cv_camera refuses, a view naming
 ///         a camera the rig does not have, two views of one capture by one
-///         camera, or a reference outside the rig; @ref view_pose's `Backend`
+///         camera, a checkerboard (its ids hold in one view only), or a
+///         reference outside the rig; @ref view_pose's `Backend`
 ///         error when IPPE fails on a usable view (naming the view); or what
 ///         OpenCV threw (@ref compute::guarded). Each message starts
 ///         `initialise: `.

@@ -60,10 +60,13 @@ renderer.
   on the core's vulkan tier, on a `VkDevice` shared with `sensor` and `gfx`, so
   frames pass between them without copies (MoltenVK on Apple; native Metal
   deferred).
-- **Detection:** the `detect` tier finds the ChArUco board in an 8-bit luma
-  image with OpenCV's detector, as corners by id and markers, at full
-  resolution or by the live view's faster hybrid; and the origin tag on the
-  floor, one AprilTag by id, its corners refined to sub-pixel.
+- **Detection:** the `detect` tier finds the board in an 8-bit luma image,
+  through one detector for both kinds: a ChArUco board with OpenCV's
+  detector, as corners by id and markers; a plain checkerboard with
+  `findChessboardCornersSB`, cut by the image's edge too, its ids holding in
+  one view only. It searches the image, or the image halved for the live
+  view, refining each corner in the image. It also finds the origin tag on
+  the floor, one AprilTag by id, its corners refined to sub-pixel.
 - **Solve:** the rig's extrinsics from views of the board. `initialise` places
   every camera and board from the views alone -- each view's own pose (IPPE),
   the spanning tree of the camera links that share the most captures, each
@@ -132,6 +135,24 @@ renderer.
   ([DECISIONS.md](DECISIONS.md#2026-10-18--calibrate-t4)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
+
+## Stable API
+
+A program built on calib uses the brain through these headers, under
+`include/volumetric_kit/calib/`; each builds without Vulkan or gfx. The API is
+these headers and calib's types they use, wherever declared; what stays
+stable, and how a break is flagged, is
+[DECISIONS.md](DECISIONS.md#2026-11-01--the-stable-api)'s rule. Every other
+header is internal.
+
+| Layer | Headers |
+| --- | --- |
+| Board | `core/target.hpp`, `compute/board.hpp` |
+| Detect | `detect/luma.hpp`, `detect/board.hpp`, `detect/tag.hpp` |
+| Views | `core/observation.hpp`, `core/detection.hpp`: the views are a `std::vector<Observation>`, by camera id and capture index |
+| Solve | `solve/initialise.hpp`, `solve/bundle_adjust.hpp`, `solve/world_tag.hpp` |
+| Quality | `quality/calibration_metrics.hpp`, `quality/results.hpp` |
+| File | sensor's `camera/array_calibration.hpp`: calib formats it, the caller writes it |
 
 ## Prerequisites
 

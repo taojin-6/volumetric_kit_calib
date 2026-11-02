@@ -22,9 +22,10 @@ namespace volumetric_kit::calib {
 
 /// @brief The pattern family of a calibration target.
 enum class TargetKind {
-  Checkerboard,          ///< Symmetric checkerboard; best corner accuracy,
-                         ///< full board must be visible, 180-degree
-                         ///< orientation ambiguity.
+  Checkerboard,          ///< Plain checkerboard; best corner accuracy, found
+                         ///< cut by the image's edge too, but its corners
+                         ///< carry no ids: a corner's id holds in its own
+                         ///< view only.
   ChArUco,               ///< Checkerboard + ArUco markers; robust to
                          ///< occlusion/partial views, unambiguous orientation.
   SymmetricCircleGrid,   ///< Circles on a square grid; blur-robust, but the
@@ -133,6 +134,8 @@ VC_CORE_API bool operator!=(const Target& a, const Target& b) noexcept;
 ///
 /// Every board needs a @ref TargetKind, at least one feature row and column, a
 /// finite positive square size, and known tolerances finite and not negative.
+/// A checkerboard needs at least 5 x 4 inner corners, either way round: the
+/// smallest grid its detector looks for (`detect::detect_board`).
 /// A ChArUco board or AprilGrid needs a @ref MarkerDictionary, a marker size
 /// between 0 and the square size, and marker ids, from
 /// @ref Target::first_marker_id on, that the dictionary holds: half the
@@ -189,6 +192,20 @@ VC_CORE_API const char* apriltag_family(MarkerDictionary dictionary) noexcept;
 /// The square size is the nominal one, and the tolerances are unknown.
 /// @return The board, which passes @ref check_target.
 VC_CORE_API Target legacy_femto_board() noexcept;
+
+/// @brief The lab's checkerboard, nominal: 13 x 8 inner corners (14 x 9
+///        squares) of 0.02 m, as the 2026-09-29 Blackmagic solve used it.
+///
+/// A seed for a lens's views: measure the square and enter it. The
+/// tolerances are unknown.
+/// @return The board, which passes @ref check_target.
+///
+/// @code
+/// Target board = legacy_checkerboard();
+/// board.square_size_m = 0.01994;  // measured with calipers
+/// VKC_TRY(check_target(board));
+/// @endcode
+VC_CORE_API Target legacy_checkerboard() noexcept;
 
 /// @brief A printed marker laid on the floor to fix the world: its
 ///        dictionary, its id, and the size of its black border.

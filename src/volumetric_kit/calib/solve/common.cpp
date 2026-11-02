@@ -60,6 +60,15 @@ core::Status check_one_view_each(const std::vector<Observation>& views,
   return {};
 }
 
+core::Status check_shared_board(const compute::Board& board,
+                                const std::string& prefix) {
+  if (board.charuco() != nullptr) return {};
+  return core::Status::invalid_argument(
+      prefix + "a " + to_string(board.target().kind) +
+      " has no markers, so its corner ids do not match across cameras; the "
+      "rig's extrinsics need a ChArUco board");
+}
+
 core::Status refuse_option(std::string_view prefix, const char* name,
                            const char* rule) {
   return core::Status::invalid_argument(std::string(prefix) + name +

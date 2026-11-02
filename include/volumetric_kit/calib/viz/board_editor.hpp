@@ -36,9 +36,9 @@ class BoardEditor {
   /// @param board            A ChArUco board the detector takes.
   /// @param square_measured  Whether its square size was measured, rather
   ///                         than the print's nominal size.
-  /// @return The editor; what `compute::Board::create` refuses
-  ///         (`InvalidArgument` naming the field, or `Unsupported` for a
-  ///         board that is not ChArUco); or `OutOfMemory`.
+  /// @return The editor; `Unsupported` for a board that is not ChArUco;
+  ///         what `compute::Board::create` refuses (`InvalidArgument` naming
+  ///         the field); or `OutOfMemory`.
   static core::Result<BoardEditor> create(const Target& board,
                                           bool square_measured = false);
 

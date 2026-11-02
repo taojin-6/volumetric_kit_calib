@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,10 +23,13 @@ namespace camera = sensor::camera;
 
 constexpr int kCellsPerSide = 3;
 
-// A detection's corners by id, sorted; InvalidArgument for an id repeated or
-// a pixel not finite.
-core::Result<std::vector<std::pair<int, camera::Vec2d>>> corners_by_id(
-    const Detection& detection, const char* which, std::size_t camera) {
+using Corners = std::vector<std::pair<int, camera::Vec2d>>;
+
+// A detection's corners by id, sorted; InvalidArgument for a pixel not
+// finite, or an id repeated when ids pair the corners.
+core::Result<Corners> corners_by_id(const Detection& detection,
+                                    const char* which, std::size_t camera,
+                                    CornerMatch match) {
   std::vector<std::pair<int, camera::Vec2d>> corners;
   corners.reserve(detection.observation.points.size());
   for (const DetectedPoint& point : detection.observation.points) {
@@ -39,6 +43,7 @@ core::Result<std::vector<std::pair<int, camera::Vec2d>>> corners_by_id(
   }
   std::sort(corners.begin(), corners.end(),
             [](const auto& a, const auto& b) { return a.first < b.first; });
+  if (match != CornerMatch::ById) return corners;
   for (std::size_t i = 1; i < corners.size(); ++i) {
     if (corners[i].first == corners[i - 1].first) {
       return core::Status::invalid_argument(
@@ -50,7 +55,58 @@ core::Result<std::vector<std::pair<int, camera::Vec2d>>> corners_by_id(
   return corners;
 }
 
+// How far each corner of `from` moved to the corner of `to` with its id;
+// both sorted by id.
+std::vector<double> moved_by_id(const Corners& from, const Corners& to) {
+  std::vector<double> moved;
+  for (std::size_t i = 0, j = 0; i < from.size() && j < to.size();) {
+    if (from[i].first < to[j].first) {
+      ++i;
+    } else if (to[j].first < from[i].first) {
+      ++j;
+    } else {
+      moved.push_back(glm::length(to[j].second - from[i].second));
+      ++i;
+      ++j;
+    }
+  }
+  return moved;
+}
+
+// How far each corner of `from` moved to the nearest corner of `to`, when that
+// is within a third of the distance to its own nearest neighbour in `from`. Two
+// corners of `from` cannot pair with one of `to`: each is at least its own
+// spacing from the other, more than the thirds of both spacings together. If
+// no corner pairs, the board moved at least that far: the smallest third
+// alone.
+std::vector<double> moved_by_position(const Corners& from, const Corners& to) {
+  std::vector<double> moved;
+  double third = std::numeric_limits<double>::infinity();
+  for (std::size_t i = 0; i < from.size(); ++i) {
+    double spacing = std::numeric_limits<double>::infinity();
+    for (std::size_t k = 0; k < from.size(); ++k) {
+      if (k != i) {
+        spacing =
+            std::min(spacing, glm::length(from[k].second - from[i].second));
+      }
+    }
+    if (!std::isfinite(spacing)) continue;  // a lone corner has no spacing
+    third = std::min(third, spacing / 3.0);
+    double nearest = std::numeric_limits<double>::infinity();
+    for (const auto& corner : to) {
+      nearest = std::min(nearest, glm::length(corner.second - from[i].second));
+    }
+    if (nearest <= spacing / 3.0) moved.push_back(nearest);
+  }
+  if (moved.empty() && std::isfinite(third)) moved.push_back(third);
+  return moved;
+}
+
 }  // namespace
+
+CornerMatch corner_match(const compute::Board& board) noexcept {
+  return board.charuco() != nullptr ? CornerMatch::ById : CornerMatch::Nearest;
+}
 
 core::Result<CheckedView> check_view(const compute::CvCamera& camera,
                                      const compute::Board& board,
@@ -117,8 +173,13 @@ core::Result<CheckedView> check_view(const compute::CvCamera& camera,
 }
 
 core::Result<CornerShift> corner_shift(const std::vector<Detection>& before,
-                                       const std::vector<Detection>& after) {
+                                       const std::vector<Detection>& after,
+                                       CornerMatch match) {
   return compute::guarded("corner_shift", [&]() -> core::Result<CornerShift> {
+    if (match != CornerMatch::ById && match != CornerMatch::Nearest) {
+      return core::Status::invalid_argument(
+          "corner_shift: match is not a CornerMatch");
+    }
     if (before.size() != after.size()) {
       return core::Status::invalid_argument(
           "corner_shift: " + std::to_string(before.size()) +
@@ -128,8 +189,9 @@ core::Result<CornerShift> corner_shift(const std::vector<Detection>& before,
     shift.cameras.resize(before.size());
     std::vector<double> all;
     for (std::size_t c = 0; c < before.size(); ++c) {
-      VKC_ASSIGN(const auto from, corners_by_id(before[c], "earlier", c));
-      VKC_ASSIGN(const auto to, corners_by_id(after[c], "later", c));
+      VKC_ASSIGN(const Corners from,
+                 corners_by_id(before[c], "earlier", c, match));
+      VKC_ASSIGN(const Corners to, corners_by_id(after[c], "later", c, match));
       if (from.empty() || to.empty()) continue;
       if (before[c].image_size.width != after[c].image_size.width ||
           before[c].image_size.height != after[c].image_size.height) {
@@ -137,18 +199,9 @@ core::Result<CornerShift> corner_shift(const std::vector<Detection>& before,
             "corner_shift: camera " + std::to_string(c) +
             "'s detections are of images of different sizes");
       }
-      std::vector<double> moved;
-      for (std::size_t i = 0, j = 0; i < from.size() && j < to.size();) {
-        if (from[i].first < to[j].first) {
-          ++i;
-        } else if (to[j].first < from[i].first) {
-          ++j;
-        } else {
-          moved.push_back(glm::length(to[j].second - from[i].second));
-          ++i;
-          ++j;
-        }
-      }
+      std::vector<double> moved = match == CornerMatch::ById
+                                      ? moved_by_id(from, to)
+                                      : moved_by_position(from, to);
       if (moved.empty()) continue;
       all.insert(all.end(), moved.begin(), moved.end());
       shift.cameras[c] = compute::median(std::move(moved));

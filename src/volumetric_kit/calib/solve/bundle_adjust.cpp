@@ -473,6 +473,7 @@ core::Result<Problem> read_problem(const std::vector<RigCamera>& cameras,
   p.by_rank = std::move(rig.by_rank);
   const std::vector<std::size_t>& rank = rig.rank;
   VKC_TRY(detail::check_one_view_each(views, kWhat));
+  VKC_TRY(detail::check_shared_board(board, kWhat));
 
   // The start's reference and cameras.
   if (start.reference >= k) {

@@ -76,10 +76,10 @@ struct CameraFrameCopy {
 ///
 /// @code
 /// for (const CameraFrameCopy& part : request.cameras) {
-///   VKC_ASSIGN(Detection full, detect::detect_charuco(
-///                                  {part.width, part.height, part.width,
-///                                   part.luma.data()},
-///                                  board, detect::Mode::Full));
+///   VKC_ASSIGN(Detection full,
+///              detect::detect_board({part.width, part.height, part.width,
+///                                    part.luma.data()},
+///                                   board));
 /// }
 /// @endcode
 struct CaptureRequest {

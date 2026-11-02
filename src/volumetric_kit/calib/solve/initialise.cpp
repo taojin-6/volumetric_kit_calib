@@ -262,6 +262,7 @@ core::Result<InitialRig> initialise(const std::vector<RigCamera>& cameras,
     core::Result<RigLenses> rig_lenses = check_rig(cameras, reference);
     if (!rig_lenses.ok()) return rig_lenses.status().with_context("initialise");
     VKC_TRY(detail::check_one_view_each(views, "initialise: "));
+    VKC_TRY(detail::check_shared_board(board, "initialise: "));
     const std::size_t k = cameras.size();
     const std::vector<std::string>& ids = rig_lenses->ids;
     const std::vector<compute::CvCamera>& lenses = rig_lenses->lenses;

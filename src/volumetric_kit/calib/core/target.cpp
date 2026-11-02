@@ -3,6 +3,7 @@
 
 #include "volumetric_kit/calib/core/target.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -10,6 +11,10 @@
 
 namespace volumetric_kit::calib {
 namespace {
+
+// A checkerboard's smallest grid of inner corners, the larger side first:
+// the grid its detector asks for (detect/board.cpp).
+constexpr int kSmallestGrid[2] = {5, 4};
 
 // How many codes a dictionary holds, as OpenCV's predefined one does
 // (board_test checks each against OpenCV); -1 for a value that is not a
@@ -108,6 +113,14 @@ core::Status check_target(const Target& target) {
   VKC_TRY(check_tolerance(target.planarity_bow_m, "planarity_bow_m"));
   if (target.legacy_pattern && target.kind != TargetKind::ChArUco) {
     return invalid("legacy_pattern", "applies to a ChArUco board only");
+  }
+  if (target.kind == TargetKind::Checkerboard &&
+      (std::min(target.rows, target.cols) < kSmallestGrid[1] ||
+       std::max(target.rows, target.cols) < kSmallestGrid[0])) {
+    return invalid("rows", "and cols make " + std::to_string(target.cols) +
+                               " x " + std::to_string(target.rows) +
+                               " inner corners; a checkerboard needs at "
+                               "least 5 x 4, either way round");
   }
 
   if (!*has_markers) {
@@ -257,6 +270,15 @@ Target legacy_femto_board() noexcept {
   board.dictionary = MarkerDictionary::ArUco4x4_100;
   board.first_marker_id = 0;
   board.legacy_pattern = true;
+  return board;
+}
+
+Target legacy_checkerboard() noexcept {
+  Target board;
+  board.kind = TargetKind::Checkerboard;
+  board.rows = 8;
+  board.cols = 13;
+  board.square_size_m = 0.02;
   return board;
 }
 

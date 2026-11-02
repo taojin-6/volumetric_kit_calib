@@ -2,12 +2,35 @@
 
 All notable changes to `volumetric_kit_calib` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
-adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
+0.1.0 the API is README.md's [table](README.md#stable-api); before 1.0 a minor
+release may break it, and each such entry says how to migrate
+(DECISIONS.md, 2026-11-01).
 
-## [Unreleased]
+## [0.1.0] - 2026-11-01
 
 ### Added
 
+- **The stable API** (DECISIONS.md, 2026-11-01): the brain's headers in
+  README.md's table. `api_test` builds the sample programs on them alone.
+- **Plain checkerboards** (DECISIONS.md, 2026-11-01): `compute::Board`
+  builds a `TargetKind::Checkerboard`, its corners on the ChArUco board's
+  grid, and `legacy_checkerboard()` is the lab's, 13 x 8 inner corners of
+  0.02 m.
+- **`detect::detect_board`** (`detect/board.hpp`): one detector for both
+  boards. A ChArUco board as `detect_charuco` finds it; a checkerboard by
+  `findChessboardCornersSB` asked for 5 x 4 inner corners with
+  `CALIB_CB_LARGER`, so a board cut by the picture's edge is found, its grid
+  numbered from its own first corner; corners SB adds that are not the
+  board's, and grids that skip squares, are dropped; each corner is refined
+  in the picture; and each search seeds OpenCV's random numbers and puts them
+  back, so a picture always gives one detection. With `DetectOptions::half`,
+  the picture halved, the board is searched there. calib_rig's captures detect
+  through it.
+- `quality::CornerMatch` and `corner_match(board)`: `corner_shift` takes a
+  trailing `match`. `Nearest` pairs a checkerboard's corners by position, for
+  the capture rule's stillness and the live-vs-full flag, and reads a third of
+  their spacing when none pair; calib_rig asks for its board's.
 - tests: **the Femto goldens.** `app_calibrate_goldens` runs Calibrate on
   the synthetic Femto rig (four Femto-like 4K colour cameras, 40 placements
   of the rig's board, the origin tag seen) and holds its
@@ -18,6 +41,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Breaking:** `compute::Board::charuco()` returns a pointer, null for a
+  checkerboard (DECISIONS.md, 2026-11-01). Migration: write
+  `*board.charuco()` where `board.charuco()` was, for a ChArUco board.
+- **Breaking:** `check_target` needs at least 5 x 4 inner corners for a
+  checkerboard, either way round (DECISIONS.md, 2026-11-01); it took 1 x 1,
+  though no `Board` could be built from a checkerboard. Migration: enter a
+  checkerboard of at least that size.
+- `compute::usable_for_pose` tests collinearity on the board's corners for
+  both kinds, where it asked OpenCV's ChArUco board; its verdicts on ChArUco
+  views are unchanged.
+- `solve::initialise` and `bundle_adjust` refuse a checkerboard
+  (`InvalidArgument`): extrinsics pair corners across cameras by id.
+  `detect_charuco` refuses one too, and `viz::BoardEditor` takes ChArUco
+  only, until it has a checkerboard's fields.
+- calib's version is 0.1.0, where it was 0.0.1.
 - build: **calib builds on volumetric_kit_sensor, not recon** (BREAKING for
   consumers; DECISIONS.md, 2026-10-29). recon's camera and sensor tiers are
   now [volumetric_kit_sensor](https://github.com/taojin-6/volumetric_kit_sensor)

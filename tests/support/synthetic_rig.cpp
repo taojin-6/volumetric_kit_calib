@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <random>
 #include <utility>
 
@@ -82,10 +83,42 @@ camera::Mat4d board_pose(const compute::Board& board,
   return frame(x, y, z, centre - middle.x * x - middle.y * y);
 }
 
-// The chessboard's outer size (metres), from OpenCV's board.
+// The chessboard's outer size (metres): from OpenCV's board for a ChArUco
+// board, which keeps it in float.
 cv::Point2d board_extent(const compute::Board& board) {
-  const cv::Point3f corner = board.charuco().getRightBottomCorner();
-  return {corner.x, corner.y};
+  if (const cv::aruco::CharucoBoard* charuco = board.charuco()) {
+    const cv::Point3f corner = charuco->getRightBottomCorner();
+    return {corner.x, corner.y};
+  }
+  const Target& target = board.target();
+  return {(target.cols + 1) * target.square_size_m,
+          (target.rows + 1) * target.square_size_m};
+}
+
+// The chessboard drawn at `size`, 0 black and 255 white: OpenCV's ChArUco
+// board, or a checkerboard's squares, the top-left black, each square's
+// edges rounded to the nearest pixel.
+cv::Mat board_texture(const compute::Board& board, const cv::Size& size) {
+  cv::Mat drawn;
+  if (const cv::aruco::CharucoBoard* charuco = board.charuco()) {
+    charuco->generateImage(size, drawn, 0, 1);
+    return drawn;
+  }
+  drawn = cv::Mat(size, CV_8U, cv::Scalar(255));
+  const Target& target = board.target();
+  const double across = static_cast<double>(size.width) / (target.cols + 1);
+  const double down = static_cast<double>(size.height) / (target.rows + 1);
+  for (int j = 0; j <= target.rows; ++j) {
+    for (int i = 0; i <= target.cols; ++i) {
+      if ((i + j) % 2 != 0) continue;
+      const cv::Point from(static_cast<int>(std::lround(i * across)),
+                           static_cast<int>(std::lround(j * down)));
+      const cv::Point to(static_cast<int>(std::lround((i + 1) * across)),
+                         static_cast<int>(std::lround((j + 1) * down)));
+      drawn(cv::Rect(from, to)).setTo(cv::Scalar(0));
+    }
+  }
+  return drawn;
 }
 
 // An 8-bit texture's integral over any box, exact for its texels as squares
@@ -408,25 +441,81 @@ cv::Mat render_board(const camera::CameraModel& model,
   const cv::Point2d extent = board_extent(board);
   const double s = options.texture_px_per_m;
   const int margin_px = static_cast<int>(std::lround(options.margin_m * s));
-  cv::Mat drawn;
-  board.charuco().generateImage(
-      cv::Size(static_cast<int>(std::lround(extent.x * s)),
-               static_cast<int>(std::lround(extent.y * s))),
-      drawn, 0, 1);
+  const cv::Mat drawn = board_texture(
+      board, cv::Size(static_cast<int>(std::lround(extent.x * s)),
+                      static_cast<int>(std::lround(extent.y * s))));
   cv::Mat padded;
   cv::copyMakeBorder(drawn, padded, margin_px, margin_px, margin_px, margin_px,
                      cv::BORDER_CONSTANT, cv::Scalar(255));
   const SummedTexture texture(padded);
 
-  // The pixels the board and its margin can reach.
+  // Where a ray meets the board's plane in front of the camera, in the
+  // board's frame (metres).
+  const camera::Mat3d rotation(board_to_camera);
+  const camera::Vec3d normal = rotation[2];
+  const camera::Vec3d origin(board_to_camera[3]);
+  const camera::Mat3d to_board = glm::transpose(rotation);
+  const double offset = glm::dot(normal, origin);
+  const auto on_board =
+      [&](const camera::Vec3d& ray) -> std::optional<camera::Vec3d> {
+    const double along = glm::dot(normal, ray);
+    const double depth = std::abs(along) > 1e-12 ? offset / along : -1.0;
+    if (!(depth > 0.0)) return std::nullopt;
+    return to_board * (depth * ray - origin);
+  };
+  // The pixels' rays: the model's lens inverted, or options.ray's.
+  const auto rays_of = [&](const std::vector<cv::Point2d>& pixels) {
+    std::vector<camera::Vec3d> rays;
+    rays.reserve(pixels.size());
+    if (options.ray) {
+      for (const cv::Point2d& p : pixels) {
+        const cv::Point3d r = options.ray(p);
+        rays.emplace_back(r.x, r.y, r.z);
+      }
+    } else {
+      for (const cv::Point2d& r :
+           compute::undistort_points(cam, pixels).value()) {
+        rays.emplace_back(r.x, r.y, 1.0);
+      }
+    }
+    return rays;
+  };
+
+  // The pixels the board and its margin can reach: where the model projects
+  // its outline, or, through options.ray, the rays on a grid kStep px apart
+  // that meet it, and a step around them.
   double min_x = 1e300, min_y = 1e300, max_x = -1e300, max_y = -1e300;
-  for (const cv::Point2d& q :
-       project(model, board_to_camera,
-               board_outline(board, options.margin_m, 40))) {
-    min_x = std::min(min_x, q.x);
-    max_x = std::max(max_x, q.x);
-    min_y = std::min(min_y, q.y);
-    max_y = std::max(max_y, q.y);
+  if (options.ray) {
+    constexpr int kStep = 8;
+    std::vector<cv::Point2d> grid;
+    for (int y = 0; y < cam.size.height + kStep - 1; y += kStep) {
+      for (int x = 0; x < cam.size.width + kStep - 1; x += kStep) {
+        grid.emplace_back(std::min(x, cam.size.width - 1),
+                          std::min(y, cam.size.height - 1));
+      }
+    }
+    const std::vector<camera::Vec3d> rays = rays_of(grid);
+    for (std::size_t k = 0; k < grid.size(); ++k) {
+      const std::optional<camera::Vec3d> q = on_board(rays[k]);
+      if (!q || q->x < -options.margin_m || q->y < -options.margin_m ||
+          q->x > extent.x + options.margin_m ||
+          q->y > extent.y + options.margin_m) {
+        continue;
+      }
+      min_x = std::min(min_x, grid[k].x - kStep);
+      max_x = std::max(max_x, grid[k].x + kStep);
+      min_y = std::min(min_y, grid[k].y - kStep);
+      max_y = std::max(max_y, grid[k].y + kStep);
+    }
+  } else {
+    for (const cv::Point2d& q :
+         project(model, board_to_camera,
+                 board_outline(board, options.margin_m, 40))) {
+      min_x = std::min(min_x, q.x);
+      max_x = std::max(max_x, q.x);
+      min_y = std::min(min_y, q.y);
+      max_y = std::max(max_y, q.y);
+    }
   }
   const int x0 = std::max(0, static_cast<int>(std::floor(min_x)) - 4);
   const int y0 = std::max(0, static_cast<int>(std::floor(min_y)) - 4);
@@ -441,7 +530,7 @@ cv::Mat render_board(const camera::CameraModel& model,
   }
 
   // S x S samples per pixel; each one's ray meets the board's plane at
-  // (u, v), in texels, or misses it (NaN).
+  // (u, v), in texels, or misses it (NaN). A row of samples at a time.
   const int S = options.supersampling;
   const int w = x1 - x0 + 1;
   const int h = y1 - y0 + 1;
@@ -450,29 +539,22 @@ cv::Mat render_board(const camera::CameraModel& model,
   const auto at = [W](int i, int j) {
     return static_cast<std::size_t>(j) * W + i;
   };
-  std::vector<cv::Point2d> samples(static_cast<std::size_t>(W) * H);
+  constexpr double kMiss = std::numeric_limits<double>::quiet_NaN();
+  std::vector<double> u(static_cast<std::size_t>(W) * H, kMiss);
+  std::vector<double> v(u.size(), kMiss);
+  std::vector<cv::Point2d> row(static_cast<std::size_t>(W));
   for (int j = 0; j < H; ++j) {
     for (int i = 0; i < W; ++i) {
-      samples[at(i, j)] = {x0 + (i + 0.5) / S - 0.5, y0 + (j + 0.5) / S - 0.5};
+      row[static_cast<std::size_t>(i)] = {x0 + (i + 0.5) / S - 0.5,
+                                          y0 + (j + 0.5) / S - 0.5};
     }
-  }
-  const std::vector<cv::Point2d> rays =
-      compute::undistort_points(cam, samples).value();
-  const camera::Mat3d rotation(board_to_camera);
-  const camera::Vec3d normal = rotation[2];
-  const camera::Vec3d origin(board_to_camera[3]);
-  const camera::Mat3d to_board = glm::transpose(rotation);
-  const double offset = glm::dot(normal, origin);
-  constexpr double kMiss = std::numeric_limits<double>::quiet_NaN();
-  std::vector<double> u(samples.size(), kMiss), v(samples.size(), kMiss);
-  for (std::size_t k = 0; k < rays.size(); ++k) {
-    const camera::Vec3d ray(rays[k].x, rays[k].y, 1.0);
-    const double along = glm::dot(normal, ray);
-    const double depth = std::abs(along) > 1e-12 ? offset / along : -1.0;
-    if (depth > 0.0) {
-      const camera::Vec3d q = to_board * (depth * ray - origin);
-      u[k] = q.x * s + margin_px;
-      v[k] = q.y * s + margin_px;
+    const std::vector<camera::Vec3d> rays = rays_of(row);
+    for (int i = 0; i < W; ++i) {
+      if (const std::optional<camera::Vec3d> q =
+              on_board(rays[static_cast<std::size_t>(i)])) {
+        u[at(i, j)] = q->x * s + margin_px;
+        v[at(i, j)] = q->y * s + margin_px;
+      }
     }
   }
 
@@ -617,6 +699,52 @@ cv::Matx33d marker_placement(const cv::Point2d& centre, double side_px,
 
 compute::Board femto_board() {
   return compute::Board::create(legacy_femto_board()).value();
+}
+
+compute::Board lab_checkerboard() {
+  return compute::Board::create(legacy_checkerboard()).value();
+}
+
+cv::Point2d FisheyeTruth::project(const cv::Point3d& point) const {
+  const double rho = std::hypot(point.x, point.y);
+  const double theta = std::atan2(rho, point.z);
+  const double t2 = theta * theta;
+  const double theta_d =
+      theta * (1.0 + t2 * (k[0] + t2 * (k[1] + t2 * (k[2] + t2 * k[3]))));
+  if (rho == 0.0) return {cx, cy};
+  return {cx + f * theta_d * point.x / rho, cy + f * theta_d * point.y / rho};
+}
+
+cv::Point3d FisheyeTruth::ray(const cv::Point2d& pixel) const {
+  const double dx = pixel.x - cx;
+  const double dy = pixel.y - cy;
+  const double r = std::hypot(dx, dy);
+  if (r == 0.0) return {0.0, 0.0, 1.0};
+  // theta_d(theta) = r / f by Newton's method from theta = theta_d.
+  const double target = r / f;
+  double theta = target;
+  for (int i = 0; i < 50; ++i) {
+    const double t2 = theta * theta;
+    const double value =
+        theta * (1.0 + t2 * (k[0] + t2 * (k[1] + t2 * (k[2] + t2 * k[3])))) -
+        target;
+    const double slope =
+        1.0 + t2 * (3.0 * k[0] +
+                    t2 * (5.0 * k[1] + t2 * (7.0 * k[2] + t2 * 9.0 * k[3])));
+    const double step = value / slope;
+    theta -= step;
+    if (std::abs(step) < 1e-15) break;
+  }
+  const double sine = std::sin(theta);
+  return {sine * dx / r, sine * dy / r, std::cos(theta)};
+}
+
+PixelToRay FisheyeTruth::pixel_to_ray() const {
+  return [lens = *this](const cv::Point2d& pixel) { return lens.ray(pixel); };
+}
+
+camera::CameraModel FisheyeTruth::frame() const {
+  return {size, {f, f, cx, cy}, {}};
 }
 
 camera::Mat4d board_facing_camera(const compute::Board& board,
