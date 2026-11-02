@@ -7,16 +7,18 @@
 // wins, sampled every live_every-th set; freezing holds the window's and
 // lets offers go; no set is held past its preparation; solid prepares depth
 // only; a refused set arrives as a Status and the worker goes on. Then across
-// two queue families, under synchronization validation: a known point,
-// prepared on the compute family and drawn on the graphics family through
-// gfx's depth-cloud pipeline, the frame waiting for the preparation's
-// semaphore, lands on its pixel with its colour by sensor's rule, the snapshot
-// held until its frame retires; a frozen snapshot redraws at a new pose with
-// no second preparation; a frame EXCLUSIVE to the compute family is refused,
-// and with no camera placed nothing is drawn, neither holding anything. When
-// the worker prepares: not while the view is frozen, hidden or minimized. And
-// the device calib_rig asks for. The GPU cases skip without a Vulkan device,
-// the cross-family ones also with one family.
+// two queue families, under synchronization validation: a known point among
+// the returns around it, prepared on the compute family and drawn on the
+// graphics family through gfx's depth-cloud pipeline, the frame waiting for
+// the preparation's semaphore, lands on its pixel with its colour by sensor's
+// rule, the snapshot held until its frame retires; a lone return, which
+// sensor's depth outlier filter drops, draws nothing; a frozen snapshot
+// redraws at a new pose with no second preparation; a frame EXCLUSIVE to the
+// compute family is refused, and with no camera placed nothing is drawn,
+// neither holding anything. When the worker prepares: not while the view is
+// frozen, hidden or minimized. And the device calib_rig asks for. The GPU
+// cases skip without a Vulkan device, the cross-family ones also with one
+// family.
 
 #include <gtest/gtest.h>
 
@@ -62,6 +64,10 @@ constexpr std::uint32_t kU = 5;  // the depth pixel with a return
 constexpr std::uint32_t kV = 4;
 constexpr std::uint16_t kRaw = 1500;  // its depth: 1.5 m at 1 mm a unit
 constexpr double kZ = 1.5;
+// The returns around it, kPatch pixels each way: 25, which sensor's depth
+// outlier filter, on by default (8 px, 20 points), keeps, where it drops a
+// lone return.
+constexpr std::uint32_t kPatch = 2;
 constexpr auto kPatience = std::chrono::seconds(30);
 
 Mat4d pose(double degrees, Vec3d axis, Vec3d translation) {
@@ -99,20 +105,25 @@ struct HostPixels {
   std::vector<std::uint32_t> color;
 };
 
-// A set of `n` frames: each with no return but kRaw at (kU, kV), every
-// colour pixel coded, and a baked pose the 3D view must not use. Each frame's
-// pixels are watched through `watched` when it is given.
+// A set of `n` frames: each with no return but kRaw within `patch` pixels
+// of (kU, kV), every colour pixel coded, and a baked pose the 3D view must
+// not use. Each frame's pixels are watched through `watched` when it is
+// given.
 std::shared_ptr<const sensor::FrameSet> make_set(
     std::size_t n, std::uint64_t sequence,
     std::vector<std::weak_ptr<const void>>* watched = nullptr,
-    float min_depth = 0.5f) {
+    float min_depth = 0.5f, std::uint32_t patch = kPatch) {
   auto set = std::make_shared<sensor::FrameSet>();
   set->timestamp_ns = 1'000'000 * sequence;
   set->sequence = sequence;
   for (std::size_t i = 0; i < n; ++i) {
     auto host = std::make_shared<HostPixels>();
     host->depth.assign(std::size_t{kDepthW} * kDepthH, 0);
-    host->depth[std::size_t{kV} * kDepthW + kU] = kRaw;
+    for (std::uint32_t y = kV - patch; y <= kV + patch; ++y) {
+      for (std::uint32_t x = kU - patch; x <= kU + patch; ++x) {
+        host->depth[std::size_t{y} * kDepthW + x] = kRaw;
+      }
+    }
     host->color.resize(std::size_t{kColorW} * kColorH);
     for (std::uint32_t y = 0; y < kColorH; ++y) {
       for (std::uint32_t x = 0; x < kColorW; ++x) {
@@ -634,6 +645,18 @@ class AppCloudAcrossFamilies : public core::test::SharedDeviceTest {
     return out;
   }
 
+  // The pixels within kPatch of (u, v), in lit's order.
+  static std::vector<std::pair<std::uint32_t, std::uint32_t>> patch_at(
+      std::uint32_t u, std::uint32_t v) {
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> out;
+    for (std::uint32_t y = v - kPatch; y <= v + kPatch; ++y) {
+      for (std::uint32_t x = u - kPatch; x <= u + kPatch; ++x) {
+        out.emplace_back(x, y);
+      }
+    }
+    return out;
+  }
+
   static std::uint32_t rgb_at(const std::vector<std::uint8_t>& rgba,
                               std::uint32_t x, std::uint32_t y) {
     const std::size_t at = (std::size_t{y} * kDepthW + x) * 4;
@@ -657,14 +680,15 @@ class AppCloudAcrossFamilies : public core::test::SharedDeviceTest {
 };
 
 // A synthetic frame prepared on the compute family and drawn on the graphics
-// family in place: its one point lands on its depth pixel through a view of
-// its own depth camera, in the colour of the colour pixel sensor's rule gives
-// it -- the nearest centre, through the factory extrinsic. The frame waits at
-// the vertex stage for the value the preparation signalled, which
-// record_cloud returns, as gfx's contract asks of a producer on another
-// queue, and validation, synchronization included, stays clean. The snapshot
-// is held until its frame retires: executed but not yet retired, with the
-// test's own reference gone, the retire queue alone keeps it.
+// family in place: each of its points lands on its depth pixel through a view
+// of its own depth camera, the known one in the colour of the colour pixel
+// sensor's rule gives it -- the nearest centre, through the factory
+// extrinsic. The frame waits at the vertex stage for the value the
+// preparation signalled, which record_cloud returns, as gfx's contract asks
+// of a producer on another queue, and validation, synchronization included,
+// stays clean. The snapshot is held until its frame retires: executed but not
+// yet retired, with the test's own reference gone, the retire queue alone
+// keeps it.
 TEST_F(AppCloudAcrossFamilies, AKnownPointLandsOnItsPixelWithItsColour) {
   std::unique_ptr<CloudWorker> cloud = start(both());
   ASSERT_NE(cloud, nullptr);
@@ -700,15 +724,32 @@ TEST_F(AppCloudAcrossFamilies, AKnownPointLandsOnItsPixelWithItsColour) {
   const glm::dvec2 c = image(
       color_model(), Vec3d(depth_to_color() * glm::dvec4(the_point(), 1.0)));
   const std::uint32_t expected = coded(nearest(c.x), nearest(c.y));
-  const auto points = lit(drawn.rgba);
-  ASSERT_EQ(points.size(), 1u);
-  EXPECT_EQ(points[0], std::make_pair(kU, kV));
+  EXPECT_EQ(lit(drawn.rgba), patch_at(kU, kV));
   EXPECT_EQ(rgb_at(drawn.rgba, kU, kV), expected & 0x00FFFFFFu);
 }
 
+// A lone return is an outlier: sensor's depth outlier filter, on by default,
+// which the 3D view keeps, drops it, so nothing is drawn.
+TEST_F(AppCloudAcrossFamilies, DrawsNoLoneReturn) {
+  std::unique_ptr<CloudWorker> cloud = start(both());
+  ASSERT_NE(cloud, nullptr);
+  cloud->offer(make_set(1, 1, nullptr, 0.5f, 0));
+  const std::shared_ptr<const CloudSnapshot> snapshot = next_snapshot(*cloud);
+  ASSERT_NE(snapshot, nullptr);
+  const Mat4d color_to_world = pose(17.0, {0.3, 1.0, 0.2}, {0.4, -0.2, 1.5});
+  const Rendered drawn =
+      render(snapshot, placed(color_to_world),
+             style(pinhole_view_proj(depth_model(),
+                                     color_to_world * depth_to_color())));
+  ASSERT_TRUE(drawn.recorded.ok()) << drawn.recorded.message();
+  ASSERT_FALSE(drawn.rgba.empty());
+  EXPECT_TRUE(lit(drawn.rgba).empty());
+}
+
 // Frozen, the snapshot redraws where a new pose puts its camera, with no
-// second preparation: the point moves as the pose moves it through the same
-// view, and keeps its colour, which the camera's own extrinsic decides.
+// second preparation: the points move as the pose moves them through the same
+// view, and the known one keeps its colour, which the camera's own extrinsic
+// decides.
 TEST_F(AppCloudAcrossFamilies, AFrozenSnapshotRedrawsAtNewPosesWithoutARePrep) {
   std::unique_ptr<CloudWorker> cloud = start(both());
   ASSERT_NE(cloud, nullptr);
@@ -737,10 +778,8 @@ TEST_F(AppCloudAcrossFamilies, AFrozenSnapshotRedrawsAtNewPosesWithoutARePrep) {
   const std::pair<std::uint32_t, std::uint32_t> moved{nearest(at.x),
                                                       nearest(at.y)};
   EXPECT_NE(moved, std::make_pair(kU, kV));
-  ASSERT_EQ(lit(first.rgba).size(), 1u);
-  const auto points = lit(second.rgba);
-  ASSERT_EQ(points.size(), 1u);
-  EXPECT_EQ(points[0], moved);
+  EXPECT_EQ(lit(first.rgba), patch_at(kU, kV));
+  EXPECT_EQ(lit(second.rgba), patch_at(moved.first, moved.second));
   EXPECT_EQ(rgb_at(second.rgba, moved.first, moved.second),
             rgb_at(first.rgba, kU, kV));
   EXPECT_EQ(cloud->prepared(), 1u);

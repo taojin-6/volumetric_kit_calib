@@ -113,6 +113,11 @@ std::vector<Placement> synthetic_plan(const std::vector<SyntheticCamera>& rig,
 struct ObserveOptions {
   double noise_px = 0.3;   ///< Gaussian noise on each axis (pixels, sigma).
   std::uint32_t seed = 1;  ///< The noise's seed.
+  /// The noise drawn the same with every standard library (Box-Muller on
+  /// the seed's `std::mt19937`), for a test whose numbers are compared
+  /// across machines; otherwise `std::normal_distribution`'s, each
+  /// library's own.
+  bool portable = false;
 };
 
 /// @brief What the rig's cameras detect of a plan: every corner of each

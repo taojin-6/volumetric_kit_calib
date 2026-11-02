@@ -38,7 +38,7 @@ endif()
 # on for sensor or gfx keeps it. Only the examples and calib_rig opt into
 # core_config.
 #
-# The pin is core 0.35.0 (c52a86a, core #76's merge), as are the core's actions
+# The pin is core 0.39.0 (1972079, core #85's merge), as are the core's actions
 # in .github/workflows.
 if(VC_WITH_RIG)
   set(VKC_WITH_VULKAN ON)
@@ -51,7 +51,7 @@ endif()
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG c52a86ab8fcfd11fb6afbfeaf0ae9ef2209b18b2)
+  GIT_TAG 19720798ef25d76c6fa570052a0cc6a32883e3c5)
 FetchContent_MakeAvailable(volumetric_kit_core)
 # The set() above is lost when the application made the core available first.
 if(VC_WITH_RIG)
@@ -78,12 +78,12 @@ endif()
 # and VS_WITH_CUDA apply. Work on both checkouts at once with
 # -DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_SENSOR=<sensor checkout>.
 #
-# The pin is sensor 0.1.0 (436840c, its repository's first main), as is its
-# Orbbec SDK action in .github/workflows/_build.yml.
+# The pin is sensor main at #26's merge (b66e96f, 0.19.0), as is its Orbbec SDK
+# action in .github/workflows/_build.yml.
 FetchContent_Declare(
   volumetric_kit_sensor
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_sensor.git
-  GIT_TAG 436840cb269553cdcb6cbd6232c5ee1a643efc02)
+  GIT_TAG b66e96f8d67856674d00069805db6822fbea7bf7)
 if(VC_WITH_RIG)
   set(VS_CAMERA_ONLY OFF)
 elseif(NOT DEFINED VS_CAMERA_ONLY)

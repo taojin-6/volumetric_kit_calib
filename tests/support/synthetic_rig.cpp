@@ -295,7 +295,10 @@ std::vector<Observation> observe(const std::vector<SyntheticCamera>& rig,
                                  const std::vector<Placement>& plan,
                                  const ObserveOptions& options) {
   std::mt19937 rng(options.seed);
-  std::normal_distribution<double> noise(0.0, 1.0);
+  std::normal_distribution<double> normal(0.0, 1.0);
+  const auto noise = [&](std::mt19937& draw) {
+    return options.portable ? portable_normal(draw) : normal(draw);
+  };
   const std::vector<cv::Point3d>& corners = board.object_points();
   const double weight = options.noise_px > 0.0
                             ? 1.0 / (options.noise_px * options.noise_px)

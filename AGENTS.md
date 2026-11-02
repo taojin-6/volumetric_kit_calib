@@ -152,6 +152,9 @@ ctest.
 - For code changes, build affected targets and run relevant tests, with
   regression coverage for changed behavior. Broaden validation when shared
   contracts or the change's scope warrant it.
+- `app_calibrate_goldens` holds Calibrate's files on the synthetic Femto rig
+  to `tests/goldens/femto_calibrate/`. A change meant to move them rewrites
+  them with `VC_WRITE_GOLDENS=1` and its commit says why.
 - Documentation-only changes need formatting, link, and consistency checks;
   no build is needed. Hooks can be scoped with `pre-commit run --files`.
 - Core tests are CPU-only. The `depth` and `viz` tiers' GPU tests use the
