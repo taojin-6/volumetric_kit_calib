@@ -100,10 +100,66 @@ writes). From 0.1.0:
 
 Every other header is internal and, those types aside, changes freely: `app/`,
 `viz/`, `capture/`, `depth/`, the rest of `compute/` and `quality/`, and
-`detect/charuco.hpp`. Why: other programs (an offline lens solve, the second
-camera pair) assemble the brain, and a rule that shows in review costs
-little. Freezing everything would stall the app; an ABI promise means
-nothing for a library nobody installs.
+`detect/charuco.hpp`. `source/rig_source.hpp` is public but not promised
+(the 2026-11-02 entry on the source). Why: other programs (an offline lens
+solve, the second camera pair) assemble the brain, and a rule that shows in
+review costs little. Freezing everything would stall the app; an ABI promise
+means nothing for a library nobody installs.
+
+## 2026-11-02 — Every camera through one source
+
+calib reads its cameras through one class, `source::RigSource`
+(`source/rig_source.hpp`, tier `calib_source`, after `detect`): a
+hardware-synced array (the Femto rig), or one stereo sensor and its two
+cameras' ids (a DeckLink pair).
+
+- **Grey pictures, made on the GPU.** Each `take()` polls -- the array's next
+  set, or the pair's newest -- makes every picture's 8-bit luma and its half
+  in one pass of sensor's `LumaPass`, whatever its layout (NV12 images,
+  nvJPEG's planes, V210, host YUYV or luma), and reads both back in one list
+  read. The live view searches the half and refines each corner in the luma.
+  The CPU halving (`cv::resize`) is gone: the GPU's half is byte-equal to it,
+  and the board's corners are where it put them (0 px on 48 corners at 4K).
+- **A set may be kept; host luma may not.** A `PictureSet` lives on the
+  device and may be shared: each camera's presence, time and grey tile, the
+  RGB-D set, and an owner that holds the tiles. `host()` is valid until the
+  next take, as it sits in the readback's reused staging buffer, so the live
+  snapshot keeps the set and the detections, never the host views.
+- **One code names a driver.** The app's opener (`app/open_source.hpp`)
+  opens the cameras and hands the rest a source and calib's own camera
+  records. Its one arm is Orbbec's; DeckLink's comes with intrinsic mode. The
+  workers hold no driver type and cast nothing.
+- **Loss as sensor counts it.** A camera's `failed` frames are a loss; its
+  `dropped` ones, a newer frame winning, and the sets an array skips are not.
+- **The spread warning per source.** An array keeps 5 ms. A stereo sensor
+  never hands out a pair past its own bound (`StereoInfo::max_skew_ns`, half
+  a frame free-running: 16.7 ms at 30p), and a capture waits for a still
+  board, so the warning rises to that bound: a pair's skew is no warning, and
+  a moving board is not captured.
+- **Any camera saves.** A capture copies each camera's host luma, plus its
+  JPEG and depth where its frame has them. A camera with no JPEG is saved as
+  a PGM of its luma (8.3 MB at 4K); a camera with depth still needs it.
+  `session.json` is version 2: calib's own camera record (id, model, size,
+  optional factory lenses and Orbbec facts, an input, its lens's origin and a
+  lens file's SHA-256), and the session's mode and driver; a sync file, a
+  depth mode, the SDK's version and the factory record only where the rig
+  has them. A Femto session's file is version 1's but for the version, `id`
+  for `serial`, and those keys.
+- **Grey tiles.** The mosaic writes a luma picture in a device buffer as a
+  grey tile, its chroma one neutral buffer made once; a decoder's NV12 images
+  stay a colour tile. So every camera's tile shows, nvJPEG's on Linux too.
+- **The cost.** On the M5 Max (Release, 300 sets), a Femto-like set of four
+  4K NV12 pictures takes 11.6 ms median, 10.8 before (+0.8 ms): copying each
+  luma image and making its half (0.8 ms on the GPU) outweigh the CPU halving
+  saved (0.3 ms). A 4K V210 pair takes 11.1 ms, 9.0 of it the search. The
+  GPU-only rule decides it; sensor's pass reading NV12 images in place, or
+  one submit for the pass and the readback, would win most of it back.
+- **Public, not promised.** `source/rig_source.hpp` carries sensor's pre-1.0
+  driver-side types and has one user, `calib_rig`, so it stays outside
+  README's stable table until a second consumer. `capture` takes plain
+  records, no source type.
+- **calib needs sensor 0.21.0**, for `LumaPass` and the list read on its prep
+  tier, and its stereo tier with `VC_WITH_RIG`.
 
 ## 2026-11-02 — A stereo pair's rectified rows
 
@@ -246,8 +302,9 @@ judges one again offline, from its saved pictures.
   report has that alone. `pairs` joins it with the pair check.
 - **`RigCamera::source`** carries a lens's provenance into the file, where
   the adjustment wrote `Factory` for every camera.
-- **calib needs sensor 0.20.0**, for `fold_radius2` on its camera tier, and
-  `opencv_calib` in the brain, privately, in the solve tier.
+- **calib needs sensor 0.20.0** (0.21.0 since 2026-11-02), for `fold_radius2`
+  on its camera tier, and `opencv_calib` in the brain, privately, in the
+  solve tier.
 
 ## 2026-11-01 — Plain checkerboards, one detector
 
@@ -275,7 +332,7 @@ corners, past where a whole board fits.
   time for 0.01-0.02 px); in the half (`DetectOptions::half`, the live view)
   with `NORMALIZE_IMAGE`.
 - **Each corner is refined in the picture**, on both paths, by the ChArUco
-  hybrid's refinement, which both kinds share. Why: SB's own corners err
+  half's refinement, which both kinds share. Why: SB's own corners err
   0.14-0.19 px (median) on a board square to the pixels, 0.02-0.09 px turned
   from them, on both renderers; refined, 0.02-0.05 px either way. These
   corners fit lenses.
@@ -604,9 +661,10 @@ The `app` tier runs the rig (`app/calib_rig.hpp`, `live_worker.hpp`,
 - **Three threads, one owner each** (a fourth, the 3D view's, since
   2026-10-17, and a fifth, Calibrate's, since 2026-10-18; see the dated
   entries). The live worker (T1) alone touches the
-  rig's `SensorArray`, which is not thread-safe: it polls each set, reads every
-  camera's luma back in one submit, finds the board (hybrid) and checks each
-  view, drives the capture rule, and publishes a snapshot, newest wins.
+  rig's source (`source::RigSource` since 2026-11-02; see the dated entry),
+  which is not thread-safe: it takes each set with every camera's luma and
+  half, finds the board and checks each view, drives the capture rule, and
+  publishes a snapshot, newest wins.
   While the 3D view fills the window and no capture is armed, it reads
   nothing back and searches nothing (amended 2026-10-22). The
   capture worker (T3) searches each capture's luma again at full resolution,
@@ -790,7 +848,8 @@ The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
   decoders leave -- NVDEC's images still owned outside Vulkan, and nvJPEG's
   I420 planes in a buffer -- is refused until the tile takes over their
   ownership (and gfx maps I420); a readback that has taken NVDEC's images
-  over leaves them to the tile (amended 2026-10-27).
+  over leaves them to the tile (amended 2026-10-27). Since 2026-11-02 such a
+  camera shows its luma as a grey tile (the dated entry on the source).
 - **One mosaic, any number of cameras.** Each camera's picture is a tile of
   one NV12 picture: gfx copies each new picture into its tile, the others
   keep theirs, and each page with a new picture is converted once per set,
@@ -872,8 +931,9 @@ the thresholds).
   trigger, so it is recorded and warned of, never a gate; a set with too few
   usable views adds nothing to the extrinsics and is warned of too. The set
   the rule would take is refused at once when the writer is full.
-- **Live corners are flagged, not refused.** The live view's hybrid corners
-  are for display; the solver takes the capture's full-resolution ones. A
+- **Live corners are flagged, not refused.** The live view's corners, found
+  in the half, are for display; the solver takes the capture's
+  full-resolution ones. A
   capture whose two disagree is flagged.
 - **Tilted views are favoured.** The rig's 5 x 3 board fixes its own rotation
   far worse facing the camera: at 0.3 px of corner noise the worst axis's
@@ -893,7 +953,8 @@ The `capture` tier writes the rig application's calibration sessions
 (`capture/session_writer.hpp` has the layout and both schemas).
 
 - **What is kept.** Each camera's JPEG byte for byte, as the camera coded it
-  (recon's `RgbdFrame::color_bitstream`); raw 16-bit depth, through recon's
+  (recon's `RgbdFrame::color_bitstream`), or, without one, its luma as a PGM
+  (2026-11-02); raw 16-bit depth from a camera with depth, through recon's
   `encode_png_u16`; the factory models at the streamed mode, in recon's
   calibration file, unposed; and the full-resolution detections, the solver's
   input, in numbers that read back exactly.

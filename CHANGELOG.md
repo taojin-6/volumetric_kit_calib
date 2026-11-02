@@ -7,6 +7,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.4.0] - 2026-11-02
+
+### Added
+
+- **Every camera through one source** (DECISIONS.md, 2026-11-02):
+  `source::RigSource` (`source/rig_source.hpp`, tier `calib_source`, with
+  `VC_WITH_RIG`) reads a sensor array or one stereo sensor and its two
+  cameras' ids as sets of synced 8-bit grey pictures: each picture's luma and
+  its half made on the GPU by sensor's `LumaPass`, from any layout, and read
+  back in one list read. A `PictureSet` stays on the device and may be kept;
+  `host()` holds the luma and half until the next take. Public, outside the
+  stable API.
+- calib_rig's opener (`app/open_source.hpp`), the one code that names a
+  driver: `check_scenario` and `RigScenario` moved there from `calib_rig.hpp`,
+  with `open_source` and `orbbec_camera`, its Orbbec arm.
+- The mosaic takes a luma picture in a device buffer as a grey tile
+  (`viz::tile_write`'s trailing `neutral_chroma`), so every camera's tile
+  shows, nvJPEG's on Linux too.
+- `LiveWorker::rule_options`: the capture rule's thresholds as its source sets
+  them, for the panels.
+
+### Changed
+
+- The live worker takes a `RigSource` and each camera's lens, searches each
+  camera's GPU half, and offers the 3D view only sets with RGB-D frames. The
+  capture rule's spread warning rises to a stereo source's own skew bound; an
+  array keeps 5 ms.
+- A capture copies each camera's luma, and its JPEG and depth where its frame
+  has them: a camera with no JPEG is saved as a PGM of its luma; a camera with
+  depth still needs its depth.
+- `session.json` is version 2: calib's own camera record
+  (`capture::SessionCamera`: id, model, size, optional factory lenses,
+  `OrbbecFacts`, input, lens origin), the session's `mode` and `rig.driver`,
+  and a sync file, depth mode, SDK version and factory record only where the
+  rig has them. A Femto session's is version 1's but for the version, `id`
+  for `serial`, and the new keys. `CaptureSetup` takes the driver, the lenses
+  and an optional depth mode; `KeptCaptures::sensors` holds the records.
+- Loss is each camera's `SensorStats::failed`; `LiveSnapshot::lost` and
+  `viz::CameraLive::lost` are gone. `viz::set_panel` takes a `viz::SetLive`
+  (`app::set_live`), and `scene_camera` a record and its lens.
+- build: **calib pins sensor at #28's head** (48aba9d, 0.21.0) and requires
+  sensor 0.21.0 and its stereo tier; the Orbbec SDK action follows the pin.
+- calib's version is 0.4.0, where it was 0.3.0.
+
+### Removed
+
+- `detect_charuco`'s `Mode`, with Hybrid's CPU halving: the live view searches
+  the GPU's half through `detect_board`.
+- `app::session_camera`, replaced by the opener's `orbbec_camera`.
+
 ## [0.3.0] - 2026-11-02
 
 ### Added

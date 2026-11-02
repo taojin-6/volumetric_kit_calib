@@ -16,11 +16,12 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > `Status`/`Result` — builds and is tested (GoogleTest); so do the `compute`
 > tier's OpenCV bridge, the `detect` tier's board and tag detection, the `solve`
 > tier's rig and lens solves and the `quality` tier's live checks, solved-rig
-> metrics, lens gates and pair row check; with `VC_WITH_RIG`, the `capture`
-> tier's session writer, the `viz` tier's live and 3D views and the `depth`
-> tier's board-plane fit and pairwise depth agreement; and, with GLFW and
-> sensor's Orbbec driver too, the `app` tier's `calib_rig`, live view, 3D
-> view, capture and Calibrate.
+> metrics, lens gates and pair row check; with `VC_WITH_RIG`, the `source`
+> tier's grey pictures from any sensor source, the `capture` tier's session
+> writer, the `viz` tier's live and 3D views and the `depth` tier's
+> board-plane fit and pairwise depth agreement; and, with GLFW and sensor's
+> Orbbec driver too, the `app` tier's `calib_rig`, live view, 3D view,
+> capture and Calibrate.
 > The color tier is not yet implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain
 > the reference oracle.
@@ -32,8 +33,8 @@ constraints and open GPU-backend choice without publishing the local design.
 ## Architecture (tiered)
 
 `core` → `compute` → {`detect`, `solve`, `color`} → `quality` →
-{`depth`, `viz`} → `app` (+ `capture` off `core`). A tier may depend only on
-tiers to its left. The headless "brain"
+{`depth`, `viz`} → `app` (+ `capture` off `core`, `source` off `detect`). A
+tier may depend only on tiers to its left. The headless "brain"
 (`core`+`compute`+`detect`+`solve`+`quality`) builds with **no**
 `volumetric_kit_gfx` dependency; only the `viz`/`app` tiers pull in the
 renderer.
@@ -46,13 +47,21 @@ renderer.
   [`volumetric_kit_sensor`](https://github.com/taojin-6/volumetric_kit_sensor)'s
   `CameraModel`, from its camera tier, which calib fetches alone so the brain
   still needs no Vulkan SDK ([DECISIONS.md](DECISIONS.md#locked-decisions)).
+- **Source:** the `source` tier reads every camera as one source of synced
+  8-bit grey pictures with camera ids, whatever drives it: a hardware-synced
+  array (the Femto rig) or one stereo sensor (a DeckLink pair). Each set's
+  luma and its half are made on the GPU, from any layout a driver hands out,
+  and read back in one submit; the set itself stays on the device
+  ([DECISIONS.md](DECISIONS.md#2026-11-02--every-camera-through-one-source)).
+  It is public, but outside the stable API.
 - **Capture:** the `capture` tier writes a calibration session to disk on a
   thread of its own and never overwrites: each camera's JPEG as the camera
-  coded it, raw 16-bit depth, the factory models in sensor's calibration file,
-  and the detections of the board and the origin tag, and the checks
+  coded it, or its luma as a PGM, raw 16-bit depth from cameras with depth,
+  the factory models in sensor's calibration file, and the detections of the
+  board and the origin tag, and the checks
   ([DECISIONS.md](DECISIONS.md#2026-10-13--sessions-on-disk)). It takes
-  sensor's interface and image I/O tiers, so `VC_WITH_RIG` builds sensor
-  beyond its camera tier.
+  sensor's image I/O tier, so `VC_WITH_RIG` builds sensor beyond its camera
+  tier.
 - **Compute:** a CPU backend is the correctness oracle: OpenCV, behind
   sensor's and calib's types. The `compute` tier holds the bridge -- the camera
   model and rigid transforms in OpenCV's types, the ChArUco board and whether a
@@ -123,8 +132,9 @@ renderer.
   differences binned on the GPU over every capture, with 32 bytes per pair
   read back
   ([DECISIONS.md](DECISIONS.md#2026-10-16--depth-checks-are-calibs-kernels)).
-- **Viz:** the live view, on `volumetric_kit_gfx`. Each camera's decoded
-  picture is copied on the device into its tile of one mosaic, for any number
+- **Viz:** the live view, on `volumetric_kit_gfx`. Each camera's picture --
+  a decoder's NV12 images in colour, any other camera's luma in grey -- is
+  copied on the device into its tile of one mosaic, for any number
   of cameras, panned and zoomed as one view, with the corners, markers and
   coverage marked over each tile in the detector's pixels;
   panels show each camera's view, the latest set, the session and the
@@ -137,10 +147,10 @@ renderer.
 - **App:** `calib_rig` opens every camera of the rig's sync file, at the
   scenario's modes, and shows them live with the board found in each; Space
   (or a clicker's "next") captures a still set, Backspace (or "back") drops
-  the last. A worker thread owns the rig and finds the board in each set's
-  luma, another prepares sets on the GPU for the 3D view (hidden until the
-  rig is calibrated), another finds the board and the origin tag in each
-  capture at full resolution, writes it and keeps it in memory for
+  the last. A worker thread owns the rig's source and finds the board in
+  each set's half, another prepares sets on the GPU for the 3D view (hidden
+  until the rig is calibrated), another finds the board and the origin tag
+  in each capture at full resolution, writes it and keeps it in memory for
   Calibrate, and the window draws and never waits
   ([DECISIONS.md](DECISIONS.md#2026-10-16--calib_rigs-live-view-and-capture)).
   Calibrate's worker solves and measures the kept captures, locates the
@@ -160,7 +170,9 @@ A program built on calib uses the brain through these headers, under
 these headers and calib's types they use, wherever declared; what stays
 stable, and how a break is flagged, is
 [DECISIONS.md](DECISIONS.md#2026-11-01--the-stable-api)'s rule. Every other
-header is internal.
+header is internal, but for `source/rig_source.hpp`: public, for `calib_rig`
+and the tests, and not promised until a second program reads a rig through
+it.
 
 | Layer | Headers |
 | --- | --- |
@@ -282,9 +294,9 @@ top-level project, so a FetchContent build of it never fails on a warning your
 compiler adds. `volumetric_kit::calib_compute`, `volumetric_kit::calib_detect`,
 `volumetric_kit::calib_solve` and `volumetric_kit::calib_quality` are always
 built. Set `VC_WITH_RIG` ON before calib is made available to link
-`volumetric_kit::calib_capture`, `volumetric_kit::calib_depth`,
-`volumetric_kit::calib_viz` and, with `VC_BUILD_APPS`, GLFW and sensor's Orbbec
-driver, `volumetric_kit::calib_app`.
+`volumetric_kit::calib_source`, `volumetric_kit::calib_capture`,
+`volumetric_kit::calib_depth`, `volumetric_kit::calib_viz` and, with
+`VC_BUILD_APPS`, GLFW and sensor's Orbbec driver, `volumetric_kit::calib_app`.
 `VC_SANITIZE` is a semicolon list, empty (off) by default —
 e.g. `-DVC_SANITIZE="address;undefined"`. calib is consumed by commit, as
 above, and installs nothing: it has no install rules or package config
@@ -292,7 +304,7 @@ above, and installs nothing: it has no install rules or package config
 
 calib needs `volumetric_kit_core` 0.29.0 or newer, with its vulkan tier for
 `VC_WITH_RIG` and its config tier for `calib_app`, and `volumetric_kit_sensor`
-0.20.0 or newer. An application that declares either before calib, to share it
+0.21.0 or newer. An application that declares either before calib, to share it
 with another sibling, pins at least that: on an older one, calib's configure
 fails at `vkc_require_core` or `vkc_require_sibling`. Without `VC_WITH_RIG`,
 calib makes sensor available camera-only (`VS_CAMERA_ONLY`), so an application
