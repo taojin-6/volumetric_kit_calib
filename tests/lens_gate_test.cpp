@@ -40,6 +40,7 @@ namespace camera = sensor::camera;
 using json = nlohmann::json;
 using Use = solve::LensView::Use;
 using test::expect_refused;
+using test::lab_lens;
 using test::value_of;
 
 constexpr double kDeg = 3.14159265358979323846 / 180.0;
@@ -120,16 +121,6 @@ camera::CameraModel lens_2024_bm2() {
           {0.43858459246177117, -0.008806271952411146, 0.0001088146725150302,
            -0.00011317892942162059, -0.0010377761285881846, 0.8032619209291925,
            0.06157382758196919, -0.005978906562434272}};
-}
-
-// The lab's current lens, which never folds.
-camera::CameraModel lab_lens() {
-  return {kSize,
-          {1702.410047823579, 1702.1183368985696, 1917.379808460028,
-           1108.2673697604462},
-          {0.7635753673346596, 0.1339021352077378, -7.126331072400135e-05,
-           4.5662431317182075e-05, 0.0032974798211048597, 1.1293583015706812,
-           0.3232813210032048, 0.02266887261491428}};
 }
 
 // A fit of one lens with no corners: only its RMS values and lens to judge.

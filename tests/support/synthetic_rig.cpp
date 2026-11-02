@@ -214,6 +214,28 @@ camera::CameraModel strongly_distorted_lens() {
           {0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}};
 }
 
+camera::CameraModel lab_lens() {
+  return {{3840, 2160},
+          {1702.410047823579, 1702.1183368985696, 1917.379808460028,
+           1108.2673697604462},
+          {0.7635753673346596, 0.1339021352077378, -7.126331072400135e-05,
+           4.5662431317182075e-05, 0.0032974798211048597, 1.1293583015706812,
+           0.3232813210032048, 0.02266887261491428}};
+}
+
+std::vector<SyntheticCamera> lab_pair() {
+  const camera::Mat4d left = look_at({-0.2, -2.6, 1.3}, {0.0, 0.0, 0.6}, 0.0);
+  // The left camera's frame to the right one's (OpenCV's R, T): the right
+  // camera's centre at `c` in the left one's frame.
+  const camera::Mat3d r =
+      camera::rotation_from_rodrigues({-0.016, -0.005, -0.003});
+  const camera::Vec3d c(0.40, -0.02, -0.007);
+  camera::Mat4d left_to_right(r);
+  left_to_right[3] = glm::dvec4(-(r * c), 1.0);
+  return {{"bm-1", lab_lens(), left},
+          {"bm-2", lab_lens(), left_to_right * left}};
+}
+
 std::vector<SyntheticCamera> synthetic_rig() {
   // A camera on the ring at `azimuth_deg`, `radius_m` out and `height_m` up,
   // looking at `target`, with its own intrinsics and the colour-like lens's
@@ -318,6 +340,37 @@ std::vector<Placement> synthetic_plan(const std::vector<SyntheticCamera>& rig,
     }
     if (placement.cameras.size() >= options.min_cameras) {
       plan.push_back(std::move(placement));
+    }
+  }
+  return plan;
+}
+
+std::vector<Placement> view_plan(const std::vector<SyntheticCamera>& rig,
+                                 std::size_t camera,
+                                 const compute::Board& board,
+                                 const PlanOptions& options) {
+  const std::vector<cv::Point3d> edge = board_outline(board, 0.0, 16);
+  const camera::Mat4d camera_to_world =
+      camera::rigid_inverse(rig[camera].world_to_camera);
+  std::vector<Placement> plan;
+  for (const double depth : {1.6, 2.4}) {
+    for (int row = -1; row <= 1; ++row) {
+      for (int col = -2; col <= 2; ++col) {
+        const std::size_t i = plan.size();
+        const camera::Vec3d centre(depth * std::tan(20.0 * col * kDeg),
+                                   depth * std::tan(24.0 * row * kDeg), depth);
+        Placement placement;
+        placement.board_to_world =
+            camera_to_world * board_facing_camera(board, centre,
+                                                  i % 2 == 0 ? 15.0 : -15.0,
+                                                  i % 4 < 2 ? 0.0 : 10.0);
+        for (std::size_t c = 0; c < rig.size(); ++c) {
+          if (sees(rig[c], board, placement.board_to_world, edge, options)) {
+            placement.cameras.push_back(c);
+          }
+        }
+        plan.push_back(std::move(placement));
+      }
     }
   }
   return plan;
