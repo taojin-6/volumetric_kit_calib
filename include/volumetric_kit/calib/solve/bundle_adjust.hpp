@@ -313,7 +313,7 @@ struct RigSolution {
   /// The same poses as sensor's calibration: the world the reference's id,
   /// each camera's `color_to_world` the inverse of sensor's
   /// `matrix_from_rodrigues` of its T_cw (the reference's exactly the
-  /// identity), and its colour lens as given, marked factory: the adjustment
+  /// identity), and its colour lens and source as given: the adjustment
   /// solves no intrinsics. Sensors in id order; no depth cameras.
   sensor::camera::ArrayCalibration calibration;
   /// The board in each capture adjusted, in the captures' order.

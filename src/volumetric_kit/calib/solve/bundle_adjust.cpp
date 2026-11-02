@@ -377,18 +377,11 @@ core::Status drop_too_near(Problem& p, const compute::Board& board,
 }
 
 // Drops the outlier corners and views at the current state; true if any.
-// The corners' bound comes first: a view's RMS is over its corners within it,
-// or over all its corners when none is, so one bad corner costs its view
-// nothing more, and a view off as a whole goes as one.
 core::Result<bool> drop_outliers(Problem& p, const compute::Board& board,
                                  const BundleAdjustOptions& options, int round,
                                  RigSolution& out) {
-  struct Fit {
-    std::size_t view = 0;
-    std::vector<double> norms;  // each kept corner's residual; NaN if not kept
-    double rms = 0.0;
-  };
-  std::vector<Fit> fits;
+  std::vector<std::size_t> counted;
+  std::vector<std::vector<double>> norms;
   std::vector<double> components;
   Projection at;
   for (std::size_t v = 0; v < p.views.size(); ++v) {
@@ -397,61 +390,41 @@ core::Result<bool> drop_outliers(Problem& p, const compute::Board& board,
     detail::project(p.lenses[view.camera], p.cameras[view.camera],
                     p.boards[view.board], view.object, &view.pixels,
                     Derivatives::None, at);
-    Fit& fit = fits.emplace_back();
-    fit.view = v;
-    fit.norms.assign(view.object.size(), kNaN);
+    counted.push_back(v);
+    std::vector<double>& view_norms = norms.emplace_back();
+    view_norms.assign(view.object.size(), kNaN);
     for (std::size_t i = 0; i < view.object.size(); ++i) {
       if (!view.kept[i]) continue;
       const cv::Vec2d& e = at.residuals[i];
       components.push_back(e[0]);
       components.push_back(e[1]);
-      fit.norms[i] = std::sqrt(e.dot(e));
+      view_norms[i] = std::sqrt(e.dot(e));
     }
   }
-  if (fits.empty()) return false;
-  const double corner_bound = detail::outlier_bound(
-      std::move(components), options.outlier_px, options.outlier_mads);
-  std::vector<double> rms;
-  for (Fit& fit : fits) {
-    double within = 0.0;
-    double all = 0.0;
-    int n_within = 0;
-    int n_all = 0;
-    for (const double e : fit.norms) {
-      if (std::isnan(e)) continue;
-      all += e * e;
-      ++n_all;
-      if (e > corner_bound) continue;
-      within += e * e;
-      ++n_within;
-    }
-    fit.rms =
-        n_within > 0 ? std::sqrt(within / n_within) : std::sqrt(all / n_all);
-    rms.push_back(fit.rms);
-  }
-  const double view_bound =
-      std::max(options.outlier_view_ratio * compute::median(rms),
-               options.outlier_view_px);
+  if (counted.empty()) return false;
+  const detail::OutlierBounds bounds =
+      detail::outlier_bounds(norms, std::move(components), options);
 
   std::vector<bool> touched(p.views.size(), false);
   bool any = false;
-  for (const Fit& fit : fits) {
-    View& view = p.views[fit.view];
-    if (fit.rms > view_bound) {
+  for (std::size_t f = 0; f < counted.size(); ++f) {
+    View& view = p.views[counted[f]];
+    if (bounds.rms[f] > bounds.view_px) {
       view.whole = false;
       any = true;
       out.rejections.push_back({view.camera, p.captures[view.board], -1, round,
-                                Dropped::OutlierView, fit.rms, view_bound});
+                                Dropped::OutlierView, bounds.rms[f],
+                                bounds.view_px});
       continue;
     }
     for (std::size_t i = 0; i < view.object.size(); ++i) {
-      if (!(fit.norms[i] > corner_bound)) continue;
+      if (!(norms[f][i] > bounds.corner_px)) continue;
       view.kept[i] = false;
-      touched[fit.view] = true;
+      touched[counted[f]] = true;
       any = true;
       out.rejections.push_back({view.camera, p.captures[view.board],
                                 view.ids[i], round, Dropped::Outlier,
-                                fit.norms[i], corner_bound});
+                                norms[f][i], bounds.corner_px});
     }
   }
   VKC_TRY(drop_unusable(p, board, touched, round, out));
@@ -888,8 +861,8 @@ void write_solution(const Problem& p, const std::vector<RigCamera>& cameras,
     sensor.id = p.ids[c];
     sensor.color_to_world = camera::rigid_inverse(
         camera::matrix_from_rodrigues(out.world_to_camera[c]));
-    sensor.color = camera::CameraCalibration{cameras[c].model,
-                                             camera::IntrinsicsSource::Factory};
+    sensor.color =
+        camera::CameraCalibration{cameras[c].model, cameras[c].source};
   }
   const Layout layout = layout_of(p);
   for (std::size_t b = 0; b < p.boards.size(); ++b) {

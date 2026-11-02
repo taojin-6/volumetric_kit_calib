@@ -55,6 +55,21 @@ TEST(Quantile, KeepsInfinitiesAndSortsANanLast) {
   EXPECT_TRUE(std::isnan(quantile({2.0, nan, 1.0}, 1.0)));
 }
 
+// The image's edge is at -0.5 and size - 0.5: pixel centres sit at integers.
+TEST(GridCell, IsRowMajorFromTheTopLeftAndEmptyOutsideTheImage) {
+  EXPECT_EQ(grid_cell(0.0, 0.0, 3840, 2160, 8, 6), 0);
+  EXPECT_EQ(grid_cell(3839.0, 2159.0, 3840, 2160, 8, 6), 47);
+  EXPECT_EQ(grid_cell(3839.0, 0.0, 3840, 2160, 8, 6), 7);
+  EXPECT_EQ(grid_cell(0.0, 2159.0, 3840, 2160, 8, 6), 40);
+  EXPECT_EQ(grid_cell(1919.5, 1079.5, 3840, 2160, 3, 3), 4);
+  EXPECT_EQ(grid_cell(-0.5, -0.5, 3840, 2160, 3, 3), 0);
+  EXPECT_FALSE(grid_cell(-0.6, 0.0, 3840, 2160, 3, 3).has_value());
+  EXPECT_FALSE(grid_cell(3839.5, 0.0, 3840, 2160, 3, 3).has_value());
+  EXPECT_FALSE(grid_cell(0.0, 2159.5, 3840, 2160, 3, 3).has_value());
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(grid_cell(nan, 0.0, 3840, 2160, 3, 3).has_value());
+}
+
 TEST(AngleDeg, IsAccurateNearZeroAndAHalfTurn) {
   EXPECT_NEAR(angle_deg({0, 0, 1}, {0, 1, 1}), 45.0, 1e-12);
   EXPECT_NEAR(angle_deg({1, 0, 0}, {0, 2, 0}), 90.0, 1e-12);
