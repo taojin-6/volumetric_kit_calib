@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-// The ChArUco board in a luma image: both modes against where the synthetic
-// renderer's board projects (front-on, turned 60 and 70 degrees, a JPEG), an
-// odd-sized image, several threads, part of a board, a collinear crop, no
-// board, another board beside it, the hybrid's window and corner rejection,
-// the images it refuses, and what OpenCV throws.
+// The ChArUco board in a luma image, searched in the image and, as the live
+// view searches it, in its half as the GPU makes it (detect_board), against
+// where the synthetic renderer's board projects (front-on, turned 60 and 70
+// degrees, a JPEG): an odd-sized image, several threads, part of a board, a
+// collinear crop, no board, another board beside it, the half's window and
+// corner rejection, the images it refuses, and what OpenCV throws.
 
 #include "volumetric_kit/calib/detect/charuco.hpp"
+
+#include "volumetric_kit/calib/detect/board.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -73,9 +76,22 @@ View render(std::string name, const compute::Board& board,
   return view;
 }
 
+// How a test searches: in the picture (detect_charuco); or, as the live view
+// does, in the picture halved as the GPU halves it, each corner refined in
+// the picture (detect_board with a half).
+enum class Mode { Full, Hybrid };
+
+core::Result<Detection> find(const cv::Mat& image, const compute::Board& board,
+                             Mode mode) {
+  if (mode == Mode::Full) return detect_charuco(luma(image), board);
+  const cv::Mat half = test::halved(image);
+  const LumaView half_luma = luma(half);
+  return detect_board(luma(image), board, DetectOptions{&half_luma});
+}
+
 Detection detect(const cv::Mat& image, const compute::Board& board, Mode mode) {
   core::Result<Detection> detection = core::Status::invalid_argument("not run");
-  EXPECT_NO_THROW(detection = detect_charuco(luma(image), board, mode));
+  EXPECT_NO_THROW(detection = find(image, board, mode));
   EXPECT_TRUE(detection.ok()) << detection.status().message();
   return detection.ok() ? *std::move(detection) : Detection{};
 }
@@ -324,7 +340,7 @@ TEST_F(FullViews, DetectsOnSeveralThreadsAtOnce) {
       threads.emplace_back([&, i] {
         for (int round = 0; round < kRounds; ++round) {
           const core::Result<Detection> found =
-              detect_charuco(luma(views()[i].image), board, mode);
+              find(views()[i].image, board, mode);
           if (!found.ok() || !Same(*found, alone[i])) ++differ[i];
         }
       });
@@ -506,9 +522,7 @@ struct Seed {
 };
 
 Seed hybrid_seed(const cv::Mat& image, const compute::Board& board, int id) {
-  cv::Mat half;
-  cv::resize(image, half, cv::Size(image.cols / 2, image.rows / 2), 0.0, 0.0,
-             cv::INTER_AREA);
+  const cv::Mat half = test::halved(image);
   std::vector<cv::Point2f> corners;
   std::vector<int> ids;
   std::vector<std::vector<cv::Point2f>> markers;
@@ -558,11 +572,7 @@ void add_fine_pattern(cv::Mat& image, int x0, int y0, int w, int d) {
 }
 
 bool same_halved(const cv::Mat& a, const cv::Mat& b) {
-  cv::Mat half_a;
-  cv::Mat half_b;
-  cv::resize(a, half_a, cv::Size(), 0.5, 0.5, cv::INTER_AREA);
-  cv::resize(b, half_b, cv::Size(), 0.5, 0.5, cv::INTER_AREA);
-  return cv::norm(half_a, half_b, cv::NORM_INF) == 0.0;
+  return cv::norm(test::halved(a), test::halved(b), cv::NORM_INF) == 0.0;
 }
 
 // The board printed low in contrast (black at 100), so a fine pattern has
@@ -671,76 +681,57 @@ TEST(DetectCharuco, HybridRoundsItsHalfWindowDown) {
             (std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}));
 }
 
-core::Status refusal(const LumaView& image, Mode mode) {
+core::Status refusal(const LumaView& image) {
   const compute::Board board = femto_board();
   core::Result<Detection> detection = Detection{};
-  EXPECT_NO_THROW(detection = detect_charuco(image, board, mode));
+  EXPECT_NO_THROW(detection = detect_charuco(image, board));
   return detection.ok() ? core::Status{} : detection.status();
 }
 
+// A half detect_board cannot read is its own tests' (detect_board_test).
 TEST(DetectCharuco, RefusesAnImageItCannotRead) {
   const std::vector<std::uint8_t> pixels(64, 110);
   const LumaView good{8, 8, 8, pixels.data()};
-  for (const Mode mode : {Mode::Full, Mode::Hybrid}) {
-    SCOPED_TRACE(name(mode));
-    EXPECT_TRUE(refusal(good, mode).ok());
-    LumaView image = good;
-    image.data = nullptr;
-    EXPECT_TRUE(
-        Refused(refusal(image, mode), "detect_charuco: image.data is null"));
-    image = good;
-    image.stride = 7;
-    EXPECT_TRUE(Refused(refusal(image, mode),
-                        "detect_charuco: image.stride is below image.width"));
-    for (const auto& [width, height] :
-         {std::pair<std::uint32_t, std::uint32_t>{0, 8}, {8, 0}, {0, 0}}) {
-      image = good;
-      image.width = width;
-      image.height = height;
-      EXPECT_FALSE(refusal(image, mode).ok()) << width << " x " << height;
-      EXPECT_EQ(refusal(image, mode).domain(), Code::InvalidArgument);
-    }
-    // Refused before anything reads the pixels.
-    image = good;
-    image.width = std::uint32_t{1} << 31;
-    image.stride = image.width;
-    EXPECT_TRUE(Refused(
-        refusal(image, mode),
-        "detect_charuco: the image is larger than OpenCV's int sizes hold"));
-    image = good;
-    image.height = std::uint32_t{1} << 31;
-    EXPECT_TRUE(Refused(
-        refusal(image, mode),
-        "detect_charuco: the image is larger than OpenCV's int sizes hold"));
-  }
-  // Full takes any pixel; Hybrid halves the image, so needs 2 x 2.
-  EXPECT_TRUE(refusal({1, 1, 1, pixels.data()}, Mode::Full).ok());
-  EXPECT_TRUE(refusal({2, 2, 2, pixels.data()}, Mode::Hybrid).ok());
-  EXPECT_TRUE(refusal({3, 3, 3, pixels.data()}, Mode::Hybrid).ok());
+  EXPECT_TRUE(refusal(good).ok());
+  LumaView image = good;
+  image.data = nullptr;
+  EXPECT_TRUE(Refused(refusal(image), "detect_charuco: image.data is null"));
+  image = good;
+  image.stride = 7;
+  EXPECT_TRUE(Refused(refusal(image),
+                      "detect_charuco: image.stride is below image.width"));
   for (const auto& [width, height] :
-       {std::pair<std::uint32_t, std::uint32_t>{1, 8}, {8, 1}, {1, 1}}) {
-    EXPECT_TRUE(
-        Refused(refusal({width, height, 8, pixels.data()}, Mode::Hybrid),
-                "detect_charuco: a Hybrid image is at least 2 x 2 "
-                "pixels"))
-        << width << " x " << height;
+       {std::pair<std::uint32_t, std::uint32_t>{0, 8}, {8, 0}, {0, 0}}) {
+    image = good;
+    image.width = width;
+    image.height = height;
+    EXPECT_FALSE(refusal(image).ok()) << width << " x " << height;
+    EXPECT_EQ(refusal(image).domain(), Code::InvalidArgument);
   }
-  EXPECT_TRUE(Refused(refusal(good, static_cast<Mode>(2)),
-                      "detect_charuco: mode is not a Mode"));
-  EXPECT_TRUE(Refused(refusal(good, static_cast<Mode>(-1)),
-                      "detect_charuco: mode is not a Mode"));
+  // Refused before anything reads the pixels.
+  image = good;
+  image.width = std::uint32_t{1} << 31;
+  image.stride = image.width;
+  EXPECT_TRUE(Refused(
+      refusal(image),
+      "detect_charuco: the image is larger than OpenCV's int sizes hold"));
+  image = good;
+  image.height = std::uint32_t{1} << 31;
+  EXPECT_TRUE(Refused(
+      refusal(image),
+      "detect_charuco: the image is larger than OpenCV's int sizes hold"));
+  // It takes any pixel.
+  EXPECT_TRUE(refusal({1, 1, 1, pixels.data()}).ok());
 }
 
-// Full mode: Hybrid's first loop is in the resize, inside OpenCV's KleidiCV
-// HAL on Arm, whose C code an exception cannot cross. Both modes run one
-// guarded body.
+// What OpenCV throws comes back as a status: one guarded body.
 TEST(DetectCharuco, ReturnsWhatOpenCVThrowsAsAStatus) {
   const compute::Board board = femto_board();
   const cv::Mat image(2160, 3840, CV_8UC1, cv::Scalar(110));
   core::Result<Detection> detection = Detection{};
   {
     const ThrowingParallelFor throwing(cv::Error::StsNotImplemented);
-    EXPECT_NO_THROW(detection = detect_charuco(luma(image), board, Mode::Full));
+    EXPECT_NO_THROW(detection = detect_charuco(luma(image), board));
   }
   ASSERT_FALSE(detection.ok());
   EXPECT_EQ(detection.status().domain(), Code::Backend);
@@ -752,13 +743,13 @@ TEST(DetectCharuco, ReturnsWhatOpenCVThrowsAsAStatus) {
       << detection.status().message();
   {
     const ThrowingParallelFor throwing(cv::Error::StsNoMem);
-    EXPECT_NO_THROW(detection = detect_charuco(luma(image), board, Mode::Full));
+    EXPECT_NO_THROW(detection = detect_charuco(luma(image), board));
   }
   ASSERT_FALSE(detection.ok());
   EXPECT_EQ(detection.status().domain(), Code::OutOfMemory);
   // OpenCV's own backend is back.
   for (const Mode mode : {Mode::Full, Mode::Hybrid}) {
-    EXPECT_TRUE(detect_charuco(luma(image), board, mode).ok()) << name(mode);
+    EXPECT_TRUE(find(image, board, mode).ok()) << name(mode);
   }
 }
 

@@ -9,7 +9,6 @@
 #include <vector>
 
 #include <opencv2/core.hpp>
-#include <opencv2/imgproc.hpp>
 #include <opencv2/objdetect/charuco_detector.hpp>
 
 #include "detail/luma_check.hpp"
@@ -20,29 +19,6 @@ namespace volumetric_kit::calib::detect {
 namespace {
 
 namespace camera = sensor::camera;
-
-core::Status check_image(const LumaView& image, Mode mode) {
-  if (mode != Mode::Full && mode != Mode::Hybrid) {
-    return core::Status::invalid_argument("detect_charuco: mode is not a Mode");
-  }
-  if (mode == Mode::Hybrid && (image.width < 2 || image.height < 2)) {
-    return core::Status::invalid_argument(
-        "detect_charuco: a Hybrid image is at least 2 x 2 pixels");
-  }
-  return detail::check_luma(image, "detect_charuco");
-}
-
-// TODO: drop this halving once the live view searches the picture sensor
-// halves on the GPU (detect_board's DetectOptions::half).
-// The image's even part halved: INTER_AREA at exactly half the size averages
-// each 2 x 2 block, rounded, which it does not when a side is odd.
-cv::Mat halved(const cv::Mat& full) {
-  const cv::Mat even = full(cv::Rect(0, 0, full.cols & ~1, full.rows & ~1));
-  cv::Mat half;
-  cv::resize(even, half, cv::Size(even.cols / 2, even.rows / 2), 0.0, 0.0,
-             cv::INTER_AREA);
-  return half;
-}
 
 camera::Vec2d pixel(const cv::Point2f& p) { return {p.x, p.y}; }
 
@@ -107,9 +83,9 @@ Detection find_charuco(const cv::Mat& full, const cv::Mat* half,
 }  // namespace detail
 
 core::Result<Detection> detect_charuco(const LumaView& image,
-                                       const compute::Board& board, Mode mode) {
+                                       const compute::Board& board) {
   return compute::guarded("detect_charuco", [&]() -> core::Result<Detection> {
-    VKC_TRY(check_image(image, mode));
+    VKC_TRY(detail::check_luma(image, "detect_charuco"));
     if (board.charuco() == nullptr) {
       return core::Status::invalid_argument(
           "detect_charuco: the board is not ChArUco (detect_board finds a "
@@ -119,13 +95,7 @@ core::Result<Detection> detect_charuco(const LumaView& image,
     const cv::Mat full(static_cast<int>(image.height),
                        static_cast<int>(image.width), CV_8UC1,
                        const_cast<std::uint8_t*>(image.data), image.stride);
-    Detection detection;
-    if (mode == Mode::Full) {
-      detection = detail::find_charuco(full, nullptr, board);
-    } else {
-      const cv::Mat half = halved(full);
-      detection = detail::find_charuco(full, &half, board);
-    }
+    Detection detection = detail::find_charuco(full, nullptr, board);
     detection.image_size = {image.width, image.height};
     return detection;
   });

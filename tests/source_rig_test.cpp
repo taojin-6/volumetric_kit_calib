@@ -33,7 +33,6 @@
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/detect/board.hpp"
-#include "volumetric_kit/calib/detect/charuco.hpp"
 #include "volumetric_kit/calib/source/rig_source.hpp"
 #include "volumetric_kit/core/testing/vulkan_fixture.hpp"
 #include "volumetric_kit/core/testing/write_image.hpp"
@@ -607,6 +606,7 @@ TEST_F(SourceRig, FindsTheBoardInTheGpusHalfAsInTheCpusHalf) {
   ASSERT_TRUE(rig.start().ok());
   double worst = 0.0;
   std::size_t corners = 0;
+  bool halves_differ = false;
   for (int k = 0; k < 3; ++k) {
     const camera::Mat4d pose = test::board_facing_camera(
         board, {0.25 * (k - 1), 0.1 * k - 0.1, 1.6 + 0.5 * k}, 15.0 + 10.0 * k,
@@ -628,9 +628,21 @@ TEST_F(SourceRig, FindsTheBoardInTheGpusHalfAsInTheCpusHalf) {
       const core::Result<Detection> gpu =
           detect::detect_board(host.luma, board, {&host.half});
       ASSERT_TRUE(gpu.ok()) << gpu.status().message();
-      // The CPU's half, as detect_charuco's Hybrid mode made it.
+      // The CPU's half, as calib 0.3.0's live view made it before searching
+      // it: the picture's even part, INTER_AREA at exactly half the size.
+      const cv::Mat full(
+          static_cast<int>(host.luma.height), static_cast<int>(host.luma.width),
+          CV_8UC1, const_cast<std::uint8_t*>(host.luma.data), host.luma.stride);
+      cv::Mat old_half;
+      cv::resize(full(cv::Rect(0, 0, full.cols & ~1, full.rows & ~1)), old_half,
+                 cv::Size(full.cols / 2, full.rows / 2), 0.0, 0.0,
+                 cv::INTER_AREA);
+      const detect::LumaView old_view{static_cast<std::uint32_t>(old_half.cols),
+                                      static_cast<std::uint32_t>(old_half.rows),
+                                      old_half.step[0], old_half.data};
+      halves_differ = halves_differ || rows_of(old_view) != rows_of(host.half);
       const core::Result<Detection> cpu =
-          detect::detect_charuco(host.luma, board, detect::Mode::Hybrid);
+          detect::detect_board(host.luma, board, {&old_view});
       ASSERT_TRUE(cpu.ok()) << cpu.status().message();
       const std::vector<DetectedPoint>& a = gpu.value().observation.points;
       const std::vector<DetectedPoint>& b = cpu.value().observation.points;
@@ -644,8 +656,9 @@ TEST_F(SourceRig, FindsTheBoardInTheGpusHalfAsInTheCpusHalf) {
       corners += a.size();
     }
   }
-  std::printf("GPU half against CPU half: %zu corners, worst %.3g px\n",
-              corners, worst);
+  std::printf("GPU half against CPU half: %zu corners, worst %.3g px, %s\n",
+              corners, worst,
+              halves_differ ? "halves differ" : "halves byte-equal");
   EXPECT_LE(worst, 0.01);
 }
 
