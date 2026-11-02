@@ -99,8 +99,8 @@ writes). From 0.1.0:
    API, a `@code` example per class.
 
 Every other header is internal and, those types aside, changes freely: `app/`,
-`viz/`, `capture/`, `depth/`, the rest of `compute/` and `quality/`, and
-`detect/charuco.hpp`. `source/rig_source.hpp` is public but not promised
+`viz/`, `capture/`, `depth/`, and the rest of `compute/` and `quality/`.
+`source/rig_source.hpp` is public but not promised
 (the 2026-11-02 entry on the source). Why: other programs (an offline lens
 solve, the second camera pair) assemble the brain, and a rule that shows in
 review costs little. Freezing everything would stall the app; an ABI promise

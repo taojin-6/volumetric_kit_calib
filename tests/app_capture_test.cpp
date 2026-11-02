@@ -50,7 +50,6 @@
 #include "volumetric_kit/calib/app/open_source.hpp"
 #include "volumetric_kit/calib/app/preset.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
-#include "volumetric_kit/calib/detect/charuco.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
 #include "volumetric_kit/sensor/io/image_io.hpp"
 
@@ -383,7 +382,7 @@ TEST(AppCapture, WritesEachCaptureDetectedAtFullResolution) {
     ASSERT_EQ(ids.size(), 8u);
     for (std::size_t k = 0; k < ids.size(); ++k) {
       const cv::Point2d& t = truth[ids[k].get<std::size_t>()];
-      // Full mode's own bound (detect_charuco's tests).
+      // The picture's own bound (detect_charuco_test).
       EXPECT_LT(std::hypot(corners[k][0].get<double>() - t.x,
                            corners[k][1].get<double>() - t.y),
                 0.3);

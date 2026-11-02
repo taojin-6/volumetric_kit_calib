@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-// The ChArUco board in a luma image, searched in the image and, as the live
-// view searches it, in its half as the GPU makes it (detect_board), against
+// The ChArUco board in a luma image (detect_board), searched in the image and,
+// as the live view searches it, in its half as the GPU makes it, against
 // where the synthetic renderer's board projects (front-on, turned 60 and 70
 // degrees, a JPEG): an odd-sized image, several threads, part of a board, a
 // collinear crop, no board, another board beside it, the half's window and
 // corner rejection, the images it refuses, and what OpenCV throws.
-
-#include "volumetric_kit/calib/detect/charuco.hpp"
 
 #include "volumetric_kit/calib/detect/board.hpp"
 
@@ -76,14 +74,14 @@ View render(std::string name, const compute::Board& board,
   return view;
 }
 
-// How a test searches: in the picture (detect_charuco); or, as the live view
-// does, in the picture halved as the GPU halves it, each corner refined in
-// the picture (detect_board with a half).
+// How a test searches: in the picture; or, as the live view does, in the
+// picture halved as the GPU halves it, each corner refined in the picture
+// (with a half).
 enum class Mode { Full, Hybrid };
 
 core::Result<Detection> find(const cv::Mat& image, const compute::Board& board,
                              Mode mode) {
-  if (mode == Mode::Full) return detect_charuco(luma(image), board);
+  if (mode == Mode::Full) return detect_board(luma(image), board);
   const cv::Mat half = test::halved(image);
   const LumaView half_luma = luma(half);
   return detect_board(luma(image), board, DetectOptions{&half_luma});
@@ -684,7 +682,7 @@ TEST(DetectCharuco, HybridRoundsItsHalfWindowDown) {
 core::Status refusal(const LumaView& image) {
   const compute::Board board = femto_board();
   core::Result<Detection> detection = Detection{};
-  EXPECT_NO_THROW(detection = detect_charuco(image, board));
+  EXPECT_NO_THROW(detection = detect_board(image, board));
   return detection.ok() ? core::Status{} : detection.status();
 }
 
@@ -695,11 +693,11 @@ TEST(DetectCharuco, RefusesAnImageItCannotRead) {
   EXPECT_TRUE(refusal(good).ok());
   LumaView image = good;
   image.data = nullptr;
-  EXPECT_TRUE(Refused(refusal(image), "detect_charuco: image.data is null"));
+  EXPECT_TRUE(Refused(refusal(image), "detect_board: image.data is null"));
   image = good;
   image.stride = 7;
   EXPECT_TRUE(Refused(refusal(image),
-                      "detect_charuco: image.stride is below image.width"));
+                      "detect_board: image.stride is below image.width"));
   for (const auto& [width, height] :
        {std::pair<std::uint32_t, std::uint32_t>{0, 8}, {8, 0}, {0, 0}}) {
     image = good;
@@ -714,12 +712,12 @@ TEST(DetectCharuco, RefusesAnImageItCannotRead) {
   image.stride = image.width;
   EXPECT_TRUE(Refused(
       refusal(image),
-      "detect_charuco: the image is larger than OpenCV's int sizes hold"));
+      "detect_board: the image is larger than OpenCV's int sizes hold"));
   image = good;
   image.height = std::uint32_t{1} << 31;
   EXPECT_TRUE(Refused(
       refusal(image),
-      "detect_charuco: the image is larger than OpenCV's int sizes hold"));
+      "detect_board: the image is larger than OpenCV's int sizes hold"));
   // It takes any pixel.
   EXPECT_TRUE(refusal({1, 1, 1, pixels.data()}).ok());
 }
@@ -731,19 +729,19 @@ TEST(DetectCharuco, ReturnsWhatOpenCVThrowsAsAStatus) {
   core::Result<Detection> detection = Detection{};
   {
     const ThrowingParallelFor throwing(cv::Error::StsNotImplemented);
-    EXPECT_NO_THROW(detection = detect_charuco(luma(image), board));
+    EXPECT_NO_THROW(detection = detect_board(luma(image), board));
   }
   ASSERT_FALSE(detection.ok());
   EXPECT_EQ(detection.status().domain(), Code::Backend);
   EXPECT_EQ(detection.status().backend(), core::Status::Backend::Other);
   EXPECT_EQ(detection.status().detail(), cv::Error::StsNotImplemented);
-  EXPECT_EQ(detection.status().message().rfind("detect_charuco: ", 0), 0u)
+  EXPECT_EQ(detection.status().message().rfind("detect_board: ", 0), 0u)
       << detection.status().message();
   EXPECT_NE(detection.status().message().find("injected"), std::string::npos)
       << detection.status().message();
   {
     const ThrowingParallelFor throwing(cv::Error::StsNoMem);
-    EXPECT_NO_THROW(detection = detect_charuco(luma(image), board));
+    EXPECT_NO_THROW(detection = detect_board(luma(image), board));
   }
   ASSERT_FALSE(detection.ok());
   EXPECT_EQ(detection.status().domain(), Code::OutOfMemory);

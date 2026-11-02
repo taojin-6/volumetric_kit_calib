@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-#include "volumetric_kit/calib/detect/charuco.hpp"
+// The ChArUco half of detect_board (board.hpp): OpenCV's CharucoDetector, in
+// the picture or its half.
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <vector>
 
 #include <opencv2/core.hpp>
 #include <opencv2/objdetect/charuco_detector.hpp>
 
-#include "detail/luma_check.hpp"
 #include "detail/search.hpp"
-#include "volumetric_kit/calib/compute/guarded.hpp"
 
 namespace volumetric_kit::calib::detect {
 namespace {
@@ -81,24 +79,5 @@ Detection find_charuco(const cv::Mat& full, const cv::Mat* half,
 }
 
 }  // namespace detail
-
-core::Result<Detection> detect_charuco(const LumaView& image,
-                                       const compute::Board& board) {
-  return compute::guarded("detect_charuco", [&]() -> core::Result<Detection> {
-    VKC_TRY(detail::check_luma(image, "detect_charuco"));
-    if (board.charuco() == nullptr) {
-      return core::Status::invalid_argument(
-          "detect_charuco: the board is not ChArUco (detect_board finds a "
-          "checkerboard)");
-    }
-    // OpenCV reads the image and never writes it.
-    const cv::Mat full(static_cast<int>(image.height),
-                       static_cast<int>(image.width), CV_8UC1,
-                       const_cast<std::uint8_t*>(image.data), image.stride);
-    Detection detection = detail::find_charuco(full, nullptr, board);
-    detection.image_size = {image.width, image.height};
-    return detection;
-  });
-}
 
 }  // namespace volumetric_kit::calib::detect
