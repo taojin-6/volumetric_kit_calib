@@ -131,8 +131,8 @@ estimates until a real session is judged.
   them failed right pairs on noise alone: on the lab-like pair, about 4% at
   0.4 px of corner noise and 8-10 corners a cell, up to 10% at 0.6 px. With
   t, noise fails a cell of a right pair at most 0.27% of the time, and a pair
-  of nine judged cells at most 2.4%: on that pair, 0.5-0.8% at 0.4 px and
-  1.3-1.9% at 0.6 px. Where 0.15 px is the larger, as at the usual noise,
+  of nine judged cells at most 2.4%: on that pair, under 1% at 0.4 px and
+  under 2% at 0.6 px. Where 0.15 px is the larger, as at the usual noise,
   nothing changes. Why not a percentile: noise sets it (0.1 px of corner
   noise gives a 95th percentile of 0.085 px, as each corner's slope predicts:
   0.22 rectified rows a source pixel at the view's centre, 0.49 at its
