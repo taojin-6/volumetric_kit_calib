@@ -59,6 +59,15 @@ on:
         required: false
         type: boolean
         default: false
+      decklink:
+        description: >-
+          Linux only: also build calib_rig with the opener's DeckLink arm
+          (sensor's VS_WITH_DECKLINK), in a tree of its own, on the DeckLink
+          SDK headers the core keeps, and run the arm's host test. No card:
+          nothing opens one.
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -300,3 +309,56 @@ jobs:
           fi
           ctest --test-dir build --output-on-failure "${select[@]}" \
             --parallel "${CTEST_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
+
+      # The DeckLink SDK's headers, for the DeckLink arm: no job can download
+      # the SDK, so the core keeps a copy (its tools/ci/decklink-sdk-16.0),
+      # checked out at calib's core pin and held to its SHA256SUMS, as
+      # sensor's _build.yml takes it. Keep the ref at the core pin in
+      # third_party/CMakeLists.txt; the next step refuses another.
+      - name: DeckLink SDK headers
+        if: inputs.decklink
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: taojin-6/volumetric_kit_core
+          ref: e1adf08203b6eb5956ebaa48f511a9a73996009b
+          path: _decklink_sdk
+          persist-credentials: false
+          sparse-checkout: tools/ci/decklink-sdk-16.0
+
+      - name: DeckLink SDK root
+        if: inputs.decklink
+        run: |
+          sdk="${GITHUB_WORKSPACE}/_decklink_sdk/tools/ci/decklink-sdk-16.0"
+          pin=$(git -C _decklink_sdk rev-parse HEAD)
+          grep -q "GIT_TAG ${pin})" third_party/CMakeLists.txt || {
+            echo "::error::the DeckLink SDK checkout (${pin}) is not at the core pin in third_party/CMakeLists.txt"
+            exit 1
+          }
+          (cd "${sdk}" && sha256sum --quiet --strict -c SHA256SUMS)
+          echo "DeckLinkSDK_ROOT=${sdk}" >> "${GITHUB_ENV}"
+
+      # The DeckLink tree's dependencies, keyed as the main tree's are.
+      - name: Cache the DeckLink tree's deps
+        if: inputs.decklink
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build-decklink/_deps
+          key: deps-decklink-${{ inputs.os }}-${{ matrix.build_type }}-brew${{ steps.brew.outputs.key || 'none' }}-ws${{ steps.ws.outputs.hash }}-${{ hashFiles('third_party/CMakeLists.txt', 'CMakeLists.txt') }}
+          restore-keys: |
+            deps-decklink-${{ inputs.os }}-${{ matrix.build_type }}-brew${{ steps.brew.outputs.key || 'none' }}-ws${{ steps.ws.outputs.hash }}-
+
+      # calib_rig with the opener's DeckLink arm alone (the Orbbec arm needs
+      # FFmpeg and CUDA here), on the rig tiers' Vulkan SDK and GLFW, built by
+      # clang as the sanitizer job builds the rig tiers on Linux; then the
+      # arm's host test, which opens no card.
+      - name: Build the DeckLink arm
+        if: inputs.decklink
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            clang libvulkan-dev glslang-tools spirv-tools libglfw3-dev
+          cmake -S . -B build-decklink -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DVC_WITH_RIG=ON -DVS_WITH_DECKLINK=ON
+          cmake --build build-decklink --target calib_rig vc_app_decklink_test \
+            --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
+          build-decklink/tests/vc_app_decklink_test
