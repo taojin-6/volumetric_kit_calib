@@ -49,12 +49,27 @@ sensor::camera::CameraModel depth_like_lens();
 /// @return The model, which sensor's `check_camera_model` accepts.
 sensor::camera::CameraModel strongly_distorted_lens();
 
+/// @brief The lab's current Blackmagic lens at 4K: an eight coefficient fit of
+///        its near-equisolid fisheye (f 1702), which never folds; its image
+///        corners about 78 degrees off axis.
+/// @return The model, which sensor's `check_camera_model` accepts.
+sensor::camera::CameraModel lab_lens();
+
 /// @brief One colour camera of the synthetic rig.
 struct SyntheticCamera {
   std::string id;                         ///< A stand-in serial.
   sensor::camera::CameraModel model;      ///< Its lens, at 3840x2160.
   sensor::camera::Mat4d world_to_camera;  ///< T_cw.
 };
+
+/// @brief A stereo pair like the lab's Blackmagic pair, each camera with
+///        @ref lab_lens: "bm-1", the left, 1.3 m up and 2.6 m from the
+///        floor's middle, looking at a point 0.6 m above it, as
+///        @ref synthetic_plan places boards; "bm-2" 0.40 m along bm-1's +x
+///        (and 2 cm up, 0.7 cm back), turned from it by the lab pair's
+///        magnitudes (16, 5 and 3 mrad about x, y and z).
+/// @return The cameras, left then right.
+std::vector<SyntheticCamera> lab_pair();
 
 /// @brief Four 4K colour cameras about 2.5 m up in an outside-in ring of about
 ///        1.9 m, each looking near the middle of the floor with its own
@@ -109,6 +124,23 @@ struct PlanOptions {
 std::vector<Placement> synthetic_plan(const std::vector<SyntheticCamera>& rig,
                                       const compute::Board& board,
                                       const PlanOptions& options = {});
+
+/// @brief Placements across one camera's view, as a person covers a stereo
+///        pair's shared view: the board's centre in each of 5 x 3 directions
+///        within 40 degrees across and 24 up and down of the camera's axis,
+///        at depths of 1.6 and 2.4 m, square to the axis but for a turn of 15
+///        degrees about the board's x axis, one way or the other in turn,
+///        and a roll of 10 degrees on every other one.
+/// @param rig      The cameras.
+/// @param camera   The camera whose view is covered.
+/// @param board    The board placed.
+/// @param options  What counts as seeing one (`count`, `seed` and
+///                 `min_cameras` unused).
+/// @return The 30 placements, each with the cameras that see it.
+std::vector<Placement> view_plan(const std::vector<SyntheticCamera>& rig,
+                                 std::size_t camera,
+                                 const compute::Board& board,
+                                 const PlanOptions& options = {});
 
 /// @brief How @ref observe detects the board.
 struct ObserveOptions {

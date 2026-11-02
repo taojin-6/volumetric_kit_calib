@@ -97,7 +97,15 @@
 ///   @ref to_string(DepthVerdict)'s names; an invalid plane's `rms_mm` is
 ///   `null`;
 /// - `depth_unchecked`: why `depth` is `null` though the depth was to be
-///   checked, such as the device's failure; `null` otherwise.
+///   checked, such as the device's failure; `null` otherwise;
+/// - `pairs` (@ref PairRowCheck), each pair's rows checked, `[]` for none:
+///   `left`, `right`, `verdict` (@ref to_string(PairRowCheck::Verdict)'s
+///   name), `reason` (`null` when empty), `lens_source` (by id, `"factory"`
+///   or `"calibrated"`, as @ref solve::RigCamera::source says), `settings`
+///   (`rectified` `[width, height]`, `alpha`, `max_cell_mean_px`,
+///   `min_cell_corners`, `min_cells`), `captures`, `corners`, `baseline_m`,
+///   `dy_median_px`, `dy_p95_px` and `cells`, row-major from the top left of
+///   the rectified view, each `corners`, `mean_px` and `limit_px`.
 ///
 /// Numbers are written in the shortest form that reads back to the same
 /// double; one that is not finite, or not measured, is `null`, as are a
@@ -117,6 +125,7 @@
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
 #include "volumetric_kit/calib/quality/export.hpp"
 #include "volumetric_kit/calib/quality/floor_boards.hpp"
+#include "volumetric_kit/calib/quality/pair_row_check.hpp"
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/calib/solve/world_tag.hpp"
@@ -176,10 +185,12 @@ struct ResultWorld {
 ///                  Not written with @p depth.
 /// @param world     Its world; by default the reference camera's, whose
 ///                  calibration file is the solution's own.
+/// @param pairs     Its pairs' rows (@ref check_pair_rows), in the report's
+///                  `pairs`; empty when no pair was checked.
 /// @return The files; `InvalidArgument` for no cameras, a repeated or empty
-///         id, or a @p solution, @p metrics, @p depth or tag world that names
-///         a camera the rig does not have or has another camera count, or a
-///         calibration whose sensors are not the cameras (naming what);
+///         id, or a @p solution, @p metrics, @p depth, tag world or pair that
+///         names a camera the rig does not have or has another camera count,
+///         or a calibration whose sensors are not the cameras (naming what);
 ///         what `solve::anchor_rig` refuses; sensor's error for a calibration
 ///         its writer refuses; or `OutOfMemory`. Each message starts
 ///         `format_results: `.
@@ -187,6 +198,7 @@ VC_QUALITY_API core::Result<ResultFiles> format_results(
     const std::vector<solve::RigCamera>& cameras,
     const solve::RigSolution& solution, const CalibrationMetrics& metrics,
     const DepthSummary* depth = nullptr,
-    const std::string& depth_unchecked = {}, const ResultWorld& world = {});
+    const std::string& depth_unchecked = {}, const ResultWorld& world = {},
+    const std::vector<PairRowCheck>& pairs = {});
 
 }  // namespace volumetric_kit::calib::quality

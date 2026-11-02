@@ -3,18 +3,26 @@
 
 // The stable API (README.md's table) as a program built on calib uses it: the
 // sample mains, including only the table's headers (and the core's), run on
-// synthetic data: their pictures are the test's own, the rest of main 2 is
-// examples/02_lens_from_images. A break in a call they make fails this build;
-// the rest of the table is held in review (DECISIONS.md, 2026-11-01).
+// synthetic data: their pictures and views are the test's own, the rest of
+// main 2 is examples/02_lens_from_images. A break in a call they make fails
+// this build; the rest of the table is held in review (DECISIONS.md,
+// 2026-11-01).
 
 // First, before anything that could stand in for an include one of them lacks.
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/core/target.hpp"
 #include "volumetric_kit/calib/detect/board.hpp"
+#include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/lens_gate.hpp"
+#include "volumetric_kit/calib/quality/pair_row_check.hpp"
+#include "volumetric_kit/calib/quality/results.hpp"
+#include "volumetric_kit/calib/solve/bundle_adjust.hpp"
+#include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/calib/solve/lens.hpp"
+#include "volumetric_kit/calib/solve/world_tag.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
 #include "volumetric_kit/core/base/result.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -88,6 +96,81 @@ TEST(Api, FitsALens) {
       calib::test::fisheye_views(board, truth, capture));
   ASSERT_TRUE(files.ok()) << files.status().message();
   EXPECT_FALSE(files->array_calibration.empty());
+}
+
+// Main 3, a pair's poses: what extrinsic mode's Calibrate does for two
+// cameras.
+core::Result<calib::quality::ResultFiles> pose_pair(
+    const calib::compute::Board& board,            // the 5 x 3 ChArUco
+    const std::vector<calib::Observation>& views,  // both, frame_id = capture
+    const std::vector<calib::solve::TagView>& tags,
+    const camera::ArrayCalibration& lenses,  // intrinsic mode's file
+    camera::ImageSize ffs_size) {            // the runtime's, from its config
+  namespace solve = calib::solve;
+  namespace quality = calib::quality;
+  std::vector<solve::RigCamera> cameras;
+  for (const char* id : {"bm-1", "bm-2"}) {
+    const camera::SensorCalibration* entry = camera::find_sensor(lenses, id);
+    if (entry == nullptr || !entry->color) {
+      return core::Status::invalid_argument(std::string(id) +
+                                            " has no lens: run intrinsic mode");
+    }
+    cameras.push_back(
+        {id, entry->color->model, camera::IntrinsicsSource::Calibrated});
+  }
+  VKC_ASSIGN(const solve::InitialRig start,
+             solve::initialise(cameras, board, views, 0));
+  VKC_ASSIGN(const solve::RigSolution solution,
+             solve::bundle_adjust(cameras, board, views, start));
+  VKC_ASSIGN(
+      const quality::CalibrationMetrics metrics,
+      quality::calibration_metrics(cameras, board, views, start, solution));
+  quality::ResultWorld world;
+  VKC_ASSIGN(world.origin, solve::origin_tag_frame(cameras, solution, tags,
+                                                   calib::kOriginTag));
+  VKC_ASSIGN(const solve::AnchoredRig rig,
+             solve::anchor_rig(solution, world.origin));
+  quality::PairRowCheckOptions options;
+  options.rectified = ffs_size;
+  VKC_ASSIGN(const quality::PairRowCheck rows,
+             quality::check_pair_rows(rig.calibration, "bm-1", "bm-2", views,
+                                      options));
+  std::printf("bm-1 | bm-2: %s, rows p95 %.2f px %s\n",
+              quality::to_string(rows.verdict), rows.dy_p95_px,
+              rows.reason.c_str());
+  return quality::format_results(cameras, solution, metrics, nullptr, {}, world,
+                                 {rows});
+}
+
+TEST(Api, PosesAPair) {
+  const std::vector<calib::test::SyntheticCamera> pair =
+      calib::test::lab_pair();
+  const calib::compute::Board board = calib::test::femto_board();
+  calib::test::ObserveOptions noise;
+  noise.noise_px = 0.15;
+  noise.portable = true;
+  const std::vector<calib::Observation> views = calib::test::observe(
+      pair, board, calib::test::view_plan(pair, 0, board), noise);
+  std::vector<calib::solve::TagView> tags;
+  for (const calib::test::MarkerSighting& seen : calib::test::observe_marker(
+           pair, calib::kOriginTag.id, calib::test::floor_tag_corners(), 3,
+           noise)) {
+    const calib::test::SyntheticCamera& cam = pair[seen.camera];
+    tags.push_back({cam.id, seen.capture, cam.model.size, seen.marker});
+  }
+  camera::ArrayCalibration lenses;  // the true lenses, as intrinsic mode's
+  for (const calib::test::SyntheticCamera& cam : pair) {
+    camera::SensorCalibration& sensor = lenses.sensors.emplace_back();
+    sensor.id = cam.id;
+    sensor.color = camera::CameraCalibration{
+        cam.model, camera::IntrinsicsSource::Calibrated};
+  }
+  const core::Result<calib::quality::ResultFiles> files =
+      pose_pair(board, views, tags, lenses, {960, 544});
+  ASSERT_TRUE(files.ok()) << files.status().message();
+  const std::string pairs =
+      files->report.substr(files->report.find("\"pairs\": ["));
+  EXPECT_NE(pairs.find("\"verdict\": \"pass\""), std::string::npos) << pairs;
 }
 
 }  // namespace
