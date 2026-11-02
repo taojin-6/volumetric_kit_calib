@@ -71,6 +71,21 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-11-01 — Depth as sensor prepares it, outliers dropped
+
+Calibrate's depth checks and the 3D view prepare depth with sensor's
+defaults, so they drop depth outliers, as sensor does for every depth sensor
+since 0.13.0: a return with fewer than 20 returns, itself included, within 8
+pixel footprints is no return. calib requires sensor 0.13.0
+(`VC_SENSOR_MIN_VERSION`) for it.
+
+- **Kept, not turned off.** Why: it is the owner's default for every depth
+  sensor, and calib checks and shows the depth a capture fuses. On
+  Calibrate's synthetic depth (2 to 5 cameras) the filter moves no board's
+  plane; a pair's pooled agreement changes by at most 190 of its 2 to 3
+  million samples and its quantiles by under 0.5 µm, one capture's by under
+  0.03 mm.
+
 ## 2026-10-29 — Built on sensor, not recon
 
 recon's camera and sensor tiers are now
@@ -90,7 +105,8 @@ recon nor grid.
   `volumetric_kit::sensor_<tier>`, options `VS_*`, GLSL `vs_*`. Why: a re-pin
   is then a rename, and a forwarding name would be one more to retire.
 - **sensor is declared after the core and before gfx, and checked with
-  `vkc_require_sibling(volumetric_kit::sensor 0.1.0 TARGETS …)`**: camera-only
+  `vkc_require_sibling(volumetric_kit::sensor 0.1.0 TARGETS …)`** (0.13.0
+  since 2026-11-01, the entry above): camera-only
   (`VS_CAMERA_ONLY`) without `VC_WITH_RIG`, with the camera, frame,
   interface, prep, array and image I/O tiers with it. Why: the core comes
   first so every sibling shares it, and the check (core 0.27.0's) refuses, at

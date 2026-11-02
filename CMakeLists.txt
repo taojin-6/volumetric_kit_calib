@@ -62,9 +62,10 @@ include(vc_sanitizers)
 
 # --- Dependencies + library --------------------------------------------------
 # The oldest volumetric_kit_core and volumetric_kit_sensor calib builds with
-# (DECISIONS.md, 2026-10-29), checked in the ones that arrive (third_party/).
+# (DECISIONS.md, 2026-10-29), checked in the ones that arrive (third_party/):
+# sensor 0.13.0 drops depth outliers by default (DECISIONS.md, 2026-11-01).
 set(VC_CORE_MIN_VERSION 0.29.0)
-set(VC_SENSOR_MIN_VERSION 0.1.0)
+set(VC_SENSOR_MIN_VERSION 0.13.0)
 # OpenCV 5, a prerequisite of the compute tier and those built on it
 # (DECISIONS.md, 2026-10-17): Homebrew's on macOS, tools/install-opencv.sh's on
 # Linux (README, "Prerequisites"). Found here so its imported targets reach

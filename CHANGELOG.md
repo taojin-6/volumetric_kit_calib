@@ -45,6 +45,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   MSAA window images, which are transient attachments, now take lazily
   allocated memory where the device has it (Metal's memoryless storage on
   Apple GPUs). calib's code and tests build unchanged.
+- build: **calib pins sensor at #26's merge** (b66e96f, 0.19.0), where it
+  was at 0.1.0 (436840c), **and core at #85's merge** (1972079, 0.39.0),
+  where it was at #76's (c52a86a, 0.35.0), as are their actions in CI; gfx
+  stays at df3a0de. calib requires sensor 0.13.0 (was 0.1.0); the core floor
+  stays 0.29.0. calib's code builds unchanged and the Femto goldens hold.
+  Calibrate's depth checks and the 3D view now get depth as sensor prepares
+  it today: mixed bilinearly where four raw pixels are one surface (0.1.1),
+  kept only where the colour camera sees too (0.9.0), and with outliers
+  dropped (0.13.0; DECISIONS.md, 2026-11-01). On the synthetic depth a
+  board's plane RMS falls from about 0.9 mm to 0.14 mm and every camera's
+  mean scale is within 3e-6 of 1 (was 6e-4), as nearest-pixel depth's
+  half-pixel terraces are gone; the filter moves no plane. It drops the 3D
+  view tests' lone return, so they draw it among 24 returns around it, and
+  `DrawsNoLoneReturn` holds that a lone one is dropped.
 - CI: the Orbbec SDK comes from sensor's action at the sensor pin, and the
   core's actions are taken at the core pin. `.pre-commit-config.yaml` has no
   pre-commit.ci block: no such app runs, and its monthly autoupdate would bump
