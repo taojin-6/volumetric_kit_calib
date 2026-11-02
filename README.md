@@ -16,7 +16,8 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > `Status`/`Result` — builds and is tested (GoogleTest); so do the `compute`
 > tier's OpenCV bridge, the `detect` tier's board and tag detection, the `solve`
 > tier's rig and lens solves and the `quality` tier's live checks, solved-rig
-> metrics and lens gates; with `VC_WITH_RIG`, the `capture` tier's session
+> metrics, lens gates and pair row check; with `VC_WITH_RIG`, the `capture`
+> tier's session
 > writer, the `viz` tier's live and 3D views and the `depth` tier's board-plane
 > fit and pairwise depth agreement; and, with GLFW and sensor's Orbbec driver
 > too, the `app` tier's `calib_rig`, live view, 3D view, capture and Calibrate.
@@ -106,6 +107,11 @@ renderer.
   frame, corners reaching the image's corners and sides), and a lens-only
   results directory
   ([DECISIONS.md](DECISIONS.md#2026-11-01--a-cameras-lens-from-its-views)).
+  For a stereo pair: how far apart each board corner's rows land in its two
+  rectified views, through sensor's own rectification at the runtime's size,
+  judged cell by cell over the view, and whether the pair is named the right
+  way round
+  ([DECISIONS.md](DECISIONS.md#2026-11-02--a-stereo-pairs-rectified-rows)).
   Over the device's depth results, for any number of cameras: the board's
   scale and plane from each view's depth, each ordered pair's depth
   agreement, and their verdicts
@@ -162,7 +168,7 @@ header is internal.
 | Detect | `detect/luma.hpp`, `detect/board.hpp`, `detect/tag.hpp` |
 | Views | `core/observation.hpp`, `core/detection.hpp`: the views are a `std::vector<Observation>`, by camera id and capture index |
 | Solve | `solve/initialise.hpp`, `solve/bundle_adjust.hpp`, `solve/world_tag.hpp`, `solve/lens.hpp` |
-| Quality | `quality/calibration_metrics.hpp`, `quality/results.hpp`, `quality/lens_gate.hpp` |
+| Quality | `quality/calibration_metrics.hpp`, `quality/results.hpp`, `quality/lens_gate.hpp`, `quality/pair_row_check.hpp` |
 | File | sensor's `camera/array_calibration.hpp`: calib formats it, the caller writes it |
 
 ## Prerequisites

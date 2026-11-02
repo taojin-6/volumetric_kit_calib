@@ -105,6 +105,50 @@ camera pair) assemble the brain, and a rule that shows in review costs
 little. Freezing everything would stall the app; an ABI promise means
 nothing for a library nobody installs.
 
+## 2026-11-02 — A stereo pair's rectified rows
+
+`quality::check_pair_rows` says whether a solved pair's rows agree where its
+stereo matcher searches (`quality/pair_row_check.hpp`). Δy is a board corner's
+row in the left rectified view less its row in the right one. The limits are
+estimates until a real session is judged.
+
+- **Through the runtime's own rectification:** sensor's `stereo_calibration`
+  and `rectify_stereo`, the functions its `StereoRectifier` uses, at the size
+  and alpha the caller gives, the runtime's from core's config: so the check
+  measures the runtime as it is, and calib keeps no copy of Bouguet's method.
+  The size has no default; its one home is the config.
+- **Each corner undistorted exactly** (`compute::undistort_points`, to 1e-10
+  px), then turned by its camera's `R1` or `R2` and projected by the rectified
+  camera. On the lab's lens OpenCV's default five iterations miss by 1.7 px
+  at 45 degrees off axis, 16 px at 57, where the runtime's view ends, and 152
+  px at the image's corners. A corner outside either view is not counted.
+- **Judged cell by cell:** on a 3 x 3 grid over the left view, each cell of 8
+  corners or more holds its mean Δy within 0.15 px, or 3 standard errors of
+  that mean if larger, so noise alone cannot fail a right pair. Why not a
+  percentile: noise sets it (0.1 px of corner noise gives a 95th percentile
+  of 0.085 px, as each corner's slope predicts: 0.22 rectified rows a source
+  pixel at the view's centre, 0.49 at its corners), while what harms the matcher
+  is local: a lens 3 px off at one edge reads 0.29 px in that cell and leaves
+  the 95th percentile at 0.11 px. The median and 95th percentile are
+  reported. At f 371 the gate is a relative pitch of 0.4 mrad.
+- **Enough cells:** 7 judged, one in each outer column among them; else
+  `Insufficient`, naming each part of the view short of corners and its count:
+  where to capture. A cell past its limit fails the pair first: no capture
+  elsewhere mends it.
+- **Left and right are the config's.** When `rectify_stereo` refuses the pair
+  as named, the other order is tried: `Swapped` if it rectifies, naming the
+  left camera, else `Refused` with the first refusal. No copy of the
+  rectifier's rule and no parsing of its words. `stereo_calibration`'s
+  refusals (an id not in the file, unposed or without a lens) are the
+  caller's errors.
+- **Named for its rows:** `quality::PairCheck` is already an ordered pair's
+  depth agreement, in the stable API through `DepthSummary`, which
+  `format_results` takes; renaming it would break the API for nothing.
+- **The report's `pairs` section** joins version 2: each pair's verdict,
+  cells, statistics, settings and its cameras' lens sources, `[]` with no
+  pair checked. The lens file's path and digest are the application's to add
+  when it checks pairs.
+
 ## 2026-11-01 — A camera's lens from its views
 
 `solve::solve_lens` fits one camera's lens from its views of a board;
