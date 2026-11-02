@@ -6,8 +6,10 @@
 /// @file measures.hpp
 /// @brief The small measures the solve and the checks share: a median and a
 ///        quantile, the angle between two directions, the angle between two
-///        rotations, and whether a transform is finite.
+///        rotations, whether a transform is finite, and a pixel's cell of a
+///        grid over its image.
 
+#include <optional>
 #include <vector>
 
 #include "volumetric_kit/calib/compute/export.hpp"
@@ -77,5 +79,24 @@ VC_COMPUTE_API double rotation_angle_deg(
 /// @endcode
 VC_COMPUTE_API bool finite(
     const sensor::camera::RodriguesTransform& transform) noexcept;
+
+/// @brief The cell of a @p cols x @p rows grid over an image that holds the
+///        pixel (@p u, @p v).
+/// @param u       The pixel's column, OpenCV's convention (centres at
+///                integers, the image's edge at -0.5 and `width - 0.5`).
+/// @param v       Its row.
+/// @param width   The image's width (pixels).
+/// @param height  Its height.
+/// @param cols    The grid's columns.
+/// @param rows    Its rows.
+/// @return The cell, row-major from the top left; empty outside the image.
+///
+/// @code
+/// const std::optional<int> cell = grid_cell(1919.5, 1079.5, 3840, 2160, 3, 3);
+/// // 4, the middle of the image
+/// @endcode
+VC_COMPUTE_API std::optional<int> grid_cell(double u, double v, int width,
+                                            int height, int cols,
+                                            int rows) noexcept;
 
 }  // namespace volumetric_kit::calib::compute

@@ -16,6 +16,7 @@
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/core/observation.hpp"
+#include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 
@@ -57,6 +58,27 @@ core::Status refuse_option(std::string_view prefix, const char* name,
 // (x and y), about their median. `components` is not empty.
 double outlier_bound(std::vector<double> components, double outlier_px,
                      double outlier_mads);
+
+// The outlier rule on one state of a fit, the adjustment's and the lens
+// solve's. A view above `view_px` is an outlier as a whole; in the others, a
+// corner above `corner_px` is.
+struct OutlierBounds {
+  double corner_px = 0.0;
+  double view_px = 0.0;
+  // Each view's RMS, over its corners within `corner_px`, or over all of them
+  // when none is: one bad corner costs its view nothing more, and a view off
+  // as a whole goes as one.
+  std::vector<double> rms;
+};
+
+// The bounds on `norms`, each view's kept corners' residuals (NaN for a corner
+// not kept), at least one view of them, and `components`, their components
+// (x and y): `options`' outlier_px and outlier_mads for a corner
+// (outlier_bound), outlier_view_ratio times the median view's RMS, at least
+// outlier_view_px, for a view.
+OutlierBounds outlier_bounds(const std::vector<std::vector<double>>& norms,
+                             std::vector<double> components,
+                             const BundleAdjustOptions& options);
 
 // cv::LevMarq stops when the energy's relative change, or the step's squared
 // norm, falls below this.

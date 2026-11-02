@@ -121,6 +121,28 @@ TEST(Results, TheCalibrationFilePosesEachCameraByItsTcw) {
   EXPECT_GT(glm::length(s.solution.world_to_camera[1].tvec), 0.5);
 }
 
+// A lens from the file stays marked so through the solve and into the file.
+TEST(Results, ACameraKeepsItsLensSource) {
+  test::Scene scene = test::make_scene(10);
+  scene.cameras[1].source = camera::IntrinsicsSource::Calibrated;
+  const solve::InitialRig start =
+      value_of(solve::initialise(scene.cameras, scene.board, scene.views, 0));
+  const solve::RigSolution solution = value_of(
+      solve::bundle_adjust(scene.cameras, scene.board, scene.views, start));
+  const CalibrationMetrics metrics = value_of(calibration_metrics(
+      scene.cameras, scene.board, scene.views, start, solution));
+  const camera::ArrayCalibration back =
+      value_of(camera::parse_array_calibration(
+          formatted(scene.cameras, solution, metrics).array_calibration));
+  for (std::size_t c = 0; c < scene.cameras.size(); ++c) {
+    const camera::SensorCalibration* sensor =
+        camera::find_sensor(back, scene.cameras[c].id);
+    ASSERT_NE(sensor, nullptr);
+    ASSERT_TRUE(sensor->color.has_value());
+    EXPECT_EQ(sensor->color->source, scene.cameras[c].source);
+  }
+}
+
 // A number as the report writes it: itself, or null when not finite.
 void expect_number(const json& j, double v) {
   if (std::isfinite(v)) {
@@ -190,7 +212,7 @@ TEST(Results, TheReportHasItsSchema) {
                 "covariance", "sensitivity", "principal_point_ab", "geometry",
                 "world", "depth", "depth_unchecked"}));
   EXPECT_EQ(doc["format"], "volumetric_kit_calib.report");
-  EXPECT_EQ(doc["version"], 1);
+  EXPECT_EQ(doc["version"], 2);
   EXPECT_TRUE(doc["depth"].is_null());  // not checked, nor asked to be
   EXPECT_TRUE(doc["depth_unchecked"].is_null());
 

@@ -153,8 +153,9 @@ core::Result<CheckedView> check_view(const compute::CvCamera& camera,
     view.pose = *pose;
     if (const std::optional<camera::Vec2d> pixel =
             compute::project(camera, centre)) {
-      check.cell = detail::grid_cell(pixel->x, pixel->y, camera.size,
-                                     kCellsPerSide, kCellsPerSide);
+      check.cell =
+          compute::grid_cell(pixel->x, pixel->y, camera.size.width,
+                             camera.size.height, kCellsPerSide, kCellsPerSide);
     }
     view.frontal = *check.tilt_deg < options.frontal_deg;
 

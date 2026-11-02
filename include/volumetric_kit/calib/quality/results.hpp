@@ -13,7 +13,25 @@
 /// `write_file(WriteMode::CreateNew)`.
 ///
 /// **`report.json`** (`"format": "volumetric_kit_calib.report"`,
-/// `"version": 1`), cameras named by id, each figure once:
+/// `"version": 2`), cameras named by id, each figure once. A results
+/// directory of lenses (`quality/lens_gate.hpp`) has `lenses` and none of the
+/// rest:
+/// - `lenses`: `unsolved`, the ids of the cameras not solved; `cameras`, by
+///   id: `verdict` (`"pass"` or `"fail"`), `failed` (each gate missed, with
+///   its numbers), `written` (false for a camera fitted for the report
+///   alone), `start` (`"given"`, or `"opencv"` for OpenCV's own), `rms_px`,
+///   `holdout_rms_px`, `holdout_corners`, `holdout_dropped`,
+///   `worst_cell_bias_px`, `worst_cell` (`column`, `row`), `fold_deg`,
+///   `frame_folds`, `reach` (`top_left`, `top_right`, `bottom_left`,
+///   `bottom_right`, `left`, `right`), `corner_reach_deg` (`top_left`,
+///   `top_right`, `bottom_left`, `bottom_right`) and `side_reach_deg` (`left`,
+///   `right`), `lens` (`width`, `height`, `intrinsics` and `distortion`, as
+///   sensor's file writes them), `sigma` (`fx`, `fy`, `cx`, `cy`),
+///   `view_counts` (`fitted`, `held_out`, `dropped`, `too_few`) and `views`
+///   (`capture`, `use`, as @ref solve::to_string(solve::LensView::Use) names
+///   it, `corners`, `rms_px`).
+///
+/// A solved rig's has, in this order:
 /// - `settings`: `reference`, `cameras`, and the `initialise`,
 ///   `bundle_adjust` and `metrics` options the metrics were measured with
 ///   (@ref CalibrationMetrics::options);
@@ -88,9 +106,9 @@
 ///
 /// **`residuals.csv`**: the header
 /// `capture,serial,corner_id,u,v,du,dv,weight,dropped`, then every corner
-/// the adjustment took, in @ref solve::RigSolution::residuals' order: its
-/// detection (u, v), its residual (du, dv; `nan` behind its camera), its
-/// weight, and 1 when it was left out, else 0.
+/// the adjustment took, in @ref solve::RigSolution::residuals' order, or each
+/// lens's: its detection (u, v), its residual (du, dv; `nan` behind its
+/// camera), its weight, and 1 when it was left out, else 0.
 
 #include <string>
 #include <vector>

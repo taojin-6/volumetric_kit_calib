@@ -92,4 +92,33 @@ double outlier_bound(std::vector<double> components, double outlier_px,
                                   compute::median(std::move(components)));
 }
 
+OutlierBounds outlier_bounds(const std::vector<std::vector<double>>& norms,
+                             std::vector<double> components,
+                             const BundleAdjustOptions& options) {
+  OutlierBounds bounds;
+  bounds.corner_px = outlier_bound(std::move(components), options.outlier_px,
+                                   options.outlier_mads);
+  bounds.rms.reserve(norms.size());
+  for (const std::vector<double>& view : norms) {
+    double within = 0.0;
+    double all = 0.0;
+    int n_within = 0;
+    int n_all = 0;
+    for (const double e : view) {
+      if (std::isnan(e)) continue;
+      all += e * e;
+      ++n_all;
+      if (e > bounds.corner_px) continue;
+      within += e * e;
+      ++n_within;
+    }
+    bounds.rms.push_back(n_within > 0 ? std::sqrt(within / n_within)
+                                      : std::sqrt(all / n_all));
+  }
+  bounds.view_px =
+      std::max(options.outlier_view_ratio * compute::median(bounds.rms),
+               options.outlier_view_px);
+  return bounds;
+}
+
 }  // namespace volumetric_kit::calib::solve::detail

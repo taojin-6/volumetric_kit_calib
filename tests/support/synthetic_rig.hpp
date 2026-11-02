@@ -213,6 +213,29 @@ struct FisheyeTruth {
   sensor::camera::CameraModel frame() const;
 };
 
+/// @brief What @ref fisheye_views captures.
+struct FisheyeCapture {
+  std::uint32_t seed = 1;   ///< The placements' and the noise's seed.
+  double noise_px = 0.0;    ///< Gaussian noise on each axis (pixels, sigma).
+  double reach_deg = 70.0;  ///< A board's centre off axis, toward the sides.
+  std::string camera = "bm-1";  ///< `Observation::camera_id`.
+};
+
+/// @brief A lens session as a person captures it, through @p truth: 40
+///        placements of @p board, tilted 20-45 degrees, near and far: 10 near
+///        the axis, 10 further out, 12 toward the sides and 8 toward the
+///        image's corners, 4 degrees further. Each view keeps the corners at
+///        least 3 px inside the image, so a board may be cut by its edge; one
+///        of fewer than 12 corners is left out.
+/// @param board    The board placed.
+/// @param truth    The lens.
+/// @param capture  The seed, the noise and how far the boards go.
+/// @return The views, `frame_id` in capture order, the corners in id order,
+///         the same for the same arguments with every standard library.
+std::vector<Observation> fisheye_views(const compute::Board& board,
+                                       const FisheyeTruth& truth,
+                                       const FisheyeCapture& capture = {});
+
 /// @brief How @ref render_board draws.
 struct RenderOptions {
   /// The board texture's resolution; the board's edges should fall on its

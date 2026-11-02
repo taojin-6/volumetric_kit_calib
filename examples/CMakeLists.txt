@@ -15,6 +15,17 @@ target_link_libraries(
           volumetric_kit::core_config)
 vc_target_warnings(example_01_project_point)
 
+# 02_lens_from_images: one camera's lens from saved pictures of a checkerboard,
+# on the stable API (README.md). Only this example reads image files, so only it
+# takes OpenCV's imgcodecs.
+find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS imgcodecs)
+add_executable(example_02_lens_from_images 02_lens_from_images/main.cpp)
+target_link_libraries(
+  example_02_lens_from_images
+  PRIVATE volumetric_kit::calib_detect volumetric_kit::calib_quality
+          opencv_imgcodecs)
+vc_target_warnings(example_02_lens_from_images)
+
 if(VC_BUILD_TESTS)
   add_test(
     NAME project_point.config
@@ -22,4 +33,11 @@ if(VC_BUILD_TESTS)
       ${CMAKE_COMMAND} -DEXECUTABLE=$<TARGET_FILE:example_01_project_point>
       -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/config-test -P
       ${CMAKE_CURRENT_SOURCE_DIR}/01_project_point/config_test.cmake)
+  # `api`, on synthetic views, runs the calls it makes; this, its arguments.
+  add_test(
+    NAME lens_from_images.arguments
+    COMMAND
+      ${CMAKE_COMMAND} -DEXECUTABLE=$<TARGET_FILE:example_02_lens_from_images>
+      -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/lens-test -P
+      ${CMAKE_CURRENT_SOURCE_DIR}/02_lens_from_images/arguments_test.cmake)
 endif()

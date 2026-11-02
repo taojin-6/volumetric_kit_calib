@@ -59,4 +59,16 @@ bool finite(const sensor::camera::RodriguesTransform& transform) noexcept {
   return true;
 }
 
+std::optional<int> grid_cell(double u, double v, int width, int height,
+                             int cols, int rows) noexcept {
+  const double x = (u + 0.5) / width;
+  const double y = (v + 0.5) / height;
+  // Written so a NaN fails it.
+  if (!(x >= 0.0 && x < 1.0 && y >= 0.0 && y < 1.0)) return std::nullopt;
+  // The products stay below cols and rows but for rounding.
+  const int col = std::min(static_cast<int>(x * cols), cols - 1);
+  const int row = std::min(static_cast<int>(y * rows), rows - 1);
+  return row * cols + col;
+}
+
 }  // namespace volumetric_kit::calib::compute

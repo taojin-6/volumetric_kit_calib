@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(
   volumetric_kit_calib
-  VERSION 0.1.0
+  VERSION 0.2.0
   DESCRIPTION
     "Calibration companion for volumetric_kit: diagnostics, acquisition guidance, and a requirements solver"
   HOMEPAGE_URL "https://github.com/taojin-6/volumetric_kit_calib"
@@ -63,15 +63,15 @@ include(vc_sanitizers)
 # --- Dependencies + library --------------------------------------------------
 # The oldest volumetric_kit_core and volumetric_kit_sensor calib builds with
 # (DECISIONS.md, 2026-10-29), checked in the ones that arrive (third_party/):
-# sensor 0.13.0 drops depth outliers by default (DECISIONS.md, 2026-11-01).
+# sensor 0.20.0 has a lens's fold on its camera tier (DECISIONS.md, 2026-11-01).
 set(VC_CORE_MIN_VERSION 0.29.0)
-set(VC_SENSOR_MIN_VERSION 0.13.0)
+set(VC_SENSOR_MIN_VERSION 0.20.0)
 # OpenCV 5, a prerequisite of the compute tier and those built on it
 # (DECISIONS.md, 2026-10-17): Homebrew's on macOS, tools/install-opencv.sh's on
 # Linux (README, "Prerequisites"). Found here so its imported targets reach
 # every tier.
 find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS core imgproc objdetect
-                                                   geometry)
+                                                   geometry calib)
 # The capture tier's writer thread; found here, as OpenCV is, so the imported
 # target reaches the tests that link the tier.
 if(VC_WITH_RIG)

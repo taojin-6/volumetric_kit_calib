@@ -11,12 +11,12 @@
 #
 # VERSION is a release tag (5.0.0) or `latest`, the newest 5.x release, so
 # Linux follows OpenCV's releases as Homebrew does on macOS. The modules are
-# calib's (core, imgproc, objdetect, geometry) and its tests' (imgcodecs,
-# calib), with what they depend on, and JPEG and PNG from OpenCV's bundled
-# sources, so the install needs nothing beyond the C and C++ runtimes. It
-# downloads nothing at configure time and builds no Python, Java, apps, tests,
-# examples or docs. The build needs git, CMake and a C++ compiler; if PREFIX is
-# not writable, the install step runs under sudo.
+# calib's (core, imgproc, objdetect, geometry, calib) and its tests' and
+# examples' (imgcodecs), with what they depend on, and JPEG and PNG from
+# OpenCV's bundled sources, so the install needs nothing beyond the C and C++
+# runtimes. It downloads nothing at configure time and builds no Python, Java,
+# apps, tests, examples or docs. The build needs git, CMake and a C++ compiler;
+# if PREFIX is not writable, the install step runs under sudo.
 set -euo pipefail
 
 repo=https://github.com/opencv/opencv.git

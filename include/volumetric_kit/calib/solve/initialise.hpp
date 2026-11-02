@@ -30,6 +30,7 @@
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
 #include "volumetric_kit/calib/solve/view_pose.hpp"
 #include "volumetric_kit/core/base/result.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
 #include "volumetric_kit/sensor/camera/camera_model.hpp"
 #include "volumetric_kit/sensor/camera/geometry.hpp"
 
@@ -47,6 +48,9 @@ struct RigCamera {
   std::string id;  ///< As `Observation::camera_id`: unique, not empty.
   /// The lens, at the size of the images its views were detected in.
   sensor::camera::CameraModel model;
+  /// Where the lens came from; carried into the calibration file.
+  sensor::camera::IntrinsicsSource source =
+      sensor::camera::IntrinsicsSource::Factory;
 };
 
 /// @brief Refuse a rig's camera ids that are none, empty or repeated.

@@ -178,9 +178,9 @@ core::Result<SessionSummary> SessionChecks::summary() const {
             if (view.frontal) ++cam.frontal_views;
             normals.push_back(compute::face_normal(view.board_to_camera));
             for (const camera::Vec2d& pixel : view.corners) {
-              if (const std::optional<int> cell =
-                      detail::grid_cell(pixel.x, pixel.y, cameras_[c].size,
-                                        kCoverageCols, kCoverageRows)) {
+              if (const std::optional<int> cell = compute::grid_cell(
+                      pixel.x, pixel.y, cameras_[c].size.width,
+                      cameras_[c].size.height, kCoverageCols, kCoverageRows)) {
                 ++cam.coverage[static_cast<std::size_t>(*cell)];
               }
             }

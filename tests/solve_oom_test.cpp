@@ -8,17 +8,20 @@
 // pose or half of one, and view_pose reports either as a Backend error naming
 // solvePnPGeneric.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <opencv2/core.hpp>
 
 #include "allocation_failure.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
+#include "volumetric_kit/calib/solve/lens.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
 #include "volumetric_kit/calib/solve/view_pose.hpp"
 #include "volumetric_kit/calib/solve/world_tag.hpp"
@@ -26,6 +29,7 @@
 namespace volumetric_kit::calib::solve {
 namespace {
 
+namespace camera = sensor::camera;
 using Code = core::Status::Code;
 
 using test::expect_oom_anywhere;
@@ -74,6 +78,68 @@ TEST(SolveOom, InitialiseRefusingAView) {
       [&](const core::Result<InitialRig>& rig) {
         return rig.status().message() == refusal || ippe_failed(rig.status());
       });
+}
+
+// Six views through a lens given as the start, a corner of one bad so a round
+// drops it, fits again and brings on the second pass, one held out: each
+// allocation of two starts' fits, the rounds and a held-out view's pose fails.
+// A few iterations, as a sweep runs a fit hundreds of times, on one OpenCV
+// thread, as it needs the same allocations each run: OpenCV's threads leave a
+// fit's last bits to chance.
+TEST(SolveOom, SolveLens) {
+  const compute::Board board = test::lab_checkerboard();
+  const camera::CameraModel lens = test::color_like_lens();
+  std::vector<Observation> views;
+  for (int v = 0; v < 6; ++v) {
+    const camera::Mat4d pose = test::board_facing_camera(
+        board, {0.03 * (v - 4), 0.02 * ((v * 3) % 8 - 4), 0.4 + 0.02 * v},
+        20.0 + 3.0 * v, 40.0 * v);
+    Observation& view = views.emplace_back();
+    view.camera_id = "bm-1";
+    view.frame_id = v;
+    const std::vector<cv::Point2d> pixels =
+        test::project(lens, pose, board.object_points());
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+      view.points.push_back(
+          {static_cast<int>(i), {pixels[i].x, pixels[i].y}, 1.0});
+    }
+  }
+  views[1].points[3].pixel.x += 25.0;
+  LensOptions options;
+  options.min_views = 4;
+  options.max_iterations = 3;
+  const int threads = cv::getNumThreads();
+  cv::setNumThreads(1);
+  const LensFit fit =
+      solve_lens("bm-1", lens.size, board, views, lens, options).value();
+  EXPECT_TRUE(std::any_of(
+      fit.views.begin(), fit.views.end(),
+      [](const LensView& view) { return view.use == LensView::Use::HeldOut; }));
+  EXPECT_TRUE(std::any_of(fit.residuals.begin(), fit.residuals.end(),
+                          [](const CornerResidual& r) { return r.dropped; }));
+  expect_oom_anywhere(
+      [&] {
+        return solve_lens("bm-1", lens.size, board, views, lens, options);
+      },
+      [](const core::Result<LensFit>& fit) {
+        return !fit.ok() && ippe_failed(fit.status());
+      });
+  cv::setNumThreads(threads);
+}
+
+TEST(SolveOom, SolveLensRefusing) {
+  const compute::Board board = test::lab_checkerboard();
+  const test::FisheyeTruth lens;
+  const std::vector<Observation> views = test::fisheye_views(board, lens);
+  expect_oom_anywhere(
+      [&] { return solve_lens("nobody", lens.size, board, views); });
+  LensOptions refused;
+  refused.min_corners = 0;
+  expect_oom_anywhere([&] {
+    return plan_lens_views("bm-1", lens.size, board, views, refused);
+  });
+  expect_oom_anywhere(
+      [&] { return plan_lens_views("bm-1", lens.size, board, views); });
 }
 
 TEST(SolveOom, BundleAdjust) {

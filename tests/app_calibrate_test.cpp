@@ -167,7 +167,7 @@ TEST(Calibrate, SolvesTwoToFiveCamerasInTheReferencesGauge) {
     EXPECT_FALSE(file->world.apriltag);
     const json report = json::parse(r.files.report);
     EXPECT_EQ(report["format"], "volumetric_kit_calib.report");
-    EXPECT_EQ(report["version"], 1);
+    EXPECT_EQ(report["version"], 2);
     EXPECT_EQ(report["settings"]["reference"], ids[c.reference]);
     EXPECT_EQ(report["world"]["reference"], ids[c.reference]);
     // No camera saw the tag: the reference stays the origin, and says why.

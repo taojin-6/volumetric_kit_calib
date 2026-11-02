@@ -15,12 +15,12 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > sensor profiles) over sensor's camera model and the core's exception-free
 > `Status`/`Result` — builds and is tested (GoogleTest); so do the `compute`
 > tier's OpenCV bridge, the `detect` tier's board and tag detection, the `solve`
-> tier's rig solve and the `quality` tier's live checks and solved-rig
-> metrics; with `VC_WITH_RIG`, the `capture` tier's session writer, the `viz`
-> tier's live and 3D views and the `depth` tier's board-plane fit and
-> pairwise depth agreement; and, with GLFW and sensor's Orbbec driver too, the
-> `app` tier's `calib_rig`, live view, 3D view, capture and Calibrate. The
-> color tier is not yet implemented; the legacy `camera_calibration` Python
+> tier's rig and lens solves and the `quality` tier's live checks, solved-rig
+> metrics and lens gates; with `VC_WITH_RIG`, the `capture` tier's session
+> writer, the `viz` tier's live and 3D views and the `depth` tier's board-plane
+> fit and pairwise depth agreement; and, with GLFW and sensor's Orbbec driver
+> too, the `app` tier's `calib_rig`, live view, 3D view, capture and Calibrate.
+> The color tier is not yet implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain
 > the reference oracle.
 
@@ -78,6 +78,11 @@ renderer.
   floor from the solved rig, and `anchor_rig` moves the outputs into its
   world, z up from the floor
   ([DECISIONS.md](DECISIONS.md#2026-10-19--the-world-at-the-origin-tag)).
+  `solve_lens` fits one camera's lens from its own views of a board, either
+  kind: sensor's rational lens by `cv::calibrateCamera`, from two starts, with
+  views held out in every region of the image, and the adjustment's outlier
+  bounds
+  ([DECISIONS.md](DECISIONS.md#2026-11-01--a-cameras-lens-from-its-views)).
 - **Quality:** before any solve, what each view and set is worth and which
   set a capture takes. Each view's verdict, distance, tilt, fit and cell come
   from its own pose; a capture takes the first complete set whose board is
@@ -95,6 +100,12 @@ renderer.
   results directory's files -- sensor's calibration file in the rig's world,
   `report.json` and `residuals.csv` -- which the application writes
   ([DECISIONS.md](DECISIONS.md#2026-10-16--the-solved-rigs-metrics-and-its-results-files)).
+  For a lens: whether a camera's views are enough yet, its gates (the
+  held-out RMS and its ratio to the fit's, few held-out corners past the fit's
+  bound, no pattern left in the residuals over the image, no fold inside the
+  frame, corners reaching the image's corners and sides), and a lens-only
+  results directory
+  ([DECISIONS.md](DECISIONS.md#2026-11-01--a-cameras-lens-from-its-views)).
   Over the device's depth results, for any number of cameras: the board's
   scale and plane from each view's depth, each ordered pair's depth
   agreement, and their verdicts
@@ -150,16 +161,16 @@ header is internal.
 | Board | `core/target.hpp`, `compute/board.hpp` |
 | Detect | `detect/luma.hpp`, `detect/board.hpp`, `detect/tag.hpp` |
 | Views | `core/observation.hpp`, `core/detection.hpp`: the views are a `std::vector<Observation>`, by camera id and capture index |
-| Solve | `solve/initialise.hpp`, `solve/bundle_adjust.hpp`, `solve/world_tag.hpp` |
-| Quality | `quality/calibration_metrics.hpp`, `quality/results.hpp` |
+| Solve | `solve/initialise.hpp`, `solve/bundle_adjust.hpp`, `solve/world_tag.hpp`, `solve/lens.hpp` |
+| Quality | `quality/calibration_metrics.hpp`, `quality/results.hpp`, `quality/lens_gate.hpp` |
 | File | sensor's `camera/array_calibration.hpp`: calib formats it, the caller writes it |
 
 ## Prerequisites
 
 calib needs a C++17 compiler -- GCC or Clang; Windows and MSVC are not
 supported ([DECISIONS.md](DECISIONS.md#platforms)) -- CMake ≥ 3.21, GLM, and
-OpenCV 5 (5.0 or a later 5.x: its core, imgproc, objdetect and geometry
-modules, and, for the tests, imgcodecs and calib). The first configure
+OpenCV 5 (5.0 or a later 5.x: its core, imgproc, objdetect, geometry and calib
+modules, and, for the tests and examples, imgcodecs). The first configure
 fetches `volumetric_kit_core` and `volumetric_kit_sensor` (pinned by commit)
 and, for tests, googletest, so it needs network access. Ubuntu's packages are
 OpenCV 4, so `tools/install-opencv.sh` builds OpenCV 5 from its source, the
@@ -210,6 +221,15 @@ The demo reads the family's versioned JSON scenario format through
 unknown fields and application compatibility. Edit `config/project_point.json`
 to change the camera and point. The demo accepts only `--config PATH` and `--help`;
 the calibration library itself keeps its core_base/sensor_camera dependency.
+
+Fit one camera's lens from saved pictures of a checkerboard, offline, with the
+stable API alone: here 14 x 9 squares of 20 mm. It prints every gate missed,
+and writes the lens file, the report and the residuals to `out/` (which must
+exist).
+
+```bash
+./build/examples/example_02_lens_from_images bm-1 14 9 20 out images/bm-1/*.pgm
+```
 
 Run calib_rig on a rig (the session root must exist):
 
@@ -266,7 +286,7 @@ above, and installs nothing: it has no install rules or package config
 
 calib needs `volumetric_kit_core` 0.29.0 or newer, with its vulkan tier for
 `VC_WITH_RIG` and its config tier for `calib_app`, and `volumetric_kit_sensor`
-0.13.0 or newer. An application that declares either before calib, to share it
+0.20.0 or newer. An application that declares either before calib, to share it
 with another sibling, pins at least that: on an older one, calib's configure
 fails at `vkc_require_core` or `vkc_require_sibling`. Without `VC_WITH_RIG`,
 calib makes sensor available camera-only (`VS_CAMERA_ONLY`), so an application
