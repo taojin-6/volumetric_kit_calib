@@ -70,13 +70,10 @@ vc_add_test(target vc_test_support)
 # core: the plain records (Observation / Detection / ViewCheck / CaptureMeta /
 # SensorProfile / LensProfile).
 vc_add_test(data_model volumetric_kit::calib_core)
-# The stable API (README.md's table): the sample mains, built on its headers
-# alone, run on synthetic data.
-vc_add_test(api volumetric_kit::calib_compute)
 
-# The OpenCV modules only the tests use: imgcodecs, to compress rendered views,
-# and calib, the bundle adjustment's oracle.
-find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS imgcodecs calib)
+# The OpenCV module only the tests and the lens example use: imgcodecs, to
+# compress rendered views.
+find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS imgcodecs)
 
 # The synthetic source every calib test draws on (support/): lenses, a rig, a
 # plan of placements and an exact-inverse renderer, over compute's bridge.
@@ -86,6 +83,11 @@ target_link_libraries(
   PUBLIC vc_test_support volumetric_kit::calib_compute
   PRIVATE opencv_geometry opencv_imgproc)
 vc_target_warnings(vc_synthetic_rig)
+
+# The stable API (README.md's table): the sample mains, built on its headers
+# alone, run on synthetic data.
+vc_add_test(api volumetric_kit::calib_detect volumetric_kit::calib_quality
+            vc_synthetic_rig)
 
 # compute: the OpenCV bridge, and the synthetic source itself.
 vc_add_test(guarded volumetric_kit::calib_compute)
@@ -137,6 +139,8 @@ vc_add_sweeps(bundle_adjust)
 # solve: the world at the origin tag on the synthetic rig, and the outputs moved
 # into it, read back with sensor's calibration file.
 vc_add_test(world_tag volumetric_kit::calib_solve vc_synthetic_rig)
+# solve: a camera's lens from its views of a fisheye truth.
+vc_add_test(lens volumetric_kit::calib_solve vc_synthetic_rig)
 vc_add_test(solve_oom volumetric_kit::calib_solve vc_synthetic_rig)
 target_sources(vc_solve_oom_test PRIVATE support/allocation_failure.cpp)
 
@@ -161,6 +165,14 @@ vc_add_test(depth_checks volumetric_kit::calib_quality vc_synthetic_rig)
 vc_add_test(floor_boards volumetric_kit::calib_quality vc_synthetic_rig)
 vc_add_test(results volumetric_kit::calib_quality vc_synthetic_rig)
 target_include_directories(vc_results_test SYSTEM
+                           PRIVATE "${VC_JSON_INCLUDE_DIR}")
+# quality: a lens's readiness at each of its limits; its gates on fits of a
+# fisheye truth and made by hand, calibrateCamera giving the wrong minimum; and
+# its results files, read back with sensor's reader and nlohmann.
+vc_add_test(lens_readiness volumetric_kit::calib_quality vc_synthetic_rig)
+vc_add_test(lens_gate volumetric_kit::calib_quality vc_synthetic_rig
+            opencv_calib opencv_geometry)
+target_include_directories(vc_lens_gate_test SYSTEM
                            PRIVATE "${VC_JSON_INCLUDE_DIR}")
 
 if(VC_WITH_RIG)

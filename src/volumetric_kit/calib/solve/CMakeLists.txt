@@ -4,7 +4,7 @@
 # --- calib_solve: Tier 2 -----------------------------------------------------
 # The rig solve on OpenCV: each view's own pose (IPPE), the cameras' spanning
 # tree, the first rig, the bundle adjustment that refines it (LevMarq), and the
-# world at the origin tag.
+# world at the origin tag; and a camera's lens from its views (calibrateCamera).
 include(GenerateExportHeader)
 
 set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
@@ -17,6 +17,7 @@ target_sources(
   PRIVATE bundle_adjust.cpp
           common.cpp
           initialise.cpp
+          lens.cpp
           reprojection.cpp
           spanning_tree.cpp
           view_pose.cpp
@@ -46,10 +47,11 @@ endif()
 target_include_directories(calib_solve PUBLIC "${_vc_generated_inc}")
 
 # The public headers name compute's board and camera; OpenCV's geometry module
-# (PnP, projection, buildMST, LevMarq) stays private.
+# (PnP, projection, buildMST, LevMarq) and calib module (calibrateCamera) stay
+# private.
 target_link_libraries(
   calib_solve
   PUBLIC calib_compute
-  PRIVATE opencv_geometry)
+  PRIVATE opencv_calib opencv_geometry)
 
 vc_target_warnings(calib_solve)

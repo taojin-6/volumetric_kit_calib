@@ -12,6 +12,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -21,6 +22,8 @@
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
+#include "volumetric_kit/calib/quality/lens_gate.hpp"
+#include "volumetric_kit/calib/quality/lens_readiness.hpp"
 #include "volumetric_kit/calib/quality/live_checks.hpp"
 #include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
@@ -409,6 +412,66 @@ TEST(QualityOom, FormatResults) {
   const std::string why = "depth checks: capture 3: the device was lost";
   expect_oom_anywhere([&] {
     return format_results(s.cameras, s.solution, s.metrics, nullptr, why);
+  });
+}
+
+// A fitted lens's gates, its results files and a session's readiness: on a
+// failing gate and a refusal too.
+TEST(QualityOom, TheLensGates) {
+  const compute::Board board = test::lab_checkerboard();
+  const test::FisheyeTruth lens;
+  test::FisheyeCapture capture;
+  capture.noise_px = 0.15;
+  const std::vector<Observation> views =
+      test::fisheye_views(board, lens, capture);
+  const solve::LensFit fit =
+      solve::solve_lens("bm-1", lens.size, board, views).value();
+  // judge_lens takes its fit by value: each on a copy made here, as a caller
+  // has one to move in.
+  const auto judged = [](solve::LensFit& copy) {
+    return judge_lens(std::move(copy));
+  };
+  expect_oom_on_a_copy(fit, judged);
+  solve::LensFit failing = fit;
+  failing.holdout_rms_px = 9.0;
+  failing.camera.model.distortion.k1 = -0.5;
+  for (solve::CornerResidual& r : failing.residuals) r.residual.x += 1.0;
+  expect_oom_on_a_copy(failing, judged);
+  solve::LensFit unknown = fit;
+  unknown.residuals[0].capture = 1000;
+  expect_oom_on_a_copy(unknown, judged);
+  LensGateOptions refused;
+  refused.min_cell_corners = 0;
+  expect_oom_on_a_copy(fit, [&](solve::LensFit& copy) {
+    return judge_lens(std::move(copy), refused);
+  });
+
+  const LensVerdict verdict = judge_lens(fit).value();
+  LensVerdict other = verdict;
+  other.fit.camera.id = "bm-2";
+  other.fit.residuals.resize(4);
+  camera::ArrayCalibration base;
+  base.sensors.emplace_back().id = "bm-3";
+  base.sensors.back().color = camera::CameraCalibration{
+      fit.camera.model, camera::IntrinsicsSource::Calibrated};
+  const std::vector<LensVerdict> both = {verdict, other};
+  const std::vector<std::string> unsolved = {"bm-4"};
+  const std::vector<std::string> report_only = {"bm-2"};
+  expect_oom_anywhere(
+      [&] { return format_lens_results(both, unsolved, &base, report_only); });
+  const std::vector<LensVerdict> twice = {verdict, verdict};
+  const std::vector<std::string> none;
+  expect_oom_anywhere(
+      [&] { return format_lens_results(twice, none, nullptr); });
+
+  const std::vector<std::int64_t> frontal = {0, 3};
+  expect_oom_anywhere([&] {
+    return lens_readiness("bm-1", lens.size, board, views, &frontal);
+  });
+  LensReadyOptions wrong;
+  wrong.min_cells = 2.0;
+  expect_oom_anywhere([&] {
+    return lens_readiness("bm-1", lens.size, board, views, nullptr, wrong);
   });
 }
 

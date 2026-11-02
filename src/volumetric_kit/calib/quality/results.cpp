@@ -17,6 +17,7 @@
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 #include "volumetric_kit/calib/detect/tag.hpp"
+#include "volumetric_kit/calib/quality/lens_gate.hpp"
 #include "volumetric_kit/sensor/camera/array_calibration.hpp"
 
 namespace volumetric_kit::calib::quality {
@@ -24,6 +25,9 @@ namespace {
 
 namespace camera = sensor::camera;
 using Writer = detail::JsonWriter;
+
+constexpr const char* kReportFormat = "volumetric_kit_calib.report";
+constexpr int kReportVersion = 2;
 
 // Refuses a solution or metrics that index cameras the rig does not have,
 // or hold another count of them, or a calibration of other sensors.
@@ -480,8 +484,8 @@ std::string report_text(const std::vector<std::string>& ids,
   const std::size_t k = ids.size();
   Writer w;
   w.open_object();
-  w.key("format").value("volumetric_kit_calib.report");
-  w.key("version").value(1);
+  w.key("format").value(kReportFormat);
+  w.key("version").value(kReportVersion);
   settings(w.key("settings"), ids, solution, metrics.options);
 
   w.key("solver").open_object();
@@ -710,23 +714,166 @@ std::string csv_text(const std::string& text) {
   return quoted + "\"";
 }
 
+constexpr const char* kResidualsHeader =
+    "capture,serial,corner_id,u,v,du,dv,weight,dropped\n";
+
+// A corner's line of the residuals file, `camera` its camera's id.
+void residual_line(std::string& text, const std::string& camera,
+                   const solve::CornerResidual& r) {
+  text += std::to_string(r.capture);
+  text += ',';
+  text += csv_text(camera);
+  text += ',';
+  text += std::to_string(r.corner);
+  for (const double v :
+       {r.pixel.x, r.pixel.y, r.residual.x, r.residual.y, r.weight}) {
+    text += ',';
+    text += csv_number(v);
+  }
+  text += r.dropped ? ",1\n" : ",0\n";
+}
+
 std::string residuals_text(const std::vector<std::string>& ids,
                            const solve::RigSolution& solution) {
-  std::string text = "capture,serial,corner_id,u,v,du,dv,weight,dropped\n";
+  std::string text = kResidualsHeader;
   for (const solve::CornerResidual& r : solution.residuals) {
-    text += std::to_string(r.capture);
-    text += ',';
-    text += csv_text(ids[r.camera]);
-    text += ',';
-    text += std::to_string(r.corner);
-    for (const double v :
-         {r.pixel.x, r.pixel.y, r.residual.x, r.residual.y, r.weight}) {
-      text += ',';
-      text += csv_number(v);
-    }
-    text += r.dropped ? ",1\n" : ",0\n";
+    residual_line(text, ids[r.camera], r);
   }
   return text;
+}
+
+void lens_section(Writer& w, const LensVerdict& verdict, bool written) {
+  const solve::LensFit& fit = verdict.fit;
+  const camera::CameraModel& model = fit.camera.model;
+  w.open_object();
+  w.key("verdict").value(verdict.pass ? "pass" : "fail");
+  w.key("failed").open_array();
+  for (const std::string& why : verdict.failed) w.value(why);
+  w.close_array();
+  w.key("written").value(written);
+  w.key("start").value(fit.from_start ? "given" : "opencv");
+  w.key("rms_px").value(fit.rms_px);
+  w.key("holdout_rms_px").value(fit.holdout_rms_px);
+  w.key("worst_cell_bias_px").value(verdict.worst_cell_bias_px);
+  w.key("fold_deg").value(verdict.fold_deg);
+  w.key("frame_folds").value(verdict.frame_folds);
+  w.key("corner_reach_deg").open_object();
+  w.key("top_left").value(verdict.corner_reach_deg[0]);
+  w.key("top_right").value(verdict.corner_reach_deg[1]);
+  w.key("bottom_left").value(verdict.corner_reach_deg[2]);
+  w.key("bottom_right").value(verdict.corner_reach_deg[3]);
+  w.close_object();
+  w.key("side_reach_deg").open_object();
+  w.key("left").value(verdict.side_reach_deg[0]);
+  w.key("right").value(verdict.side_reach_deg[1]);
+  w.close_object();
+  w.key("lens").open_object();
+  w.key("width").value(std::size_t{model.size.width});
+  w.key("height").value(std::size_t{model.size.height});
+  w.key("intrinsics").open_object();
+  w.key("fx").value(model.intrinsics.fx);
+  w.key("fy").value(model.intrinsics.fy);
+  w.key("cx").value(model.intrinsics.cx);
+  w.key("cy").value(model.intrinsics.cy);
+  w.close_object();
+  w.key("distortion").open_object();
+  w.key("model").value("rational");
+  w.key("k1").value(model.distortion.k1);
+  w.key("k2").value(model.distortion.k2);
+  w.key("p1").value(model.distortion.p1);
+  w.key("p2").value(model.distortion.p2);
+  w.key("k3").value(model.distortion.k3);
+  w.key("k4").value(model.distortion.k4);
+  w.key("k5").value(model.distortion.k5);
+  w.key("k6").value(model.distortion.k6);
+  w.close_object();
+  w.close_object();
+  w.key("sigma").open_object();
+  w.key("fx").value(fit.sigma.fx);
+  w.key("fy").value(fit.sigma.fy);
+  w.key("cx").value(fit.sigma.cx);
+  w.key("cy").value(fit.sigma.cy);
+  w.close_object();
+  const auto count = [&](solve::LensView::Use use) {
+    return std::count_if(
+        fit.views.begin(), fit.views.end(),
+        [use](const solve::LensView& view) { return view.use == use; });
+  };
+  w.key("view_counts").open_object();
+  for (const solve::LensView::Use use :
+       {solve::LensView::Use::Fitted, solve::LensView::Use::HeldOut,
+        solve::LensView::Use::Dropped, solve::LensView::Use::TooFew}) {
+    w.key(solve::to_string(use)).value(static_cast<std::int64_t>(count(use)));
+  }
+  w.close_object();
+  w.key("views").open_array();
+  for (const solve::LensView& view : fit.views) {
+    w.open_object();
+    w.key("capture").value(view.frame_id);
+    w.key("use").value(solve::to_string(view.use));
+    w.key("corners").value(view.corners);
+    w.key("rms_px").value(view.rms_px);
+    w.close_object();
+  }
+  w.close_array();
+  w.close_object();
+}
+
+// Refuses an id empty or repeated across `lenses` and `unsolved`, or one in
+// `report_only` that `lenses` does not hold.
+core::Status check_lens_ids(const std::vector<LensVerdict>& lenses,
+                            const std::vector<std::string>& unsolved,
+                            const std::vector<std::string>& report_only) {
+  constexpr const char* kPrefix = "format_lens_results: ";
+  std::set<std::string> ids;
+  const auto add = [&](const std::string& id) -> core::Status {
+    if (id.empty()) {
+      return core::Status::invalid_argument(std::string(kPrefix) +
+                                            "a camera has no id");
+    }
+    if (!ids.insert(id).second) {
+      return core::Status::invalid_argument(std::string(kPrefix) + "camera \"" +
+                                            id + "\" is named twice");
+    }
+    return {};
+  };
+  for (const LensVerdict& lens : lenses) VKC_TRY(add(lens.fit.camera.id));
+  const std::set<std::string> solved = ids;
+  for (const std::string& id : unsolved) VKC_TRY(add(id));
+  for (const std::string& id : report_only) {
+    if (solved.count(id) == 0) {
+      return core::Status::invalid_argument(std::string(kPrefix) +
+                                            "report-only camera \"" + id +
+                                            "\" has no lens");
+    }
+  }
+  return {};
+}
+
+// `lenses` but `report_only`, marked calibrated, and `base`'s other colour
+// lenses as they are: no pose, no world, nothing else of `base`.
+camera::ArrayCalibration lens_file(const std::vector<LensVerdict>& lenses,
+                                   const camera::ArrayCalibration* base,
+                                   const std::set<std::string>& report_only) {
+  camera::ArrayCalibration file;
+  std::set<std::string> taken = report_only;
+  for (const LensVerdict& lens : lenses) {
+    const solve::RigCamera& cam = lens.fit.camera;
+    taken.insert(cam.id);
+    if (report_only.count(cam.id) != 0) continue;
+    camera::SensorCalibration& sensor = file.sensors.emplace_back();
+    sensor.id = cam.id;
+    sensor.color = camera::CameraCalibration{
+        cam.model, camera::IntrinsicsSource::Calibrated};
+  }
+  if (base == nullptr) return file;
+  for (const camera::SensorCalibration& carried : base->sensors) {
+    if (taken.count(carried.id) != 0 || !carried.color) continue;
+    camera::SensorCalibration& sensor = file.sensors.emplace_back();
+    sensor.id = carried.id;
+    sensor.color = carried.color;
+  }
+  return file;
 }
 
 }  // namespace
@@ -757,6 +904,52 @@ core::Result<ResultFiles> format_results(
     files.report =
         report_text(ids, solution, metrics, depth, depth_unchecked, world);
     files.residuals = residuals_text(ids, solution);
+    return files;
+  });
+}
+
+core::Result<ResultFiles> format_lens_results(
+    const std::vector<LensVerdict>& lenses,
+    const std::vector<std::string>& unsolved,
+    const camera::ArrayCalibration* base,
+    const std::vector<std::string>& report_only) {
+  constexpr const char* kWhat = "format_lens_results";
+  return compute::guarded(kWhat, [&]() -> core::Result<ResultFiles> {
+    VKC_TRY(check_lens_ids(lenses, unsolved, report_only));
+    const std::set<std::string> unwritten(report_only.begin(),
+                                          report_only.end());
+    ResultFiles files;
+    const camera::ArrayCalibration file = lens_file(lenses, base, unwritten);
+    if (!file.sensors.empty()) {
+      core::Result<std::string> text = camera::format_array_calibration(file);
+      if (!text.ok()) return text.status().with_context(kWhat);
+      files.array_calibration = *std::move(text);
+    }
+
+    Writer w;
+    w.open_object();
+    w.key("format").value(kReportFormat);
+    w.key("version").value(kReportVersion);
+    w.key("lenses").open_object();
+    w.key("unsolved").open_array(true);
+    for (const std::string& id : unsolved) w.value(id);
+    w.close_array();
+    w.key("cameras").open_object();
+    for (const LensVerdict& lens : lenses) {
+      const std::string& id = lens.fit.camera.id;
+      lens_section(w.key(id), lens, unwritten.count(id) == 0);
+    }
+    w.close_object();
+    w.close_object();
+    w.close_object();
+    files.report = std::move(w).text();
+
+    files.residuals = kResidualsHeader;
+    for (const LensVerdict& lens : lenses) {
+      for (const solve::CornerResidual& r : lens.fit.residuals) {
+        residual_line(files.residuals, lens.fit.camera.id, r);
+      }
+    }
     return files;
   });
 }

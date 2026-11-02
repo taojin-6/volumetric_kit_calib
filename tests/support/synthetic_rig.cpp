@@ -747,6 +747,88 @@ camera::CameraModel FisheyeTruth::frame() const {
   return {size, {f, f, cx, cy}, {}};
 }
 
+std::vector<Observation> fisheye_views(const compute::Board& board,
+                                       const FisheyeTruth& truth,
+                                       const FisheyeCapture& capture) {
+  // Draws the same with every standard library, as portable_normal does.
+  std::mt19937 rng(capture.seed);
+  const auto uniform = [&rng](double from, double to) {
+    constexpr double kToUnit = 1.0 / 4294967296.0;  // 2^-32
+    return from + (to - from) * (static_cast<double>(rng()) + 0.5) * kToUnit;
+  };
+  // Where each board's centre is: off axis, around it (degrees), how far.
+  struct Aim {
+    double off_axis;
+    double around;
+    double distance_m;
+  };
+  std::vector<Aim> aims;
+  for (int i = 0; i < 10; ++i) {
+    aims.push_back(
+        Aim{uniform(0.0, 25.0), uniform(-180.0, 180.0), uniform(0.45, 0.9)});
+  }
+  for (int i = 0; i < 10; ++i) {
+    aims.push_back(
+        Aim{uniform(28.0, 48.0), uniform(-180.0, 180.0), uniform(0.4, 0.8)});
+  }
+  for (const double around : {0.0, 180.0, 0.0, 180.0, 10.0, 170.0, -10.0,
+                              -170.0, 20.0, 160.0, -20.0, -160.0}) {
+    aims.push_back(Aim{uniform(55.0, capture.reach_deg),
+                       around + uniform(-5.0, 5.0), uniform(0.35, 0.6)});
+  }
+  for (const double around :
+       {-150.0, -30.0, 30.0, 150.0, -145.0, -35.0, 35.0, 145.0}) {
+    aims.push_back(Aim{uniform(58.0, capture.reach_deg + 4.0),
+                       around + uniform(-5.0, 5.0), uniform(0.35, 0.6)});
+  }
+
+  std::vector<Observation> views;
+  for (const Aim& aim : aims) {
+    const double off = aim.off_axis * kDeg;
+    const double around = aim.around * kDeg;
+    const camera::Vec3d centre =
+        aim.distance_m * camera::Vec3d(std::sin(off) * std::cos(around),
+                                       std::sin(off) * std::sin(around),
+                                       std::cos(off));
+    const camera::Vec3d z = glm::normalize(centre);
+    const camera::Vec3d x =
+        glm::normalize(glm::cross(camera::Vec3d(0.0, 1.0, 0.0), z));
+    const camera::Mat3d facing(x, glm::cross(z, x), z);
+    const double tilt = uniform(20.0, 45.0) * kDeg;
+    const double spin = uniform(-20.0, 20.0) * kDeg;
+    const double ax = portable_normal(rng);
+    const double ay = portable_normal(rng);
+    const double axis = std::hypot(ax, ay);
+    camera::Mat4d board_to_camera(
+        facing * camera::rotation_from_rodrigues(
+                     {tilt * ax / axis, tilt * ay / axis, spin}));
+    board_to_camera[3] =
+        glm::dvec4(centre - compute::centre_in(board, board_to_camera), 1.0);
+
+    Observation view;
+    view.camera_id = capture.camera;
+    view.frame_id = static_cast<std::int64_t>(views.size());
+    const std::vector<cv::Point3d>& object = board.object_points();
+    for (std::size_t id = 0; id < object.size(); ++id) {
+      const camera::Vec3d p =
+          apply(board_to_camera, {object[id].x, object[id].y, object[id].z});
+      if (p.z <= 0.0) continue;
+      const cv::Point2d pixel = truth.project({p.x, p.y, p.z});
+      if (pixel.x < 3.0 || pixel.x > truth.size.width - 4.0 || pixel.y < 3.0 ||
+          pixel.y > truth.size.height - 4.0) {
+        continue;
+      }
+      view.points.push_back(
+          {static_cast<int>(id),
+           {pixel.x + capture.noise_px * portable_normal(rng),
+            pixel.y + capture.noise_px * portable_normal(rng)},
+           1.0});
+    }
+    if (view.points.size() >= 12) views.push_back(std::move(view));
+  }
+  return views;
+}
+
 camera::Mat4d board_facing_camera(const compute::Board& board,
                                   const camera::Vec3d& centre, double tilt_deg,
                                   double roll_deg) {
