@@ -28,6 +28,25 @@ inline detect::LumaView luma(const cv::Mat& image) {
           static_cast<std::uint32_t>(image.rows), image.step[0], image.data};
 }
 
+/// @brief A picture halved as sensor's LumaPass halves it on the GPU: each
+///        pixel the mean of 2 x 2, rounded half up, an odd last row or column
+///        left out (what `detect::DetectOptions::half` takes).
+/// @param full  A `CV_8UC1` picture.
+/// @return Its half.
+inline cv::Mat halved(const cv::Mat& full) {
+  cv::Mat half(full.rows / 2, full.cols / 2, CV_8U);
+  for (int y = 0; y < half.rows; ++y) {
+    for (int x = 0; x < half.cols; ++x) {
+      const int sum = full.at<std::uint8_t>(2 * y, 2 * x) +
+                      full.at<std::uint8_t>(2 * y, 2 * x + 1) +
+                      full.at<std::uint8_t>(2 * y + 1, 2 * x) +
+                      full.at<std::uint8_t>(2 * y + 1, 2 * x + 1);
+      half.at<std::uint8_t>(y, x) = static_cast<std::uint8_t>((sum + 2) / 4);
+    }
+  }
+  return half;
+}
+
 /// @brief Whether @p status is an `InvalidArgument` with @p message.
 /// @param status   The status checked.
 /// @param message  Its whole message.

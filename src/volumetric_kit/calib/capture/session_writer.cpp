@@ -31,7 +31,6 @@ namespace volumetric_kit::calib::capture {
 namespace {
 
 using sensor::camera::ArrayCalibration;
-using sensor::camera::CameraModel;
 using Code = core::Status::Code;
 
 core::Status invalid(const std::string& message) {
@@ -63,18 +62,9 @@ bool same_ignoring_case(const std::string& a, const std::string& b) noexcept {
   return true;
 }
 
-// Every camera streams the mode the first does.
-core::Status check_same_size(const SessionCamera& camera,
-                             const SessionCamera& first, const char* which,
-                             const CameraModel& model,
-                             const CameraModel& first_model) {
-  if (model.size.width == first_model.size.width &&
-      model.size.height == first_model.size.height) {
-    return {};
-  }
-  return invalid("camera " + camera.info.id + "'s " + which + " model is " +
-                 size_text(model.size) + ", camera " + first.info.id + "'s " +
-                 size_text(first_model.size));
+bool same_size(const sensor::camera::ImageSize& a,
+               const sensor::camera::ImageSize& b) noexcept {
+  return a.width == b.width && a.height == b.height;
 }
 
 core::Status check_depth_mode(const DepthMode& d) {
@@ -88,33 +78,89 @@ core::Status check_depth_mode(const DepthMode& d) {
   return {};
 }
 
-// The factory record: every camera's models and depth_to_color, unposed,
-// which sensor's checks: a camera at least, no id twice, models it can hold.
-// @pre Every camera has both models.
-core::Result<ArrayCalibration> factory_calibration(const SessionInfo& info) {
+// The factory record: each camera's factory models and depth_to_color,
+// unposed, which sensor checks: no id twice, models it can hold. Empty when no
+// camera has a factory model.
+core::Result<std::optional<ArrayCalibration>> factory_calibration(
+    const SessionInfo& info) {
   ArrayCalibration array;
   for (const SessionCamera& camera : info.cameras) {
+    if (!camera.color && !camera.depth) continue;
     sensor::camera::SensorCalibration sensor;
-    sensor.id = camera.info.id;
-    sensor.color = sensor::camera::CameraCalibration{
-        *camera.info.color, sensor::camera::IntrinsicsSource::Factory};
-    sensor.depth = sensor::camera::CameraCalibration{
-        *camera.info.depth, sensor::camera::IntrinsicsSource::Factory};
-    sensor.depth_to_color = camera.info.depth_to_color;
+    sensor.id = camera.id;
+    if (camera.color) {
+      sensor.color = sensor::camera::CameraCalibration{
+          *camera.color, sensor::camera::IntrinsicsSource::Factory};
+    }
+    if (camera.depth) {
+      sensor.depth = sensor::camera::CameraCalibration{
+          *camera.depth, sensor::camera::IntrinsicsSource::Factory};
+    }
+    sensor.depth_to_color = camera.depth_to_color;
     array.sensors.push_back(std::move(sensor));
   }
+  if (array.sensors.empty()) return std::optional<ArrayCalibration>();
   if (core::Status valid = sensor::camera::validate_array_calibration(array);
       !valid.ok()) {
     return std::move(valid).with_context("SessionWriter: factory calibration");
   }
-  return array;
+  return std::optional<ArrayCalibration>(std::move(array));
+}
+
+core::Status check_camera(const SessionCamera& camera,
+                          const SessionCamera& first) {
+  const std::string& id = camera.id;
+  if (!detail::is_plain_serial(id)) {
+    return invalid("camera id \"" + id + "\" is not a plain file name");
+  }
+  if (camera.size.width == 0 || camera.size.height == 0) {
+    return invalid("camera " + id + " has no size");
+  }
+  if (!same_size(camera.size, first.size)) {
+    return invalid("camera " + id + " is " + size_text(camera.size) +
+                   ", camera " + first.id + " " + size_text(first.size));
+  }
+  if (camera.color && !same_size(camera.color->size, camera.size)) {
+    return invalid("camera " + id + "'s colour model is " +
+                   size_text(camera.color->size) + ", not its " +
+                   size_text(camera.size));
+  }
+  if (camera.fps == 0) return invalid("camera " + id + "'s fps is unknown");
+  if (camera.fps != first.fps) {
+    return invalid("camera " + id + " streams at " +
+                   std::to_string(camera.fps) + " fps, camera " + first.id +
+                   " at " + std::to_string(first.fps));
+  }
+  if ((camera.lens == LensOrigin::File) == camera.lens_file.empty()) {
+    return invalid("camera " + id +
+                   (camera.lens == LensOrigin::File
+                        ? "'s lens came from a file it does not name"
+                        : " names a lens file its lens did not come from"));
+  }
+  if (camera.lens != LensOrigin::Factory && camera.lens != LensOrigin::File &&
+      camera.lens != LensOrigin::StandIn) {
+    return invalid("camera " + id + "'s lens origin is not a LensOrigin");
+  }
+  if (camera.lens == LensOrigin::Factory && !camera.color) {
+    return invalid("camera " + id +
+                   "'s lens came from a factory model it does not have");
+  }
+  if (!camera.lens_file.empty()) {
+    VKC_TRY(core::check_path("SessionWriter: camera " + id + "'s lens file",
+                             camera.lens_file));
+  }
+  return {};
 }
 
 // The session's checks, around sensor's of its factory record, which it
 // returns.
-core::Result<ArrayCalibration> check_info(const SessionInfo& info) {
+core::Result<std::optional<ArrayCalibration>> check_info(
+    const SessionInfo& info) {
   VKC_TRY(core::check_path("SessionWriter: directory", info.directory));
-  VKC_TRY(core::check_path("SessionWriter: sync_path", info.sync_path));
+  if (!info.sync_path.empty()) {
+    VKC_TRY(core::check_path("SessionWriter: sync_path", info.sync_path));
+  }
+  if (info.driver.empty()) return invalid("no driver named");
   if (core::Status board = check_target(info.board); !board.ok()) {
     return std::move(board).with_context("SessionWriter: board");
   }
@@ -126,75 +172,84 @@ core::Result<ArrayCalibration> check_info(const SessionInfo& info) {
   if (core::Status tag = check_origin_tag(info.origin_tag); !tag.ok()) {
     return std::move(tag).with_context("SessionWriter");
   }
-  VKC_TRY(check_depth_mode(info.depth_mode));
-  for (const SessionCamera& camera : info.cameras) {
-    const std::string& serial = camera.info.id;
-    if (!detail::is_plain_serial(serial)) {
-      return invalid("camera serial \"" + serial +
-                     "\" is not a plain file name");
-    }
-    if (!camera.info.color) {
-      return invalid("camera " + serial + " has no colour model");
-    }
-    if (!camera.info.depth) {
-      return invalid("camera " + serial + " has no depth model");
-    }
+  if (info.mode != SessionMode::Extrinsics &&
+      info.mode != SessionMode::Intrinsics) {
+    return invalid("mode is not a SessionMode");
   }
-  VKC_ASSIGN(ArrayCalibration factory, factory_calibration(info));
-  // sensor's check found a camera at least, and no serial twice.
+  if (info.cameras.empty()) return invalid("no cameras");
   const SessionCamera& first = info.cameras.front();
+  const SessionCamera* first_depth = nullptr;
   bool reference = false;
   for (std::size_t i = 0; i < info.cameras.size(); ++i) {
     const SessionCamera& camera = info.cameras[i];
-    const std::string& serial = camera.info.id;
+    VKC_TRY(check_camera(camera, first));
     for (std::size_t j = 0; j < i; ++j) {
-      if (same_ignoring_case(info.cameras[j].info.id, serial)) {
-        return invalid("cameras " + info.cameras[j].info.id + " and " + serial +
-                       " differ only in case");
+      if (same_ignoring_case(info.cameras[j].id, camera.id)) {
+        return invalid(info.cameras[j].id == camera.id
+                           ? "camera " + camera.id + " is named twice"
+                           : "cameras " + info.cameras[j].id + " and " +
+                                 camera.id + " differ only in case");
       }
     }
-    VKC_TRY(check_same_size(camera, first, "colour", *camera.info.color,
-                            *first.info.color));
-    VKC_TRY(check_same_size(camera, first, "depth", *camera.info.depth,
-                            *first.info.depth));
-    if (camera.info.fps == 0) {
-      return invalid("camera " + serial + "'s fps is unknown");
+    if (camera.depth) {
+      if (first_depth == nullptr) first_depth = &camera;
+      if (!same_size(camera.depth->size, first_depth->depth->size)) {
+        return invalid("camera " + camera.id + "'s depth model is " +
+                       size_text(camera.depth->size) + ", camera " +
+                       first_depth->id + "'s " +
+                       size_text(first_depth->depth->size));
+      }
     }
-    if (camera.info.fps != first.info.fps) {
-      return invalid("camera " + serial + " streams at " +
-                     std::to_string(camera.info.fps) + " fps, camera " +
-                     first.info.id + " at " + std::to_string(first.info.fps));
-    }
-    reference = reference || serial == info.reference;
+    reference = reference || camera.id == info.reference;
   }
+  if (first_depth != nullptr && !info.depth_mode) {
+    return invalid("camera " + first_depth->id +
+                   " has depth, and the session no depth mode");
+  }
+  if (first_depth == nullptr && info.depth_mode) {
+    return invalid("a depth mode, and no camera with depth");
+  }
+  if (info.depth_mode) VKC_TRY(check_depth_mode(*info.depth_mode));
   if (!reference) {
     return invalid("reference \"" + info.reference + "\" is not a camera");
   }
-  return factory;
+  return factory_calibration(info);
 }
 
 // @pre `info` passed check_info.
 core::Status check_part(const SessionInfo& info, std::size_t i,
                         const CameraCapture& part) {
-  const sensor::SensorInfo& camera = info.cameras[i].info;
+  const SessionCamera& camera = info.cameras[i];
   const std::string where = "capture: camera " + camera.id + ": ";
-  // A JPEG starts with its SOI marker.
-  if (part.jpeg.size() < 2 || part.jpeg[0] != 0xFF || part.jpeg[1] != 0xD8) {
-    return invalid(where + "the colour is not a JPEG");
+  if (!part.jpeg.empty()) {
+    // A JPEG starts with its SOI marker.
+    if (part.jpeg.size() < 2 || part.jpeg[0] != 0xFF || part.jpeg[1] != 0xD8) {
+      return invalid(where + "the colour is not a JPEG");
+    }
+  } else if (part.luma.size() !=
+             static_cast<std::size_t>(camera.size.width) * camera.size.height) {
+    return invalid(where + "neither a JPEG nor its " + size_text(camera.size) +
+                   " luma");
   }
-  if (part.depth == nullptr) return invalid(where + "no depth");
-  const sensor::camera::ImageSize& depth = camera.depth->size;
-  const std::size_t samples =
-      static_cast<std::size_t>(depth.width) * depth.height;
-  if (part.depth->size() != samples) {
-    return invalid(where + std::to_string(part.depth->size()) +
-                   " depth samples for a " + size_text(depth) + " depth image");
+  if (!camera.depth) {
+    if (part.depth != nullptr) {
+      return invalid(where + "depth from a camera without depth");
+    }
+  } else {
+    if (part.depth == nullptr) return invalid(where + "no depth");
+    const sensor::camera::ImageSize& depth = camera.depth->size;
+    const std::size_t samples =
+        static_cast<std::size_t>(depth.width) * depth.height;
+    if (part.depth->size() != samples) {
+      return invalid(where + std::to_string(part.depth->size()) +
+                     " depth samples for a " + size_text(depth) +
+                     " depth image");
+    }
   }
   const sensor::camera::ImageSize& size = part.detection.image_size;
-  const sensor::camera::ImageSize& color = camera.color->size;
-  if (size.width != color.width || size.height != color.height) {
+  if (!same_size(size, camera.size)) {
     return invalid(where + "a detection in a " + size_text(size) +
-                   " image, not the colour image's " + size_text(color));
+                   " image, not the camera's " + size_text(camera.size));
   }
   for (const DetectedPoint& point : part.detection.observation.points) {
     if (!finite(point.pixel) || !std::isfinite(point.weight)) {
@@ -276,7 +331,7 @@ struct SessionWriter::State {
   };
 
   // May throw: a deque may allocate as it is made (libstdc++'s does).
-  State(SessionInfo session, ArrayCalibration factory_record,
+  State(SessionInfo session, std::optional<ArrayCalibration> factory_record,
         std::size_t queue_capacity)
       : info(std::move(session)),
         factory(std::move(factory_record)),
@@ -284,53 +339,78 @@ struct SessionWriter::State {
 
   // --- The writer's thread alone ----------------------------------------
 
-  // The session's directory, then its tree.
+  // The session's directory, then its tree: each camera's images, and each
+  // depth camera's depth.
   std::vector<std::string> tree() const {
     const std::string& root = info.directory;
     std::vector<std::string> paths = {root};
-    for (const char* name : {detail::kImagesDir, detail::kDepthDir}) {
-      const std::string top = detail::join(root, name);
-      paths.push_back(top);
+    const std::string images = detail::join(root, detail::kImagesDir);
+    paths.push_back(images);
+    for (const SessionCamera& camera : info.cameras) {
+      paths.push_back(detail::join(images, camera.id));
+    }
+    if (info.depth_mode) {
+      const std::string depth = detail::join(root, detail::kDepthDir);
+      paths.push_back(depth);
       for (const SessionCamera& camera : info.cameras) {
-        paths.push_back(detail::join(top, camera.info.id));
+        if (camera.depth) paths.push_back(detail::join(depth, camera.id));
       }
     }
     paths.push_back(detail::join(root, detail::kCapturesDir));
     return paths;
   }
 
+  // The SHA-256 of the files the session names, the sync file and the lens
+  // files, each read once.
+  core::Status read_named_files() {
+    if (!info.sync_path.empty() && facts.sync_sha256.empty()) {
+      VKC_ASSIGN(const std::string sync, core::read_file(info.sync_path));
+      facts.sync_sha256 = detail::sha256_hex(sync);
+    }
+    facts.lens_sha256.resize(info.cameras.size());
+    for (std::size_t i = 0; i < info.cameras.size(); ++i) {
+      const std::string& path = info.cameras[i].lens_file;
+      if (path.empty() || !facts.lens_sha256[i].empty()) continue;
+      for (std::size_t j = 0; j < i; ++j) {
+        if (info.cameras[j].lens_file == path) {
+          facts.lens_sha256[i] = facts.lens_sha256[j];
+        }
+      }
+      if (!facts.lens_sha256[i].empty()) continue;
+      VKC_ASSIGN(const std::string lens, core::read_file(path));
+      facts.lens_sha256[i] = detail::sha256_hex(lens);
+    }
+    return {};
+  }
+
   // The session's directory tree and factory record, at the first capture;
   // a failure leaves what was made, and the next capture goes on from there.
   core::Status prepare() {
-    if (sync_sha256.empty()) {
-      VKC_ASSIGN(const std::string sync, core::read_file(info.sync_path));
-      sync_sha256 = detail::sha256_hex(sync);
-    }
+    VKC_TRY(read_named_files());
     if (directories.empty()) directories = tree();
     while (made < directories.size()) {
       if (made == 0) {
         std::string stamp = detail::iso_time(now_ns());
         VKC_TRY(core::create_new_directory(directories[0]));
-        created = std::move(stamp);
+        facts.created = std::move(stamp);
       } else {
         VKC_TRY(core::create_new_directory(directories[made]));
       }
       ++made;
     }
-    if (!factory_written) {
+    if (factory && !facts.factory) {
       VKC_TRY(sensor::camera::write_array_calibration(
-          detail::join(info.directory, detail::kFactoryFile), factory,
+          detail::join(info.directory, detail::kFactoryFile), *factory,
           core::WriteMode::CreateNew));
-      factory_written = true;
+      facts.factory = true;
     }
     return {};
   }
 
   core::Status write_session() {
-    return core::write_file(
-        detail::join(info.directory, detail::kSessionFile),
-        detail::format_session(info, created, sync_sha256, captures),
-        core::WriteMode::Replace);
+    return core::write_file(detail::join(info.directory, detail::kSessionFile),
+                            detail::format_session(info, facts, captures),
+                            core::WriteMode::Replace);
   }
 
   // Lists `entry` in session.json, or leaves it unlisted on any failure.
@@ -355,18 +435,26 @@ struct SessionWriter::State {
     // TODO: encode and write each camera's files as a task of its own if the
     // rig's write time per capture (hand check H4) asks for it.
     for (std::size_t i = 0; i < info.cameras.size(); ++i) {
-      const std::string& serial = info.cameras[i].info.id;
-      const sensor::camera::ImageSize& depth = info.cameras[i].info.depth->size;
+      const SessionCamera& camera = info.cameras[i];
       const CameraCapture& part = job.cameras[i];
+      const bool jpeg = !part.jpeg.empty();
+      const std::string color = detail::join(
+          info.directory, detail::color_file(camera.id, index, jpeg));
+      if (jpeg) {
+        VKC_TRY(core::write_file(color, bytes_of(part.jpeg),
+                                 core::WriteMode::CreateNew));
+      } else {
+        VKC_TRY(core::write_file(color, detail::pgm(part.luma, camera.size),
+                                 core::WriteMode::CreateNew));
+      }
+      if (!camera.depth) continue;
+      const sensor::camera::ImageSize& depth = camera.depth->size;
       const std::vector<std::uint16_t>& samples = *part.depth;
-      VKC_TRY(core::write_file(
-          detail::join(info.directory, detail::color_file(serial, index)),
-          bytes_of(part.jpeg), core::WriteMode::CreateNew));
       VKC_ASSIGN(const std::vector<std::uint8_t> png,
                  sensor::io::encode_png_u16(samples.data(), samples.size(),
                                             depth.width, depth.height));
       VKC_TRY(core::write_file(
-          detail::join(info.directory, detail::depth_file(serial, index)),
+          detail::join(info.directory, detail::depth_file(camera.id, index)),
           bytes_of(png), core::WriteMode::CreateNew));
     }
     VKC_TRY(core::write_file(
@@ -461,15 +549,13 @@ struct SessionWriter::State {
 
   // Set at create, then read-only, so any thread reads them.
   const SessionInfo info;
-  const ArrayCalibration factory;
+  const std::optional<ArrayCalibration> factory;  // none without a factory lens
   const std::size_t capacity;
 
   // The writer's thread's alone.
   std::vector<std::string> directories;  // the session's, then its tree
-  std::string sync_sha256;
-  std::string created;
-  std::size_t made = 0;  // directories made
-  bool factory_written = false;
+  detail::SessionFacts facts;            // what session.json adds to `info`
+  std::size_t made = 0;                  // directories made
   int next_index = 0;
   std::vector<detail::CaptureEntry> captures;  // what session.json lists
   // Each capture carried out, written or not, until a drop takes it; the
@@ -495,7 +581,7 @@ core::Result<std::unique_ptr<SessionWriter>> SessionWriter::create(
     if (options.queue_capacity == 0) {
       return invalid("queue_capacity must be at least 1");
     }
-    VKC_ASSIGN(ArrayCalibration factory, check_info(info));
+    VKC_ASSIGN(std::optional<ArrayCalibration> factory, check_info(info));
     // The writer first, so that nothing after the thread starts can throw.
     std::unique_ptr<SessionWriter> writer(
         new SessionWriter(std::make_unique<State>(
@@ -576,6 +662,18 @@ std::size_t SessionWriter::pending() const {
 void SessionWriter::flush() {
   std::unique_lock<std::mutex> lock(state_->mutex);
   state_->idle.wait(lock, [this] { return state_->in_flight == 0; });
+}
+
+const char* to_string(LensOrigin origin) noexcept {
+  switch (origin) {
+    case LensOrigin::Factory:
+      return "factory";
+    case LensOrigin::File:
+      return "file";
+    case LensOrigin::StandIn:
+      return "stand-in";
+  }
+  return "unknown";
 }
 
 core::Result<std::string> session_stamp(

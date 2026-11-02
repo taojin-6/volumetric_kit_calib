@@ -36,8 +36,7 @@ endif()
 
 target_include_directories(calib_detect PUBLIC "${_vc_generated_inc}")
 
-# The public header names compute's Board; imgproc (resize, cornerSubPix) is
-# private.
+# The public header names compute's Board; imgproc (cornerSubPix) is private.
 target_link_libraries(
   calib_detect
   PUBLIC calib_compute

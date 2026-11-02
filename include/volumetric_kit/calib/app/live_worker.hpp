@@ -9,17 +9,18 @@
 ///        view checked, the capture rule driven, and the newest result handed
 ///        to the window.
 ///
-/// The worker is the only user of the rig's `SensorArray`, which is not
-/// thread-safe. Each set it polls is read back to the host in one submit
-/// (sensor's `PictureReadback`, luma alone), the board is found in every
-/// camera's luma at once (hybrid detection, then `quality::check_view`), and
-/// the result is published as a @ref LiveSnapshot: newest wins, so a slow
+/// The worker is the only user of the rig's `source::RigSource`, which is
+/// not thread-safe, whatever its cameras: each set comes with every camera's
+/// 8-bit luma and its half, made on the GPU and read back in one submit. The
+/// board is found in every camera's half, each corner refined in its luma,
+/// all cameras at once (`detect::detect_board`, then `quality::check_view`),
+/// and the result is published as a @ref LiveSnapshot: newest wins, so a slow
 /// window skips sets rather than queueing them, and the worker holds at most
 /// the set it is on and the one published. A capture the rule takes is copied
-/// out of its set and handed to a @ref CaptureSink, so the set's frames go
-/// back to the driver at once. Each set is also offered, before it is
-/// searched (@ref LiveWorker::set_detecting), to a @ref SetSink: the 3D
-/// view's worker, which prepares its depth.
+/// out of its set and the host luma and handed to a @ref CaptureSink, so the
+/// set's frames go back to the driver at once. Each set with RGB-D frames is
+/// also offered, before it is searched (@ref LiveWorker::set_detecting), to a
+/// @ref SetSink: the 3D view's worker, which prepares its depth.
 
 #include <chrono>
 #include <cstddef>
@@ -35,14 +36,11 @@
 #include "volumetric_kit/calib/core/view_check.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
 #include "volumetric_kit/calib/quality/live_checks.hpp"
+#include "volumetric_kit/calib/source/rig_source.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/base/stage_metrics.hpp"
 #include "volumetric_kit/sensor/array/sensor_array.hpp"
-
-namespace volumetric_kit::core {
-class Allocator;
-class Device;
-}  // namespace volumetric_kit::core
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -57,18 +55,23 @@ struct CameraFrameCopy {
   std::uint32_t width = 0;   ///< The luma's width (pixels).
   std::uint32_t height = 0;  ///< The luma's height (rows).
   /// The luma as the live view read it back, rows packed: what the capture's
-  /// full-resolution detection searches.
+  /// full-resolution detection searches, and what the session saves of a
+  /// camera with no JPEG.
   std::vector<std::uint8_t> luma;
-  /// The camera's JPEG, byte for byte (`RgbdFrame::color_bitstream`).
+  /// The camera's JPEG, byte for byte (`RgbdFrame::color_bitstream`); empty
+  /// when its frame has none.
   std::vector<std::uint8_t> jpeg;
   /// The depth, a sample per depth pixel, row-major, in the sensor's units
-  /// (`RgbdFrame::depth`).
+  /// (`RgbdFrame::depth`); empty for a camera without depth.
   std::vector<std::uint16_t> depth;
-  /// What one depth unit is (metres): `RgbdFrame::metres_per_unit`.
+  /// What one depth unit is (metres): `RgbdFrame::metres_per_unit`; 0
+  /// without depth.
   float metres_per_unit = 0.0f;
-  std::uint64_t timestamp_ns = 0;  ///< `RgbdFrame::timestamp_ns`.
-  std::uint64_t sequence = 0;      ///< `RgbdFrame::sequence`.
-  Detection live;  ///< The live (hybrid) detection, for the live-vs-full flag.
+  std::uint64_t timestamp_ns = 0;  ///< The picture's capture time.
+  /// Its frame's sequence number (`RgbdFrame::sequence`), or the set's.
+  std::uint64_t sequence = 0;
+  /// The live detection (in the half, refined), for the live-vs-full flag.
+  Detection live;
 };
 
 /// @brief A capture the rule took: every camera's frame of one set, copied
@@ -132,7 +135,8 @@ class CaptureSink {
   CaptureSink& operator=(const CaptureSink&) = default;
 };
 
-/// @brief Where a @ref LiveWorker offers each set, before it searches it
+/// @brief Where a @ref LiveWorker offers each set with RGB-D frames
+///        (`source::PictureSet::rgbd`), before it searches it
 ///        (@ref LiveWorker::set_detecting): the 3D view's worker
 ///        (@ref CloudWorker), or a test's stand-in.
 ///
@@ -164,12 +168,13 @@ class SetSink {
   SetSink& operator=(const SetSink&) = default;
 };
 
-/// @brief What the live view knows of one set: the frames, where the board is
-///        in each, what each view is worth, and how the rig keeps up.
+/// @brief What the live view knows of one set: its pictures, where the board
+///        is in each, what each view is worth, and how the rig keeps up.
 ///
-/// It holds the set, so its frames -- the decoded pictures the window draws
-/// -- stay alive while it does; the window holds it until the GPU is done
-/// with the frame that copied them.
+/// It holds the set, so its pictures -- the tiles and decoded pictures the
+/// window draws -- stay alive while it does; the window holds it until the
+/// GPU is done with the frame that copied them. It holds nothing on the
+/// host the source reuses.
 ///
 /// @code
 /// if (std::shared_ptr<const LiveSnapshot> s = live->take_snapshot()) {
@@ -180,12 +185,11 @@ class SetSink {
 /// @endcode
 struct LiveSnapshot {
   std::uint64_t number = 0;  ///< The sets the worker has published, from 1.
-  /// The set, its frames as the driver handed them out.
-  std::shared_ptr<const sensor::FrameSet> set;
-  /// Each camera's live (hybrid) detection, in rig order: empty where the set
-  /// has no frame, its frame no picture, or the board was not found, and
-  /// every camera's while the set is not searched
-  /// (@ref LiveWorker::set_detecting).
+  /// The set, its pictures and frames as the source handed them out.
+  std::shared_ptr<const source::PictureSet> set;
+  /// Each camera's live detection, in rig order: empty where the set has no
+  /// picture of it or the board was not found, and every camera's while the
+  /// set is not searched (@ref LiveWorker::set_detecting).
   std::vector<Detection> detections;
   /// Each camera's view, checked (`quality::check_view`); a default one where
   /// the detection or the check failed.
@@ -195,13 +199,12 @@ struct LiveSnapshot {
   /// How far each camera's corners moved since the set before (median,
   /// pixels); empty where no corner is in both.
   std::vector<std::optional<double>> stillness_px;
-  /// The frames each camera's driver lost (an Orbbec camera's
-  /// `OrbbecStreamStats::lost`); empty where the driver does not count them.
-  std::vector<std::optional<std::uint64_t>> lost;
-  sensor::SensorArrayStats stats;     ///< The array's counters.
+  /// The source's counters (`source::RigSource::stats`): each camera's
+  /// `failed` is a loss, its `dropped` newest winning.
+  sensor::SensorArrayStats stats;
   quality::CaptureDecision decision;  ///< The capture rule's answer.
-  /// The stages' times: `"poll"`, then, for a set searched, `"readback"`
-  /// (with its device time) and `"detect"`.
+  /// The stages' times: `"poll"`, then, for a set searched, `"luma"` and
+  /// `"readback"` (with their device times) and `"detect"`.
   core::StageMetrics stages;
   /// Sets a second, smoothed over the last second or so.
   double sets_per_second = 0.0;
@@ -214,32 +217,38 @@ struct LiveSnapshot {
 /// options.rule.timeout = std::chrono::seconds(5);
 /// @endcode
 struct LiveOptions {
-  quality::ViewCheckOptions view;    ///< Each view's check.
-  quality::CaptureRuleOptions rule;  ///< The capture rule's thresholds.
+  quality::ViewCheckOptions view;  ///< Each view's check.
+  /// The capture rule's thresholds. Its `spread_warn_ms` is a set's spread
+  /// warned of, raised to the source's own sync bound
+  /// (`source::RigSource::max_skew_ns`) where it has one: a pair's skew
+  /// within its bound is what its sensor guarantees, and a still board makes
+  /// it harmless.
+  quality::CaptureRuleOptions rule;
   /// How long the worker waits before it polls again when no set is ready.
   std::chrono::milliseconds idle{2};
 };
 
-/// @brief The live worker: a thread that owns the rig's `SensorArray` and its
-///        picture readback, and publishes a @ref LiveSnapshot per set.
+/// @brief The live worker: a thread that owns the rig's
+///        `source::RigSource`, and publishes a @ref LiveSnapshot per set.
 ///
 /// Every other member is for the window's thread. The worker starts the
-/// array on its own thread; a failure there, a sensor's failure while
+/// source on its own thread; a failure there, the sensors' failure while
 /// polling -- a camera disconnected among them, as sensor's Orbbec driver
 /// fails every poll after it -- or anything its thread throws ends it,
-/// posting why (@ref take_errors). A set it cannot read back, or a camera it
-/// cannot detect in, is reported and skipped, and the live view goes on.
+/// posting why (@ref take_errors). A set whose luma the source cannot make
+/// or read back, or a camera it cannot detect in, is reported and skipped,
+/// and the live view goes on.
 ///
-/// @warning The device and allocator the readback uses, the capture sink and
-///          the set sink must outlive the worker. Release every snapshot, and
-///          have the set sink let go of every set it was offered
-///          (@ref CloudWorker::stop), before destroying it, so the frames go
-///          back to their sensors before the array closes them.
+/// @warning The capture sink and the set sink must outlive the worker.
+///          Release every snapshot, and have the set sink let go of every set
+///          it was offered (@ref CloudWorker::stop), before destroying it, so
+///          the frames go back to their sensors before the source closes
+///          them.
 ///
 /// @code
 /// VKC_ASSIGN(std::unique_ptr<LiveWorker> live,
-///            LiveWorker::create(std::move(array), device, allocator, board,
-///                               false, capture_worker.get()));
+///            LiveWorker::create(std::move(source), lenses, board, false,
+///                               capture_worker.get()));
 /// // Each frame of the window:
 /// if (pressed) live->arm();
 /// if (auto snapshot = live->take_snapshot()) latest = std::move(snapshot);
@@ -250,38 +259,39 @@ struct LiveOptions {
 /// @endcode
 class LiveWorker {
  public:
-  /// @brief Take the rig and start its thread.
-  /// @param array            The rig, opened and not started; taken whatever
-  ///                         the outcome. Every sensor needs a colour model.
-  /// @param device           The device its pictures are on (the compute
-  ///                         library's), for the readback.
-  /// @param allocator        Its allocator, for the readback's host memory.
+  /// @brief Take the rig's source and start its thread.
+  /// @param source           The source, opened and not started; taken
+  ///                         whatever the outcome.
+  /// @param lenses           Each camera's lens, in the source's order, at
+  ///                         its pictures' size: what each view is checked
+  ///                         through.
   /// @param board            The board to find, which `compute::Board`
   ///                         takes.
   /// @param square_measured  Whether its square size was measured.
   /// @param sink             Where captures go; null for a live view that
   ///                         captures nothing (@ref arm refuses).
-  /// @param sets             Where each set is offered (@ref SetSink); null
-  ///                         for none.
+  /// @param sets             Where each set with RGB-D frames is offered
+  ///                         (@ref SetSink); null for none.
   /// @param options          How it detects, checks and captures.
-  /// @return The worker, its thread running; `InvalidArgument` for a sensor
-  ///         without a colour model (naming it), a board or options refused,
-  ///         or an idle wait that is negative; the readback's failure;
-  ///         `IoError` if the thread cannot start; or `OutOfMemory`.
+  /// @return The worker, its thread running; `InvalidArgument` for no
+  ///         source, a lens per camera missing or extra, a lens of another
+  ///         size than its camera's (naming it), a board or options refused,
+  ///         or an idle wait that is negative; `IoError` if the thread cannot
+  ///         start; or `OutOfMemory`.
   static core::Result<std::unique_ptr<LiveWorker>> create(
-      sensor::SensorArray&& array, const core::Device& device,
-      core::Allocator& allocator, const Target& board, bool square_measured,
-      CaptureSink* sink, SetSink* sets = nullptr,
-      const LiveOptions& options = {});
+      std::unique_ptr<source::RigSource> source,
+      const std::vector<sensor::camera::CameraModel>& lenses,
+      const Target& board, bool square_measured, CaptureSink* sink,
+      SetSink* sets = nullptr, const LiveOptions& options = {});
 
-  /// @brief As @ref stop, then release the array, closing its sensors.
+  /// @brief As @ref stop, then release the source, closing its sensors.
   ~LiveWorker();
   LiveWorker(const LiveWorker&) = delete;
   LiveWorker& operator=(const LiveWorker&) = delete;
   LiveWorker(LiveWorker&&) = delete;
   LiveWorker& operator=(LiveWorker&&) = delete;
 
-  /// @brief Stop the thread and wait for it; the array is stopped, and the
+  /// @brief Stop the thread and wait for it; the source is stopped, and the
   ///        set it was on released. Idempotent.
   void stop() noexcept;
 
@@ -291,13 +301,18 @@ class LiveWorker {
   /// @return Each camera's id, in rig order.
   const std::vector<std::string>& ids() const noexcept { return ids_; }
 
+  /// @return The capture rule's thresholds as this source sets them
+  ///         (@ref LiveOptions::rule), for the panels.
+  const quality::CaptureRuleOptions& rule_options() const noexcept;
+
   /// @brief Whether to search each set for the board: on, the default,
   ///        while the window shows the camera images; off while it shows the
   ///        3D view alone.
   ///
   /// Off, each set is still polled, offered to the set sink and published
-  /// with the rig's counters, but nothing is read back, detected or ruled on
-  /// -- unless a capture is armed, which goes on being searched for.
+  /// with the rig's counters, but no luma is made or read back, and nothing
+  /// detected or ruled on -- unless a capture is armed, which goes on being
+  /// searched for.
   /// @param on  Whether to search.
   void set_detecting(bool on) noexcept;
 
@@ -331,8 +346,9 @@ class LiveWorker {
   ///         or a timeout's while no set came.
   quality::CaptureDecision decision() const;
 
-  /// @brief Take what went wrong since the last call: sets that could not be
-  ///        read back, captures the sink refused, and why the thread ended.
+  /// @brief Take what went wrong since the last call: sets whose luma could
+  ///        not be made or read back, captures the sink refused, and why the
+  ///        thread ended.
   /// @return The failures, oldest first.
   std::vector<core::Status> take_errors();
 

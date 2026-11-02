@@ -2,9 +2,10 @@
 # Copyright (c) 2026 Tao Jin
 
 # --- calib_app: Tier 5 -------------------------------------------------------
-# calib_rig's live view, 3D view, capture and Calibrate: the rig's preset check,
-# the key map, the window's mode, the acquisition and live-detection worker
-# (T1), the 3D view's frame preparation worker (T2), the capture worker (T3),
+# calib_rig's live view, 3D view, capture and Calibrate: the opener, the one
+# code that names a driver, and its Orbbec arm's preset check; the key map, the
+# window's mode, the acquisition and live-detection worker (T1) on the source
+# tier, the 3D view's frame preparation worker (T2), the capture worker (T3),
 # the Calibrate worker (T4) and the window loop (T0) on gfx's GLFW glue, ImGui
 # overlay and the viz tier's mosaic and scene. Built with VC_BUILD_APPS and the
 # viz tier when gfx_glfw (an installed GLFW) and sensor's Orbbec tier
@@ -62,6 +63,7 @@ target_sources(
           keys.cpp
           live_view.cpp
           live_worker.cpp
+          open_source.cpp
           preset.cpp
           rig_mode.cpp
           "${_vc_software_cpp}")
@@ -69,16 +71,19 @@ add_dependencies(calib_app calib_app_software)
 
 # The public headers name the viz tier's mosaic, overlays and scene, the quality
 # tier's metrics and results files, the capture tier's session records, the
-# detector's board, sensor's array, picture readback, frame preparation and
-# Orbbec options, gfx's retire queue and depth-cloud pipeline, and the core's
-# scenario. The window, the shared device and its requirements, the depth
-# checks' kernels, OpenCV's thread pool and the threads stay private.
+# detector's board, the source tier's pictures, sensor's array and frame
+# preparation, the opener's Orbbec arm (its preset, options and sync file),
+# gfx's retire queue and depth-cloud pipeline, and the core's scenario. The
+# window, the shared device and its requirements, the depth checks' kernels,
+# OpenCV's thread pool and the threads stay private. TODO: link sensor_orbbec
+# privately once no public header names an Orbbec type (the decklink arm, A5).
 target_link_libraries(
   calib_app
   PUBLIC calib_viz
          calib_quality
          calib_capture
          calib_detect
+         calib_source
          volumetric_kit::sensor_array
          volumetric_kit::sensor_prep
          volumetric_kit::sensor_orbbec

@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -111,24 +112,24 @@ camera::CameraModel depth_model(int seed) {
   return m;
 }
 
-SessionCamera make_camera(const std::string& serial, int seed,
-                          sensor::SyncRole role) {
+SessionCamera make_camera(const std::string& serial, int seed, bool primary) {
   SessionCamera c;
-  c.info.id = serial;
-  c.info.model = "Orbbec Femto Mega";
-  c.info.color = color_model(seed);
-  c.info.depth = depth_model(seed);
-  c.info.depth_to_color = camera::matrix_from_rodrigues(
+  c.id = serial;
+  c.model = "Orbbec Femto Mega";
+  c.size = {kColorW, kColorH};
+  c.color = color_model(seed);
+  c.depth = depth_model(seed);
+  c.depth_to_color = camera::matrix_from_rodrigues(
       {{0.0012 * seed, -0.0034, 0.0021}, {-0.0325, -0.0005, 0.0022}});
-  c.info.role = role;
-  c.info.fps = 25;
-  c.firmware = "1.2.9";
-  c.ip_address = "192.168.1." + std::to_string(10 + seed);
-  c.sync_mode =
-      role == sensor::SyncRole::Primary ? "primary" : "secondary-synced";
-  c.depth_delay_us = 160 * seed;
-  c.color_lens_model = "brown-conrady";
-  c.depth_lens_model = "brown-conrady-k6";
+  c.role = primary ? "primary" : "secondary";  // as sensor names its roles
+  c.fps = 25;
+  OrbbecFacts& facts = c.orbbec.emplace();
+  facts.firmware = "1.2.9";
+  facts.ip_address = "192.168.1." + std::to_string(10 + seed);
+  facts.sync_mode = primary ? "primary" : "secondary-synced";
+  facts.depth_delay_us = 160 * seed;
+  facts.color_lens_model = "brown-conrady";
+  facts.depth_lens_model = "brown-conrady-k6";
   return c;
 }
 
@@ -141,13 +142,14 @@ DepthMode nfov_unbinned() {
   return mode;
 }
 
-// Two cameras, the second the reference, so neither order nor index 0 is
-// taken for it. The sync file exists, holding "abc".
+// Two Femto cameras, the second the reference, so neither order nor index 0
+// is taken for it. The sync file exists, holding "abc".
 SessionInfo make_info(const ScratchDir& dir) {
   SessionInfo info;
   info.directory = dir / "2026-10-13_094107";
   info.software = {"calib-sha", "sensor-sha", "gfx-sha",
                    "core-sha",  "5.0.0",      "2.10.6"};
+  info.driver = "orbbec";
   info.sync_path = dir / "sync.json";
   write(info.sync_path, "abc");
   info.reference = "CL2A141000N";
@@ -156,8 +158,36 @@ SessionInfo make_info(const ScratchDir& dir) {
   info.board.planarity_bow_m = 0.0005;
   info.square_measured = true;
   info.depth_mode = nfov_unbinned();
-  info.cameras = {make_camera("CL2A14100A4", 1, sensor::SyncRole::Secondary),
-                  make_camera("CL2A141000N", 2, sensor::SyncRole::Primary)};
+  info.color_codec = "mjpeg";
+  info.cameras = {make_camera("CL2A14100A4", 1, false),
+                  make_camera("CL2A141000N", 2, true)};
+  return info;
+}
+
+// A stereo pair's session, as a DeckLink pair's: no sync file, no depth, no
+// factory lens, each camera on its input, its lens from one file holding
+// "lens", the first the reference.
+SessionInfo pair_info(const ScratchDir& dir) {
+  SessionInfo info;
+  info.directory = dir / "2026-11-02_101500";
+  info.software = {"calib-sha", "sensor-sha", "gfx-sha",
+                   "core-sha",  "5.0.0",      ""};
+  info.driver = "decklink";
+  info.reference = "bm-1";
+  info.board = legacy_femto_board();
+  const std::string lens = dir / "array_calibration.json";
+  write(lens, "lens");
+  for (const char* id : {"bm-1", "bm-2"}) {
+    SessionCamera c;
+    c.id = id;
+    c.model = "DeckLink 8K Pro";
+    c.size = {kColorW, kColorH};
+    c.fps = 30;
+    c.input = c.id == "bm-1" ? "SDI 2" : "SDI 1";
+    c.lens = LensOrigin::File;
+    c.lens_file = lens;
+    info.cameras.push_back(std::move(c));
+  }
   return info;
 }
 
@@ -213,6 +243,21 @@ CaptureJob make_job(int seed = 0) {
   job.cameras = {make_part(seed), make_part(seed + 1)};
   job.cameras[1].check.verdict = ViewVerdict::Collinear;
   job.cameras[1].check.collinear = true;
+  return job;
+}
+
+// A pair's capture (pair_info): each camera's luma, no JPEG and no depth.
+CaptureJob pair_job(int seed = 0) {
+  CaptureJob job = make_job(seed);
+  for (std::size_t i = 0; i < job.cameras.size(); ++i) {
+    CameraCapture& part = job.cameras[i];
+    part.jpeg.clear();
+    part.depth.reset();
+    part.luma.resize(std::size_t{kColorW} * kColorH);
+    for (std::size_t k = 0; k < part.luma.size(); ++k) {
+      part.luma[k] = static_cast<std::uint8_t>(k * 31 + i * 7 + seed);
+    }
+  }
   return job;
 }
 
@@ -343,7 +388,7 @@ TEST(SessionWriter, KeepsTheCamerasJpegBytes) {
   submit(*writer, job);
   finish(*writer);
   for (std::size_t i = 0; i < info.cameras.size(); ++i) {
-    const std::string& serial = info.cameras[i].info.id;
+    const std::string& serial = info.cameras[i].id;
     const std::string jpeg = read(info.directory + "/images/" + serial +
                                   "/calib_img_" + serial + "_000.jpg");
     EXPECT_EQ(jpeg, std::string(job.cameras[i].jpeg.begin(),
@@ -360,7 +405,7 @@ TEST(SessionWriter, WritesDepthAsSixteenBitPngSensorReads) {
   submit(*writer, job);
   finish(*writer);
   for (std::size_t i = 0; i < info.cameras.size(); ++i) {
-    const std::string& serial = info.cameras[i].info.id;
+    const std::string& serial = info.cameras[i].id;
     vkc::Result<std::vector<std::uint16_t>> depth =
         sensor::io::load_depth_u16(info.directory + "/depth/" + serial +
                                        "/calib_depth_" + serial + "_000.png",
@@ -389,7 +434,7 @@ TEST(SessionWriter, LetsTheSharedDepthGoOnceWritten) {
   ASSERT_EQ(results.size(), 1u);
   expect_written(results[0], WriteResult::Kind::Capture, 0);
   EXPECT_EQ(kept.use_count(), 1);
-  const std::string& serial = info.cameras[1].info.id;
+  const std::string& serial = info.cameras[1].id;
   vkc::Result<std::vector<std::uint16_t>> depth =
       sensor::io::load_depth_u16(info.directory + "/depth/" + serial +
                                      "/calib_depth_" + serial + "_000.png",
@@ -414,13 +459,12 @@ TEST(SessionWriter, FactoryCalibrationReadsBackAsTheModels) {
   ASSERT_EQ(factory->sensors.size(), info.cameras.size());
   for (const SessionCamera& c : info.cameras) {
     const camera::SensorCalibration* sensor =
-        camera::find_sensor(*factory, c.info.id);
-    ASSERT_NE(sensor, nullptr) << c.info.id;
+        camera::find_sensor(*factory, c.id);
+    ASSERT_NE(sensor, nullptr) << c.id;
     EXPECT_FALSE(sensor->color_to_world);  // unposed
     ASSERT_TRUE(sensor->color && sensor->depth && sensor->depth_to_color);
-    for (const auto& [got, model] :
-         {std::pair{&*sensor->color, &*c.info.color},
-          std::pair{&*sensor->depth, &*c.info.depth}}) {
+    for (const auto& [got, model] : {std::pair{&*sensor->color, &*c.color},
+                                     std::pair{&*sensor->depth, &*c.depth}}) {
       EXPECT_EQ(got->source, camera::IntrinsicsSource::Factory);
       const camera::CameraModel& m = got->model;
       EXPECT_EQ(m.size.width, model->size.width);
@@ -444,7 +488,7 @@ TEST(SessionWriter, FactoryCalibrationReadsBackAsTheModels) {
     for (int col = 0; col < 4; ++col) {
       for (int row = 0; row < 4; ++row) {
         EXPECT_NEAR((*sensor->depth_to_color)[col][row],
-                    c.info.depth_to_color[col][row], 1e-12);
+                    c.depth_to_color[col][row], 1e-12);
       }
     }
   }
@@ -463,11 +507,13 @@ TEST(SessionWriter, SessionJsonHoldsWhatWasGivenExactly) {
   const std::string text = read(info.directory + "/session.json");
   const json doc = json::parse(text);
   EXPECT_EQ(doc["format"], "volumetric_kit_calib.session");
-  EXPECT_EQ(doc["version"], 1);
+  EXPECT_EQ(doc["version"], 2);
+  EXPECT_EQ(doc["mode"], "extrinsics");
   EXPECT_EQ(doc["software"],
             json::parse(R"({"calib": "calib-sha", "sensor": "sensor-sha",
                             "gfx": "gfx-sha", "core": "core-sha",
                             "opencv": "5.0.0", "orbbec_sdk": "2.10.6"})"));
+  EXPECT_EQ(doc["rig"]["driver"], "orbbec");
   EXPECT_EQ(doc["rig"]["sync_file"], info.sync_path);
   // SHA-256 of "abc" (FIPS 180-2, appendix B.1).
   EXPECT_EQ(doc["rig"]["sync_sha256"],
@@ -506,12 +552,13 @@ TEST(SessionWriter, SessionJsonHoldsWhatWasGivenExactly) {
 
   ASSERT_EQ(doc["cameras"].size(), 2u);
   EXPECT_EQ(doc["cameras"][0], json::parse(R"({
-      "serial": "CL2A14100A4", "model": "Orbbec Femto Mega",
+      "id": "CL2A14100A4", "model": "Orbbec Femto Mega",
       "firmware": "1.2.9", "ip": "192.168.1.11", "role": "secondary",
       "sync_mode": "secondary-synced", "depth_delay_us": 160,
       "color_lens_model": "brown-conrady",
-      "depth_lens_model": "brown-conrady-k6"})"));
-  EXPECT_EQ(doc["cameras"][1]["serial"], "CL2A141000N");
+      "depth_lens_model": "brown-conrady-k6",
+      "lens": {"origin": "factory"}})"));
+  EXPECT_EQ(doc["cameras"][1]["id"], "CL2A141000N");
   EXPECT_EQ(doc["cameras"][1]["role"], "primary");
   EXPECT_EQ(doc["factory_calibration"], "factory_calibration.json");
 
@@ -520,6 +567,152 @@ TEST(SessionWriter, SessionJsonHoldsWhatWasGivenExactly) {
   ASSERT_EQ(created.size(), 24u) << created;
   EXPECT_EQ(created[10], 'T');
   EXPECT_EQ(created.back(), 'Z');
+}
+
+// A Femto session's session.json is version 1's, as calib 0.3.0 wrote it,
+// but for the version, `id` for `serial`, and the keys version 2 adds: the
+// mode, the rig's driver and each camera's lens.
+TEST(SessionWriter, AFemtoSessionIsVersionOnesButForTheNewKeys) {
+  const ScratchDir dir;
+  const SessionInfo info = make_info(dir);
+  auto writer = make_writer(info);
+  ASSERT_TRUE(writer);
+  submit(*writer, make_job());
+  finish(*writer);
+  json doc = parse(info.directory + "/session.json");
+  EXPECT_EQ(doc["version"], 2);
+  doc["version"] = 1;
+  EXPECT_EQ(doc["mode"], "extrinsics");
+  doc.erase("mode");
+  EXPECT_EQ(doc["rig"]["driver"], "orbbec");
+  doc["rig"].erase("driver");
+  for (json& camera : doc["cameras"]) {
+    EXPECT_EQ(camera["lens"], json::parse(R"({"origin": "factory"})"));
+    camera.erase("lens");
+    camera["serial"] = camera["id"];
+    camera.erase("id");
+  }
+  doc.erase("created");
+  doc.erase("captures");
+
+  json v1 = json::parse(R"({
+    "format": "volumetric_kit_calib.session", "version": 1,
+    "software": {"calib": "calib-sha", "sensor": "sensor-sha",
+                 "gfx": "gfx-sha", "core": "core-sha", "opencv": "5.0.0",
+                 "orbbec_sdk": "2.10.6"},
+    "rig": {"sync_file": "",
+            "sync_sha256":
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            "reference": "CL2A141000N"},
+    "board": {"type": "charuco", "squares": [5, 3], "square_m": 0.1505,
+              "marker_m": 0.112, "dictionary": "DICT_4X4_100",
+              "first_marker_id": 0, "legacy_pattern": true,
+              "square_measured": true, "square_tolerance_m": null,
+              "planarity_bow_m": 0.0005},
+    "origin_tag": {"dictionary": "DICT_APRILTAG_36h11", "id": 0,
+                   "edge_m": 0.15},
+    "streams": {"color": {"width": 64, "height": 48, "codec": "mjpeg"},
+                "depth": {"width": 16, "height": 12, "mode": "nfov_unbinned",
+                          "metres_per_unit": 0.001, "min_m": 0.5,
+                          "max_m": 3.86},
+                "fps": 25},
+    "cameras": [
+      {"serial": "CL2A14100A4", "model": "Orbbec Femto Mega",
+       "firmware": "1.2.9", "ip": "192.168.1.11", "role": "secondary",
+       "sync_mode": "secondary-synced", "depth_delay_us": 160,
+       "color_lens_model": "brown-conrady",
+       "depth_lens_model": "brown-conrady-k6"},
+      {"serial": "CL2A141000N", "model": "Orbbec Femto Mega",
+       "firmware": "1.2.9", "ip": "192.168.1.12", "role": "primary",
+       "sync_mode": "primary", "depth_delay_us": 320,
+       "color_lens_model": "brown-conrady",
+       "depth_lens_model": "brown-conrady-k6"}],
+    "factory_calibration": "factory_calibration.json"})");
+  v1["rig"]["sync_file"] = info.sync_path;
+  EXPECT_EQ(doc, v1) << doc.dump(2);
+}
+
+// A stereo pair's session: no sync file, depth, factory lens or SDK, each
+// camera's input and lens file; its pictures as PGMs, and no depth or factory
+// files. session.json, as written and parsed, holds exactly that.
+TEST(SessionWriter, APairsSessionHasNoRgbdKeys) {
+  const ScratchDir dir;
+  const SessionInfo info = pair_info(dir);
+  auto writer = make_writer(info);
+  ASSERT_TRUE(writer);
+  submit(*writer, pair_job());
+  const std::vector<WriteResult> results = finish(*writer);
+  ASSERT_EQ(results.size(), 1u);
+  expect_written(results[0], WriteResult::Kind::Capture, 0);
+  EXPECT_EQ(files_under(info.directory),
+            (std::set<std::string>{
+                "session.json", "images/bm-1/calib_img_bm-1_000.pgm",
+                "images/bm-2/calib_img_bm-2_000.pgm", "captures/000.json"}));
+  json doc = parse(info.directory + "/session.json");
+  const std::string created = doc["created"];
+  EXPECT_EQ(created.size(), 24u);
+  doc.erase("created");
+  json expected = json::parse(R"({
+    "format": "volumetric_kit_calib.session", "version": 2,
+    "mode": "extrinsics",
+    "software": {"calib": "calib-sha", "sensor": "sensor-sha",
+                 "gfx": "gfx-sha", "core": "core-sha", "opencv": "5.0.0"},
+    "rig": {"driver": "decklink", "reference": "bm-1"},
+    "board": {"type": "charuco", "squares": [5, 3], "square_m": 0.15,
+              "marker_m": 0.112, "dictionary": "DICT_4X4_100",
+              "first_marker_id": 0, "legacy_pattern": true,
+              "square_measured": false, "square_tolerance_m": null,
+              "planarity_bow_m": null},
+    "origin_tag": {"dictionary": "DICT_APRILTAG_36h11", "id": 0,
+                   "edge_m": 0.15},
+    "streams": {"color": {"width": 64, "height": 48}, "fps": 30},
+    "cameras": [
+      {"id": "bm-1", "model": "DeckLink 8K Pro", "input": "SDI 2",
+       "lens": {"origin": "file", "path": "",
+                "sha256":
+       "812b9215cd2f0e7ea41f32a8416803de2bcfaed16c43ae540afc65a218a3da0e"}},
+      {"id": "bm-2", "model": "DeckLink 8K Pro", "input": "SDI 1",
+       "lens": {"origin": "file", "path": "",
+                "sha256":
+       "812b9215cd2f0e7ea41f32a8416803de2bcfaed16c43ae540afc65a218a3da0e"}}],
+    "captures": [{"index": 0, "file": "captures/000.json",
+                  "dropped": false}]})");
+  for (json& camera : expected["cameras"]) {
+    camera["lens"]["path"] = info.cameras.front().lens_file;
+  }
+  EXPECT_EQ(doc, expected) << doc.dump(2);
+  const json capture = parse(info.directory + "/captures/000.json");
+  EXPECT_EQ(capture["cameras"]["bm-2"]["color"],
+            "images/bm-2/calib_img_bm-2_000.pgm");
+  EXPECT_TRUE(capture["cameras"]["bm-2"]["depth"].is_null());
+}
+
+// A camera's luma, with no JPEG, is a PGM that reads back byte for byte; its
+// size is the capture's `color_bytes`.
+TEST(SessionWriter, WritesALumaWithoutAJpegAsAPgm) {
+  const ScratchDir dir;
+  const SessionInfo info = pair_info(dir);
+  auto writer = make_writer(info);
+  ASSERT_TRUE(writer);
+  const CaptureJob job = pair_job(9);
+  submit(*writer, job);
+  finish(*writer);
+  const json capture = parse(info.directory + "/captures/000.json");
+  for (std::size_t i = 0; i < info.cameras.size(); ++i) {
+    const std::string& id = info.cameras[i].id;
+    const std::string bytes = read(info.directory + "/images/" + id +
+                                   "/calib_img_" + id + "_000.pgm");
+    const std::string header = "P5\n64 48\n255\n";
+    ASSERT_EQ(bytes.size(), header.size() + std::size_t{kColorW} * kColorH);
+    EXPECT_EQ(bytes.substr(0, header.size()), header);
+    EXPECT_TRUE(
+        std::equal(job.cameras[i].luma.begin(), job.cameras[i].luma.end(),
+                   bytes.begin() + static_cast<std::ptrdiff_t>(header.size()),
+                   [](std::uint8_t a, char b) {
+                     return a == static_cast<std::uint8_t>(b);
+                   }));
+    EXPECT_EQ(capture["cameras"][id]["color_bytes"], bytes.size());
+  }
 }
 
 TEST(SessionWriter, CaptureJsonHoldsWhatWasGivenExactly) {
@@ -555,7 +748,7 @@ TEST(SessionWriter, CaptureJsonHoldsWhatWasGivenExactly) {
 
   ASSERT_EQ(doc["cameras"].size(), 2u);
   for (std::size_t i = 0; i < info.cameras.size(); ++i) {
-    const std::string& serial = info.cameras[i].info.id;
+    const std::string& serial = info.cameras[i].id;
     const CameraCapture& part = job.cameras[i];
     const json& c = doc["cameras"][serial];
     EXPECT_EQ(c["color"],
@@ -1088,8 +1281,13 @@ TEST(SessionWriter, RefusesASessionItCannotWrite) {
   }
   {
     SessionInfo info = good;
-    info.sync_path.clear();
+    info.sync_path = std::string("sync\0.json", 10);
     refused(info, Code::InvalidArgument, "sync_path");
+  }
+  {
+    SessionInfo info = good;
+    info.driver.clear();
+    refused(info, Code::InvalidArgument, "no driver named");
   }
   {
     SessionInfo info = good;
@@ -1117,76 +1315,108 @@ TEST(SessionWriter, RefusesASessionItCannotWrite) {
   }
   {
     SessionInfo info = good;
-    info.depth_mode.metres_per_unit = std::numeric_limits<float>::infinity();
+    info.depth_mode->metres_per_unit = std::numeric_limits<float>::infinity();
     refused(info, Code::InvalidArgument, "metres_per_unit");
   }
   for (const float min_m : {4.0f, 0.0f, -0.5f}) {
     SessionInfo info = good;
-    info.depth_mode.min_m = min_m;
+    info.depth_mode->min_m = min_m;
     refused(info, Code::InvalidArgument, "min_m");
   }
   {
     SessionInfo info = good;
+    info.depth_mode.reset();
+    refused(info, Code::InvalidArgument,
+            "camera CL2A14100A4 has depth, and the session no depth mode");
+  }
+  {
+    SessionInfo info = good;
+    for (SessionCamera& camera : info.cameras) camera.depth.reset();
+    refused(info, Code::InvalidArgument,
+            "a depth mode, and no camera with depth");
+  }
+  {
+    SessionInfo info = good;
     info.cameras.clear();
-    refused(info, Code::InvalidArgument, "no sensors");
+    refused(info, Code::InvalidArgument, "no cameras");
   }
   for (const char* serial : {"../escape", "..", ".", ""}) {
     SessionInfo info = good;
-    info.cameras[0].info.id = serial;
+    info.cameras[0].id = serial;
     refused(info, Code::InvalidArgument, "plain file name");
   }
   {
     SessionInfo info = good;
-    info.cameras[0].info.id = info.cameras[1].info.id;
-    refused(info, Code::InvalidArgument, "CL2A141000N is twice");
+    info.cameras[0].id = info.cameras[1].id;
+    refused(info, Code::InvalidArgument, "camera CL2A141000N is named twice");
   }
   {
     SessionInfo info = good;
-    info.cameras[0].info.id = "cl2a141000n";
+    info.cameras[0].id = "cl2a141000n";
     refused(info, Code::InvalidArgument,
             "cameras cl2a141000n and CL2A141000N differ only in case");
   }
   {
     SessionInfo info = good;
-    info.cameras[1].info.color.reset();
-    refused(info, Code::InvalidArgument, "no colour model");
+    info.cameras[1].size = {0, 0};
+    refused(info, Code::InvalidArgument, "camera CL2A141000N has no size");
   }
   {
     SessionInfo info = good;
-    info.cameras[1].info.depth.reset();
-    refused(info, Code::InvalidArgument, "no depth model");
-  }
-  {
-    SessionInfo info = good;
-    info.cameras[1].info.color->size.width += 1;
+    info.cameras[1].size.width += 2;
+    info.cameras[1].color->size.width += 2;
     refused(info, Code::InvalidArgument,
-            "camera CL2A141000N's colour model is 65x48, camera "
-            "CL2A14100A4's 64x48");
+            "camera CL2A141000N is 66x48, camera CL2A14100A4 64x48");
   }
   {
     SessionInfo info = good;
-    info.cameras[1].info.depth->size.height += 1;
+    info.cameras[1].color->size.width += 1;
+    refused(info, Code::InvalidArgument,
+            "camera CL2A141000N's colour model is 65x48, not its 64x48");
+  }
+  {
+    SessionInfo info = good;
+    info.cameras[1].lens = LensOrigin::File;
+    refused(info, Code::InvalidArgument,
+            "camera CL2A141000N's lens came from a file it does not name");
+  }
+  {
+    SessionInfo info = good;
+    info.cameras[1].lens_file = "lens.json";
+    refused(info, Code::InvalidArgument,
+            "camera CL2A141000N names a lens file its lens did not come from");
+  }
+  {
+    SessionInfo info = pair_info(dir);
+    info.cameras[1].lens = LensOrigin::Factory;
+    info.cameras[1].lens_file.clear();
+    refused(info, Code::InvalidArgument,
+            "camera bm-2's lens came from a factory model it does not have");
+  }
+  {
+    SessionInfo info = good;
+    info.cameras[1].depth->size.height += 1;
     refused(info, Code::InvalidArgument, "depth model is 16x13");
   }
   {
     SessionInfo info = good;
-    info.cameras[1].info.fps = 0;
+    info.cameras[1].fps = 0;
     refused(info, Code::InvalidArgument, "CL2A141000N's fps is unknown");
   }
   {
     SessionInfo info = good;
-    info.cameras[1].info.fps = 15;
+    info.cameras[1].fps = 15;
     refused(info, Code::InvalidArgument,
             "camera CL2A141000N streams at 15 fps, camera CL2A14100A4 at 25");
   }
   {
     SessionInfo info = good;
-    info.cameras[0].info.color->intrinsics.fx = kNaN;
+    info.cameras[0].color->intrinsics.fx = kNaN;
     refused(info, Code::InvalidArgument, "factory calibration");
   }
   {
     SessionInfo info = good;
-    info.cameras[0].info.depth_to_color[0][0] = 2.0;  // not a rotation
+    info.cameras[0].depth_to_color[0][0] = 2.0;  // not a rotation
     refused(info, Code::InvalidArgument, "factory calibration");
   }
   {
@@ -1223,6 +1453,12 @@ TEST(SessionWriter, RefusesACaptureThatDoesNotFitTheSession) {
   {
     CaptureJob job = make_job();
     job.cameras[1].jpeg.clear();
+    refused(std::move(job),
+            "camera CL2A141000N: neither a JPEG nor its 64x48 luma");
+  }
+  {
+    CaptureJob job = make_job();
+    job.cameras[1].jpeg = {0xFF};
     refused(std::move(job), "camera CL2A141000N: the colour is not a JPEG");
   }
   {
@@ -1247,8 +1483,7 @@ TEST(SessionWriter, RefusesACaptureThatDoesNotFitTheSession) {
     CaptureJob job = make_job();
     job.cameras[0].detection.image_size = {kColorW / 2, kColorH / 2};
     refused(std::move(job),
-            "a detection in a 32x24 image, not the colour "
-            "image's 64x48");
+            "a detection in a 32x24 image, not the camera's 64x48");
   }
   {
     CaptureJob job = make_job();
@@ -1322,6 +1557,29 @@ TEST(SessionWriter, RefusesACaptureThatDoesNotFitTheSession) {
   EXPECT_EQ(writer->pending(), 0u);
   EXPECT_TRUE(finish(*writer).empty());
   EXPECT_FALSE(fs::exists(info.directory));
+
+  // A pair's cameras have no depth, and each its luma.
+  const SessionInfo pair = pair_info(dir);
+  auto pair_writer = make_writer(pair);
+  ASSERT_TRUE(pair_writer);
+  {
+    CaptureJob job = pair_job();
+    job.cameras[1].depth = make_job().cameras[0].depth;
+    vkc::Result<bool> queued = pair_writer->submit(std::move(job));
+    ASSERT_FALSE(queued.ok());
+    EXPECT_EQ(queued.status().message(),
+              "SessionWriter: capture: camera bm-2: depth from a camera "
+              "without depth");
+  }
+  {
+    CaptureJob job = pair_job();
+    job.cameras[0].luma.pop_back();
+    vkc::Result<bool> queued = pair_writer->submit(std::move(job));
+    ASSERT_FALSE(queued.ok());
+    EXPECT_EQ(queued.status().message(),
+              "SessionWriter: capture: camera bm-1: neither a JPEG nor its "
+              "64x48 luma");
+  }
 }
 
 // --- The directory's name ---------------------------------------------------

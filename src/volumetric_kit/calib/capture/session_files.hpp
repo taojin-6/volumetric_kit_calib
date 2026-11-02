@@ -27,25 +27,41 @@ struct CaptureEntry {
   bool dropped = false;
 };
 
-// Whether `serial` can name a camera's directories and files: one or more of
+// What session.json records beside the SessionInfo it was made with: the
+// files the writer read, and whether it wrote the factory record.
+struct SessionFacts {
+  std::string created;      // ISO 8601, at the directory's creation
+  std::string sync_sha256;  // the sync file's; empty without one
+  // Each camera's lens file's SHA-256, by camera; empty where its lens came
+  // from no file.
+  std::vector<std::string> lens_sha256;
+  bool factory = false;  // factory_calibration.json was written
+};
+
+// Whether `id` can name a camera's directories and files: one or more of
 // letters, digits, '-', '_' and '.', and not "." or "..".
-bool is_plain_serial(const std::string& serial) noexcept;
+bool is_plain_serial(const std::string& id) noexcept;
 
 // `directory`/`name`, with one separator.
 std::string join(const std::string& directory, const std::string& name);
 
-// A capture's files, relative to the session's directory.
-std::string color_file(const std::string& serial, int index);
-std::string depth_file(const std::string& serial, int index);
+// A capture's files, relative to the session's directory: the camera's
+// picture, a JPEG or else a PGM, and its depth.
+std::string color_file(const std::string& id, int index, bool jpeg);
+std::string depth_file(const std::string& id, int index);
 std::string capture_file(int index);
+
+// `luma` (`size`'s rows, packed) as a PGM file's bytes: "P5", the size and
+// 255, a newline after each, then the rows.
+std::string pgm(const std::vector<std::uint8_t>& luma,
+                sensor::camera::ImageSize size);
 
 // `ns` since the epoch as ISO 8601 UTC to the millisecond, e.g.
 // "2026-10-13T09:41:07.250Z".
 std::string iso_time(std::int64_t ns);
 
 // session.json's text, for an `info` SessionWriter::create accepted.
-std::string format_session(const SessionInfo& info, const std::string& created,
-                           const std::string& sync_sha256,
+std::string format_session(const SessionInfo& info, const SessionFacts& facts,
                            const std::vector<CaptureEntry>& captures);
 
 // captures/<NNN>.json's text, for `job` with its index set, which

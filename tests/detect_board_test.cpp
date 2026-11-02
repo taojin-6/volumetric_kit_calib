@@ -117,21 +117,7 @@ cv::Mat picture(const cv::Mat& clean, std::uint64_t seed) {
   return test::camera_image(clean, optics);
 }
 
-// The picture halved as sensor halves it on the GPU: each pixel the rounded
-// mean of 2 x 2, an odd last row or column left out.
-cv::Mat halved(const cv::Mat& full) {
-  cv::Mat half(full.rows / 2, full.cols / 2, CV_8U);
-  for (int y = 0; y < half.rows; ++y) {
-    for (int x = 0; x < half.cols; ++x) {
-      const int sum = full.at<std::uint8_t>(2 * y, 2 * x) +
-                      full.at<std::uint8_t>(2 * y, 2 * x + 1) +
-                      full.at<std::uint8_t>(2 * y + 1, 2 * x) +
-                      full.at<std::uint8_t>(2 * y + 1, 2 * x + 1);
-      half.at<std::uint8_t>(y, x) = static_cast<std::uint8_t>((sum + 2) / 4);
-    }
-  }
-  return half;
-}
+using test::halved;
 
 Detection detect(const cv::Mat& image, const compute::Board& board,
                  const cv::Mat* half = nullptr) {
@@ -436,8 +422,8 @@ TEST(DetectBoard, RefusesAPictureOrHalfItCannotRead) {
                             "picture halved (0 x 0)"));
 }
 
-// A ChArUco board: as detect_charuco finds it, in Full mode without a half,
-// and in Hybrid mode, whose own halving is the GPU's, with one.
+// A ChArUco board: in the picture, as detect_charuco finds it; in its half
+// (detect_charuco's own tests hold that path to where the board projects).
 TEST(DetectBoard, FindsAChArUcoBoardAsDetectCharucoDoes) {
   const compute::Board board = test::femto_board();
   const cv::Mat image = test::camera_image(test::render_board(
@@ -448,29 +434,22 @@ TEST(DetectBoard, FindsAChArUcoBoardAsDetectCharucoDoes) {
   const Detection live = detect(image, board, &half);
   ASSERT_EQ(full.observation.size(), 8u);
   ASSERT_EQ(live.observation.size(), 8u);
-  const Detection want_full =
-      detect_charuco(luma(image), board, Mode::Full).value();
-  const Detection want_live =
-      detect_charuco(luma(image), board, Mode::Hybrid).value();
-  for (const auto& [got, want] :
-       {std::pair{&full, &want_full}, std::pair{&live, &want_live}}) {
-    ASSERT_EQ(got->observation.size(), want->observation.size());
-    for (std::size_t i = 0; i < got->observation.size(); ++i) {
-      EXPECT_EQ(got->observation.points[i].id, want->observation.points[i].id);
-      EXPECT_EQ(got->observation.points[i].pixel,
-                want->observation.points[i].pixel);
-    }
-    ASSERT_EQ(got->markers.size(), want->markers.size());
-    for (std::size_t i = 0; i < got->markers.size(); ++i) {
-      EXPECT_EQ(got->markers[i].id, want->markers[i].id);
-      EXPECT_EQ(got->markers[i].corners, want->markers[i].corners);
-    }
+  const Detection want = detect_charuco(luma(image), board).value();
+  ASSERT_EQ(full.observation.size(), want.observation.size());
+  for (std::size_t i = 0; i < full.observation.size(); ++i) {
+    EXPECT_EQ(full.observation.points[i].id, want.observation.points[i].id);
+    EXPECT_EQ(full.observation.points[i].pixel,
+              want.observation.points[i].pixel);
+  }
+  ASSERT_EQ(full.markers.size(), want.markers.size());
+  for (std::size_t i = 0; i < full.markers.size(); ++i) {
+    EXPECT_EQ(full.markers[i].id, want.markers[i].id);
+    EXPECT_EQ(full.markers[i].corners, want.markers[i].corners);
   }
   // detect_charuco takes no checkerboard.
-  EXPECT_EQ(detect_charuco(luma(image), test::lab_checkerboard(), Mode::Full)
-                .status()
-                .domain(),
-            Code::InvalidArgument);
+  EXPECT_EQ(
+      detect_charuco(luma(image), test::lab_checkerboard()).status().domain(),
+      Code::InvalidArgument);
 }
 
 // A still board, turned 45 degrees or cut by an edge, in two pictures that

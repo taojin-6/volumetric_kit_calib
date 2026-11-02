@@ -59,9 +59,9 @@ Read only the sections needed for the current task.
   `core::Status` inside calib's namespaces, `vkc::Status` in tests and
   examples, from the core's own headers. calib re-exports none of them.
 - CMake: component targets `volumetric_kit::calib_core`, `…_compute`,
-  `…_detect`, `…_solve`, `…_quality`, `…_color`, `…_capture`, `…_depth`,
-  `…_viz`, `…_app`; umbrella alias `volumetric_kit::calib`. Applications fetch
-  calib by commit; it installs nothing.
+  `…_detect`, `…_solve`, `…_quality`, `…_color`, `…_source`, `…_capture`,
+  `…_depth`, `…_viz`, `…_app`; umbrella alias `volumetric_kit::calib`.
+  Applications fetch calib by commit; it installs nothing.
 - Macros/export: `VC_*` for calib's own (e.g. `VC_CORE_API`, `VC_BUILD_TESTS`);
   the error-handling macros are the core's (`VKC_TRY`, `VKC_ASSIGN`,
   `VKC_CHECK`).
@@ -69,10 +69,12 @@ Read only the sections needed for the current task.
 ## Architecture
 
 `core` → `compute` → {`detect`, `solve`, `color`} → `quality` →
-{`depth`, `viz`} → `app` (+ `capture` off `core`). The dependency rule is
-strict: a tier may depend only on tiers to its left. The headless **brain**
-(`core`+`compute`+`detect`+`solve`+`quality`) builds with **no**
-`volumetric_kit_gfx` dependency; only `viz`/`app` pull in the renderer.
+{`depth`, `viz`} → `app` (+ `capture` off `core`, `source` off `detect`). The
+dependency rule is strict: a tier may depend only on tiers to its left. The
+headless **brain** (`core`+`compute`+`detect`+`solve`+`quality`) builds with
+**no** `volumetric_kit_gfx` dependency, and links no `source`: only
+`viz`/`app` pull in the renderer, and only the opener in `app` names a
+camera driver.
 `depth` runs the depth checks' kernels on the core's vulkan tier, with neither
 gfx nor sensor's C++ tiers (only its exported `pinhole.glsl`).
 

@@ -325,6 +325,41 @@ TEST(TileWrite, CopiesTheDecodersPlanesInPlaceToItsTile) {
   EXPECT_TRUE(tile_write(taken, {3840, 2160}, {}).ok());
 }
 
+// A luma picture in a device buffer, as sensor's LumaPass leaves it: a grey
+// tile, its luma read in place as plane 0 and the mosaic's neutral chroma as
+// plane 1. Without that chroma, or off the device, it is refused.
+TEST(TileWrite, WritesALumaBufferAsAGreyTile) {
+  sensor::YuvImage luma;
+  luma.layout = sensor::YuvLayout::Luma;
+  luma.width = 3840;
+  luma.height = 2160;
+  luma.device = std::make_shared<core::Buffer>();
+  luma.offset[0] = 4096;
+  luma.stride[0] = 3840;
+  const core::Buffer neutral;
+  const core::Result<pipelines::ImageWrite> write =
+      tile_write(luma, {3840, 2160}, {16, 32}, &neutral);
+  ASSERT_TRUE(write.ok()) << write.status().message();
+  EXPECT_EQ(write.value().planes[0].buffer, luma.device.get());
+  EXPECT_EQ(write.value().planes[0].offset, 4096u);
+  EXPECT_EQ(write.value().planes[0].row_length, 3840u);
+  EXPECT_EQ(write.value().planes[0].image, nullptr);
+  EXPECT_EQ(write.value().planes[1].buffer, &neutral);
+  EXPECT_EQ(write.value().planes[1].image, nullptr);
+  expect_offset(write.value().offset, 16, 32);
+  expect_extent(write.value().extent, 3840, 2160);
+
+  EXPECT_EQ(tile_write(luma, {3840, 2160}, {}).status().domain(),
+            Code::Unsupported);
+  sensor::YuvImage host = luma;
+  host.device.reset();
+  host.host = reinterpret_cast<const std::uint8_t*>(&neutral);
+  EXPECT_EQ(tile_write(host, {3840, 2160}, {}, &neutral).status().domain(),
+            Code::Unsupported);
+  EXPECT_EQ(tile_write(luma, {1920, 1080}, {}, &neutral).status().domain(),
+            Code::InvalidArgument);
+}
+
 TEST(TileWrite, RefusesWhatATileCannotTake) {
   const VkExtent2D tile{3840, 2160};
   sensor::YuvImage i420 = mjpeg_picture();

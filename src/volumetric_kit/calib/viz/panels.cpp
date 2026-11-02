@@ -181,45 +181,46 @@ core::Result<std::vector<PanelLine>> camera_panel(
                              std::to_string(frames.delivered) + " delivered, " +
                              std::to_string(frames.dropped) + " dropped, " +
                              std::to_string(frames.failed) + " failed";
-        if (camera.lost)
-          counts += ", " + std::to_string(*camera.lost) + " lost";
-        const bool lossy =
-            frames.failed > 0 || (camera.lost && *camera.lost > 0);
-        lines.push_back(
-            {"frames", std::move(counts), lossy ? Tone::Warn : Tone::Normal});
+        lines.push_back({"frames", std::move(counts),
+                         frames.failed > 0 ? Tone::Warn : Tone::Normal});
         return lines;
       });
 }
 
 core::Result<std::vector<PanelLine>> set_panel(
-    const sensor::FrameSet& set, const sensor::SensorArrayStats& stats,
+    const SetLive& set, const sensor::SensorArrayStats& stats,
     const std::vector<std::string>& ids, const SaverQueue& saver,
     const PanelOptions& options) {
   return compute::guarded(
       "set_panel", [&]() -> core::Result<std::vector<PanelLine>> {
-        if (ids.size() != set.frames.size()) {
+        if (ids.size() != set.skew_ns.size()) {
           return core::Status::invalid_argument(
               "set_panel: " + std::to_string(ids.size()) +
-              " ids for a set of " + std::to_string(set.frames.size()) +
+              " ids for a set of " + std::to_string(set.skew_ns.size()) +
               " cameras");
         }
         std::vector<PanelLine> lines;
-        if (set.frames.empty()) {
+        if (set.skew_ns.empty()) {
           lines.push_back({"set", "none yet", Tone::Muted});
           lines.push_back({"spread", "-", Tone::Muted});
         } else {
-          lines.push_back({"set",
-                           std::to_string(set.count()) + "/" +
-                               std::to_string(set.frames.size()) + " frames",
-                           set.complete() ? Tone::Good : Tone::Warn});
-          const double spread_ms = static_cast<double>(set.spread_ns()) / 1e6;
+          std::size_t present = 0;
+          for (const std::optional<std::int64_t>& skew : set.skew_ns) {
+            present += skew ? 1 : 0;
+          }
+          lines.push_back(
+              {"set",
+               std::to_string(present) + "/" +
+                   std::to_string(set.skew_ns.size()) + " frames",
+               present == set.skew_ns.size() ? Tone::Good : Tone::Warn});
+          const double spread_ms = static_cast<double>(set.spread_ns) / 1e6;
           lines.push_back({"spread", fixed(spread_ms, 2) + " ms",
                            spread_ms > options.rule.spread_warn_ms
                                ? Tone::Warn
                                : Tone::Normal});
         }
         for (std::size_t i = 0; i < ids.size(); ++i) {
-          const std::optional<std::int64_t> skew = set.skew_ns(i);
+          const std::optional<std::int64_t>& skew = set.skew_ns[i];
           if (skew) {
             lines.push_back(
                 {"skew " + ids[i],

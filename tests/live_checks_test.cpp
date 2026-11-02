@@ -20,7 +20,7 @@
 #include "detect_helpers.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
-#include "volumetric_kit/calib/detect/charuco.hpp"
+#include "volumetric_kit/calib/detect/board.hpp"
 
 namespace volumetric_kit::calib::quality {
 namespace {
@@ -417,8 +417,9 @@ TEST(LiveVsFull, FlagsAMedianOrAMaxAboveItsLimit) {
   EXPECT_TRUE(live_vs_full_flagged(shift, options));
 }
 
-// A camera's picture of the board, detected live (hybrid) and in full: the
-// two agree, unless a live corner is off by more than a pixel.
+// A camera's picture of the board, detected live (in its half, refined in
+// the picture) and in full: the two agree, unless a live corner is off by
+// more than a pixel.
 TEST(LiveVsFull, ARenderedViewAgreesUntilACornerIsOff) {
   const compute::Board board = test::femto_board();
   const camera::CameraModel model = test::color_like_lens();
@@ -427,10 +428,12 @@ TEST(LiveVsFull, ARenderedViewAgreesUntilACornerIsOff) {
   const cv::Mat image =
       test::camera_image(test::render_board(model, at, board));
   const detect::LumaView luma = test::luma(image);
+  const cv::Mat half = test::halved(image);
+  const detect::LumaView half_luma = test::luma(half);
   Detection live =
-      detect::detect_charuco(luma, board, detect::Mode::Hybrid).value();
-  const Detection full =
-      detect::detect_charuco(luma, board, detect::Mode::Full).value();
+      detect::detect_board(luma, board, detect::DetectOptions{&half_luma})
+          .value();
+  const Detection full = detect::detect_board(luma, board).value();
   ASSERT_EQ(full.observation.points.size(), 8u);
   EXPECT_EQ(check(full).check.verdict, ViewVerdict::Good);
 

@@ -78,12 +78,13 @@ endif()
 # and VS_WITH_CUDA apply. Work on both checkouts at once with
 # -DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_SENSOR=<sensor checkout>.
 #
-# The pin is sensor main at #27's merge (aa7d940, 0.20.0), for fold_radius2 on
-# its camera tier, as is its Orbbec SDK action in .github/workflows/_build.yml.
+# The pin is sensor main at #28's merge (5697a87, 0.21.0), for its prep tier's
+# LumaPass and list read, as is its Orbbec SDK action in
+# .github/workflows/_build.yml.
 FetchContent_Declare(
   volumetric_kit_sensor
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_sensor.git
-  GIT_TAG aa7d9402ae6726a84995c7bc52f936298d0d36d1)
+  GIT_TAG 5697a8772f25ac146c2da99357e1400488665c22)
 if(VC_WITH_RIG)
   set(VS_CAMERA_ONLY OFF)
 elseif(NOT DEFINED VS_CAMERA_ONLY)
@@ -101,6 +102,7 @@ if(VC_WITH_RIG)
     volumetric_kit::sensor_interface
     volumetric_kit::sensor_prep
     volumetric_kit::sensor_array
+    volumetric_kit::sensor_stereo
     volumetric_kit::sensor_image_io)
 else()
   vkc_require_sibling(volumetric_kit::sensor ${VC_SENSOR_MIN_VERSION} TARGETS

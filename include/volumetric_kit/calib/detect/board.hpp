@@ -33,8 +33,13 @@ struct DetectOptions {
 /// @brief The board's corners in one 8-bit picture, either kind.
 ///
 /// - **ChArUco:** OpenCV's `CharucoDetector`, corners by ChArUco id and the
-///   board's markers, as `detect_charuco` finds them in Full mode, or with
-///   @ref DetectOptions::half as in Hybrid mode, from that half.
+///   board's markers. In the picture, its corners are refined by OpenCV.
+///   With @ref DetectOptions::half, the board is found in the half, its
+///   markers reported in the picture's pixels, and each corner refined from
+///   there with `cornerSubPix` (at most 100 iterations, to 0.01 px), its
+///   half-window half its distance to the nearest marker corner found (the
+///   board's or not), rounded down and held to 2-10 px; a corner that moves
+///   more than 2 px is dropped.
 /// - **Checkerboard:** `findChessboardCornersSB` asked for 5 x 4 inner
 ///   corners with `CALIB_CB_LARGER`, so any larger grid counts, a board cut
 ///   by the picture's edge included. In the picture it runs with
@@ -63,9 +68,9 @@ struct DetectOptions {
 ///         index into `compute::Board::object_points`), in ascending order,
 ///         each of weight 1, with the camera and frame left for the caller to
 ///         fill; and a ChArUco board's markers, in ascending order of id. Or
-///         `InvalidArgument` for a picture or half `detect_charuco` would
-///         refuse (no pixels, a null `data`, a `stride` below `width`, a side
-///         longer than OpenCV's `int` holds), a half of another size than the
+///         `InvalidArgument` for a picture or half OpenCV cannot read (no
+///         pixels, a null `data`, a `stride` below `width`, a side longer
+///         than OpenCV's `int` holds), a half of another size than the
 ///         picture halved, or a checkerboard grid larger than @p board either
 ///         way round (naming both sizes); or what OpenCV threw
 ///         (`compute::guarded`).

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <string>
 #include <utility>
@@ -202,14 +203,47 @@ core::Result<MosaicLayout> mosaic_layout(
   });
 }
 
-core::Result<pipelines::ImageWrite> tile_write(const sensor::YuvImage& picture,
-                                               VkExtent2D expected,
-                                               VkOffset2D at) {
+core::Result<pipelines::ImageWrite> tile_write(
+    const sensor::YuvImage& picture, VkExtent2D expected, VkOffset2D at,
+    const core::Buffer* neutral_chroma) {
   return compute::guarded(
       "tile_write", [&]() -> core::Result<pipelines::ImageWrite> {
+        const auto sized = [&]() -> core::Status {
+          if (picture.width == 0 || picture.height == 0 ||
+              picture.width != expected.width ||
+              picture.height != expected.height) {
+            return core::Status::invalid_argument(
+                "tile_write: a " + size_text(picture.width, picture.height) +
+                " picture for a " + size_text(expected.width, expected.height) +
+                " tile");
+          }
+          return {};
+        };
+        if (picture.layout == sensor::YuvLayout::Luma) {
+          if (picture.device == nullptr) {
+            return core::Status::unsupported(
+                "tile_write: a luma picture not in a device buffer");
+          }
+          if (neutral_chroma == nullptr) {
+            return core::Status::unsupported(
+                "tile_write: a luma picture with no neutral chroma");
+          }
+          VKC_TRY(sized());
+          // Grey: the luma as plane 0, a neutral chroma under it.
+          pipelines::ImageWrite write;
+          write.planes[0].buffer = picture.device.get();
+          write.planes[0].offset = picture.offset[0];
+          write.planes[0].row_length =
+              static_cast<std::uint32_t>(picture.stride[0]);
+          write.planes[1].buffer = neutral_chroma;
+          write.offset = at;
+          write.extent = expected;
+          return write;
+        }
         if (picture.layout != sensor::YuvLayout::Nv12) {
           return core::Status::unsupported(
-              "tile_write: an I420 picture; tiles take NV12");
+              "tile_write: an I420, YUYV or V210 picture; tiles take NV12 or "
+              "luma");
         }
         if (picture.image[0] == nullptr && picture.image[1] == nullptr &&
             picture.device != nullptr) {
@@ -225,14 +259,7 @@ core::Result<pipelines::ImageWrite> tile_write(const sensor::YuvImage& picture,
           return core::Status::invalid_argument(
               "tile_write: the picture lacks its luma or chroma image");
         }
-        if (picture.width == 0 || picture.height == 0 ||
-            picture.width != expected.width ||
-            picture.height != expected.height) {
-          return core::Status::invalid_argument(
-              "tile_write: a " + size_text(picture.width, picture.height) +
-              " picture for a " + size_text(expected.width, expected.height) +
-              " tile");
-        }
+        VKC_TRY(sized());
         pipelines::ImageWrite write;
         write.planes[0].image = picture.image[0].get();
         write.planes[1].image = picture.image[1].get();
@@ -320,6 +347,15 @@ core::Result<std::unique_ptr<RigMosaic>> RigMosaic::create(
           VKC_ASSIGN(mosaic->black_, allocator.create_buffer(black));
           *static_cast<std::uint8_t*>(mosaic->black_.mapped()) = 0;
         }
+        // A grey tile's chroma, for the largest tile: Cb and Cr at 128.
+        core::BufferDesc neutral;
+        neutral.size = std::uint64_t{(placed.cell.width + 1) / 2} *
+                       ((placed.cell.height + 1) / 2) * 2;
+        neutral.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        neutral.memory = core::MemoryUsage::Staging;
+        VKC_ASSIGN(mosaic->neutral_, allocator.create_buffer(neutral));
+        std::memset(mosaic->neutral_.mapped(), 128,
+                    static_cast<std::size_t>(neutral.size));
         mosaic->codings_.resize(placed.pages.size());
         mosaic->since_.resize(placed.tiles.size());
         mosaic->refused_.reserve(placed.tiles.size());
@@ -383,7 +419,7 @@ core::Status RigMosaic::record_pages(
     if (pictures[i] == nullptr) continue;
     const MosaicTile& tile = layout_.tiles[i];
     core::Result<pipelines::ImageWrite> write =
-        tile_write(*pictures[i], tile.extent, tile.at);
+        tile_write(*pictures[i], tile.extent, tile.at, &neutral_);
     if (!write.ok()) {
       refused_.push_back({i, std::move(write).status()});
       continue;

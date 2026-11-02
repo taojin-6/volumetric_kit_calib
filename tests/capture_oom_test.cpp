@@ -49,15 +49,18 @@ SessionInfo make_info() {
   info.sync_path = "/vc_capture_oom_no_such_parent/femto_mega_sync.json";
   info.reference = "CL2A141000N";
   info.board = legacy_femto_board();
-  info.depth_mode.name = "nfov_unbinned";
-  info.depth_mode.min_m = 0.5f;
-  info.depth_mode.max_m = 3.86f;
+  info.driver = "orbbec";
+  DepthMode& mode = info.depth_mode.emplace();
+  mode.name = "nfov_unbinned";
+  mode.min_m = 0.5f;
+  mode.max_m = 3.86f;
   for (const char* serial : {"CL2A14100A4", "CL2A141000N"}) {
     SessionCamera c;
-    c.info.id = serial;
-    c.info.color = model(64, 48);
-    c.info.depth = model(16, 12);
-    c.info.fps = 25;
+    c.id = serial;
+    c.size = {64, 48};
+    c.color = model(64, 48);
+    c.depth = model(16, 12);
+    c.fps = 25;
     info.cameras.push_back(std::move(c));
   }
   return info;
@@ -105,7 +108,7 @@ TEST(CaptureOom, CreateAcceptingASession) {
 
 TEST(CaptureOom, CreateRefusingASession) {
   SessionInfo info = make_info();
-  info.cameras[1].info.fps = 15;
+  info.cameras[1].fps = 15;
   Supply<SessionInfo> infos(info);
   expect_oom_when_reporting(
       [&infos] { return SessionWriter::create(infos.take()); },
@@ -123,7 +126,7 @@ TEST(CaptureOom, CreateRefusingAnOriginTag) {
 
 TEST(CaptureOom, CreateRefusingWhatSensorRefuses) {
   SessionInfo info = make_info();
-  info.cameras[0].info.color->intrinsics.fx =
+  info.cameras[0].color->intrinsics.fx =
       std::numeric_limits<double>::quiet_NaN();
   Supply<SessionInfo> infos(info);
   expect_oom_when_reporting(

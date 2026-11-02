@@ -190,6 +190,12 @@ if(VC_WITH_RIG)
               Threads::Threads)
   target_sources(vc_capture_oom_test PRIVATE support/allocation_failure.cpp)
 
+  # source: fake cameras in an array and a fake stereo pair, each set's luma and
+  # half made and read back on a device, through the core's Vulkan test fixtures
+  # (they skip without one); the board in the GPU's half; main 4.
+  vc_add_test(source_rig volumetric_kit::calib_source vc_synthetic_rig
+              volumetric_kit::core_test_support opencv_imgproc)
+
   # depth: the board-plane fit and the pair agreement on a device, through the
   # core's Vulkan test fixtures (they skip without one), against references in
   # double made here; the board region's rule on the device, pixel by pixel,
