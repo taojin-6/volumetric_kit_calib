@@ -102,6 +102,7 @@ if(VC_WITH_RIG)
     volumetric_kit::sensor_interface
     volumetric_kit::sensor_prep
     volumetric_kit::sensor_array
+    volumetric_kit::sensor_stereo
     volumetric_kit::sensor_image_io)
 else()
   vkc_require_sibling(volumetric_kit::sensor ${VC_SENSOR_MIN_VERSION} TARGETS

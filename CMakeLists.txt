@@ -63,9 +63,10 @@ include(vc_sanitizers)
 # --- Dependencies + library --------------------------------------------------
 # The oldest volumetric_kit_core and volumetric_kit_sensor calib builds with
 # (DECISIONS.md, 2026-10-29), checked in the ones that arrive (third_party/):
-# sensor 0.20.0 has a lens's fold on its camera tier (DECISIONS.md, 2026-11-01).
+# sensor 0.21.0 has its prep tier's LumaPass and list read (DECISIONS.md,
+# 2026-11-02).
 set(VC_CORE_MIN_VERSION 0.29.0)
-set(VC_SENSOR_MIN_VERSION 0.20.0)
+set(VC_SENSOR_MIN_VERSION 0.21.0)
 # OpenCV 5, a prerequisite of the compute tier and those built on it
 # (DECISIONS.md, 2026-10-17): Homebrew's on macOS, tools/install-opencv.sh's on
 # Linux (README, "Prerequisites"). Found here so its imported targets reach
