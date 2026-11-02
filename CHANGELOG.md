@@ -7,6 +7,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.5.0] - 2026-11-02
+
+### Added
+
+- **Intrinsic mode** (DECISIONS.md, 2026-11-02): calib_rig's mode is the
+  scenario's `operation`, `calibrate_intrinsics` fitting each camera's lens.
+  One table (`app/calib_mode.hpp`): `session_mode`, each camera's live lens
+  (`rig_lens`: the file's at its size, the factory's, a stand-in), a fit's
+  start (`lens_start`, never the stand-in), each mode's board
+  (`board_seed`, `board_rule`), capture rule (`capture_rule`, one view a
+  lens capture), readiness (`lens_states`) and Calibrate's gate
+  (`session_ready`). Calibrate's lens run (`CalibrateResult::mode`,
+  `lenses`, `unsolved`, `report_only`) writes a lens-only results
+  directory; `CaptureWorker::lenses` feeds the Lenses panel
+  (`viz::lens_panel`), and `viz::lens_results_panel` the Calibration
+  window; `RigMode::intrinsic` has no 3D view.
+- **DeckLink pairs open:** the opener's DeckLink arm, where sensor builds
+  its driver (`VS_WITH_DECKLINK`), opens the scenario's pair with no
+  calibration, for its lenses.
+- The Board window's kind, a checkerboard's fields, and the session's
+  board rule (`viz::BoardRule`, `viz::with_kind`): a board with fewer inner
+  corners than a lens view takes is refused for lenses, saying why.
+- ci: the ubuntu-24.04 leg builds calib_rig's DeckLink arm on the core's
+  copy of the DeckLink SDK's headers and runs its host test.
+
+### Changed
+
+- `check_scenario` runs only the operations `calibrate` and
+  `calibrate_intrinsics`, and the drivers `orbbec` and, for lenses,
+  `decklink`, each where built, refusing anything else by field and value;
+  it reads `source.calibration`. `RigScenario` is the mode, the driver and
+  that file; the preset and the sync file are the Orbbec arm's.
+- `orbbec_options` and `orbbec_camera` move into the opener's Orbbec arm,
+  internal to `calib_app`, which links `sensor_orbbec` privately and builds
+  with either driver.
+- The session writer takes a checkerboard, whose board block has no marker
+  keys. `CaptureSetup` and `KeptCaptures` carry the mode and the
+  calibration file, `KeptCapture` each view's `frontal`. `write_results`
+  writes no calibration file whose text is empty.
+- build: **calib pins core at #86's merge** (e1adf08, 0.40.0), where it was
+  at #85's (1972079, 0.39.0), as are the core's actions in CI; `calib_app`
+  needs core 0.40.0 (`VC_APP_CORE_MIN_VERSION`). Every test passed
+  unchanged on the new pin.
+- calib's version is 0.5.0, where it was 0.4.0.
+
+### Removed
+
+- `detect/charuco.hpp` and `detect_charuco`, an internal header:
+  `detect_board` finds a ChArUco board.
+
 ## [0.4.0] - 2026-11-02
 
 ### Added

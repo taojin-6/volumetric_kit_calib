@@ -19,9 +19,9 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > metrics, lens gates and pair row check; with `VC_WITH_RIG`, the `source`
 > tier's grey pictures from any sensor source, the `capture` tier's session
 > writer, the `viz` tier's live and 3D views and the `depth` tier's
-> board-plane fit and pairwise depth agreement; and, with GLFW and sensor's
-> Orbbec driver too, the `app` tier's `calib_rig`, live view, 3D view,
-> capture and Calibrate.
+> board-plane fit and pairwise depth agreement; and, with GLFW and a sensor
+> driver too, Orbbec's or DeckLink's, the `app` tier's `calib_rig`, live view,
+> 3D view, capture and Calibrate, of each camera's lens or the rig's poses.
 > The color tier is not yet implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain
 > the reference oracle.
@@ -144,8 +144,9 @@ renderer.
   the rig's poses, with the cameras' frusta, the world's axes, the solved
   boards and the origin tag, turned upright, the tag's floor level
   ([DECISIONS.md](DECISIONS.md#2026-10-17--the-live-3d-view-drawn-from-prepared-frames-in-place)).
-- **App:** `calib_rig` opens every camera of the rig's sync file, at the
-  scenario's modes, and shows them live with the board found in each; Space
+- **App:** `calib_rig` opens the scenario's cameras -- every camera of a
+  Femto rig's sync file at its modes, or one DeckLink pair with no
+  calibration -- and shows them live with the board found in each; Space
   (or a clicker's "next") captures a still set, Backspace (or "back") drops
   the last. A worker thread owns the rig's source and finds the board in
   each set's half, another prepares sets on the GPU for the 3D view (hidden
@@ -159,7 +160,10 @@ renderer.
   the tag's world, or the reference camera's when it cannot be located;
   each result fills the window with the live points at the solved poses,
   and a key goes back to the images
-  ([DECISIONS.md](DECISIONS.md#2026-10-18--calibrate-t4)).
+  ([DECISIONS.md](DECISIONS.md#2026-10-18--calibrate-t4)). In intrinsic
+  mode it instead fits each ready camera's lens and writes a lens-only
+  results directory ([its modes](#intrinsic-and-extrinsic-mode);
+  [DECISIONS.md](DECISIONS.md#2026-11-02--intrinsic-mode)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
 
@@ -206,13 +210,15 @@ configure. `VC_WITH_RIG` (OFF by default) builds `capture`, `depth` and
 GLSL compiler: the core's vulkan tier
 [prerequisites](https://github.com/taojin-6/volumetric_kit_core#prerequisites).
 `viz` fetches `volumetric_kit_gfx` (pinned by commit). Given GLFW
-(`brew install glfw`) and sensor's Orbbec driver (`-DVS_WITH_ORBBEC=ON`, with
-the
+(`brew install glfw`) and a sensor driver -- Orbbec's (`-DVS_WITH_ORBBEC=ON`,
+with the
 [Orbbec SDK](https://github.com/taojin-6/volumetric_kit_sensor#orbbec-driver);
 off Apple also `-DVS_WITH_FFMPEG=ON -DVS_WITH_CUDA=ON`, with FFmpeg and the
 CUDA toolkit for sensor's
 [video decoders](https://github.com/taojin-6/volumetric_kit_sensor#video-decoders)),
-`VC_WITH_RIG` builds the `app` tier and `calib_rig` too. To build against a
+or DeckLink's (`-DVS_WITH_DECKLINK=ON`, Linux x86-64, with the DeckLink SDK's
+headers at `DeckLinkSDK_ROOT`) -- `VC_WITH_RIG` builds the `app` tier and
+`calib_rig` too, with an opener for each driver built. To build against a
 local core, sensor or gfx checkout instead of the pinned one, pass
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_CORE=<path>`,
 `-DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_SENSOR=<path>` or
@@ -272,8 +278,50 @@ Its keys, on a press (none while a text field has the keyboard):
 | Space, →, Page Down, S | capture | to the images, "press again" |
 | Backspace, ←, Page Up | drop the last capture | to the images |
 | C, F5 | Calibrate | Calibrate |
-| V, B, `.` | to the 3D view, once calibrated | to the images |
+| V, B, `.` | to the 3D view, once calibrated (extrinsic mode) | to the images |
 | Escape | cancel Calibrate | cancel Calibrate |
+
+### Intrinsic and extrinsic mode
+
+The scenario's `operation` is calib_rig's mode:
+
+| | Intrinsic (`calibrate_intrinsics`) | Extrinsic (`calibrate`) |
+| --- | --- | --- |
+| Board | the checkerboard first; any with 12 inner corners or more | the rig's ChArUco board |
+| Each camera's live lens | `source.calibration`'s at the stream's size, else the driver's, else a stand-in | the file's or the driver's; none stops the run |
+| A capture | a still board, one view enough | a still board |
+| Calibrate | once a camera is ready (the Lenses panel) | once the session's links are |
+| Its result | each ready camera's lens, in a lens-only `array_calibration.json`; a factory lens is reported, never written | the rig's poses, and the 3D view |
+
+The checkerboard is the intrinsic board: the rig's 5 x 3 ChArUco board has 8
+inner corners, fewer than a lens view takes (12), and is refused there.
+calib_rig fits a DeckLink pair's lenses; it does not solve the pair's poses
+yet:
+
+```json
+{"version": 1, "operation": "calibrate_intrinsics",
+ "source": {"kind": "live", "driver": "decklink",
+   "cameras": [{"id": "bm-1", "input": "SDI 2"}, {"id": "bm-2", "input": "SDI 1"}],
+   "pairs": [{"left": "bm-1", "right": "bm-2"}],
+   "calibration": "bm_pair/array_calibration.json"},
+ "output": {"path": "sessions"}}
+```
+
+A pair's lenses, in the lab:
+
+1. **Boards.** Measure the checkerboard's square with calipers over 12
+   squares, check the board is flat (note any bow) with about a square of
+   white margin around it, and enter it with "square measured" ticked. For
+   the pose session, measure the 5 x 3 ChArUco board end to end with a steel
+   rule (0.75 m), and have the floor tag (tag36h11, id 0) at hand.
+2. **Cameras.** Tape focus and iris; fix exposure and white balance over
+   PTP.
+3. **Session.** Run the scenario above, `source.calibration` the pair's
+   current file. Capture about 40 still boards, tilted 20-45 degrees, near
+   and far, pushing the board into each corner and along both sides until
+   each camera's line in the Lenses panel turns green; then press C. The
+   lens file is `<session>/results/<RRR>_<stamp>/array_calibration.json`,
+   its report beside it.
 
 ## Use it in your project
 
@@ -296,15 +344,15 @@ compiler adds. `volumetric_kit::calib_compute`, `volumetric_kit::calib_detect`,
 built. Set `VC_WITH_RIG` ON before calib is made available to link
 `volumetric_kit::calib_source`, `volumetric_kit::calib_capture`,
 `volumetric_kit::calib_depth`, `volumetric_kit::calib_viz` and, with
-`VC_BUILD_APPS`, GLFW and sensor's Orbbec driver, `volumetric_kit::calib_app`.
+`VC_BUILD_APPS`, GLFW and a sensor driver, `volumetric_kit::calib_app`.
 `VC_SANITIZE` is a semicolon list, empty (off) by default —
 e.g. `-DVC_SANITIZE="address;undefined"`. calib is consumed by commit, as
 above, and installs nothing: it has no install rules or package config
 ([DECISIONS.md](DECISIONS.md#2026-10-22--consumed-by-commit-never-installed)).
 
 calib needs `volumetric_kit_core` 0.29.0 or newer, with its vulkan tier for
-`VC_WITH_RIG` and its config tier for `calib_app`, and `volumetric_kit_sensor`
-0.21.0 or newer. An application that declares either before calib, to share it
+`VC_WITH_RIG`, and 0.40.0 or newer with its config tier for `calib_app`; and
+`volumetric_kit_sensor` 0.21.0 or newer. An application that declares either before calib, to share it
 with another sibling, pins at least that: on an older one, calib's configure
 fails at `vkc_require_core` or `vkc_require_sibling`. Without `VC_WITH_RIG`,
 calib makes sensor available camera-only (`VS_CAMERA_ONLY`), so an application
