@@ -1387,6 +1387,13 @@ TEST(SessionWriter, RefusesASessionItCannotWrite) {
             "camera CL2A141000N names a lens file its lens did not come from");
   }
   {
+    SessionInfo info = pair_info(dir);
+    info.cameras[1].lens = LensOrigin::Factory;
+    info.cameras[1].lens_file.clear();
+    refused(info, Code::InvalidArgument,
+            "camera bm-2's lens came from a factory model it does not have");
+  }
+  {
     SessionInfo info = good;
     info.cameras[1].depth->size.height += 1;
     refused(info, Code::InvalidArgument, "depth model is 16x13");

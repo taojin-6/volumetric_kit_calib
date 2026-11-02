@@ -416,8 +416,9 @@ class VC_CAPTURE_API SessionWriter {
   ///                 size; each factory colour model is the camera's size;
   ///                 the factory models sensor's calibration file holds,
   ///                 with their `depth_to_color`; a lens file is named
-  ///                 exactly when a camera's lens came from one; and the
-  ///                 reference is a camera.
+  ///                 exactly when a camera's lens came from one, and a
+  ///                 factory lens only by a camera with a factory colour
+  ///                 model; and the reference is a camera.
   /// @param options  How it queues.
   /// @return The writer; `InvalidArgument` naming what @p info or @p options
   ///         gets wrong; `Unsupported` for a board that is not ChArUco;

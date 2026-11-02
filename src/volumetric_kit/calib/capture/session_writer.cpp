@@ -141,6 +141,10 @@ core::Status check_camera(const SessionCamera& camera,
       camera.lens != LensOrigin::StandIn) {
     return invalid("camera " + id + "'s lens origin is not a LensOrigin");
   }
+  if (camera.lens == LensOrigin::Factory && !camera.color) {
+    return invalid("camera " + id +
+                   "'s lens came from a factory model it does not have");
+  }
   if (!camera.lens_file.empty()) {
     VKC_TRY(core::check_path("SessionWriter: camera " + id + "'s lens file",
                              camera.lens_file));
