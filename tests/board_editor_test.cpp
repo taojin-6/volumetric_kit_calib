@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-// The board editor: edits checked as the detector checks a board, the
-// fields as the editor shows them, and the board locked after the session's
-// first capture.
+// The board editor: edits checked as the detector checks a board and as the
+// session's rule takes one (a lens session's checkerboard, and a lens view's
+// corners), the fields as the editor shows them, the kind switch, and the
+// board locked after the session's first capture.
 
 #include "volumetric_kit/calib/viz/board_editor.hpp"
 
@@ -159,6 +160,59 @@ TEST(BoardFields, HoldCountsToIntsRange) {
   fields.squares_across = kMax;
   EXPECT_EQ(apply_fields(editor.board(), fields).cols, kMax - 1);
   EXPECT_EQ(editor.board().cols, 4);
+}
+
+// A lens session's editor takes a checkerboard, its fields squares and a
+// square with no markers, and a ChArUco board large enough; the kind switch
+// starts from the lab's board of that kind.
+TEST(BoardEditor, ALensSessionTakesACheckerboard) {
+  BoardRule lenses;
+  lenses.checkerboard = true;
+  lenses.min_corners = 12;
+  core::Result<BoardEditor> made =
+      BoardEditor::create(legacy_checkerboard(), false, lenses);
+  ASSERT_TRUE(made.ok()) << made.status().message();
+  BoardEditor editor = std::move(made).value();
+  EXPECT_EQ(editor.rule().min_corners, 12);
+  const BoardFields fields = board_fields(editor.board());
+  EXPECT_EQ(fields.squares_across, 14);
+  EXPECT_EQ(fields.squares_down, 9);
+  EXPECT_DOUBLE_EQ(fields.square_mm, 20.0);
+  EXPECT_DOUBLE_EQ(fields.marker_mm, 0.0);
+  // The squares measured: one field, no markers to keep.
+  const Target measured = apply_fields(editor.board(), {14, 9, 19.94, 0.0});
+  ASSERT_TRUE(editor.edit(measured, true).ok());
+  EXPECT_DOUBLE_EQ(editor.board().square_size_m, 0.01994);
+  EXPECT_EQ(editor.board().dictionary, MarkerDictionary::None);
+  EXPECT_TRUE(editor.square_measured());
+  // The rig's ChArUco board has too few corners for a lens view: refused,
+  // saying why, and nothing changes.
+  const core::Status refused = editor.edit(legacy_femto_board(), false);
+  EXPECT_EQ(refused.domain(), Code::InvalidArgument);
+  EXPECT_NE(refused.message().find("a lens view needs 12 corners, and this "
+                                   "board has 8 (4 x 2 inner corners)"),
+            std::string::npos)
+      << refused.message();
+  EXPECT_EQ(editor.board().kind, TargetKind::Checkerboard);
+  EXPECT_EQ(editor.board().cols, 13);
+  // The kind switch: the lab's board of the other kind, or the board itself.
+  EXPECT_EQ(with_kind(editor.board(), TargetKind::Checkerboard),
+            editor.board());
+  EXPECT_EQ(with_kind(editor.board(), TargetKind::ChArUco),
+            legacy_femto_board());
+  EXPECT_EQ(with_kind(legacy_femto_board(), TargetKind::Checkerboard),
+            legacy_checkerboard());
+  // Another kind is refused, naming the two a lens session takes.
+  Target circles;
+  circles.kind = TargetKind::SymmetricCircleGrid;
+  circles.rows = 4;
+  circles.cols = 11;
+  circles.square_size_m = 0.02;
+  const core::Status other = editor.edit(circles, false);
+  EXPECT_EQ(other.domain(), Code::Unsupported);
+  EXPECT_NE(other.message().find("must be ChArUco or a checkerboard"),
+            std::string::npos)
+      << other.message();
 }
 
 TEST(BoardEditor, LocksTheBoardAfterTheFirstCapture) {

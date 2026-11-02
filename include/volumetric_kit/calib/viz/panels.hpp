@@ -6,10 +6,10 @@
 /// @file panels.hpp
 /// @brief The live view's panels: what each camera sees, how the latest set
 ///        arrived, what the captures kept add up to and how much of the
-///        origin tag they hold, where a capture stands, and the stage
-///        timings; and Calibrate's: how far it has got, what its result and
-///        its depth checks are worth, where its world is, and the notices
-///        it posts.
+///        origin tag they hold, how far each lens's views are, where a
+///        capture stands, and the stage timings; and Calibrate's: how far it
+///        has got, what its result and its depth checks are worth, where its
+///        world is, what each lens fitted is worth, and the notices it posts.
 ///
 /// Each panel is a model -- lines of text, each in a @ref Tone -- built from
 /// host data alone (the quality tier's checks and metrics, sensor's counters,
@@ -22,6 +22,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "volumetric_kit/calib/core/capture_meta.hpp"
@@ -30,6 +31,8 @@
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
+#include "volumetric_kit/calib/quality/lens_gate.hpp"
+#include "volumetric_kit/calib/quality/lens_readiness.hpp"
 #include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
@@ -428,6 +431,65 @@ core::Result<std::vector<PanelLine>> world_panel(
 core::Result<std::vector<std::string>> calibration_notices(
     int number, const std::string& directory,
     const std::vector<PanelLine>& world);
+
+/// @brief The Lenses panel, in intrinsic mode: one line per camera, its id
+///        and how far its views are toward its lens fit, amber until ready,
+///        then green.
+///
+/// `views 22/30  cells 71%  reach TL .93 TR .88 BL .95 BR .71  sides L .94
+/// R .90  frontal 40%  lens: file`: the views to fit of `min_views`, the
+/// share of the 8 x 6 cells holding a corner, the reach toward each image
+/// corner and side (`quality::LensReadiness`), the frontal share (`-`
+/// through a stand-in lens, which cannot tell), and where the live lens
+/// came from.
+/// @param ids      Each camera's id, in rig order.
+/// @param lenses   Each camera's readiness, in rig order; empty before the
+///                 first capture, when each line reads `no views yet`.
+/// @param origins  Each camera's lens origin, as `session.json` names it
+///                 (`"file"`, `"factory"`, `"stand-in"`), in rig order.
+/// @param options  What ready means: `min_views`.
+/// @return The lines; `InvalidArgument` for lists of other lengths than
+///         @p ids; or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const std::vector<PanelLine> lines,
+///            lens_panel(ids, captures->lenses(), origins));
+/// draw_panel_lines("lenses", lines);
+/// @endcode
+core::Result<std::vector<PanelLine>> lens_panel(
+    const std::vector<std::string>& ids,
+    const std::vector<quality::LensReadiness>& lenses,
+    const std::vector<std::string>& origins,
+    const quality::LensReadyOptions& options = {});
+
+/// @brief The Calibration window's lines for a lens run.
+///
+/// Lines, in order: `calibration` (its results number, captures and
+/// seconds); `lens <id>` for each camera fitted, `pass` (green) or `fail:
+/// <first gate missed>` (red), its held-out RMS and fold, and `report only`
+/// for a camera fitted for the report alone; `lens <id>` for each camera not
+/// fitted, why (amber); and `results`, the directory.
+/// @param lenses       The cameras fitted, judged.
+/// @param report_only  Those of @p lenses not written (factory lenses).
+/// @param unsolved     The cameras not fitted, each id and why.
+/// @param number       Its results directory's number, `RRR`.
+/// @param directory    Its results directory.
+/// @param captures     The kept captures it was fitted from.
+/// @param seconds      How long the fits took.
+/// @return The lines; or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const std::vector<PanelLine> lines,
+///            lens_results_panel(result.lenses, result.report_only, unsolved,
+///                               result.number, result.directory,
+///                               result.captures, result.seconds));
+/// @endcode
+core::Result<std::vector<PanelLine>> lens_results_panel(
+    const std::vector<quality::LensVerdict>& lenses,
+    const std::vector<std::string>& report_only,
+    const std::vector<std::pair<std::string, std::string>>& unsolved,
+    int number, const std::string& directory, std::size_t captures,
+    double seconds);
 
 /// @brief The live stages' timings as gfx's metrics panel takes them.
 /// @param stages  The stages timed (poll, readback, detect, tiles, ...).
