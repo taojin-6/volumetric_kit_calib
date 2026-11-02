@@ -30,8 +30,9 @@ namespace volumetric_kit::calib::solve {
 
 /// How far toward an image corner or side (@ref LensReach) a view reaches to
 /// count: about 70 degrees off axis toward the corners, 61 toward the sides,
-/// on the lab's fisheye. An R8 fit with corners that far does not fold inside
-/// the frame.
+/// on the lab's fisheye. A right R8 fit with corners that far does not fold
+/// inside the frame; a wrong minimum still can, which is the fold gate's to
+/// catch.
 inline constexpr double kLensReach = 0.9;
 
 /// @brief How far a pixel, or the farthest of several, gets from the image's
@@ -70,7 +71,8 @@ struct LensOptions {
   /// fitted one reaching @ref kLensReach toward a corner or side. At least 2.
   int holdout_every = 5;
   /// Solves after outliers are dropped, at most, by the bundle adjustment's
-  /// rule and bounds (@ref BundleAdjustOptions); 0 drops none.
+  /// rule and bounds (@ref BundleAdjustOptions); 0 drops none, from the
+  /// fitted and the held-out views alike.
   int outlier_rounds = 3;
   /// `calibrateCamera`'s iterations in one fit, at most; at least 1. A
   /// fisheye's fit creeps for hundreds before it settles.
@@ -97,8 +99,8 @@ struct LensView {
   Use use{};                  ///< What the solve did with it.
   int corners = 0;            ///< The corners it scored; found, if none did.
   /// Its RMS through the lens over those corners, at the round that dropped
-  /// it for a view dropped; infinite for a held-out view with no pose; 0 for
-  /// a view not used.
+  /// it for a view dropped; infinite for a held-out view with no pose, none
+  /// being left it once its outlier corners went; 0 for a view not used.
   double rms_px = 0;
 };
 
@@ -125,15 +127,17 @@ struct LensFit {
   /// length trades against its coefficients, so only the curve is known well.
   sensor::camera::PinholeIntrinsics sigma;
   double rms_px = 0;  ///< OpenCV's 2D RMS over the fitted corners.
-  /// The same over every corner of the held-out views: each posed on its
-  /// own, by @ref view_pose then refined through the lens, and nothing
-  /// dropped, as the rule would hide what they are held out to show. NaN
-  /// with none held out; infinite when one has no pose.
+  /// The same over the held-out views' corners: each view posed on its own,
+  /// by @ref view_pose then refined through the lens, and posed again without
+  /// the corners past this fit's corner bound, which are `dropped` in
+  /// `residuals`, so it compares like with like with `rms_px`. NaN with none
+  /// held out; infinite when one has no pose.
   double holdout_rms_px = 0;
-  /// The kept fit began at the given start, not OpenCV's own.
+  /// The kept fit came of the given start, not OpenCV's own, at once or
+  /// through a lens fitted from it.
   bool from_start = false;
   std::vector<LensView> views;  ///< Every view of the camera, in capture order.
-  /// Every corner of the fitted and held-out views, in that order, its
+  /// Every corner of the views fitted and held out, in capture order, its
   /// @ref CornerResidual::camera 0; `dropped` for one the rule left out.
   std::vector<CornerResidual> residuals;
 };
@@ -174,7 +178,13 @@ VC_SOLVE_API core::Result<std::vector<LensView>> plan_lens_views(
 ///    if its RMS is above them; a view whose kept corners fall below
 ///    `min_corners` or fix no pose goes whole. Step 2 then runs again. The
 ///    rounds stop when none is dropped.
-/// 4. **Hold-out.** Each view held out is posed through the lens and scored.
+/// 4. **Second pass.** When a round dropped anything, the rounds run once more
+///    with every view and corner back, from the lens they reached: a wrong
+///    first fit can drop what was never bad. That doubles the time, and only
+///    then.
+/// 5. **Hold-out.** Each view held out is posed through the lens, those of its
+///    corners past the final fit's corner bound are marked, it is posed again
+///    on the rest, and it is scored.
 ///
 /// The result depends on the views' captures, not on their order in
 /// @p views, and is the same on every run but for rounding (about 1e-8 px):
@@ -193,7 +203,8 @@ VC_SOLVE_API core::Result<std::vector<LensView>> plan_lens_views(
 ///         `solve_lens: `.
 ///
 /// @code
-/// VKC_ASSIGN(const LensFit fit, solve_lens("bm-1", size, board, views, m0));
+/// VKC_ASSIGN(const LensFit fit,
+///            solve_lens("bm-1", size, board, views, file_lens));
 /// @endcode
 VC_SOLVE_API core::Result<LensFit> solve_lens(
     std::string_view camera_id, sensor::camera::ImageSize size,

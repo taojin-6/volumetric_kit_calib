@@ -51,6 +51,13 @@ struct ViewState {
   Pose pose = Pose::all(0.0);
 };
 
+// A lens to start a fit from, and whether it came of the caller's: the second
+// pass starts from what the first one reached.
+struct Start {
+  compute::CvCamera lens;
+  bool given = false;
+};
+
 // A fit: the lens, and a pose for each view in it, in the Plan's order.
 struct Solved {
   double rms = 0.0;
@@ -58,6 +65,13 @@ struct Solved {
   camera::PinholeIntrinsics sigma;
   std::vector<Pose> poses;
   bool from_start = false;
+};
+
+// The fitted views at a fit.
+struct Residuals {
+  std::vector<std::size_t> fitted;         // their places in the states
+  std::vector<std::vector<double>> norms;  // each corner's, NaN if not kept
+  std::vector<double> components;          // the kept corners', x and y
 };
 
 core::Status check_options(const LensOptions& o, std::string_view prefix) {
@@ -210,8 +224,7 @@ std::vector<ViewState> read_views(const compute::Board& board,
 // start may yet fit. Running out of memory goes on up.
 std::optional<Solved> fit_from(const Plan& plan,
                                const std::vector<ViewState>& states,
-                               const cv::Size& image,
-                               const compute::CvCamera* start,
+                               const cv::Size& image, const Start* start,
                                int max_iterations, std::string& why) {
   // OpenCV's calibration takes single precision alone: 2e-4 px at 4K.
   std::vector<std::vector<cv::Point3f>> object;
@@ -230,8 +243,8 @@ std::optional<Solved> fit_from(const Plan& plan,
   cv::Mat distortion = cv::Mat::zeros(8, 1, CV_64F);
   int flags = cv::CALIB_RATIONAL_MODEL;
   if (start != nullptr) {
-    matrix = cv::Mat(start->camera_matrix).clone();
-    distortion = cv::Mat(start->distortion).clone();
+    matrix = cv::Mat(start->lens.camera_matrix).clone();
+    distortion = cv::Mat(start->lens.distortion).clone();
     flags |= cv::CALIB_USE_INTRINSIC_GUESS;
   }
   const cv::TermCriteria criteria(
@@ -274,7 +287,7 @@ std::optional<Solved> fit_from(const Plan& plan,
                               t.at<double>(0), t.at<double>(1),
                               t.at<double>(2));
   }
-  solved.from_start = start != nullptr;
+  solved.from_start = start != nullptr && start->given;
   return solved;
 }
 
@@ -282,8 +295,7 @@ std::optional<Solved> fit_from(const Plan& plan,
 // compares like with like.
 core::Result<Solved> best_fit(const Plan& plan,
                               const std::vector<ViewState>& states,
-                              const cv::Size& image,
-                              const compute::CvCamera* start,
+                              const cv::Size& image, const Start* start,
                               int max_iterations) {
   std::string why;
   std::optional<Solved> best =
@@ -306,6 +318,49 @@ void project_view(const compute::CvCamera& lens, const ViewState& state,
                   Derivatives::None, at);
 }
 
+Residuals fitted_residuals(const Plan& plan,
+                           const std::vector<ViewState>& states,
+                           const Solved& solved) {
+  Residuals out;
+  Projection at;
+  for (std::size_t s = 0; s < states.size(); ++s) {
+    const ViewState& state = states[s];
+    if (plan.uses[state.planned].use != Use::Fitted) continue;
+    project_view(solved.lens, state, solved.poses[out.fitted.size()], at);
+    out.fitted.push_back(s);
+    std::vector<double>& view_norms = out.norms.emplace_back();
+    view_norms.assign(state.object.size(), kNaN);
+    for (std::size_t i = 0; i < view_norms.size(); ++i) {
+      if (state.kept[i] == 0) continue;
+      const cv::Vec2d& e = at.residuals[i];
+      out.components.push_back(e[0]);
+      out.components.push_back(e[1]);
+      view_norms[i] = std::sqrt(e.dot(e));
+    }
+  }
+  return out;
+}
+
+// The view's corners kept.
+Observation kept_corners(const Observation& view, const ViewState& state) {
+  Observation kept;
+  for (std::size_t i = 0; i < state.kept.size(); ++i) {
+    if (state.kept[i] != 0) kept.points.push_back(view.points[i]);
+  }
+  return kept;
+}
+
+// Whether `kept` still has corners enough to count and to fix a pose.
+core::Result<bool> enough_corners(const Observation& kept,
+                                  const compute::Board& board,
+                                  const cv::Size& image,
+                                  const LensOptions& options) {
+  VKC_ASSIGN(const compute::ViewUse usable,
+             compute::usable_for_pose(board, kept, image));
+  return static_cast<int>(kept.points.size()) >= options.min_corners &&
+         usable == compute::ViewUse::Usable;
+}
+
 // Drops the outlier corners and views of `solved`; true if any. The fit has no
 // robust loss, so a bad corner pulls its view's pose and the view's other
 // corners with it: a view with such corners loses those, and is judged whole
@@ -315,36 +370,18 @@ core::Result<bool> drop_outliers(std::vector<ViewState>& states,
                                  const compute::Board& board,
                                  const cv::Size& image,
                                  const LensOptions& options, Plan& plan) {
-  std::vector<std::size_t> counted;
-  std::vector<std::vector<double>> norms;
-  std::vector<double> components;
-  Projection at;
-  for (std::size_t s = 0; s < states.size(); ++s) {
-    const ViewState& state = states[s];
-    if (plan.uses[state.planned].use != Use::Fitted) continue;
-    project_view(solved.lens, state, solved.poses[counted.size()], at);
-    counted.push_back(s);
-    std::vector<double>& view_norms = norms.emplace_back();
-    view_norms.assign(state.object.size(), kNaN);
-    for (std::size_t i = 0; i < view_norms.size(); ++i) {
-      if (state.kept[i] == 0) continue;
-      const cv::Vec2d& e = at.residuals[i];
-      components.push_back(e[0]);
-      components.push_back(e[1]);
-      view_norms[i] = std::sqrt(e.dot(e));
-    }
-  }
-  const detail::OutlierBounds bounds =
-      detail::outlier_bounds(norms, std::move(components), {});
+  Residuals residuals = fitted_residuals(plan, states, solved);
+  const detail::OutlierBounds bounds = detail::outlier_bounds(
+      residuals.norms, std::move(residuals.components), {});
 
   bool any = false;
-  for (std::size_t f = 0; f < counted.size(); ++f) {
-    ViewState& state = states[counted[f]];
+  for (std::size_t f = 0; f < residuals.fitted.size(); ++f) {
+    ViewState& state = states[residuals.fitted[f]];
     LensView& use = plan.uses[state.planned];
     use.rms_px = bounds.rms[f];
     bool touched = false;
-    for (std::size_t i = 0; i < norms[f].size(); ++i) {
-      if (!(norms[f][i] > bounds.corner_px)) continue;
+    for (std::size_t i = 0; i < residuals.norms[f].size(); ++i) {
+      if (!(residuals.norms[f][i] > bounds.corner_px)) continue;
       state.kept[i] = 0;
       touched = true;
     }
@@ -356,34 +393,34 @@ core::Result<bool> drop_outliers(std::vector<ViewState>& states,
       continue;
     }
     any = true;
-    Observation kept;
-    const Observation& all = *plan.views[state.planned];
-    for (std::size_t i = 0; i < state.kept.size(); ++i) {
-      if (state.kept[i] != 0) kept.points.push_back(all.points[i]);
-    }
+    const Observation kept = kept_corners(*plan.views[state.planned], state);
     use.corners = static_cast<int>(kept.points.size());
-    VKC_ASSIGN(const compute::ViewUse usable,
-               compute::usable_for_pose(board, kept, image));
-    if (use.corners < options.min_corners ||
-        usable != compute::ViewUse::Usable) {
-      use.use = Use::Dropped;
-    }
+    VKC_ASSIGN(const bool enough, enough_corners(kept, board, image, options));
+    if (!enough) use.use = Use::Dropped;
   }
   return any;
 }
 
-// A held-out view's pose through the fitted lens: IPPE's two on its rays, each
-// refined, the better kept; empty with none.
+// A held-out view's pose through the fitted lens, on its corners kept: IPPE's
+// two on their rays, each refined, the better kept; empty with none.
 core::Result<std::optional<Pose>> pose_through(const compute::CvCamera& lens,
                                                const compute::Board& board,
                                                const Observation& view,
                                                const ViewState& state) {
-  core::Result<ViewPose> found = view_pose(lens, board, view);
+  const Observation kept = kept_corners(view, state);
+  core::Result<ViewPose> found = view_pose(lens, board, kept);
   if (!found.ok()) {
     if (found.status().domain() != core::Status::Code::Numerical) {
       return found.status();
     }
     return std::optional<Pose>{};
+  }
+  std::vector<cv::Point3d> object;
+  std::vector<cv::Point2d> pixels;
+  for (std::size_t i = 0; i < state.kept.size(); ++i) {
+    if (state.kept[i] == 0) continue;
+    object.push_back(state.object[i]);
+    pixels.push_back(state.pixels[i]);
   }
   std::vector<PoseCandidate> candidates{found->best};
   if (found->alternative) candidates.push_back(*found->alternative);
@@ -393,11 +430,12 @@ core::Result<std::optional<Pose>> pose_through(const compute::CvCamera& lens,
   for (const PoseCandidate& candidate : candidates) {
     VKC_ASSIGN(compute::CvPose pose,
                compute::cv_pose(candidate.board_to_camera));
-    cv::solvePnPRefineLM(state.object, state.pixels, lens.camera_matrix,
-                         lens.distortion, pose.rvec, pose.tvec);
+    cv::solvePnPRefineLM(object, pixels, lens.camera_matrix, lens.distortion,
+                         pose.rvec, pose.tvec);
     const Pose refined(pose.rvec[0], pose.rvec[1], pose.rvec[2], pose.tvec[0],
                        pose.tvec[1], pose.tvec[2]);
-    project_view(lens, state, refined, at);
+    detail::project(lens, refined, Pose::all(0.0), object, &pixels,
+                    Derivatives::None, at);
     double sum = 0.0;
     for (const cv::Vec2d& e : at.residuals) sum += e.dot(e);
     if (sum < least) {
@@ -406,6 +444,35 @@ core::Result<std::optional<Pose>> pose_through(const compute::CvCamera& lens,
     }
   }
   return best;
+}
+
+// A held-out view as the fit's are treated: posed, its corners past `bound`
+// marked, and posed again on the rest, up to `outlier_rounds` times, so a bad
+// corner's pull on the pose costs its neighbours nothing. Empty when no pose
+// is left.
+core::Result<std::optional<Pose>> judge_held_out(
+    const compute::CvCamera& lens, const compute::Board& board,
+    const Observation& view, const cv::Size& image, double bound,
+    const LensOptions& options, ViewState& state) {
+  Projection at;
+  for (int round = 0;; ++round) {
+    VKC_ASSIGN(const std::optional<Pose> pose,
+               pose_through(lens, board, view, state));
+    if (!pose || round == options.outlier_rounds) return pose;
+    project_view(lens, state, *pose, at);
+    bool moved = false;
+    for (std::size_t i = 0; i < state.kept.size(); ++i) {
+      const cv::Vec2d& e = at.residuals[i];
+      const char keep =
+          at.depths[i] > 0.0 && std::sqrt(e.dot(e)) <= bound ? 1 : 0;
+      moved = moved || keep != state.kept[i];
+      state.kept[i] = keep;
+    }
+    if (!moved) return pose;
+    VKC_ASSIGN(const bool enough, enough_corners(kept_corners(view, state),
+                                                 board, image, options));
+    if (!enough) return std::optional<Pose>{};
+  }
 }
 
 // The view's corners through the lens at its pose, into `fit`'s residuals, its
@@ -486,7 +553,7 @@ core::Result<LensFit> solve_lens(
     VKC_ASSIGN(Plan plan, plan_views(camera_id, size, board, views, options,
                                      "solve_lens: "));
     const cv::Size image = image_of(size);
-    std::optional<compute::CvCamera> given;
+    std::optional<Start> given;
     if (start) {
       if (start->size.width != size.width ||
           start->size.height != size.height) {
@@ -498,7 +565,7 @@ core::Result<LensFit> solve_lens(
       }
       core::Result<compute::CvCamera> lens = compute::cv_camera(*start);
       if (!lens.ok()) return lens.status().with_context("solve_lens: start");
-      given = *std::move(lens);
+      given = Start{*std::move(lens), true};
     }
 
     // The views to fit: enough at first, and after each round.
@@ -515,16 +582,30 @@ core::Result<LensFit> solve_lens(
     VKC_TRY(check_left());
 
     std::vector<ViewState> states = read_views(board, plan);
-    const compute::CvCamera* from = given ? &*given : nullptr;
+    const std::vector<ViewState> all_states = states;
+    const std::vector<LensView> planned = plan.uses;
+    // The rounds: fit, drop and fit again. A first fit can be wrong, and what
+    // it drops then was never bad, so when they dropped anything they run once
+    // more with everything back, from the lens they reached. One loop, so the
+    // second pass makes the first's calls.
+    std::optional<Start> from = given;
     Solved best;
-    for (int round = 0;; ++round) {
-      VKC_ASSIGN(best,
-                 best_fit(plan, states, image, from, options.max_iterations));
-      if (round == options.outlier_rounds) break;
-      VKC_ASSIGN(const bool dropped,
-                 drop_outliers(states, best, board, image, options, plan));
-      if (!dropped) break;
-      VKC_TRY(check_left());
+    for (int pass = 0; pass < 2; ++pass) {
+      bool dropped = false;
+      for (int round = 0;; ++round) {
+        VKC_ASSIGN(best, best_fit(plan, states, image, from ? &*from : nullptr,
+                                  options.max_iterations));
+        if (round == options.outlier_rounds) break;
+        VKC_ASSIGN(const bool any,
+                   drop_outliers(states, best, board, image, options, plan));
+        if (!any) break;
+        dropped = true;
+        VKC_TRY(check_left());
+      }
+      if (!dropped || pass == 1) break;
+      from = Start{best.lens, best.from_start};
+      states = all_states;
+      plan.uses = planned;
     }
 
     const cv::Matx33d& k = best.lens.camera_matrix;
@@ -540,7 +621,12 @@ core::Result<LensFit> solve_lens(
     fit.from_start = best.from_start;
 
     // Every view scored in capture order: those fitted at their fit's poses,
-    // those held out each posed on its own.
+    // those held out each posed on its own, by the corner bound of this fit.
+    Residuals residuals = fitted_residuals(plan, states, best);
+    const double bound =
+        detail::outlier_bounds(residuals.norms, std::move(residuals.components),
+                               {})
+            .corner_px;
     double held_sum = 0.0;
     int held_corners = 0;
     int held_views = 0;
@@ -554,7 +640,8 @@ core::Result<LensFit> solve_lens(
       } else if (use.use == Use::HeldOut) {
         ++held_views;
         VKC_ASSIGN(const std::optional<Pose> pose,
-                   pose_through(best.lens, board, view, state));
+                   judge_held_out(best.lens, board, view, image, bound, options,
+                                  state));
         if (pose) {
           state.pose = *pose;
           held_sum += score(best.lens, state, view, fit, use);

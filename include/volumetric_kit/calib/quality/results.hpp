@@ -20,14 +20,16 @@
 ///   id: `verdict` (`"pass"` or `"fail"`), `failed` (each gate missed, with
 ///   its numbers), `written` (false for a camera fitted for the report
 ///   alone), `start` (`"given"`, or `"opencv"` for OpenCV's own), `rms_px`,
-///   `holdout_rms_px`, `worst_cell_bias_px`, `fold_deg`, `frame_folds`,
-///   `corner_reach_deg` (`top_left`, `top_right`, `bottom_left`,
-///   `bottom_right`) and `side_reach_deg` (`left`, `right`), `lens`
-///   (`width`, `height`, `intrinsics` and `distortion`, as sensor's file writes
-///   them), `sigma` (`fx`, `fy`, `cx`, `cy`), `view_counts` (`fitted`,
-///   `held_out`, `dropped`, `too_few`) and `views` (`capture`, `use`, as
-///   @ref solve::to_string(solve::LensView::Use) names it, `corners`,
-///   `rms_px`).
+///   `holdout_rms_px`, `holdout_corners`, `holdout_dropped`,
+///   `worst_cell_bias_px`, `worst_cell` (`column`, `row`), `fold_deg`,
+///   `frame_folds`, `reach` (`top_left`, `top_right`, `bottom_left`,
+///   `bottom_right`, `left`, `right`), `corner_reach_deg` (`top_left`,
+///   `top_right`, `bottom_left`, `bottom_right`) and `side_reach_deg` (`left`,
+///   `right`), `lens` (`width`, `height`, `intrinsics` and `distortion`, as
+///   sensor's file writes them), `sigma` (`fx`, `fy`, `cx`, `cy`),
+///   `view_counts` (`fitted`, `held_out`, `dropped`, `too_few`) and `views`
+///   (`capture`, `use`, as @ref solve::to_string(solve::LensView::Use) names
+///   it, `corners`, `rms_px`).
 ///
 /// A solved rig's has, in this order:
 /// - `settings`: `reference`, `cameras`, and the `initialise`,

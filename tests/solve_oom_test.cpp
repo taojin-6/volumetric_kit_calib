@@ -80,17 +80,17 @@ TEST(SolveOom, InitialiseRefusingAView) {
       });
 }
 
-// Eight views through a lens given as the start, a corner of one bad so a
-// round drops it and fits again, some held out: each allocation of two starts'
-// fits, the rounds and a held-out view's pose fails. A few iterations, as a
-// sweep runs a fit hundreds of times, on one OpenCV thread, as it needs the
-// same allocations each run: OpenCV's threads leave a fit's last bits to
-// chance.
+// Six views through a lens given as the start, a corner of one bad so a round
+// drops it, fits again and brings on the second pass, one held out: each
+// allocation of two starts' fits, the rounds and a held-out view's pose fails.
+// A few iterations, as a sweep runs a fit hundreds of times, on one OpenCV
+// thread, as it needs the same allocations each run: OpenCV's threads leave a
+// fit's last bits to chance.
 TEST(SolveOom, SolveLens) {
   const compute::Board board = test::lab_checkerboard();
   const camera::CameraModel lens = test::color_like_lens();
   std::vector<Observation> views;
-  for (int v = 0; v < 8; ++v) {
+  for (int v = 0; v < 6; ++v) {
     const camera::Mat4d pose = test::board_facing_camera(
         board, {0.03 * (v - 4), 0.02 * ((v * 3) % 8 - 4), 0.4 + 0.02 * v},
         20.0 + 3.0 * v, 40.0 * v);
@@ -107,7 +107,7 @@ TEST(SolveOom, SolveLens) {
   views[1].points[3].pixel.x += 25.0;
   LensOptions options;
   options.min_views = 4;
-  options.max_iterations = 5;
+  options.max_iterations = 3;
   const int threads = cv::getNumThreads();
   cv::setNumThreads(1);
   const LensFit fit =

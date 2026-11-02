@@ -140,7 +140,7 @@ vc_add_sweeps(bundle_adjust)
 # into it, read back with sensor's calibration file.
 vc_add_test(world_tag volumetric_kit::calib_solve vc_synthetic_rig)
 # solve: a camera's lens from its views of a fisheye truth.
-vc_add_test(lens volumetric_kit::calib_solve vc_synthetic_rig)
+vc_add_test(lens volumetric_kit::calib_solve vc_synthetic_rig opencv_geometry)
 vc_add_test(solve_oom volumetric_kit::calib_solve vc_synthetic_rig)
 target_sources(vc_solve_oom_test PRIVATE support/allocation_failure.cpp)
 

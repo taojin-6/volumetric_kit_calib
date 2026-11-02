@@ -2,14 +2,17 @@
 // Copyright (c) 2026 Tao Jin
 
 // A solved lens's gates, on fits of a fisheye truth and on fits made here: a
-// right lens passes; a wrong minimum and a curve bent past 45 degrees, which
-// the RMS passes, fail the bias gate, above its noise floor; the fold gate, in
-// normalized radius through sensor, fails the 2024 bm-2 lens and passes M0's;
-// and the lens-only results files, read back through sensor and nlohmann.
+// right lens passes, however noisy; a wrong minimum and a curve bent past 45
+// degrees, which the RMS passes, fail the bias gate, above its noise floor;
+// the fold gate, in normalized radius through sensor, fails the 2024 bm-2 lens
+// and a pole inside the frame, and passes the lab's current lens; boards that
+// stop short fail the reach gate; and the lens-only results files, read back
+// through sensor and nlohmann.
 
 #include "volumetric_kit/calib/quality/lens_gate.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -55,11 +58,52 @@ const compute::Board& board() {
   return once;
 }
 
-std::vector<Observation> session(std::uint32_t seed) {
+std::vector<Observation> session(std::uint32_t seed, double noise_px = 0.15) {
   test::FisheyeCapture capture;
   capture.seed = seed;
-  capture.noise_px = 0.15;
+  capture.noise_px = noise_px;
   return test::fisheye_views(board(), truth(), capture);
+}
+
+// `views` as if no board had gone past `limit` of the way toward any image
+// corner or side.
+std::vector<Observation> stop_short(const std::vector<Observation>& views,
+                                    double limit) {
+  std::vector<Observation> kept;
+  for (const Observation& view : views) {
+    Observation cut = view;
+    cut.points.clear();
+    for (const DetectedPoint& point : view.points) {
+      const solve::LensReach reach = solve::pixel_reach(kSize, point.pixel);
+      if (*std::max_element(reach.begin(), reach.end()) < limit) {
+        cut.points.push_back(point);
+      }
+    }
+    if (cut.points.size() >= 12) kept.push_back(std::move(cut));
+  }
+  return kept;
+}
+
+// `view` numbered as the detector numbers a board the frame cuts: from its own
+// first corner, half turned if `turned`.
+void renumber(Observation& view, bool turned) {
+  const int cols = board().target().cols;
+  int first_col = cols;
+  int first_row = board().target().rows;
+  int last_col = 0;
+  int last_row = 0;
+  for (const DetectedPoint& point : view.points) {
+    first_col = std::min(first_col, point.id % cols);
+    first_row = std::min(first_row, point.id / cols);
+    last_col = std::max(last_col, point.id % cols);
+    last_row = std::max(last_row, point.id / cols);
+  }
+  for (DetectedPoint& point : view.points) {
+    const int col = point.id % cols;
+    const int row = point.id / cols;
+    point.id = turned ? (last_row - row) * cols + (last_col - col)
+                      : (row - first_row) * cols + (col - first_col);
+  }
 }
 
 const solve::LensFit& right_fit() {
@@ -78,8 +122,8 @@ camera::CameraModel lens_2024_bm2() {
            0.06157382758196919, -0.005978906562434272}};
 }
 
-// M0's lens, which never folds.
-camera::CameraModel lens_m0() {
+// The lab's current lens, which never folds.
+camera::CameraModel lab_lens() {
   return {kSize,
           {1702.410047823579, 1702.1183368985696, 1917.379808460028,
            1108.2673697604462},
@@ -98,6 +142,14 @@ solve::LensFit bare_fit(const camera::CameraModel& model,
   fit.rms_px = rms_px;
   fit.holdout_rms_px = holdout_rms_px;
   return fit;
+}
+
+// The gates on a fit made here, whose few corners reach nowhere in particular:
+// all but reach.
+core::Result<LensVerdict> judge_made(solve::LensFit fit) {
+  LensGateOptions options;
+  options.min_reach = 0.0;
+  return judge_lens(std::move(fit), options);
 }
 
 // Adds a view of `n` corners at `pixel`, residuals alternating about `mean`
@@ -124,21 +176,110 @@ bool mentions(const LensVerdict& verdict, const std::string& text) {
                      });
 }
 
+// Every gate missed, for a failure's message: none is not an error here.
+std::string reasons(const LensVerdict& verdict) {
+  std::string all = verdict.failed.empty() ? "no gate missed" : "";
+  for (const std::string& why : verdict.failed) all += why + "; ";
+  return all;
+}
+
 constexpr const char* kBias = "mean residual";
 
+// Down at the detector's noise too, where the ratio of two small numbers would
+// fail a right lens; and with each view numbered from its own first corner, as
+// the detector numbers a board the frame cuts.
 TEST(JudgeLens, PassesARightLens) {
-  for (const std::uint32_t seed : {1u, 2u, 3u}) {
-    const solve::LensFit fit =
-        value_of(solve::solve_lens("bm-1", kSize, board(), session(seed)));
-    const LensVerdict verdict = value_of(judge_lens(fit));
-    EXPECT_TRUE(verdict.pass) << verdict.failed.front();
-    EXPECT_TRUE(verdict.failed.empty());
-    EXPECT_GT(verdict.worst_cell_bias_px, 0.0);
-    EXPECT_LT(verdict.worst_cell_bias_px, 0.1);
-    EXPECT_EQ(verdict.fold_deg, 90.0);
-    EXPECT_FALSE(verdict.frame_folds);
-    EXPECT_EQ(verdict.fit.camera.model.intrinsics.fx,
-              fit.camera.model.intrinsics.fx);
+  for (const double noise_px : {0.15, 0.01, 0.0}) {
+    for (const std::uint32_t seed : {1u, 2u, 3u}) {
+      const solve::LensFit fit = value_of(
+          solve::solve_lens("bm-1", kSize, board(), session(seed, noise_px)));
+      const LensVerdict verdict = value_of(judge_lens(fit));
+      ASSERT_TRUE(verdict.pass) << noise_px << ' ' << reasons(verdict);
+      EXPECT_TRUE(verdict.failed.empty());
+      EXPECT_GT(verdict.worst_cell_bias_px, 0.0);
+      EXPECT_LT(verdict.worst_cell_bias_px, 0.1);
+      EXPECT_EQ(verdict.fold_deg, 90.0);
+      EXPECT_FALSE(verdict.frame_folds);
+      EXPECT_EQ(verdict.fit.camera.model.intrinsics.fx,
+                fit.camera.model.intrinsics.fx);
+    }
+  }
+
+  std::vector<Observation> views = session(1);
+  for (std::size_t v = 0; v < views.size(); ++v) {
+    renumber(views[v], v % 2 == 1);
+  }
+  const LensVerdict renumbered = value_of(
+      judge_lens(value_of(solve::solve_lens("bm-1", kSize, board(), views))));
+  EXPECT_TRUE(renumbered.pass) << reasons(renumbered);
+  const LensVerdict plain = value_of(judge_lens(right_fit()));
+  EXPECT_EQ(renumbered.worst_cell, plain.worst_cell);
+  EXPECT_NEAR(renumbered.worst_cell_bias_px, plain.worst_cell_bias_px, 1e-3);
+}
+
+// Boards that stop short of the reach look right where they went, and say
+// nothing of the curve past it, which the runtime still reads.
+TEST(JudgeLens, FailsBoardsThatStopShort) {
+  const solve::LensFit fit = value_of(
+      solve::solve_lens("bm-1", kSize, board(), stop_short(session(1), 0.8)));
+  const LensVerdict verdict = value_of(judge_lens(fit));
+  EXPECT_FALSE(verdict.pass);
+  EXPECT_TRUE(mentions(verdict, "toward the top-left corner, short of 0.9"));
+  for (const double reach : verdict.reach) EXPECT_LT(reach, 0.8);
+}
+
+// Each direction by name, at its limit, over the fitted corners kept.
+TEST(JudgeLens, HoldsEachDirectionToItsReach) {
+  const camera::Vec2d none(0.0);
+  solve::LensFit fit = bare_fit(lab_lens());
+  add_corners(fit, 0, Use::Fitted, 2, {20.0, 20.0}, none, 0.0);
+  add_corners(fit, 1, Use::Fitted, 2, {3820.0, 20.0}, none, 0.0);
+  add_corners(fit, 2, Use::Fitted, 2, {20.0, 2140.0}, none, 0.0);
+  add_corners(fit, 3, Use::Fitted, 2, {3820.0, 2140.0}, none, 0.0);
+  LensVerdict verdict = value_of(judge_lens(fit));
+  EXPECT_TRUE(verdict.pass) << reasons(verdict);
+  const solve::LensReach corner = solve::pixel_reach(kSize, {3820.0, 2140.0});
+  EXPECT_DOUBLE_EQ(verdict.reach[3], corner[3]);
+  EXPECT_DOUBLE_EQ(verdict.reach[5], corner[5]);
+
+  LensGateOptions options;
+  options.min_reach = *std::min_element(verdict.reach.begin(),  //
+                                        verdict.reach.end());
+  EXPECT_TRUE(value_of(judge_lens(fit, options)).pass);
+  options.min_reach = std::nextafter(options.min_reach, 1.0);
+  EXPECT_FALSE(value_of(judge_lens(fit, options)).pass);
+
+  // The bottom right's only corners dropped, or held out: it is not reached.
+  for (solve::CornerResidual& r : fit.residuals) r.dropped = r.capture == 3;
+  add_corners(fit, 4, Use::HeldOut, 2, {3820.0, 2140.0}, none, 0.0);
+  verdict = value_of(judge_lens(fit));
+  ASSERT_EQ(verdict.failed.size(), 1u) << reasons(verdict);
+  EXPECT_TRUE(mentions(verdict, "toward the bottom-right corner"));
+
+  // A side alone: these reach 0.94 toward the right corners, 0.927 toward it.
+  fit = bare_fit(lab_lens());
+  add_corners(fit, 0, Use::Fitted, 2, {20.0, 20.0}, none, 0.0);
+  add_corners(fit, 1, Use::Fitted, 2, {3700.0, 20.0}, none, 0.0);
+  add_corners(fit, 2, Use::Fitted, 2, {20.0, 2140.0}, none, 0.0);
+  add_corners(fit, 3, Use::Fitted, 2, {3700.0, 2140.0}, none, 0.0);
+  options.min_reach = 0.93;
+  verdict = value_of(judge_lens(fit, options));
+  ASSERT_EQ(verdict.failed.size(), 1u);
+  EXPECT_TRUE(mentions(verdict, "toward the right side"));
+}
+
+// A wrong first fit can condemn good views, one of them perhaps the only one
+// to reach a corner: nothing here is bad, so nothing stays dropped, and the
+// session keeps its reach. OpenCV's path differs in its last bits between
+// machines, so a seed may not land wrong anywhere else.
+TEST(JudgeLens, AWrongFirstFitCostsASessionNothing) {
+  for (const std::uint32_t seed : {18u, 26u}) {
+    const LensVerdict verdict = value_of(judge_lens(value_of(solve::solve_lens(
+        "bm-1", kSize, board(), stop_short(session(seed), 0.92)))));
+    EXPECT_TRUE(verdict.pass) << seed << ' ' << reasons(verdict);
+    for (const solve::CornerResidual& r : verdict.fit.residuals) {
+      ASSERT_FALSE(r.dropped) << seed;
+    }
   }
 }
 
@@ -178,40 +319,112 @@ TEST(JudgeLens, MeasuresHowFarOffAxisTheCornersReach) {
 }
 
 TEST(JudgeLens, HoldsTheHeldOutRmsToItsLimitScaledByWidth) {
-  EXPECT_TRUE(value_of(judge_lens(bare_fit(lens_m0(), 0.5, 0.45))).pass);
-  LensVerdict verdict = value_of(judge_lens(bare_fit(lens_m0(), 0.5001, 0.45)));
+  EXPECT_TRUE(value_of(judge_made(bare_fit(lab_lens(), 0.5, 0.45))).pass);
+  LensVerdict verdict =
+      value_of(judge_made(bare_fit(lab_lens(), 0.5001, 0.45)));
   EXPECT_FALSE(verdict.pass);
   ASSERT_EQ(verdict.failed.size(), 1u);
   EXPECT_NE(verdict.failed[0].find("0.5 px"), std::string::npos)
       << verdict.failed[0];
 
   // At half the width, half the pixels of error.
-  camera::CameraModel half = lens_m0();
+  camera::CameraModel half = lab_lens();
   half.size = {1920, 1080};
   half.intrinsics = {851.0, 851.0, 959.5, 539.5};
-  EXPECT_TRUE(value_of(judge_lens(bare_fit(half, 0.25, 0.25))).pass);
-  EXPECT_FALSE(value_of(judge_lens(bare_fit(half, 0.2501, 0.25))).pass);
+  EXPECT_TRUE(value_of(judge_made(bare_fit(half, 0.25, 0.25))).pass);
+  EXPECT_FALSE(value_of(judge_made(bare_fit(half, 0.2501, 0.25))).pass);
 }
 
 TEST(JudgeLens, HoldsTheHeldOutRmsToItsRatioToTheFits) {
-  EXPECT_TRUE(value_of(judge_lens(bare_fit(lens_m0(), 0.26, 0.2))).pass);
+  EXPECT_TRUE(value_of(judge_made(bare_fit(lab_lens(), 0.26, 0.2))).pass);
   const LensVerdict verdict =
-      value_of(judge_lens(bare_fit(lens_m0(), 0.2601, 0.2)));
+      value_of(judge_made(bare_fit(lab_lens(), 0.2601, 0.2)));
   EXPECT_FALSE(verdict.pass);
-  EXPECT_TRUE(mentions(verdict, "1.3")) << verdict.failed.front();
+  EXPECT_TRUE(mentions(verdict, "1.3")) << reasons(verdict);
+}
+
+// 3.3 times the fit's, down at the detector's noise, says nothing; the floor
+// scales with the image.
+TEST(JudgeLens, JudgesTheRatioOnlyAboveItsFloor) {
+  EXPECT_TRUE(value_of(judge_made(bare_fit(lab_lens(), 0.1, 0.03))).pass);
+  EXPECT_FALSE(value_of(judge_made(bare_fit(lab_lens(), 0.1001, 0.03))).pass);
+
+  camera::CameraModel half = lab_lens();
+  half.size = {1920, 1080};
+  half.intrinsics = {851.0, 851.0, 959.5, 539.5};
+  EXPECT_TRUE(value_of(judge_made(bare_fit(half, 0.05, 0.015))).pass);
+  EXPECT_FALSE(value_of(judge_made(bare_fit(half, 0.0501, 0.015))).pass);
+}
+
+// A glitch costs a held-out view its corner and no more; a lens wrong enough
+// to send more than 1% of them past the bound does not hide there.
+TEST(JudgeLens, HoldsTheHeldOutCornersDroppedToTheirShare) {
+  const camera::Vec2d at(100.0, 100.0);
+  const camera::Vec2d none(0.0);
+  solve::LensFit fit = bare_fit(lab_lens());
+  add_corners(fit, 0, Use::HeldOut, 200, at, none, 0.1);
+  add_corners(fit, 1, Use::Fitted, 20, at, none, 0.1);
+  fit.residuals[0].dropped = true;
+  fit.residuals[1].dropped = true;
+  fit.residuals[200].dropped = true;  // fitted: not a held-out corner
+  fit.residuals[201].dropped = true;
+  LensVerdict verdict = value_of(judge_made(fit));
+  EXPECT_TRUE(verdict.pass) << reasons(verdict);
+  EXPECT_EQ(verdict.holdout_corners, 200);
+  EXPECT_EQ(verdict.holdout_dropped, 2);
+
+  fit.residuals[2].dropped = true;
+  verdict = value_of(judge_made(fit));
+  EXPECT_FALSE(verdict.pass);
+  EXPECT_EQ(verdict.holdout_dropped, 3);
+  EXPECT_TRUE(mentions(verdict, "3 of 200 held-out corners"))
+      << reasons(verdict);
+}
+
+// One corner off in a held-out view, by more than the 0.5 px gate and past the
+// corner bound, passes as it does in a fitted view. Several in every one fail,
+// lens or no lens to blame: the gate cannot tell them from a wrong one.
+TEST(JudgeLens, ABadHeldOutCornerPassesAndManyFail) {
+  for (const double px : {6.0, 25.0}) {
+    std::vector<Observation> views = session(1);
+    const std::vector<solve::LensView> plan =
+        value_of(solve::plan_lens_views("bm-1", kSize, board(), views));
+    int spoiled = 0;
+    for (std::size_t v = 0; v < plan.size() && spoiled < 1; ++v) {
+      if (plan[v].use != Use::HeldOut) continue;
+      views[v].points[views[v].points.size() / 2].pixel.x += px;
+      ++spoiled;
+    }
+    ASSERT_EQ(spoiled, 1);
+    const LensVerdict one = value_of(
+        judge_lens(value_of(solve::solve_lens("bm-1", kSize, board(), views))));
+    EXPECT_TRUE(one.pass) << px << ' ' << reasons(one);
+    EXPECT_EQ(one.holdout_dropped, 1) << px;
+
+    for (std::size_t v = 0; v < plan.size(); ++v) {
+      if (plan[v].use != Use::HeldOut) continue;
+      for (std::size_t i = 0; i < 10; i += 2) {
+        views[v].points[i].pixel.y += px;
+      }
+    }
+    const LensVerdict many = value_of(
+        judge_lens(value_of(solve::solve_lens("bm-1", kSize, board(), views))));
+    EXPECT_FALSE(many.pass) << px;
+    EXPECT_TRUE(mentions(many, "held-out corners")) << px;
+  }
 }
 
 // With no view held out nothing vouches for the lens; a view with no pose
 // reads infinite, and misses both RMS gates.
 TEST(JudgeLens, FailsAFitWithNothingHeldOut) {
   const double nan = std::numeric_limits<double>::quiet_NaN();
-  LensVerdict verdict = value_of(judge_lens(bare_fit(lens_m0(), nan)));
+  LensVerdict verdict = value_of(judge_made(bare_fit(lab_lens(), nan)));
   EXPECT_FALSE(verdict.pass);
   ASSERT_EQ(verdict.failed.size(), 1u);
   EXPECT_TRUE(mentions(verdict, "no view was held out"));
 
   const double inf = std::numeric_limits<double>::infinity();
-  verdict = value_of(judge_lens(bare_fit(lens_m0(), inf)));
+  verdict = value_of(judge_made(bare_fit(lab_lens(), inf)));
   EXPECT_FALSE(verdict.pass);
   EXPECT_EQ(verdict.failed.size(), 2u);
 }
@@ -221,51 +434,64 @@ TEST(JudgeLens, FailsAFitWithNothingHeldOut) {
 TEST(JudgeLens, HoldsEachCellsBiasToItsNoiseFloor) {
   const camera::Vec2d at(100.0, 100.0);
   // 40 corners of spread 0.5 on each axis: 3 standard errors are 0.335 px.
-  solve::LensFit noisy = bare_fit(lens_m0());
+  solve::LensFit noisy = bare_fit(lab_lens());
   add_corners(noisy, 0, Use::Fitted, 40, at, {0.3, 0.0}, 0.5);
-  LensVerdict verdict = value_of(judge_lens(noisy));
-  EXPECT_TRUE(verdict.pass) << verdict.failed.front();
+  LensVerdict verdict = value_of(judge_made(noisy));
+  EXPECT_TRUE(verdict.pass) << reasons(verdict);
   EXPECT_NEAR(verdict.worst_cell_bias_px, 0.3, 1e-12);
-  noisy = bare_fit(lens_m0());
+  noisy = bare_fit(lab_lens());
   add_corners(noisy, 0, Use::Fitted, 40, at, {0.34, 0.0}, 0.5);
-  EXPECT_TRUE(mentions(value_of(judge_lens(noisy)), kBias));
+  EXPECT_TRUE(mentions(value_of(judge_made(noisy)), kBias));
 
   // Tight corners: the 0.1 px bound itself.
-  solve::LensFit tight = bare_fit(lens_m0());
+  solve::LensFit tight = bare_fit(lab_lens());
   add_corners(tight, 0, Use::Fitted, 40, at, {0.0999, 0.0}, 0.01);
-  EXPECT_TRUE(value_of(judge_lens(tight)).pass);
-  tight = bare_fit(lens_m0());
+  EXPECT_TRUE(value_of(judge_made(tight)).pass);
+  tight = bare_fit(lab_lens());
   add_corners(tight, 0, Use::Fitted, 40, at, {0.1001, 0.0}, 0.01);
-  EXPECT_TRUE(mentions(value_of(judge_lens(tight)), kBias));
+  EXPECT_TRUE(mentions(value_of(judge_made(tight)), kBias));
 }
 
 // Too few corners in a cell, those not fitted and those dropped say nothing.
 TEST(JudgeLens, JudgesOnlyCellsOfEnoughFittedCorners) {
   const camera::Vec2d at(100.0, 100.0);
   const camera::Vec2d bias(1.0, 0.0);
-  solve::LensFit fit = bare_fit(lens_m0());
+  solve::LensFit fit = bare_fit(lab_lens());
   add_corners(fit, 0, Use::Fitted, 29, at, bias, 0.01);
-  EXPECT_TRUE(value_of(judge_lens(fit)).pass);
+  EXPECT_TRUE(value_of(judge_made(fit)).pass);
   add_corners(fit, 1, Use::Fitted, 1, at, bias, 0.01);
-  EXPECT_TRUE(mentions(value_of(judge_lens(fit)), kBias));
+  EXPECT_TRUE(mentions(value_of(judge_made(fit)), kBias));
 
-  fit = bare_fit(lens_m0());
+  fit = bare_fit(lab_lens());
   add_corners(fit, 0, Use::HeldOut, 40, at, bias, 0.01);
   add_corners(fit, 1, Use::Fitted, 40, at, bias, 0.01);
   for (solve::CornerResidual& r : fit.residuals) {
     r.dropped = r.capture == 1;
   }
-  EXPECT_TRUE(value_of(judge_lens(fit)).pass);
+  EXPECT_TRUE(value_of(judge_made(fit)).pass);
 
   // Cells are the grid's: the same corners in one cell each are judged apart.
-  fit = bare_fit(lens_m0());
+  fit = bare_fit(lab_lens());
   add_corners(fit, 0, Use::Fitted, 20, {100.0, 100.0}, bias, 0.01);
   add_corners(fit, 1, Use::Fitted, 20, {700.0, 100.0}, bias, 0.01);
-  EXPECT_TRUE(value_of(judge_lens(fit)).pass);
+  EXPECT_TRUE(value_of(judge_made(fit)).pass);
   add_corners(fit, 2, Use::Fitted, 20, {110.0, 110.0}, bias, 0.01);
   add_corners(fit, 3, Use::Fitted, 10, {3700.0, 2000.0}, -bias, 0.01);
-  const LensVerdict verdict = value_of(judge_lens(fit));
+  const LensVerdict verdict = value_of(judge_made(fit));
   EXPECT_TRUE(mentions(verdict, "cell 0, 0"));
+}
+
+// The worst cell is named by column and row; with none judged, by neither.
+TEST(JudgeLens, NamesTheWorstCell) {
+  EXPECT_EQ(value_of(judge_made(bare_fit(lab_lens()))).worst_cell,
+            (std::array<int, 2>{-1, -1}));
+  solve::LensFit fit = bare_fit(lab_lens());
+  add_corners(fit, 0, Use::Fitted, 40, {100.0, 100.0}, {0.02, 0.0}, 0.01);
+  add_corners(fit, 1, Use::Fitted, 40, {1000.0, 400.0}, {0.05, 0.0}, 0.01);
+  add_corners(fit, 2, Use::Fitted, 40, {3700.0, 100.0}, {0.03, 0.0}, 0.01);
+  const LensVerdict verdict = value_of(judge_made(fit));
+  EXPECT_EQ(verdict.worst_cell, (std::array<int, 2>{2, 1}));
+  EXPECT_NEAR(verdict.worst_cell_bias_px, 0.05, 1e-12);
 }
 
 // The fit from `start` alone on the views `like` fitted: calibrateCamera as
@@ -406,14 +632,14 @@ TEST(JudgeLens, ALensBentPast45DegreesFailsTheBiasGate) {
   EXPECT_GE(fired, 3);
 }
 
-TEST(JudgeLens, TheFoldGateFailsThe2024LensAndPassesM0s) {
-  const LensVerdict bad = value_of(judge_lens(bare_fit(lens_2024_bm2())));
+TEST(JudgeLens, TheFoldGateFailsThe2024LensAndPassesTheLabs) {
+  const LensVerdict bad = value_of(judge_made(bare_fit(lens_2024_bm2())));
   EXPECT_TRUE(bad.frame_folds);
   EXPECT_FALSE(bad.pass);
   EXPECT_NEAR(bad.fold_deg, 74.8, 0.1);
   EXPECT_TRUE(mentions(bad, "folds"));
 
-  const LensVerdict good = value_of(judge_lens(bare_fit(lens_m0())));
+  const LensVerdict good = value_of(judge_made(bare_fit(lab_lens())));
   EXPECT_FALSE(good.frame_folds);
   EXPECT_TRUE(good.pass);
   EXPECT_EQ(good.fold_deg, 90.0);
@@ -425,34 +651,57 @@ TEST(JudgeLens, TheFoldGateFailsThe2024LensAndPassesM0s) {
 TEST(JudgeLens, TheFoldGateComparesNormalizedRadii) {
   camera::CameraModel model{kSize, {2000.0, 2000.0, 1919.5, 1079.5}, {}};
   model.distortion.k1 = -0.1;
-  LensVerdict verdict = value_of(judge_lens(bare_fit(model)));
+  LensVerdict verdict = value_of(judge_made(bare_fit(model)));
   EXPECT_NEAR(verdict.fold_deg, 61.29, 0.01);
   EXPECT_FALSE(verdict.frame_folds);  // the corners at 1.10
   EXPECT_TRUE(verdict.pass);
 
   model.intrinsics.fx = model.intrinsics.fy = 1500.0;  // at 1.47
-  verdict = value_of(judge_lens(bare_fit(model)));
+  verdict = value_of(judge_made(bare_fit(model)));
   EXPECT_TRUE(verdict.frame_folds);
   EXPECT_FALSE(verdict.pass);
 
   // Each axis by its own focal length: at 0.96 and 1.08, so at 1.44.
   model.intrinsics.fx = 2000.0;
   model.intrinsics.fy = 1000.0;
-  EXPECT_TRUE(value_of(judge_lens(bare_fit(model))).frame_folds);
+  EXPECT_TRUE(value_of(judge_made(bare_fit(model))).frame_folds);
+
+  // Every image corner counts: with the axis at the right edge, those at the
+  // left are at 2.0 and those at the right at 0.6.
+  model.intrinsics = {2000.0, 2000.0, 3839.0, 1079.5};
+  EXPECT_TRUE(value_of(judge_made(bare_fit(model))).frame_folds);
 }
 
-// A pole of the denominator bounds no radius: the model's image runs out to
-// infinity before it, so the frame holds it.
+// A pole the frame lies well inside bounds nothing: the model's image runs out
+// to infinity before it, and every image corner reads nearer the axis.
 TEST(JudgeLens, TheFoldGatePassesAPoleOutsideTheFrame) {
   camera::CameraModel model{kSize, {2000.0, 2000.0, 1919.5, 1079.5}, {}};
   model.distortion.k4 = -0.2;  // the denominator's zero at r^2 = 5
-  const LensVerdict verdict = value_of(judge_lens(bare_fit(model)));
+  const LensVerdict verdict = value_of(judge_made(bare_fit(model)));
   EXPECT_NEAR(verdict.fold_deg, std::atan(std::sqrt(5.0)) / kDeg, 0.01);
   EXPECT_FALSE(verdict.frame_folds);
 }
 
+// A fit that never saw the corners: its numerator all but cancels a pole 55.8
+// degrees off axis, so the curve runs on past a spike, and the image's corners
+// read 79 degrees through it. The runtime cuts every ray at that number.
+TEST(JudgeLens, TheFoldGateFailsAPoleInsideTheFrame) {
+  const camera::CameraModel model{
+      kSize,
+      {1701.4449259028816, 1701.4119732999638, 1917.2643614302251,
+       1108.9347303641816},
+      {0.043876244510601972, -0.21896430916385881, 2.7458829657533664e-05,
+       -4.400396484662529e-05, -0.0068247300392786274, 0.40966669851916004,
+       -0.29805089860040429, -0.048390877236838249}};
+  const LensVerdict verdict = value_of(judge_made(bare_fit(model)));
+  EXPECT_NEAR(verdict.fold_deg, 55.8, 0.1);
+  EXPECT_TRUE(verdict.frame_folds);
+  EXPECT_FALSE(verdict.pass);
+  EXPECT_TRUE(mentions(verdict, "folds")) << reasons(verdict);
+}
+
 TEST(JudgeLens, Refuses) {
-  const solve::LensFit fit = bare_fit(lens_m0());
+  const solve::LensFit fit = bare_fit(lab_lens());
   LensGateOptions options;
   options.max_holdout_rms_px = 0.0;
   expect_refused(judge_lens(fit, options).status(), "judge_lens",
@@ -469,6 +718,18 @@ TEST(JudgeLens, Refuses) {
   options.min_cell_corners = 1;
   expect_refused(judge_lens(fit, options).status(), "judge_lens",
                  "options.min_cell_corners");
+  options = {};
+  options.min_reach = 1.5;
+  expect_refused(judge_lens(fit, options).status(), "judge_lens",
+                 "options.min_reach");
+  options = {};
+  options.min_ratio_holdout_rms_px = -0.1;
+  expect_refused(judge_lens(fit, options).status(), "judge_lens",
+                 "options.min_ratio_holdout_rms_px");
+  options = {};
+  options.max_holdout_dropped = 2.0;
+  expect_refused(judge_lens(fit, options).status(), "judge_lens",
+                 "options.max_holdout_dropped");
 
   solve::LensFit bad = fit;
   bad.camera.model.intrinsics.fx = 0.0;
@@ -500,7 +761,7 @@ camera::ArrayCalibration base_file() {
   camera::SensorCalibration* femto =
       add("femto", camera::IntrinsicsSource::Factory);
   femto->depth =
-      camera::CameraCalibration{lens_m0(), camera::IntrinsicsSource::Factory};
+      camera::CameraCalibration{lab_lens(), camera::IntrinsicsSource::Factory};
   femto->depth_to_color = camera::Mat4d(1.0);
   camera::SensorCalibration& unlensed = file.sensors.emplace_back();
   unlensed.id = "posed-only";
@@ -591,9 +852,20 @@ TEST(FormatLensResults, TheReportHoldsWhatTheGatesFound) {
   EXPECT_EQ(cam["start"], "opencv");
   EXPECT_EQ(cam["rms_px"], fit.rms_px);
   EXPECT_EQ(cam["holdout_rms_px"], fit.holdout_rms_px);
+  EXPECT_EQ(cam["holdout_corners"], solved.holdout_corners);
+  EXPECT_GT(solved.holdout_corners, 0);
+  EXPECT_EQ(cam["holdout_dropped"], 0);
   EXPECT_EQ(cam["worst_cell_bias_px"], solved.worst_cell_bias_px);
+  EXPECT_EQ(cam["worst_cell"]["column"], solved.worst_cell[0]);
+  EXPECT_EQ(cam["worst_cell"]["row"], solved.worst_cell[1]);
   EXPECT_EQ(cam["fold_deg"], 90.0);
   EXPECT_EQ(cam["frame_folds"], false);
+  EXPECT_EQ(cam["reach"]["top_left"], solved.reach[0]);
+  EXPECT_EQ(cam["reach"]["top_right"], solved.reach[1]);
+  EXPECT_EQ(cam["reach"]["bottom_left"], solved.reach[2]);
+  EXPECT_EQ(cam["reach"]["bottom_right"], solved.reach[3]);
+  EXPECT_EQ(cam["reach"]["left"], solved.reach[4]);
+  EXPECT_EQ(cam["reach"]["right"], solved.reach[5]);
   EXPECT_EQ(cam["corner_reach_deg"]["top_left"], solved.corner_reach_deg[0]);
   EXPECT_EQ(cam["corner_reach_deg"]["top_right"], solved.corner_reach_deg[1]);
   EXPECT_EQ(cam["corner_reach_deg"]["bottom_left"], solved.corner_reach_deg[2]);

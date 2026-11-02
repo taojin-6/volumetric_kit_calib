@@ -25,11 +25,14 @@
 
 #include <gtest/gtest.h>
 #include <opencv2/core.hpp>
+#include <opencv2/geometry.hpp>
 
 #include "result_checks.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
+#include "volumetric_kit/calib/compute/cv_pose.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
+#include "volumetric_kit/calib/solve/view_pose.hpp"
 #include "volumetric_kit/sensor/camera/array_calibration.hpp"
 
 namespace volumetric_kit::calib::solve {
@@ -203,8 +206,8 @@ TEST(PlanLensViews, TakesARegionsThirdViewOfEveryFive) {
   EXPECT_EQ(count(plan, Use::HeldOut), 0);  // a region of 2 gives none
 }
 
-// A corner's only reaching view stays fitted, whichever slot it falls on; with
-// a second one, the rule holds the first out as usual.
+// A corner's only reaching view stays fitted, wherever it falls in the rhythm;
+// with a second one, the rule holds the first out as usual.
 TEST(PlanLensViews, NeverHoldsOutACornersOnlyReachingView) {
   // Capture 2 is the region's third, the one held out, and reaches the top
   // left: nine tenths of the way is about 96, 54 from the corner, and the
@@ -229,6 +232,35 @@ TEST(PlanLensViews, NeverHoldsOutACornersOnlyReachingView) {
   ASSERT_LT(pixel_reach(kSize, views[2].points[0].pixel)[0], kLensReach);
   plan = value_of(plan_lens_views("bm-1", kSize, board(), views));
   EXPECT_EQ(count(plan, Use::HeldOut), 0);
+}
+
+// Two reaching views, the 3rd and 8th of one region, both due to be held out:
+// the first goes, and the second, the last left, stays.
+TEST(PlanLensViews, KeepsTheSecondOfTwoReachingViewsBothDueToBeHeldOut) {
+  std::vector<Observation> views;
+  for (std::int64_t frame = 0; frame < 8; ++frame) {
+    const bool reaching = frame == 2 || frame == 7;
+    views.push_back(patch(frame, reaching ? 20.0 : 300.0, 20.0));
+  }
+  const std::vector<LensView> plan =
+      value_of(plan_lens_views("bm-1", kSize, board(), views));
+  EXPECT_EQ(plan[2].use, Use::HeldOut);
+  EXPECT_EQ(plan[7].use, Use::Fitted);
+}
+
+// A view belongs to the region its corners centre in, wherever its first
+// corner falls: a board's ids run either way across the image.
+TEST(PlanLensViews, PlacesAViewByTheCentreOfItsCorners) {
+  std::vector<Observation> views;
+  for (std::int64_t frame = 0; frame < 3; ++frame) {
+    views.push_back(patch(frame, 1200.0, 500.0));  // centred left of 1280
+  }
+  ASSERT_LT(views[2].points.front().pixel.x, 1280.0);
+  ASSERT_GT(views[2].points.back().pixel.x, 1280.0);
+  std::reverse(views[2].points.begin(), views[2].points.end());
+  const std::vector<LensView> plan =
+      value_of(plan_lens_views("bm-1", kSize, board(), views));
+  EXPECT_EQ(plan[2].use, Use::HeldOut);
 }
 
 // The hold-out goes by capture, not by the order the caller keeps views in.
@@ -454,8 +486,190 @@ TEST(SolveLens, StartsFromARealLensToo) {
   EXPECT_LT(curve_error_px(started.camera.model, lens, 56.0), 1.0);
 }
 
+// One iteration: OpenCV's own start is nowhere yet, and a right lens stays
+// right. So the start is tried, it wins, and the fit says so, through the
+// second pass that a dropped corner brings on too.
+TEST(SolveLens, KeepsAGivenStartThatFitsBetterAndSaysSo) {
+  const test::FisheyeTruth lens = truth();
+  test::FisheyeCapture capture;
+  capture.noise_px = 0.15;
+  std::vector<Observation> views = test::fisheye_views(board(), lens, capture);
+  const LensFit own = value_of(solve_lens("bm-1", kSize, board(), views));
+  LensOptions options;
+  options.max_iterations = 1;
+  options.outlier_rounds = 0;
+  const LensFit unaided = value_of(
+      solve_lens("bm-1", kSize, board(), views, std::nullopt, options));
+  EXPECT_FALSE(unaided.from_start);
+  EXPECT_GT(unaided.rms_px, 1.0);
+  const LensFit started = value_of(
+      solve_lens("bm-1", kSize, board(), views, own.camera.model, options));
+  EXPECT_TRUE(started.from_start);
+  EXPECT_LT(started.rms_px, 0.3);
+
+  const std::vector<LensView> plan =
+      value_of(plan_lens_views("bm-1", kSize, board(), views));
+  for (std::size_t v = 0; v < plan.size(); ++v) {
+    if (plan[v].use != Use::Fitted) continue;
+    views[v].points[2].pixel.x += 25.0;
+    break;
+  }
+  options.outlier_rounds = 3;
+  const LensFit second = value_of(
+      solve_lens("bm-1", kSize, board(), views, own.camera.model, options));
+  EXPECT_TRUE(second.from_start);
+  EXPECT_TRUE(std::any_of(second.residuals.begin(), second.residuals.end(),
+                          [](const CornerResidual& r) { return r.dropped; }));
+}
+
+// With no start given, no fit is named as if from one, a second pass or not.
+TEST(SolveLens, SaysNoStartWonWhenNoneWasGiven) {
+  const test::FisheyeTruth lens = truth();
+  test::FisheyeCapture capture;
+  capture.noise_px = 0.15;
+  std::vector<Observation> views = test::fisheye_views(board(), lens, capture);
+  const std::vector<LensView> plan =
+      value_of(plan_lens_views("bm-1", kSize, board(), views));
+  for (std::size_t v = 0; v < plan.size(); ++v) {
+    if (plan[v].use != Use::Fitted) continue;
+    views[v].points[2].pixel.x += 25.0;
+    break;
+  }
+  const LensFit fit = value_of(solve_lens("bm-1", kSize, board(), views));
+  EXPECT_FALSE(fit.from_start);
+  EXPECT_TRUE(std::any_of(fit.residuals.begin(), fit.residuals.end(),
+                          [](const CornerResidual& r) { return r.dropped; }));
+}
+
+// OpenCV's own start can land far off at first, and what that fit condemns was
+// never bad. Nothing here is, so nothing stays dropped. OpenCV's path differs
+// in its last bits between machines, so the seed may not land wrong elsewhere.
+TEST(SolveLens, AWrongFirstFitDropsNothingForGood) {
+  test::FisheyeCapture capture;
+  capture.seed = 19;
+  const LensFit fit = value_of(solve_lens(
+      "bm-1", kSize, board(), test::fisheye_views(board(), truth(), capture)));
+  EXPECT_EQ(count(fit.views, Use::Dropped), 0);
+  for (const CornerResidual& r : fit.residuals) ASSERT_FALSE(r.dropped);
+}
+
+// Each held-out view's RMS is that of its better pose through the fitted lens:
+// IPPE's two, refined on the pixels, here as the solve should have them.
+TEST(SolveLens, PosesEachHeldOutViewThroughTheLens) {
+  const test::FisheyeTruth lens = truth();
+  int checked = 0;
+  for (const std::uint32_t seed : {1u, 2u, 3u, 4u, 5u, 6u}) {
+    test::FisheyeCapture capture;
+    capture.seed = seed;
+    capture.noise_px = 0.15;
+    const std::vector<Observation> views =
+        test::fisheye_views(board(), lens, capture);
+    const LensFit fit = value_of(solve_lens("bm-1", kSize, board(), views));
+    const compute::CvCamera cam =
+        value_of(compute::cv_camera(fit.camera.model));
+    for (const LensView& use : fit.views) {
+      if (use.use != Use::HeldOut) continue;
+      const auto view = std::find_if(
+          views.begin(), views.end(),
+          [&](const Observation& v) { return v.frame_id == use.frame_id; });
+      ASSERT_NE(view, views.end());
+      std::vector<cv::Point3d> object;
+      std::vector<cv::Point2d> pixels;
+      for (const DetectedPoint& point : view->points) {
+        object.push_back(
+            board().object_points()[static_cast<std::size_t>(point.id)]);
+        pixels.emplace_back(point.pixel.x, point.pixel.y);
+      }
+      const ViewPose poses = value_of(view_pose(cam, board(), *view));
+      std::vector<PoseCandidate> candidates{poses.best};
+      if (poses.alternative) candidates.push_back(*poses.alternative);
+      double least = std::numeric_limits<double>::infinity();
+      for (const PoseCandidate& candidate : candidates) {
+        compute::CvPose pose =
+            value_of(compute::cv_pose(candidate.board_to_camera));
+        cv::solvePnPRefineLM(object, pixels, cam.camera_matrix, cam.distortion,
+                             pose.rvec, pose.tvec);
+        std::vector<cv::Point2d> projected;
+        cv::projectPoints(object, pose.rvec, pose.tvec, cam.camera_matrix,
+                          cam.distortion, projected);
+        double sum = 0.0;
+        for (std::size_t i = 0; i < pixels.size(); ++i) {
+          const cv::Point2d e = projected[i] - pixels[i];
+          sum += e.dot(e);
+        }
+        least = std::min(least,
+                         std::sqrt(sum / static_cast<double>(pixels.size())));
+      }
+      EXPECT_NEAR(use.rms_px, least, 1e-9) << seed << ' ' << use.frame_id;
+      ++checked;
+    }
+  }
+  EXPECT_GE(checked, 30);
+}
+
+// A bad corner in a held-out view goes as one in a fitted view does, and its
+// pull on the pose with it: the view scores as if it had never been seen.
+TEST(SolveLens, DropsABadHeldOutCornerAndPosesTheViewWithoutIt) {
+  const test::FisheyeTruth lens = truth();
+  test::FisheyeCapture capture;
+  capture.noise_px = 0.15;
+  std::vector<Observation> views = test::fisheye_views(board(), lens, capture);
+  const std::vector<LensView> plan =
+      value_of(plan_lens_views("bm-1", kSize, board(), views));
+  const auto held =
+      std::find_if(plan.begin(), plan.end(),
+                   [](const LensView& v) { return v.use == Use::HeldOut; });
+  ASSERT_NE(held, plan.end());
+  const std::size_t v = static_cast<std::size_t>(held - plan.begin());
+  const std::size_t i = views[v].points.size() / 2;
+  const int bad = views[v].points[i].id;
+
+  std::vector<Observation> without = views;
+  without[v].points.erase(without[v].points.begin() +
+                          static_cast<std::ptrdiff_t>(i));
+  const LensFit clean = value_of(solve_lens("bm-1", kSize, board(), without));
+
+  views[v].points[i].pixel.x += 25.0;
+  const LensFit fit = value_of(solve_lens("bm-1", kSize, board(), views));
+  EXPECT_EQ(fit.views[v].use, Use::HeldOut);
+  EXPECT_EQ(fit.views[v].corners, clean.views[v].corners);
+  EXPECT_NEAR(fit.views[v].rms_px, clean.views[v].rms_px, 1e-6);
+  EXPECT_NEAR(fit.holdout_rms_px, clean.holdout_rms_px, 1e-6);
+  int named = 0;
+  for (const CornerResidual& r : fit.residuals) {
+    if (!r.dropped) continue;
+    EXPECT_EQ(r.capture, views[v].frame_id);
+    EXPECT_EQ(r.corner, bad);
+    ++named;
+  }
+  EXPECT_EQ(named, 1);
+}
+
+// A held-out view with too few corners left has no pose, and says so: it can
+// vouch for nothing.
+TEST(SolveLens, AHeldOutViewLeftWithoutAPoseReadsInfinite) {
+  const test::FisheyeTruth lens = truth();
+  test::FisheyeCapture capture;
+  capture.noise_px = 0.15;
+  std::vector<Observation> views = test::fisheye_views(board(), lens, capture);
+  const std::vector<LensView> plan =
+      value_of(plan_lens_views("bm-1", kSize, board(), views));
+  const auto held =
+      std::find_if(plan.begin(), plan.end(),
+                   [](const LensView& v) { return v.use == Use::HeldOut; });
+  ASSERT_NE(held, plan.end());
+  const std::size_t v = static_cast<std::size_t>(held - plan.begin());
+  for (std::size_t i = 0; i < views[v].points.size(); ++i) {
+    views[v].points[i].pixel.y += i % 2 == 0 ? 20.0 : -20.0;
+  }
+  const LensFit fit = value_of(solve_lens("bm-1", kSize, board(), views));
+  EXPECT_TRUE(std::isinf(fit.views[v].rms_px));
+  EXPECT_TRUE(std::isinf(fit.holdout_rms_px));
+}
+
 // Three corners 25 px off and a view out as a whole: named, the lens no worse
-// for them.
+// for them. A view shifted whole is not the case here: its pose takes that up,
+// and it stays (DECISIONS.md).
 TEST(SolveLens, DropsAndNamesBadCornersAndAShiftedView) {
   const test::FisheyeTruth lens = truth();
   test::FisheyeCapture capture;
@@ -464,7 +678,8 @@ TEST(SolveLens, DropsAndNamesBadCornersAndAShiftedView) {
   const std::vector<LensView> plan =
       value_of(plan_lens_views("bm-1", kSize, board(), views));
   // Two fitted views well out from the axis: one loses three corners, the
-  // other shifts as a whole, by more than its pose can take up.
+  // other has its corners moved 6 px up and down in turn, which no pose takes
+  // up.
   std::vector<std::size_t> fitted;
   for (std::size_t v = 25; v < plan.size(); ++v) {
     if (plan[v].use == Use::Fitted) fitted.push_back(v);
@@ -502,6 +717,30 @@ TEST(SolveLens, DropsAndNamesBadCornersAndAShiftedView) {
   EXPECT_LE(named.size(), 10u);
   EXPECT_NEAR(fit.rms_px, 0.15 * std::sqrt(2.0), 0.02);
   EXPECT_LT(curve_error_px(fit.camera.model, lens, 56.0), 1.0);
+}
+
+// A view off by less than the corner bound in every corner goes by its RMS,
+// its corners all kept until it does.
+TEST(SolveLens, DropsAViewByItsRmsWhenNoCornerIsPastTheBound) {
+  const test::FisheyeTruth lens = truth();
+  test::FisheyeCapture capture;
+  capture.noise_px = 0.15;
+  std::vector<Observation> views = test::fisheye_views(board(), lens, capture);
+  const std::vector<LensView> plan =
+      value_of(plan_lens_views("bm-1", kSize, board(), views));
+  std::size_t off = plan.size();
+  for (std::size_t v = 25; v < plan.size(); ++v) {
+    if (plan[v].use == Use::Fitted) off = v;
+  }
+  ASSERT_LT(off, plan.size());
+  for (std::size_t i = 0; i < views[off].points.size(); ++i) {
+    views[off].points[i].pixel.y += i % 2 == 0 ? 2.0 : -2.0;
+  }
+  const LensFit fit = value_of(solve_lens("bm-1", kSize, board(), views));
+  EXPECT_EQ(fit.views[off].use, Use::Dropped);
+  EXPECT_NEAR(fit.views[off].rms_px, 2.0, 0.2);
+  EXPECT_EQ(count(fit.views, Use::Dropped), 1);
+  for (const CornerResidual& r : fit.residuals) EXPECT_FALSE(r.dropped);
 }
 
 TEST(SolveLens, RefusesWithTooFewViews) {
@@ -554,7 +793,13 @@ TEST(SolveLens, KeepsEveryCornerWithNoOutlierRounds) {
   test::FisheyeCapture capture;
   capture.noise_px = 0.15;
   std::vector<Observation> views = test::fisheye_views(board(), lens, capture);
-  views[3].points[2].pixel.x += 25.0;
+  const std::vector<LensView> plan =
+      value_of(plan_lens_views("bm-1", kSize, board(), views));
+  for (std::size_t v = 0; v < plan.size(); ++v) {
+    if (v == 3 || plan[v].use == Use::HeldOut) {
+      views[v].points[2].pixel.x += 25.0;  // fitted and held out alike
+    }
+  }
   LensOptions options;
   options.outlier_rounds = 0;
   const LensFit fit = value_of(
