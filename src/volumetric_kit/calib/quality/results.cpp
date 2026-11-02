@@ -497,6 +497,8 @@ const char* source_name(camera::IntrinsicsSource source) {
                                                         : "factory";
 }
 
+// TODO: each camera's lens file (its path and SHA-256) beside its lens source,
+// when calib_rig checks pairs and can give them.
 void pairs_section(Writer& w, const std::vector<PairRowCheck>& pairs,
                    const std::vector<solve::RigCamera>& cameras) {
   w.open_array();
