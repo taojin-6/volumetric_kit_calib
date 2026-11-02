@@ -7,6 +7,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.2.0] - 2026-11-01
+
+### Added
+
+- **A camera's lens from its views** (DECISIONS.md, 2026-11-01):
+  `solve::solve_lens` (`solve/lens.hpp`) fits sensor's rational lens by
+  `cv::calibrateCamera`, from OpenCV's own start and a given one, the lower RMS
+  kept, with views held out in every region of the image and the adjustment's
+  outlier bounds. `solve::plan_lens_views` says which views it takes.
+- **Its gates and files** (`quality/lens_gate.hpp`): `judge_lens` holds a fit
+  to its held-out RMS, that over the fit's, the cells' mean residuals and the
+  lens's fold; `format_lens_results` gives a lens-only calibration file, the
+  report and the residuals.
+- `quality::lens_readiness`: whether a camera's views are enough yet, counted
+  on those the solve will fit.
+- `RigCamera::source`: a lens's provenance, which `bundle_adjust` carries into
+  the calibration file, where it wrote `Factory`.
+- `examples/02_lens_from_images`: a lens from saved pictures, on the stable
+  API alone.
+- `compute::grid_cell`, moved down from the quality tier for the hold-out.
+
+### Changed
+
+- `report.json` is version 2: as version 1, with an optional `lenses` section
+  that a lens run's report holds alone.
+- The bundle adjustment's outlier rule moved to `solve/common`, shared with
+  the lens solve; its outputs are unchanged.
+- build: **calib pins sensor at #27's merge** (aa7d940, 0.20.0) and requires
+  0.20.0, for `fold_radius2` on its camera tier. The solve tier links
+  `opencv_calib`, privately, so OpenCV's calib module is a prerequisite of the
+  brain, not of the tests alone.
+- calib's version is 0.2.0, where it was 0.1.0.
+
 ## [0.1.0] - 2026-11-01
 
 ### Added
