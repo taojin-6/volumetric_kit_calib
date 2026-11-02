@@ -144,6 +144,23 @@ core::Status check_world_fits(const std::vector<std::string>& ids,
       " cameras");
 }
 
+// Refuses a pair whose cameras are not the rig's.
+core::Status check_pairs_fit(const std::vector<std::string>& ids,
+                             const std::vector<PairRowCheck>& pairs) {
+  const auto in_rig = [&](const std::string& id) {
+    return std::find(ids.begin(), ids.end(), id) != ids.end();
+  };
+  for (const PairRowCheck& p : pairs) {
+    for (const std::string* id : {&p.left, &p.right}) {
+      if (in_rig(*id)) continue;
+      return core::Status::invalid_argument(
+          "the pair of \"" + p.left + "\" and \"" + p.right +
+          "\" names camera \"" + *id + "\", which the rig does not have");
+    }
+  }
+  return {};
+}
+
 void pair(Writer& w, const camera::Vec2d& v) {
   w.open_array(true);
   w.value(v.x);
@@ -475,12 +492,65 @@ void world_section(Writer& w, const ResultWorld& world,
   w.close_object();
 }
 
-std::string report_text(const std::vector<std::string>& ids,
+const char* source_name(camera::IntrinsicsSource source) {
+  return source == camera::IntrinsicsSource::Calibrated ? "calibrated"
+                                                        : "factory";
+}
+
+void pairs_section(Writer& w, const std::vector<PairRowCheck>& pairs,
+                   const std::vector<solve::RigCamera>& cameras) {
+  w.open_array();
+  for (const PairRowCheck& p : pairs) {
+    w.open_object();
+    w.key("left").value(p.left);
+    w.key("right").value(p.right);
+    w.key("verdict").value(to_string(p.verdict));
+    refused(w.key("reason"), p.reason);
+    w.key("lens_source").open_object();
+    for (const std::string* id : {&p.left, &p.right}) {
+      for (const solve::RigCamera& cam : cameras) {
+        if (cam.id == *id) w.key(cam.id).value(source_name(cam.source));
+      }
+    }
+    w.close_object();
+    const PairRowCheckOptions& o = p.options;
+    w.key("settings").open_object();
+    w.key("rectified").open_array(true);
+    w.value(std::size_t{o.rectified.width});
+    w.value(std::size_t{o.rectified.height});
+    w.close_array();
+    w.key("alpha").value(o.alpha);
+    w.key("max_cell_mean_px").value(o.max_cell_mean_px);
+    w.key("min_cell_corners").value(o.min_cell_corners);
+    w.key("min_cells").value(o.min_cells);
+    w.close_object();
+    w.key("captures").value(p.captures);
+    w.key("corners").value(p.corners);
+    w.key("baseline_m").value(p.baseline_m);
+    w.key("dy_median_px").value(p.dy_median_px);
+    w.key("dy_p95_px").value(p.dy_p95_px);
+    w.key("cells").open_array();
+    for (std::size_t c = 0; c < p.cell_corners.size(); ++c) {
+      w.open_object();
+      w.key("corners").value(p.cell_corners[c]);
+      w.key("mean_px").value(p.cell_mean_px[c]);
+      w.key("limit_px").value(p.cell_limit_px[c]);
+      w.close_object();
+    }
+    w.close_array();
+    w.close_object();
+  }
+  w.close_array();
+}
+
+std::string report_text(const std::vector<solve::RigCamera>& cameras,
+                        const std::vector<std::string>& ids,
                         const solve::RigSolution& solution,
                         const CalibrationMetrics& metrics,
                         const DepthSummary* depth_checks,
                         const std::string& depth_unchecked,
-                        const ResultWorld& world) {
+                        const ResultWorld& world,
+                        const std::vector<PairRowCheck>& pairs) {
   const std::size_t k = ids.size();
   Writer w;
   w.open_object();
@@ -691,6 +761,7 @@ std::string report_text(const std::vector<std::string>& ids,
     w.key("depth").null();
     refused(w.key("depth_unchecked"), depth_unchecked);
   }
+  pairs_section(w.key("pairs"), pairs, cameras);
   w.close_object();
   return std::move(w).text();
 }
@@ -896,7 +967,7 @@ core::Result<ResultFiles> format_results(
     const std::vector<solve::RigCamera>& cameras,
     const solve::RigSolution& solution, const CalibrationMetrics& metrics,
     const DepthSummary* depth, const std::string& depth_unchecked,
-    const ResultWorld& world) {
+    const ResultWorld& world, const std::vector<PairRowCheck>& pairs) {
   constexpr const char* kWhat = "format_results";
   return compute::guarded(kWhat, [&]() -> core::Result<ResultFiles> {
     std::vector<std::string> ids;
@@ -906,6 +977,7 @@ core::Result<ResultFiles> format_results(
     if (checked.ok()) checked = check_fits(ids, solution, metrics);
     if (checked.ok() && depth) checked = check_depth_fits(ids.size(), *depth);
     if (checked.ok()) checked = check_world_fits(ids, world.origin);
+    if (checked.ok()) checked = check_pairs_fit(ids, pairs);
     if (!checked.ok()) return std::move(checked).with_context(kWhat);
     core::Result<solve::AnchoredRig> anchored =
         solve::anchor_rig(solution, world.origin);
@@ -915,8 +987,8 @@ core::Result<ResultFiles> format_results(
     if (!calibration.ok()) return calibration.status().with_context(kWhat);
     ResultFiles files;
     files.array_calibration = *std::move(calibration);
-    files.report =
-        report_text(ids, solution, metrics, depth, depth_unchecked, world);
+    files.report = report_text(cameras, ids, solution, metrics, depth,
+                               depth_unchecked, world, pairs);
     files.residuals = residuals_text(ids, solution);
     return files;
   });

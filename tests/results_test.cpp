@@ -210,11 +210,12 @@ TEST(Results, TheReportHasItsSchema) {
                 "format", "version", "settings", "solver", "tree",
                 "reprojection", "rejections", "transfer", "leave_one_out",
                 "covariance", "sensitivity", "principal_point_ab", "geometry",
-                "world", "depth", "depth_unchecked"}));
+                "world", "depth", "depth_unchecked", "pairs"}));
   EXPECT_EQ(doc["format"], "volumetric_kit_calib.report");
   EXPECT_EQ(doc["version"], 2);
   EXPECT_TRUE(doc["depth"].is_null());  // not checked, nor asked to be
   EXPECT_TRUE(doc["depth_unchecked"].is_null());
+  EXPECT_EQ(doc["pairs"], json::array());  // no pair checked
 
   // The settings the metrics were measured with.
   const json& settings = doc["settings"];
@@ -699,6 +700,107 @@ TEST(Results, RefusesDepthChecksThatDoNotFit) {
   d = depth_checks();
   d.captures[0].pairs[0].agreement.from = 7;
   refused(d);
+}
+
+// Each pair's rows, as checked, in `pairs`: a cell with too few corners and
+// an empty reason are null, each camera's lens source by its id.
+TEST(Results, TheReportHasItsPairsSection) {
+  const Solved& s = solved();
+  std::vector<solve::RigCamera> cams = s.scene.cameras;
+  cams[1].source = camera::IntrinsicsSource::Calibrated;
+  PairRowCheck pass;
+  pass.options.rectified = {960, 544};
+  pass.options.alpha = 0.25;
+  pass.options.max_cell_mean_px = 0.125;
+  pass.options.min_cell_corners = 9;
+  pass.options.min_cells = 6;
+  pass.left = cams[0].id;
+  pass.right = cams[1].id;
+  pass.verdict = PairRowCheck::Verdict::Pass;
+  pass.captures = 12;
+  pass.corners = 301;
+  for (std::size_t c = 0; c < pass.cell_corners.size(); ++c) {
+    pass.cell_corners[c] = c == 2 ? 3 : 30 + c;
+    if (c == 2) continue;
+    pass.cell_mean_px[c] = 0.01 * c - 0.04;
+    pass.cell_limit_px[c] = 0.125 + 0.001 * c;
+  }
+  pass.dy_median_px = 0.03125;
+  pass.dy_p95_px = 0.09375;
+  pass.baseline_m = 0.3995;
+  PairRowCheck swapped;
+  swapped.left = cams[3].id;
+  swapped.right = cams[2].id;
+  swapped.verdict = PairRowCheck::Verdict::Swapped;
+  swapped.reason = "\"" + cams[2].id + "\" is the left camera";
+
+  const nlohmann::ordered_json doc = nlohmann::ordered_json::parse(
+      value_of(format_results(cams, s.solution, s.metrics, nullptr, {}, {},
+                              {pass, swapped}))
+          .report);
+  ASSERT_EQ(doc["pairs"].size(), 2u);
+  const auto& p = doc["pairs"][0];
+  EXPECT_EQ(keys_of(p), (std::vector<std::string>{
+                            "left", "right", "verdict", "reason", "lens_source",
+                            "settings", "captures", "corners", "baseline_m",
+                            "dy_median_px", "dy_p95_px", "cells"}));
+  EXPECT_EQ(p["left"], cams[0].id);
+  EXPECT_EQ(p["right"], cams[1].id);
+  EXPECT_EQ(p["verdict"], "pass");
+  EXPECT_TRUE(p["reason"].is_null());
+  EXPECT_EQ(keys_of(p["lens_source"]),
+            (std::vector<std::string>{cams[0].id, cams[1].id}));
+  EXPECT_EQ(p["lens_source"][cams[0].id], "factory");
+  EXPECT_EQ(p["lens_source"][cams[1].id], "calibrated");
+  const auto& o = p["settings"];
+  EXPECT_EQ(keys_of(o),
+            (std::vector<std::string>{"rectified", "alpha", "max_cell_mean_px",
+                                      "min_cell_corners", "min_cells"}));
+  EXPECT_EQ(o["rectified"], nlohmann::ordered_json({960, 544}));
+  EXPECT_EQ(o["alpha"].get<double>(), 0.25);
+  EXPECT_EQ(o["max_cell_mean_px"].get<double>(), 0.125);
+  EXPECT_EQ(o["min_cell_corners"], 9);
+  EXPECT_EQ(o["min_cells"], 6);
+  EXPECT_EQ(p["captures"], 12);
+  EXPECT_EQ(p["corners"], 301);
+  EXPECT_EQ(p["baseline_m"].get<double>(), 0.3995);
+  EXPECT_EQ(p["dy_median_px"].get<double>(), 0.03125);
+  EXPECT_EQ(p["dy_p95_px"].get<double>(), 0.09375);
+  ASSERT_EQ(p["cells"].size(), 9u);
+  for (std::size_t c = 0; c < 9; ++c) {
+    const auto& cell = p["cells"][c];
+    EXPECT_EQ(keys_of(cell),
+              (std::vector<std::string>{"corners", "mean_px", "limit_px"}));
+    EXPECT_EQ(cell["corners"], pass.cell_corners[c]);
+    if (c == 2) {
+      EXPECT_TRUE(cell["mean_px"].is_null());
+      EXPECT_TRUE(cell["limit_px"].is_null());
+      continue;
+    }
+    EXPECT_EQ(cell["mean_px"].get<double>(), pass.cell_mean_px[c]);
+    EXPECT_EQ(cell["limit_px"].get<double>(), pass.cell_limit_px[c]);
+  }
+  const auto& q = doc["pairs"][1];
+  EXPECT_EQ(q["left"], cams[3].id);
+  EXPECT_EQ(q["verdict"], "swapped");
+  EXPECT_EQ(q["reason"], swapped.reason);
+  EXPECT_TRUE(q["dy_p95_px"].is_null());
+  EXPECT_EQ(q["baseline_m"].get<double>(), 0.0);
+}
+
+TEST(Results, RefusesAPairOfACameraTheRigDoesNotHave) {
+  const Solved& s = solved();
+  PairRowCheck p;
+  p.left = s.scene.cameras[0].id;
+  p.right = "bm-9";
+  core::Result<ResultFiles> files = ResultFiles{};
+  EXPECT_NO_THROW(files = format_results(s.scene.cameras, s.solution, s.metrics,
+                                         nullptr, {}, {}, {p}));
+  EXPECT_EQ(files.status().domain(), Code::InvalidArgument);
+  EXPECT_EQ(files.status().message(),
+            "format_results: the pair of \"" + p.left +
+                "\" and \"bm-9\" names camera \"bm-9\", which the rig does "
+                "not have");
 }
 
 // A number not finite is null; a refused re-solve says why.
