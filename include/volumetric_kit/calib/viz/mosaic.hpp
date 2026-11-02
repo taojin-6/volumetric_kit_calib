@@ -4,15 +4,18 @@
 #pragma once
 
 /// @file mosaic.hpp
-/// @brief The live view's rig mosaic: each camera's decoded picture copied on
+/// @brief The live view's rig mosaic: each camera's picture -- a decoder's
+///        NV12 images in colour, or any camera's luma in grey -- copied on
 ///        the GPU into its tile of one NV12 picture, converted once per frame
 ///        with a new picture, and drawn through one pan-and-zoom view.
 ///
 /// No picture passes through the host: gfx's `ImagePipeline::record_write`
-/// copies each decoder's planes into its camera's tile, and `record_convert`
-/// converts the mosaic for display. Any number of cameras, of mixed even
-/// sizes, take equal cells of one grid (@ref mosaic_layout); a mosaic too
-/// large for one texture is paged over several, which its view shows as one.
+/// copies each picture's planes into its camera's tile -- a grey tile's
+/// chroma from one neutral buffer the mosaic makes once -- and
+/// `record_convert` converts the mosaic for display. Any number of cameras,
+/// of mixed even sizes, take equal cells of one grid (@ref mosaic_layout); a
+/// mosaic too large for one texture is paged over several, which its view
+/// shows as one.
 /// Marks drawn over a tile's region (@ref RigMosaic::tile_region,
 /// @ref overlay.hpp) land on the texels they name.
 
@@ -137,20 +140,27 @@ core::Result<MosaicLayout> mosaic_layout(
     const std::vector<sensor::camera::ImageSize>& sizes,
     std::uint32_t gutter = kMosaicGutter, const MosaicLimits& limits = {});
 
-/// @brief A decoder's picture as gfx's write of its tile: its two NV12 image
-///        planes, read in place, copied to @p at.
+/// @brief A picture as gfx's write of its tile, copied to @p at: a decoder's
+///        two NV12 image planes, read in place, in colour; or a luma picture
+///        in a device buffer (sensor's `LumaPass` output), in grey, its
+///        chroma from @p neutral_chroma.
 ///
-/// The write borrows the picture's images, so the picture -- the frame that
-/// holds it -- must outlive the write's execution on the GPU, not merely its
-/// recording. The images must be readable from the renderer's queue family
-/// (sensor's `color_queue_families`).
-/// @param picture   The picture, as `RgbdFrame::color` holds it.
-/// @param expected  The tile's size (@ref MosaicTile::extent).
-/// @param at        The tile's place in its page (@ref MosaicTile::at).
-/// @return The write; `Unsupported` for an I420 picture, planes in a buffer
-///         rather than images, or images still owned outside Vulkan
+/// The write borrows the picture's images or buffer, so the picture -- the
+/// set that holds it -- must outlive the write's execution on the GPU, not
+/// merely its recording. They must be readable from the renderer's queue
+/// family (sensor's `color_queue_families`, or the luma pass's families).
+/// @param picture         The picture, as `RgbdFrame::color` or a source's
+///                        tile holds it.
+/// @param expected        The tile's size (@ref MosaicTile::extent).
+/// @param at              The tile's place in its page (@ref MosaicTile::at).
+/// @param neutral_chroma  For a luma picture: a buffer with `TRANSFER_SRC`
+///                        usage of at least the tile's NV12 chroma,
+///                        `ceil(w / 2) * ceil(h / 2) * 2` bytes, each 128.
+/// @return The write; `Unsupported` for an I420 picture, NV12 planes in a
+///         buffer rather than images, images still owned outside Vulkan
 ///         (`YuvImage::queue_family` is `kQueueFamilyExternal`, as NVDEC's
-///         arrive until a readback takes them over); `InvalidArgument` for a
+///         arrive until a readback takes them over), or a luma picture with
+///         no device buffer or no @p neutral_chroma; `InvalidArgument` for a
 ///         picture missing its luma or chroma image, or whose size is zero or
 ///         not @p expected; or `OutOfMemory`.
 ///
@@ -158,11 +168,10 @@ core::Result<MosaicLayout> mosaic_layout(
 /// VKC_ASSIGN(const gfx::pipelines::ImageWrite write,
 ///            tile_write(frame.color, tile.extent, tile.at));
 /// @endcode
-// TODO: images owned outside Vulkan (NVDEC's) and planes in a buffer
-// (nvJPEG's, on Linux), which need their ownership taken over first, and I420,
-// once gfx maps it.
+// TODO: I420, once gfx maps it.
 core::Result<gfx::pipelines::ImageWrite> tile_write(
-    const sensor::YuvImage& picture, VkExtent2D expected, VkOffset2D at);
+    const sensor::YuvImage& picture, VkExtent2D expected, VkOffset2D at,
+    const core::Buffer* neutral_chroma = nullptr);
 
 /// @brief How pictures written together become display colour: the Y'CbCr
 ///        matrix, range and chroma siting they share.
@@ -197,14 +206,16 @@ struct TileRefusal {
 };
 
 /// @brief The rig's mosaic: one NV12 texture per page, written in tiles from
-///        each camera's decoded picture and converted on the GPU, and one view
-///        of it all.
+///        each camera's picture (@ref tile_write) and converted on the GPU,
+///        and one view of it all.
 ///
 /// Records and draws go into the caller's command buffers on the renderer's
 /// graphics queue: @ref record before the frame's rendering scope, @ref draw
 /// inside it. A camera with no new picture keeps its last; texels no picture
-/// covers -- the gutter, and any empty cell -- are black, paged or not. The
-/// view keeps its pan and zoom as its viewport changes. Not thread-safe.
+/// covers -- the gutter, and any empty cell -- are black, paged or not. A
+/// grey tile's chroma is the mosaic's own neutral buffer, made once at
+/// create, host memory the size of the largest tile's chroma (4 MB at 4K).
+/// The view keeps its pan and zoom as its viewport changes. Not thread-safe.
 ///
 /// @warning The device the allocator allocates on must outlive the mosaic, and
 ///          the GPU must be done with every frame that recorded or drew it
@@ -218,11 +229,9 @@ struct TileRefusal {
 /// // Each frame with a new set, before the rendering scope; the set is held
 /// // in gfx's RetireQueue until the frame retires. `pictures` is the caller's
 /// // own vector, reused from frame to frame:
-/// pictures.assign(set.frames.size(), nullptr);
+/// pictures.assign(set.cameras.size(), nullptr);
 /// for (std::size_t i = 0; i < pictures.size(); ++i) {
-///   if (set.frames[i] && set.frames[i]->has_color()) {
-///     pictures[i] = &set.frames[i]->color;
-///   }
+///   pictures[i] = set.cameras[i].tile;  // grey; or the decoder's, in colour
 /// }
 /// VKC_TRY(mosaic->record(cmd, pictures));
 /// // ... and each of mosaic->refused() shown on its camera's panel.
@@ -365,6 +374,8 @@ class RigMosaic {
   // written from black_, a byte of 0.
   gfx::pipelines::ImageTexture backdrop_;
   core::Buffer black_;
+  // A grey tile's chroma: 128 in every byte, for the largest tile.
+  core::Buffer neutral_;
   // The coding each page's planes hold, since its last discard.
   std::vector<std::optional<gfx::pipelines::ImageConversion>> codings_;
   std::vector<std::optional<std::uint64_t>> since_;  // per tile

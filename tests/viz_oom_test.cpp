@@ -82,14 +82,13 @@ TEST(VizOom, Panels) {
   CameraLive camera;
   camera.present = true;
   camera.check.distance_m = 2.5;
-  camera.lost = 1;
+  camera.frames.failed = 1;
   expect_oom_anywhere([&] {
     return camera_panel(camera, quality::CameraSummary{}, legacy_femto_board());
   });
 
-  sensor::FrameSet set;
-  set.frames.resize(2);
-  set.frames[0].emplace();
+  SetLive set;
+  set.skew_ns = {0, std::nullopt};
   const std::vector<std::string> ids = {"CL2A141000N", "CL2A14100A4"};
   expect_oom_anywhere([&] { return set_panel(set, {}, ids, {}); });
   expect_oom_when_reporting([&] { return set_panel(set, {}, {}, {}); },

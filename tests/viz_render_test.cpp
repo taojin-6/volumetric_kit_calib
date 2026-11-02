@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <string>
@@ -35,6 +36,8 @@
 #include "volumetric_kit/calib/viz/overlay.hpp"
 #include "volumetric_kit/calib/viz/panels.hpp"
 #include "volumetric_kit/core/testing/vulkan_fixture.hpp"
+#include "volumetric_kit/core/vulkan/allocator.hpp"
+#include "volumetric_kit/core/vulkan/buffer.hpp"
 #include "volumetric_kit/core/vulkan/command_buffer.hpp"
 #include "volumetric_kit/core/vulkan/command_pool.hpp"
 #include "volumetric_kit/core/vulkan/image.hpp"
@@ -252,6 +255,32 @@ class VizRenderTest : public core::test::VulkanDeviceTest {
     return picture;
   }
 
+  // A `width` x `height` luma picture of `fill` with its white texel at
+  // `dot`, in a device buffer as sensor's LumaPass leaves it: a grey tile.
+  Picture make_luma_picture(std::uint32_t width, std::uint32_t height,
+                            glm::vec2 dot, std::uint8_t fill) {
+    Picture picture;
+    picture.dot = dot;
+    core::BufferDesc desc;
+    desc.size = std::uint64_t{width} * height;
+    desc.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    desc.memory = core::MemoryUsage::Staging;
+    core::Result<core::Buffer> buffer = allocator().create_buffer(desc);
+    EXPECT_TRUE(buffer.ok()) << buffer.status().message();
+    if (!buffer.ok()) return picture;
+    auto* bytes = static_cast<std::uint8_t*>(buffer.value().mapped());
+    std::memset(bytes, fill, static_cast<std::size_t>(desc.size));
+    bytes[static_cast<std::size_t>(dot.y) * width +
+          static_cast<std::size_t>(dot.x)] = 255;
+    picture.yuv.layout = sensor::YuvLayout::Luma;
+    picture.yuv.device =
+        std::make_shared<const core::Buffer>(std::move(buffer).value());
+    picture.yuv.stride[0] = width;
+    picture.yuv.width = width;
+    picture.yuv.height = height;
+    return picture;
+  }
+
   std::shared_ptr<core::Image> upload(VkFormat format, VkExtent2D extent,
                                       const std::vector<std::uint8_t>& bytes) {
     gfx::ImageUploadDesc desc;
@@ -328,8 +357,8 @@ class VizRenderTest : public core::test::VulkanDeviceTest {
     std::vector<const sensor::YuvImage*> yuv(pictures.size(), nullptr);
     for (std::size_t i = 0; i < pictures.size(); ++i) {
       if (pictures[i] == nullptr) continue;
-      to_general(raw, *pictures[i]->luma);
-      to_general(raw, *pictures[i]->chroma);
+      if (pictures[i]->luma != nullptr) to_general(raw, *pictures[i]->luma);
+      if (pictures[i]->chroma != nullptr) to_general(raw, *pictures[i]->chroma);
       yuv[i] = &pictures[i]->yuv;
     }
     const core::Status recorded = mosaic.record(raw, yuv);
@@ -538,6 +567,52 @@ TEST_F(VizRenderTest, KeepsAMissingCamerasLastPictureAndTheGutterBlack) {
     }
     ASSERT_EQ(seconds.size(), 2u);
     EXPECT_TRUE(seconds[0].bytes == seconds[1].bytes);
+  }
+}
+
+// A camera's luma in a device buffer, as a stereo pair's or an nvJPEG
+// camera's comes from sensor's LumaPass, is written as a grey tile: its dot
+// where the view puts the texel, every other texel grey, neither page nor
+// tile refused, on one page and on a page each.
+TEST_F(VizRenderTest, WritesALumaBufferAsAGreyTile) {
+  MosaicLimits one_cell;
+  one_cell.max_texels = 16 * 16;
+  for (const MosaicLimits& limits : {MosaicLimits{}, one_cell}) {
+    SCOPED_TRACE(limits.max_texels);
+    std::unique_ptr<RigMosaic> mosaic =
+        make_mosaic({{16, 12}, {16, 12}}, limits);
+    ASSERT_NE(mosaic, nullptr);
+    fit(*mosaic);
+    std::vector<Picture> pictures;
+    pictures.push_back(make_luma_picture(16, 12, {3, 4}, 160));
+    pictures.push_back(make_luma_picture(16, 12, {11, 8}, 100));
+    const Pixels pixels = render(*mosaic, all(pictures));
+    ASSERT_FALSE(pixels.bytes.empty());
+    EXPECT_TRUE(mosaic->refused().empty());
+    for (std::size_t i = 0; i < pictures.size(); ++i) {
+      SCOPED_TRACE(i);
+      EXPECT_EQ(mosaic->sets_since_picture(i), 0u);
+      const glm::vec2 expected = mosaic->view().image_to_target(
+          mosaic->tile_region(i).origin + pictures[i].dot + 0.5f);
+      const std::optional<glm::vec2> found =
+          centroid(pixels, visible(*mosaic, i), bright);
+      ASSERT_TRUE(found.has_value());
+      EXPECT_NEAR(found->x, expected.x, 0.75f);
+      EXPECT_NEAR(found->y, expected.y, 0.75f);
+      // Grey everywhere in the tile: no tint from its chroma.
+      const gfx::ui::OverlayRegion region = mosaic->tile_region(i);
+      const Rect inside = target_rect(mosaic->view(), region.origin,
+                                      region.origin + region.size, 1.0f);
+      const int tinted = count(pixels, inside, [](const std::uint8_t* px) {
+        const auto apart = [](std::uint8_t a, std::uint8_t b) {
+          return a > b ? a - b : b - a;
+        };
+        return apart(px[0], px[1]) > 2 || apart(px[1], px[2]) > 2 ? 1.0 : 0.0;
+      });
+      EXPECT_EQ(tinted, 0);
+      EXPECT_EQ(count(pixels, inside, lit),
+                static_cast<int>(inside.size.x * inside.size.y));
+    }
   }
 }
 

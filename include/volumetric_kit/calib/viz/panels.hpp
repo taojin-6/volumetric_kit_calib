@@ -73,11 +73,10 @@ struct PanelOptions {
 ///
 /// @code
 /// CameraLive camera;
-/// camera.present = set.frames[i].has_value();
+/// camera.present = set.cameras[i].present;
 /// camera.check = views[i].check;           // quality::check_view's
 /// camera.stillness_px = shift.cameras[i];  // quality::corner_shift's
-/// camera.frames = array_stats.sensors[i];
-/// camera.lost = orbbec_stats.lost;         // where the driver counts it
+/// camera.frames = source_stats.sensors[i];
 /// @endcode
 struct CameraLive {
   bool present = false;  ///< The set has its frame.
@@ -85,9 +84,9 @@ struct CameraLive {
   /// How far its corners moved since the set before (pixels); empty when no
   /// corner is in both.
   std::optional<double> stillness_px;
-  sensor::SensorStats frames;  ///< Its frame counters.
-  /// The frames its driver lost; empty where the driver does not count them.
-  std::optional<std::uint64_t> lost;
+  /// Its frame counters, as sensor keeps them: `failed` is a loss; `dropped`,
+  /// frames a newer one replaced before a poll, is not.
+  sensor::SensorStats frames;
 };
 
 /// @brief One camera's panel.
@@ -97,8 +96,7 @@ struct CameraLive {
 /// `session.view.oblique_deg`, red above `session.solve.oblique_deg`) and
 /// `fit` from the view's own pose; `cell`, where the board's centre is in a
 /// 3 x 3 grid; `stillness` (green below `rule.still_px`); `views` usable and
-/// used by the solve; `coverage` filled; and `frames`, amber once any failed
-/// or was lost.
+/// used by the solve; `coverage` filled; and `frames`, amber once any failed.
 /// @param camera   The camera in the latest set.
 /// @param session  Its part of the session.
 /// @param board    The board, for its corners and markers.
@@ -131,26 +129,40 @@ struct SaverQueue {
   bool full = false;
 };
 
+/// @brief What the live view knows of the latest set's times.
+///
+/// @code
+/// SetLive set;  // two cameras: one 1.2 ms after the set's time, one missing
+/// set.skew_ns = {1'200'000, std::nullopt};
+/// set.spread_ns = 0;
+/// @endcode
+struct SetLive {
+  /// Each camera's picture's time less the set's (nanoseconds), in rig
+  /// order; empty where the set has none, and no entry before the first set.
+  std::vector<std::optional<std::int64_t>> skew_ns;
+  std::uint64_t spread_ns = 0;  ///< The latest picture's less the earliest's.
+};
+
 /// @brief The latest set's panel.
 ///
 /// Lines, in order: `set`, the frames it holds (amber when incomplete);
 /// `spread` (amber above `rule.spread_warn_ms`); `skew <id>` for each camera,
-/// its frame's time less the trigger's; `sets`, the array's counters; and
+/// its frame's time less the set's; `sets`, the source's counters; and
 /// `saver`, the writer's queue (amber when `saver.full`).
-/// @param set      The latest set; one with no frames before the first.
-/// @param stats    The array's counters.
+/// @param set      The latest set; one with no cameras before the first.
+/// @param stats    The source's counters.
 /// @param ids      Each camera's id, in the set's order.
 /// @param saver    The writer's queue.
 /// @param options  The thresholds.
-/// @return The lines; `InvalidArgument` when @p ids and the set's frames
+/// @return The lines; `InvalidArgument` when @p ids and the set's cameras
 ///         differ in number; or `OutOfMemory`.
 ///
 /// @code
 /// VKC_ASSIGN(const std::vector<PanelLine> lines,
-///            set_panel(*snapshot.set, array_stats, serials, saver));
+///            set_panel(set_live, source_stats, ids, saver));
 /// @endcode
 core::Result<std::vector<PanelLine>> set_panel(
-    const sensor::FrameSet& set, const sensor::SensorArrayStats& stats,
+    const SetLive& set, const sensor::SensorArrayStats& stats,
     const std::vector<std::string>& ids, const SaverQueue& saver,
     const PanelOptions& options = {});
 

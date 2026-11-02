@@ -9,7 +9,6 @@
 #include <utility>
 
 #include "volumetric_kit/calib/compute/guarded.hpp"
-#include "volumetric_kit/core/base/check.hpp"
 #include "volumetric_kit/gfx/pipelines/color.hpp"
 
 namespace volumetric_kit::calib::app {
@@ -22,22 +21,28 @@ core::Status record_snapshot(
     if (snapshot == nullptr || snapshot->set == nullptr) {
       return core::Status::invalid_argument("record_snapshot: no snapshot");
     }
-    const sensor::FrameSet& set = *snapshot->set;
-    if (set.frames.size() != mosaic.size()) {
+    const source::PictureSet& set = *snapshot->set;
+    if (set.cameras.size() != mosaic.size()) {
       return core::Status::invalid_argument(
-          "record_snapshot: a set of " + std::to_string(set.frames.size()) +
-          " frames for a mosaic of " + std::to_string(mosaic.size()) +
+          "record_snapshot: a set of " + std::to_string(set.cameras.size()) +
+          " pictures for a mosaic of " + std::to_string(mosaic.size()) +
           " tiles");
     }
-    std::vector<const sensor::YuvImage*> pictures(set.frames.size(), nullptr);
+    std::vector<const sensor::YuvImage*> pictures(set.cameras.size(), nullptr);
     for (std::size_t i = 0; i < pictures.size(); ++i) {
-      if (set.frames[i] && set.frames[i]->has_color()) {
-        pictures[i] = &set.frames[i]->color;
+      if (!set.cameras[i].present) continue;
+      // Its grey tile; else the decoder's picture, in colour.
+      if (set.cameras[i].tile != nullptr) {
+        pictures[i] = set.cameras[i].tile;
+      } else if (set.rgbd != nullptr && i < set.rgbd->frames.size() &&
+                 set.rgbd->frames[i] && set.rgbd->frames[i]->has_color()) {
+        pictures[i] = &set.rgbd->frames[i]->color;
       }
     }
-    // Held, not freed: the decoder's images go back once nothing holds the
-    // set, after the GPU is done with the frame that copied them. Held before
-    // the record, whose OutOfMemory may follow copies already recorded.
+    // Held, not freed: the tiles and the decoder's images go back once
+    // nothing holds the set, after the GPU is done with the frame that copied
+    // them. Held before the record, whose OutOfMemory may follow copies
+    // already recorded.
     retire.push(frame_number, [held = snapshot->set] { (void)held; });
     return mosaic.record(cmd, pictures);
   });
@@ -86,6 +91,24 @@ core::Result<std::vector<viz::TileOverlay>> tile_overlays(
       });
 }
 
+core::Result<viz::SetLive> set_live(const source::PictureSet& set) {
+  return compute::guarded("set_live", [&]() -> core::Result<viz::SetLive> {
+    viz::SetLive live;
+    live.spread_ns = set.spread_ns;
+    live.skew_ns.reserve(set.cameras.size());
+    for (const source::CameraPicture& camera : set.cameras) {
+      if (!camera.present) {
+        live.skew_ns.emplace_back();
+        continue;
+      }
+      // Two's complement: the difference of two times, either way round.
+      live.skew_ns.emplace_back(
+          static_cast<std::int64_t>(camera.timestamp_ns - set.timestamp_ns));
+    }
+    return live;
+  });
+}
+
 core::Result<std::vector<viz::CameraLive>> camera_lives(
     const LiveSnapshot& snapshot) {
   return compute::guarded(
@@ -95,8 +118,8 @@ core::Result<std::vector<viz::CameraLive>> camera_lives(
         for (std::size_t i = 0; i < n; ++i) {
           viz::CameraLive& camera = cameras[i];
           camera.present = snapshot.set != nullptr &&
-                           i < snapshot.set->frames.size() &&
-                           snapshot.set->frames[i].has_value();
+                           i < snapshot.set->cameras.size() &&
+                           snapshot.set->cameras[i].present;
           camera.check = snapshot.checks[i];
           if (i < snapshot.stillness_px.size()) {
             camera.stillness_px = snapshot.stillness_px[i];
@@ -104,7 +127,6 @@ core::Result<std::vector<viz::CameraLive>> camera_lives(
           if (i < snapshot.stats.sensors.size()) {
             camera.frames = snapshot.stats.sensors[i];
           }
-          if (i < snapshot.lost.size()) camera.lost = snapshot.lost[i];
         }
         return cameras;
       });
@@ -156,13 +178,13 @@ bool cloud_live(bool frozen, viz::ScenePlacement placement,
   return !frozen && placement != viz::ScenePlacement::Hidden && !minimized;
 }
 
-viz::SceneCamera scene_camera(const sensor::SensorInfo& info, std::size_t index,
-                              bool reference) {
-  VKC_CHECK(info.color.has_value(), "scene_camera: the sensor has no colour");
+viz::SceneCamera scene_camera(const capture::SessionCamera& record,
+                              const sensor::camera::CameraModel& lens,
+                              std::size_t index, bool reference) {
   viz::SceneCamera camera;
-  camera.color = *info.color;
-  camera.depth = info.depth;
-  camera.depth_to_color = info.depth_to_color;
+  camera.color = lens;
+  camera.depth = record.depth;
+  camera.depth_to_color = record.depth_to_color;
   if (reference) camera.color_to_world = sensor::camera::Mat4d(1.0);
   camera.tint = gfx::pipelines::categorical_rgba8(index);
   return camera;

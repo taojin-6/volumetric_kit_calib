@@ -12,22 +12,23 @@
 /// Five threads. The window's (T0) draws the rig mosaic and its marks and
 /// panels, or the 3D view (@ref RigMode), and turns the keys and buttons into
 /// requests; it never waits on a camera, a detector, the solve or the disk.
-/// The live worker (T1, @ref LiveWorker) polls the rig, reads each set's luma
-/// back, finds the board and drives the capture rule. The 3D-view worker (T2,
-/// @ref CloudWorker) prepares each sampled set's depth and colour on the
-/// GPU. The capture worker (T3, @ref CaptureWorker) detects each capture at
-/// full resolution and queues it on the session writer. Calibrate's worker
-/// (T4, @ref CalibrateWorker) solves the captures kept and writes the results
+/// The live worker (T1, @ref LiveWorker) takes each set from the rig's
+/// source, its luma and half made on the GPU and read back, finds the board
+/// and drives the capture rule. The 3D-view worker (T2, @ref CloudWorker)
+/// prepares each sampled RGB-D set's depth and colour on the GPU. The capture
+/// worker (T3, @ref CaptureWorker) detects each capture at full resolution
+/// and queues it on the session writer. Calibrate's worker (T4,
+/// @ref CalibrateWorker) solves the captures kept and writes the results
 /// directory. The rig's cameras decode onto the compute library's side of one
-/// `VkDevice` that gfx shares, so the window copies each decoded picture into
-/// its tile and draws each prepared depth as points on the GPU, and only the
-/// luma the detector reads crosses to the host.
+/// `VkDevice` that gfx shares, so the window copies each picture into its
+/// tile and draws each prepared depth as points on the GPU, and only the luma
+/// the detector reads crosses to the host. Only the opener
+/// (@ref open_source) names a driver.
 
-#include "volumetric_kit/calib/app/preset.hpp"
+#include "volumetric_kit/calib/app/open_source.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/config/config.hpp"
 #include "volumetric_kit/core/vulkan/device_requirements.hpp"
-#include "volumetric_kit/sensor/orbbec/orbbec_sync_config.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -59,35 +60,6 @@ struct RigRequirements {
 /// VKC_ASSIGN(const RigRequirements wide, rig_requirements(true));
 /// @endcode
 core::Result<RigRequirements> rig_requirements(bool large_points = true);
-
-/// @brief What calib_rig takes from its scenario before it opens a window or
-///        a camera.
-///
-/// @code
-/// VKC_ASSIGN(const RigScenario scenario, check_scenario(config));
-/// const std::size_t cameras = scenario.sync.devices.size();
-/// @endcode
-struct RigScenario {
-  RigPreset preset;  ///< The modes every camera streams at.
-  /// The rig's sync file (`source.sync_config`), read: its cameras, each
-  /// one's sync settings.
-  sensor::OrbbecRigSyncConfig sync;
-};
-
-/// @brief What calib_rig checks of its scenario before it opens a window or
-///        a camera.
-/// @param config  The scenario, as `core::config::load` resolved it for
-///                `Application::CalibRig`.
-/// @return The scenario's preset and sync file; @ref rig_preset's refusals;
-///         `NotFound` when `output.path` is not an existing directory;
-///         `sensor::read_orbbec_sync_config`'s refusals of the sync
-///         file (missing, unreadable, malformed or listing no camera); or
-///         `OutOfMemory`.
-///
-/// @code
-/// VKC_ASSIGN(const RigScenario scenario, check_scenario(config));
-/// @endcode
-core::Result<RigScenario> check_scenario(const core::config::Config& config);
 
 /// @brief Run calib_rig until its window closes, or Ctrl+C in the terminal.
 ///

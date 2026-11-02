@@ -2,12 +2,12 @@
 # Copyright (c) 2026 Tao Jin
 
 # --- calib_capture: off core -------------------------------------------------
-# Sessions on disk: the rig and each capture's RGB-D set, detections and checks,
-# written on a thread of its own and never overwritten. Built with VC_WITH_RIG:
-# it takes sensor's interface tier (SensorInfo) and image I/O tier (the 16-bit
-# PNG encoder), and sensor's calibration file for the factory record, so it
-# needs the Vulkan SDK through sensor. Depends on calib_core alone among calib's
-# tiers.
+# Sessions on disk: the rig and each capture's pictures, depth, detections and
+# checks, written on a thread of its own and never overwritten. Built with
+# VC_WITH_RIG: it takes sensor's image I/O tier (the 16-bit PNG encoder), and
+# sensor's calibration file for the factory record, so it needs the Vulkan SDK
+# through sensor. It names no sensor type: its camera record is calib's own.
+# Depends on calib_core alone among calib's tiers.
 include(GenerateExportHeader)
 
 set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
@@ -44,11 +44,11 @@ target_include_directories(calib_capture PUBLIC "${_vc_generated_inc}")
 target_include_directories(calib_capture SYSTEM
                            PRIVATE "${VC_JSON_INCLUDE_DIR}")
 
-# The public header names sensor's SensorInfo; the PNG encoder and the threads
-# stay private.
+# The public header names sensor's camera models, which calib_core brings; the
+# PNG encoder and the threads stay private.
 target_link_libraries(
   calib_capture
-  PUBLIC calib_core volumetric_kit::sensor_interface
+  PUBLIC calib_core
   PRIVATE volumetric_kit::sensor_image_io Threads::Threads)
 
 vc_target_warnings(calib_capture)

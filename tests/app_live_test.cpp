@@ -36,11 +36,14 @@
 
 #include "device_picture.hpp"
 #include "fake_sensor.hpp"
+#include "fake_stereo.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/app/live_worker.hpp"
 #include "volumetric_kit/calib/app/preset.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
+#include "volumetric_kit/calib/source/rig_source.hpp"
 #include "volumetric_kit/core/testing/vulkan_fixture.hpp"
+#include "volumetric_kit/sensor/frame/device_requirements.hpp"
 
 namespace volumetric_kit::calib::app {
 namespace {
@@ -94,10 +97,11 @@ struct HostPixels {
 
 // How a push departs from the usual frames.
 struct Push {
-  std::vector<std::size_t> missing;         // cameras that send nothing
-  std::optional<std::size_t> without_jpeg;  // a camera that sends no JPEG
-  std::vector<std::int64_t> skew_ns;        // added to each camera's time
-  std::shared_ptr<const void> held;         // held by camera 0's frame too
+  std::vector<std::size_t> missing;          // cameras that send nothing
+  std::optional<std::size_t> without_jpeg;   // a camera that sends no JPEG
+  std::optional<std::size_t> without_depth;  // a camera that sends no depth
+  std::vector<std::int64_t> skew_ns;         // added to each camera's time
+  std::shared_ptr<const void> held;          // held by camera 0's frame too
 };
 
 // One fake camera, and what it shows.
@@ -134,6 +138,10 @@ class CollectSink final : public CaptureSink {
 
 class AppLive : public core::test::VulkanDeviceTest {
  protected:
+  core::DeviceRequirements requirements() const override {
+    return sensor::device_requirements();
+  }
+
   // A rig of `n` cameras, camera `i` seeing the board at board_pose(i), or
   // a blank wall where `blank` says.
   void make_rig(std::size_t n, const std::vector<std::size_t>& blank = {}) {
@@ -171,15 +179,22 @@ class AppLive : public core::test::VulkanDeviceTest {
     }
   }
 
-  // The worker over the rig.
+  // The worker over the rig, as one source.
   std::unique_ptr<LiveWorker> start(CaptureSink* sink = nullptr,
                                     SetSink* sets = nullptr) {
+    const std::size_t n = sensors_.size();
     core::Result<sensor::SensorArray> array =
         sensor::SensorArray::open(std::move(sensors_), {});
     EXPECT_TRUE(array.ok()) << array.status().message();
     if (!array.ok()) return nullptr;
+    core::Result<std::unique_ptr<source::RigSource>> rig =
+        source::RigSource::open(std::move(array).value(), device(),
+                                allocator());
+    EXPECT_TRUE(rig.ok()) << rig.status().message();
+    if (!rig.ok()) return nullptr;
     core::Result<std::unique_ptr<LiveWorker>> worker =
-        LiveWorker::create(std::move(array).value(), device(), allocator(),
+        LiveWorker::create(std::move(rig).value(),
+                           std::vector<camera::CameraModel>(n, live_lens()),
                            legacy_femto_board(), false, sink, sets);
     EXPECT_TRUE(worker.ok()) << worker.status().message();
     return worker.ok() ? std::move(worker).value() : nullptr;
@@ -210,7 +225,7 @@ class AppLive : public core::test::VulkanDeviceTest {
                     0xFF,
                     0xD9};
       sensor::RgbdFrame frame;
-      frame.depth = host->depth.data();
+      if (how.without_depth != i) frame.depth = host->depth.data();
       frame.metres_per_unit = 0.001f;
       frame.depth_camera = test::depth_like_lens();
       frame.min_depth = 0.5f;
@@ -236,6 +251,37 @@ class AppLive : public core::test::VulkanDeviceTest {
       frames.emplace_back(i, std::move(frame));
     }
     for (auto& [i, frame] : frames) cameras_[i].fake->push(std::move(frame));
+  }
+
+  // A stereo pair, cameras bm-1 and bm-2 opened without a calibration, as
+  // one source, its sync bound half a frame at 30p.
+  std::unique_ptr<LiveWorker> start_pair(test::FakeStereo** fake,
+                                         CaptureSink* sink,
+                                         SetSink* sets = nullptr) {
+    auto pair =
+        std::make_unique<test::FakeStereo>(test::uncalibrated_pair_info());
+    *fake = pair.get();
+    source::StereoMember member{std::move(pair), {"bm-1", "bm-2"}};
+    member.sizes = {{{kWidth, kHeight}, {kWidth, kHeight}}};
+    core::Result<std::unique_ptr<source::RigSource>> rig =
+        source::RigSource::open(std::move(member), device(), allocator());
+    EXPECT_TRUE(rig.ok()) << rig.status().message();
+    if (!rig.ok()) return nullptr;
+    core::Result<std::unique_ptr<LiveWorker>> worker =
+        LiveWorker::create(std::move(rig).value(), {live_lens(), live_lens()},
+                           legacy_femto_board(), false, sink, sets);
+    EXPECT_TRUE(worker.ok()) << worker.status().message();
+    return worker.ok() ? std::move(worker).value() : nullptr;
+  }
+
+  // Pair `tick`: both cameras' luma the board at board_pose(pose), the right
+  // picture `skew_ns` after the left one.
+  static void push_pair(test::FakeStereo& fake, std::size_t pose,
+                        std::uint64_t tick, std::int64_t skew_ns) {
+    const cv::Mat& render = board_render(pose);
+    std::vector<std::uint8_t> bytes(render.data, render.data + render.total());
+    fake.push(test::host_pair(kWidth, kHeight, bytes, bytes,
+                              kStartNs + tick * kPeriodNs, skew_ns, tick));
   }
 
   // Waits until the array has drained every frame pushed: the worker polled
@@ -298,7 +344,7 @@ TEST_F(AppLive, FindsEachCamerasBoardWhereItProjects) {
     const std::shared_ptr<const LiveSnapshot> s = next(*live, 0);
     ASSERT_NE(s, nullptr);
     ASSERT_NE(s->set, nullptr);
-    ASSERT_EQ(s->set->frames.size(), n);
+    ASSERT_EQ(s->set->cameras.size(), n);
     ASSERT_EQ(s->detections.size(), n);
     EXPECT_EQ(s->set->timestamp_ns, kStartNs + kPeriodNs);
     for (std::size_t i = 0; i < n; ++i) {
@@ -317,7 +363,6 @@ TEST_F(AppLive, FindsEachCamerasBoardWhereItProjects) {
       }
       EXPECT_TRUE(is_usable(s->checks[i].verdict));
       EXPECT_EQ(s->checks[i].corners, 8);
-      EXPECT_FALSE(s->lost[i].has_value());  // not an Orbbec camera
     }
     EXPECT_EQ(s->decision.state, quality::CaptureState::Idle);
     EXPECT_EQ(s->stats.sets, 1u);
@@ -325,7 +370,8 @@ TEST_F(AppLive, FindsEachCamerasBoardWhereItProjects) {
     for (const core::StageRow& row : s->stages.rows()) {
       stages.emplace_back(row.name);
     }
-    EXPECT_EQ(stages, (std::vector<std::string>{"poll", "readback", "detect"}));
+    EXPECT_EQ(stages,
+              (std::vector<std::string>{"poll", "luma", "readback", "detect"}));
 
     // The next set: every corner where it was, so each is still.
     push(2);
@@ -466,8 +512,10 @@ TEST_F(AppLive, CapturesNothingWithoutASinkAndRefusesABadBoard) {
   EXPECT_EQ(live->board().rows, legacy_femto_board().rows);
 }
 
-// A sensor without a colour model is refused before the thread starts.
-TEST_F(AppLive, RefusesACameraWithoutColour) {
+// A lens per camera, each at its camera's size, or the worker is refused
+// before the thread starts; a sensor without a colour model, before that, by
+// the source.
+TEST_F(AppLive, RefusesACameraWithoutColourOrALensOfAnotherSize) {
   sensor::SensorInfo info;
   info.id = "NOCOLOR";
   info.fps = 25;
@@ -476,13 +524,35 @@ TEST_F(AppLive, RefusesACameraWithoutColour) {
   core::Result<sensor::SensorArray> array =
       sensor::SensorArray::open(std::move(sensors_), {});
   ASSERT_TRUE(array.ok()) << array.status().message();
-  const core::Result<std::unique_ptr<LiveWorker>> live =
-      LiveWorker::create(std::move(array).value(), device(), allocator(),
-                         legacy_femto_board(), false, nullptr);
-  ASSERT_FALSE(live.ok());
-  EXPECT_EQ(live.status().domain(), Code::InvalidArgument);
-  EXPECT_NE(live.status().message().find("NOCOLOR has no colour model"),
+  const core::Result<std::unique_ptr<source::RigSource>> refused =
+      source::RigSource::open(std::move(array).value(), device(), allocator());
+  ASSERT_FALSE(refused.ok());
+  EXPECT_EQ(refused.status().domain(), Code::InvalidArgument);
+  EXPECT_NE(refused.status().message().find("NOCOLOR has no colour model"),
             std::string::npos);
+
+  const auto refusal = [&](const std::vector<camera::CameraModel>& lenses) {
+    make_rig(2);
+    core::Result<sensor::SensorArray> rig =
+        sensor::SensorArray::open(std::move(sensors_), {});
+    EXPECT_TRUE(rig.ok());
+    if (!rig.ok()) return std::string();
+    core::Result<std::unique_ptr<source::RigSource>> opened =
+        source::RigSource::open(std::move(rig).value(), device(), allocator());
+    EXPECT_TRUE(opened.ok());
+    if (!opened.ok()) return std::string();
+    const core::Result<std::unique_ptr<LiveWorker>> live =
+        LiveWorker::create(std::move(opened).value(), lenses,
+                           legacy_femto_board(), false, nullptr);
+    EXPECT_FALSE(live.ok());
+    return live.ok() ? std::string() : live.status().message();
+  };
+  EXPECT_EQ(refusal({live_lens()}), "LiveWorker: 1 lenses for 2 cameras");
+  camera::CameraModel wrong = live_lens();
+  wrong.size = {640, 360};
+  EXPECT_EQ(refusal({live_lens(), wrong}),
+            "LiveWorker: camera SYN1's lens is 640x360, its pictures "
+            "1280x720");
 }
 
 // What the thread throws ends it, posting why, with the rig stopped.
@@ -632,8 +702,8 @@ TEST_F(AppLive, OffersEachSetItReadsBackToItsSetSink) {
   const std::vector<std::shared_ptr<const sensor::FrameSet>> taken =
       sets.taken();
   ASSERT_EQ(taken.size(), 2u);
-  EXPECT_EQ(taken[0], first->set);
-  EXPECT_EQ(taken[1], second->set);
+  EXPECT_EQ(taken[0], first->set->rgbd);
+  EXPECT_EQ(taken[1], second->set->rgbd);
   EXPECT_EQ(taken[1]->frames.size(), 3u);
   live->stop();
   sets.release();
@@ -652,7 +722,8 @@ TEST_F(AppLive, SearchesNoSetWhileNotDetectingUnlessACaptureIsArmed) {
     }
     return names;
   };
-  const std::vector<std::string> searched = {"poll", "readback", "detect"};
+  const std::vector<std::string> searched = {"poll", "luma", "readback",
+                                             "detect"};
   make_rig(2);
   CollectSink sink;
   KeepSets sets;
@@ -681,7 +752,7 @@ TEST_F(AppLive, SearchesNoSetWhileNotDetectingUnlessACaptureIsArmed) {
   EXPECT_EQ(off->decision.state, quality::CaptureState::Idle);
   EXPECT_EQ(off->stats.sets, 2u);
   ASSERT_EQ(sets.taken().size(), 2u);
-  EXPECT_EQ(sets.taken()[1], off->set);
+  EXPECT_EQ(sets.taken()[1], off->set->rgbd);
 
   live->set_detecting(true);
   push(3);
@@ -729,7 +800,7 @@ TEST_F(AppLive, ASetMissingACameraIsNotTaken) {
   push(2, without);
   const std::shared_ptr<const LiveSnapshot> s = next(*live, first->number);
   ASSERT_NE(s, nullptr);
-  EXPECT_FALSE(s->set->frames[2].has_value());
+  EXPECT_FALSE(s->set->cameras[2].present);
   EXPECT_EQ(s->decision.state, quality::CaptureState::Waiting);
   EXPECT_EQ(s->decision.hold, quality::Hold::Incomplete);
   EXPECT_NE(s->decision.message.find("SYN2 missing"), std::string::npos)
@@ -738,9 +809,9 @@ TEST_F(AppLive, ASetMissingACameraIsNotTaken) {
   EXPECT_EQ(live->captures(), 0u);
 }
 
-// A set the rule takes that the worker cannot copy out -- a camera sent no
-// JPEG -- fails the capture, saying why, and nothing reaches the sink.
-TEST_F(AppLive, ATakenSetWithoutAJpegFailsTheCapture) {
+// A camera that sent no JPEG is captured all the same: its luma, which the
+// session saves, and its depth.
+TEST_F(AppLive, ATakenSetWithoutAJpegCapturesItsLuma) {
   make_rig(2);
   CollectSink sink;
   std::unique_ptr<LiveWorker> live = start(&sink);
@@ -753,6 +824,34 @@ TEST_F(AppLive, ATakenSetWithoutAJpegFailsTheCapture) {
   Push no_jpeg;
   no_jpeg.without_jpeg = 1;
   push(2, no_jpeg);
+  const std::shared_ptr<const LiveSnapshot> s = next(*live, first->number);
+  ASSERT_NE(s, nullptr);
+  EXPECT_EQ(s->decision.state, quality::CaptureState::Take);
+  const std::vector<CaptureRequest> taken = sink.taken();
+  ASSERT_EQ(taken.size(), 1u);
+  const CameraFrameCopy& part = taken[0].cameras[1];
+  EXPECT_TRUE(part.jpeg.empty());
+  EXPECT_TRUE(part.luma == cameras_[1].luma);
+  EXPECT_EQ(part.depth.size(), 640u * 576u);
+  EXPECT_FALSE(taken[0].cameras[0].jpeg.empty());
+}
+
+// A set the rule takes that the worker cannot copy out -- a camera with
+// depth sent none -- fails the capture, saying why, and nothing reaches the
+// sink.
+TEST_F(AppLive, ATakenSetWithoutDepthFailsTheCapture) {
+  make_rig(2);
+  CollectSink sink;
+  std::unique_ptr<LiveWorker> live = start(&sink);
+  ASSERT_NE(live, nullptr);
+  push(1);
+  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  ASSERT_NE(first, nullptr);
+  ASSERT_TRUE(live->arm());
+  wait_armed(*live);
+  Push no_depth;
+  no_depth.without_depth = 1;
+  push(2, no_depth);
   std::vector<core::Status> errors;
   const std::shared_ptr<const LiveSnapshot> s =
       next(*live, first->number, &errors);
@@ -762,10 +861,10 @@ TEST_F(AppLive, ATakenSetWithoutAJpegFailsTheCapture) {
   }
   EXPECT_EQ(s->decision.state, quality::CaptureState::Failed);
   EXPECT_EQ(s->decision.hold, quality::Hold::None);
-  EXPECT_EQ(s->decision.message, "camera SYN1 sent no JPEG with its frame");
+  EXPECT_EQ(s->decision.message, "camera SYN1 sent no depth with its frame");
   ASSERT_EQ(errors.size(), 1u);
   EXPECT_EQ(errors[0].message(),
-            "capture: camera SYN1 sent no JPEG with its frame");
+            "capture: camera SYN1 sent no depth with its frame");
   EXPECT_TRUE(sink.taken().empty());
   EXPECT_EQ(live->captures(), 0u);
   EXPECT_EQ(live->decision().state, quality::CaptureState::Failed);
@@ -797,6 +896,95 @@ TEST_F(AppLive, ACaptureRecordsItsSpreadAndWarnsOfIt) {
             kStartNs + 2 * kPeriodNs + 8'000'000);
 }
 
+// An array bounds no spread: frames 6 ms apart, past spread_warn_ms, are
+// warned of still.
+TEST_F(AppLive, ASixMillisecondSpreadStillWarnsOnAnArray) {
+  make_rig(2);
+  CollectSink sink;
+  std::unique_ptr<LiveWorker> live = start(&sink);
+  ASSERT_NE(live, nullptr);
+  EXPECT_EQ(live->rule_options().spread_warn_ms, 5.0);
+  push(1);
+  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  ASSERT_NE(first, nullptr);
+  ASSERT_TRUE(live->arm());
+  wait_armed(*live);
+  Push skewed;
+  skewed.skew_ns = {0, 6'000'000};
+  push(2, skewed);
+  const std::shared_ptr<const LiveSnapshot> s = next(*live, first->number);
+  ASSERT_NE(s, nullptr);
+  EXPECT_EQ(s->decision.state, quality::CaptureState::Take);
+  EXPECT_TRUE(s->decision.spread_high);
+  EXPECT_EQ(s->decision.message, "frames spread over 6.00 ms");
+}
+
+// A stereo pair free-running at its sensor's bound, 16.6 ms apart, holding a
+// still board: the capture is taken with no warning, as the sensor
+// guarantees the skew and a still board makes it harmless. It is grey: each
+// camera's luma, no JPEG or depth needed, and no set for the 3D view.
+TEST_F(AppLive, AStillPairCapturesAtItsSkewBoundWithoutAWarning) {
+  CollectSink sink;
+  KeepSets sets;
+  test::FakeStereo* fake = nullptr;
+  std::unique_ptr<LiveWorker> live = start_pair(&fake, &sink, &sets);
+  ASSERT_NE(live, nullptr);
+  EXPECT_NEAR(live->rule_options().spread_warn_ms, 16.666666, 1e-6);
+  EXPECT_EQ(live->ids(), (std::vector<std::string>{"bm-1", "bm-2"}));
+  constexpr std::int64_t kSkew = 16'600'000;
+  push_pair(*fake, 0, 1, kSkew);
+  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->set->rgbd, nullptr);
+  ASSERT_EQ(first->detections.size(), 2u);
+  EXPECT_EQ(first->detections[1].observation.points.size(), 8u);
+  ASSERT_TRUE(live->arm());
+  wait_armed(*live);
+  push_pair(*fake, 0, 2, kSkew);
+  const std::shared_ptr<const LiveSnapshot> s = next(*live, first->number);
+  ASSERT_NE(s, nullptr);
+  EXPECT_EQ(s->decision.state, quality::CaptureState::Take);
+  EXPECT_FALSE(s->decision.spread_high);
+  EXPECT_EQ(s->decision.message, "");
+  const std::vector<CaptureRequest> taken = sink.taken();
+  ASSERT_EQ(taken.size(), 1u);
+  EXPECT_DOUBLE_EQ(taken[0].meta.spread_ms, 16.6);
+  EXPECT_EQ(taken[0].meta.trigger_ns, kStartNs + 2 * kPeriodNs);
+  ASSERT_EQ(taken[0].cameras.size(), 2u);
+  const cv::Mat& render = board_render(0);
+  for (std::size_t i = 0; i < 2; ++i) {
+    const CameraFrameCopy& part = taken[0].cameras[i];
+    EXPECT_TRUE(part.jpeg.empty());
+    EXPECT_TRUE(part.depth.empty());
+    EXPECT_EQ(part.metres_per_unit, 0.0f);
+    EXPECT_TRUE(std::equal(part.luma.begin(), part.luma.end(), render.data));
+    EXPECT_EQ(part.sequence, 2u);
+  }
+  EXPECT_EQ(taken[0].cameras[1].timestamp_ns, kStartNs + 2 * kPeriodNs + kSkew);
+  EXPECT_TRUE(sets.taken().empty());
+}
+
+// A pair whose board moved since the pair before is not taken, its skew
+// within the bound or not: the rule waits for a still board.
+TEST_F(AppLive, AMovingPairDoesNotCapture) {
+  CollectSink sink;
+  test::FakeStereo* fake = nullptr;
+  std::unique_ptr<LiveWorker> live = start_pair(&fake, &sink);
+  ASSERT_NE(live, nullptr);
+  push_pair(*fake, 0, 1, 16'600'000);
+  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  ASSERT_NE(first, nullptr);
+  ASSERT_TRUE(live->arm());
+  wait_armed(*live);
+  push_pair(*fake, 1, 2, 16'600'000);  // the board elsewhere
+  const std::shared_ptr<const LiveSnapshot> s = next(*live, first->number);
+  ASSERT_NE(s, nullptr);
+  EXPECT_EQ(s->decision.state, quality::CaptureState::Waiting);
+  EXPECT_EQ(s->decision.hold, quality::Hold::Moving);
+  EXPECT_TRUE(sink.taken().empty());
+  EXPECT_EQ(live->captures(), 0u);
+}
+
 // Stopping joins the thread and stops the rig; once the snapshots are gone
 // and the worker destroyed, no frame is held.
 TEST_F(AppLive, StopsCleanlyAndReleasesEveryFrame) {
@@ -808,7 +996,7 @@ TEST_F(AppLive, StopsCleanlyAndReleasesEveryFrame) {
   push(1);
   std::shared_ptr<const LiveSnapshot> held = next(*live, 0);
   ASSERT_NE(held, nullptr);
-  const std::weak_ptr<const void> first = held->set->frames[0]->pixels;
+  const std::weak_ptr<const void> first = held->set->rgbd->frames[0]->pixels;
   push(2);  // published by the worker, never taken
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
   live->stop();

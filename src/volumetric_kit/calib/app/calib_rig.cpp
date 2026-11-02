@@ -11,11 +11,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <deque>
-#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
-#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -58,10 +56,7 @@
 #include "volumetric_kit/gfx/ui/imgui_overlay.hpp"
 #include "volumetric_kit/gfx/ui/metrics_panel.hpp"
 #include "volumetric_kit/gfx/windowing/swapchain.hpp"
-#include "volumetric_kit/sensor/array/sensor_array.hpp"
 #include "volumetric_kit/sensor/frame/device_requirements.hpp"
-#include "volumetric_kit/sensor/orbbec/orbbec_sensor.hpp"
-#include "volumetric_kit/sensor/orbbec/orbbec_sync_config.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -270,6 +265,7 @@ void drop_last(CaptureWorker& captures, Notices& notices) {
 // Everything a frame's UI reads.
 struct FrameInputs {
   const std::vector<std::string>* ids = nullptr;
+  viz::PanelOptions panel;  // the rule's thresholds as the source sets them
   std::optional<quality::SessionSummary> summary;
   std::shared_ptr<const KeptCaptures> kept;
   std::size_t unresolved = 0;  // captures and drops; read before both above
@@ -414,8 +410,11 @@ void rig_windows(const LiveSnapshot& snapshot, const viz::BoardEditor& editor,
   const std::vector<std::string>& ids = *in.ids;
   ImGui::SetNextWindowPos(ImVec2(10, 200), ImGuiCond_FirstUseEver);
   ImGui::Begin("Rig");
+  const core::Result<viz::SetLive> set = set_live(*snapshot.set);
   const core::Result<std::vector<viz::PanelLine>> set_lines =
-      viz::set_panel(*snapshot.set, snapshot.stats, ids, in.saver);
+      set.ok()
+          ? viz::set_panel(set.value(), snapshot.stats, ids, in.saver, in.panel)
+          : core::Result<std::vector<viz::PanelLine>>(set.status());
   if (set_lines.ok()) viz::draw_panel_lines("set", set_lines.value());
   ImGui::End();
 
@@ -431,8 +430,8 @@ void rig_windows(const LiveSnapshot& snapshot, const viz::BoardEditor& editor,
     const quality::CameraSummary none;
     const quality::CameraSummary& session =
         in.summary ? in.summary->cameras[i] : none;
-    const core::Result<std::vector<viz::PanelLine>> lines =
-        viz::camera_panel(cameras.value()[i], session, editor.board());
+    const core::Result<std::vector<viz::PanelLine>> lines = viz::camera_panel(
+        cameras.value()[i], session, editor.board(), in.panel);
     ImGui::PushID(static_cast<int>(i));
     if (lines.ok()) viz::draw_panel_lines("camera", lines.value());
     if (!snapshot.errors[i].ok()) {
@@ -824,7 +823,6 @@ class Teardown {
 
 core::Status run_window(GLFWwindow* window, const core::config::Config& config,
                         const RigScenario& scenario) {
-  const RigPreset& preset = scenario.preset;
   Notices notices;
   // --- One VkDevice: gfx draws on its graphics side, sensor decodes, reads
   // back and prepares frames on its compute side. Wide points where the GPU
@@ -866,36 +864,31 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       core::Allocator sensor_allocator,
       core::Allocator::create(shared->instance().handle(), sensor_device));
 
-  // --- The rig, at the preset.
-  // TODO: open the rig from scenario.sync once sensor's open_orbbec_sensors
-  // takes a parsed sync configuration, so the file is read once.
-  VKC_ASSIGN(auto sensors,
-             sensor::open_orbbec_sensors(
-                 config.source.sync_config,
-                 orbbec_options(
-                     preset, sensor_device, sensor_allocator,
-                     {shared->compute_family(), shared->graphics_family()})));
-  std::vector<sensor::SensorInfo> infos;
-  for (const auto& camera : sensors) infos.push_back(camera->info());
-  VKC_TRY(check_preset(infos, preset));
-  VKC_ASSIGN(sensor::SensorArray array,
-             sensor::SensorArray::open(std::move(sensors), {}));
+  // --- The rig's cameras, as one source: the opener's alone names a driver.
+  VKC_ASSIGN(
+      OpenedSource opened,
+      open_source(config, scenario, sensor_device, sensor_allocator,
+                  {shared->compute_family(), shared->graphics_family()}));
+  const std::size_t camera_count = opened.cameras.size();
 
   CaptureSetup setup;
   setup.root = config.output.path;
   setup.software = app_software();
-  setup.sync_path = config.source.sync_config;
-  setup.reference = array.primary();
-  setup.depth_mode = preset.depth_mode;
+  setup.driver = opened.driver;
+  setup.sync_path = opened.sync_path;
+  setup.reference = opened.reference;
+  setup.depth_mode = opened.depth_mode;
+  setup.color_codec = opened.color_codec;
+  setup.lenses = opened.lenses;
   std::vector<sensor::camera::ImageSize> sizes;
   std::vector<viz::SceneCamera> scene_cameras;
-  for (std::size_t i = 0; i < array.size(); ++i) {
-    VKC_ASSIGN(capture::SessionCamera camera,
-               session_camera(array.sensor(i), scenario.sync));
-    sizes.push_back(camera.info.color->size);
-    scene_cameras.push_back(scene_camera(camera.info, i, i == array.primary()));
-    setup.cameras.push_back(std::move(camera));
+  for (std::size_t i = 0; i < camera_count; ++i) {
+    const capture::SessionCamera& camera = opened.cameras[i];
+    sizes.push_back(camera.size);
+    scene_cameras.push_back(
+        scene_camera(camera, opened.lenses[i], i, i == opened.reference));
   }
+  setup.cameras = opened.cameras;
   // TODO: cap cv::setNumThreads once H4 measures the contention between
   // OpenCV, the SDK and the decode threads.
   VKC_ASSIGN(std::unique_ptr<CaptureWorker> captures,
@@ -905,13 +898,13 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   // The 3D view's worker, prepared frames shared with the renderer's family.
   VKC_ASSIGN(std::unique_ptr<CloudWorker> cloud,
              CloudWorker::create(
-                 sensor_device, sensor_allocator, array.size(),
+                 sensor_device, sensor_allocator, camera_count,
                  {shared->compute_family(), shared->graphics_family()}));
   // Calibrate's worker (T4), after the 3D view's, so it goes first, with its
   // depth checks on sensor's device, built now so a failure shows here.
   VKC_ASSIGN(
       std::unique_ptr<CalibrateDepth> depth,
-      CalibrateDepth::create(sensor_device, sensor_allocator, array.size()));
+      CalibrateDepth::create(sensor_device, sensor_allocator, camera_count));
   VKC_ASSIGN(std::unique_ptr<CalibrateWorker> calibrate,
              CalibrateWorker::create(std::move(depth)));
 
@@ -950,12 +943,11 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
 
   // --- The live worker last, as its thread starts the cameras: from here
   // every way out stops Calibrate's worker, then it, then the 3D view's
-  // (Teardown), so no set is held when the array closes.
-  VKC_ASSIGN(
-      std::unique_ptr<LiveWorker> live,
-      LiveWorker::create(std::move(array), sensor_device, sensor_allocator,
-                         editor.board(), editor.square_measured(),
-                         captures.get(), cloud.get()));
+  // (Teardown), so no set is held when the source closes.
+  VKC_ASSIGN(std::unique_ptr<LiveWorker> live,
+             LiveWorker::create(std::move(opened.source), opened.lenses,
+                                editor.board(), editor.square_measured(),
+                                captures.get(), cloud.get()));
   const std::vector<std::string>& ids = live->ids();
   std::shared_ptr<const LiveSnapshot> latest;  // released before live
   const Teardown teardown(*calibrate, *live, *cloud, app, retire);
@@ -1009,6 +1001,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     // reflects every one made before.
     FrameInputs in;
     in.ids = &ids;
+    in.panel.rule = live->rule_options();
     in.unresolved = captures->unresolved();
     in.saver = {captures->pending(), captures->capacity(), captures->full()};
     in.summary = captures->summary();
@@ -1122,24 +1115,6 @@ core::Result<RigRequirements> rig_requirements(bool large_points) {
         needs.graphics.features.largePoints = large_points ? VK_TRUE : VK_FALSE;
         return needs;
       });
-}
-
-core::Result<RigScenario> check_scenario(const core::config::Config& config) {
-  return compute::guarded("check_scenario", [&]() -> core::Result<RigScenario> {
-    RigScenario scenario;
-    VKC_ASSIGN(scenario.preset, rig_preset(config.source));
-    std::error_code ec;
-    if (!std::filesystem::is_directory(config.output.path, ec)) {
-      return core::Status::not_found("output.path: " + config.output.path +
-                                     " is not an existing directory");
-    }
-    // sensor's reader refuses a file that lists no camera.
-    core::Result<sensor::OrbbecRigSyncConfig> sync =
-        sensor::read_orbbec_sync_config(config.source.sync_config);
-    if (!sync.ok()) return sync.status().with_context("source.sync_config");
-    scenario.sync = std::move(sync).value();
-    return scenario;
-  });
 }
 
 core::Status run_calib_rig(const core::config::Config& config) {

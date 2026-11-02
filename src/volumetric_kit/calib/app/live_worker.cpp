@@ -16,9 +16,7 @@
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
-#include "volumetric_kit/calib/detect/charuco.hpp"
-#include "volumetric_kit/sensor/orbbec/orbbec_sensor.hpp"
-#include "volumetric_kit/sensor/prep/picture_readback.hpp"
+#include "volumetric_kit/calib/detect/board.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -37,17 +35,17 @@ core::Status with_camera(const std::string& id, const core::Status& status) {
 }  // namespace
 
 struct LiveWorker::State {
-  explicit State(sensor::SensorArray&& rig) : array(std::move(rig)) {}
+  explicit State(std::unique_ptr<source::RigSource> rig)
+      : source(std::move(rig)) {}
 
   // The worker's thread's alone, once it runs.
-  sensor::SensorArray array;
-  std::unique_ptr<sensor::PictureReadback> readback;
+  std::unique_ptr<source::RigSource> source;
   std::vector<compute::CvCamera> cameras;
   std::optional<compute::Board> detector_board;
   std::optional<quality::CaptureRule> rule;
   std::vector<Detection> previous;  // the last set's live detections
   bool have_previous = false;
-  LiveOptions options;
+  LiveOptions options;  // the rule's spread warning is the source's
   CaptureSink* sink = nullptr;
   SetSink* sets = nullptr;
   std::uint64_t published = 0;
@@ -104,9 +102,9 @@ struct LiveWorker::State {
   }
 
   // Each camera's live detection and check, every camera at once.
-  void detect(const std::vector<std::optional<sensor::PictureView>>& views,
-              LiveSnapshot& out) {
-    const std::size_t n = views.size();
+  void detect(const source::PictureSet& set,
+              const std::vector<source::HostLuma>& host, LiveSnapshot& out) {
+    const std::size_t n = set.cameras.size();
     out.detections.assign(n, Detection{});
     out.checks.assign(n, ViewCheck{});
     out.errors.assign(n, core::Status{});
@@ -115,22 +113,21 @@ struct LiveWorker::State {
         cv::Range(0, static_cast<int>(n)), [&](const cv::Range& range) {
           for (int c = range.start; c < range.end; ++c) {
             const auto i = static_cast<std::size_t>(c);
-            out.errors[i] = detect_one(i, views[i], board_used,
+            if (!set.cameras[i].present) continue;
+            out.errors[i] = detect_one(i, host[i], board_used,
                                        out.detections[i], out.checks[i]);
           }
         });
   }
 
-  core::Status detect_one(std::size_t i,
-                          const std::optional<sensor::PictureView>& view,
+  core::Status detect_one(std::size_t i, const source::HostLuma& picture,
                           const compute::Board& board_used, Detection& found,
                           ViewCheck& check) const {
-    if (!view) return {};
     return compute::guarded("live detection", [&]() -> core::Status {
-      const detect::LumaView luma{view->width, view->height, view->stride,
-                                  view->luma};
-      VKC_ASSIGN(found, detect::detect_charuco(luma, board_used,
-                                               detect::Mode::Hybrid));
+      // Searched in the half the GPU made, each corner refined in the luma.
+      VKC_ASSIGN(found,
+                 detect::detect_board(picture.luma, board_used,
+                                      detect::DetectOptions{&picture.half}));
       // A view the check refuses still shows what was found.
       VKC_ASSIGN(
           const quality::CheckedView checked,
@@ -140,10 +137,10 @@ struct LiveWorker::State {
     });
   }
 
-  // The set's frames copied out for the capture worker.
+  // The set's pictures and frames copied out for the capture worker: each
+  // camera's host luma, and its JPEG and depth where its frame has them.
   core::Result<CaptureRequest> capture_request(
-      const sensor::FrameSet& set,
-      const std::vector<std::optional<sensor::PictureView>>& views,
+      const source::PictureSet& set, const std::vector<source::HostLuma>& host,
       const LiveSnapshot& live, const quality::CaptureDecision& taken,
       const std::vector<std::string>& ids) const {
     CaptureRequest request;
@@ -158,83 +155,78 @@ struct LiveWorker::State {
             .count();
     request.meta.trigger_ns = set.timestamp_ns;
     request.meta.sequence = set.sequence;
-    request.meta.spread_ms = static_cast<double>(set.spread_ns()) / 1e6;
+    request.meta.spread_ms = static_cast<double>(set.spread_ns) / 1e6;
     request.meta.stillness_px = taken.stillness_px;
-    request.cameras.resize(set.frames.size());
-    for (std::size_t i = 0; i < set.frames.size(); ++i) {
-      const std::optional<sensor::RgbdFrame>& frame = set.frames[i];
-      if (!frame || !views[i]) {
+    const std::vector<source::SourceCamera>& sourced = source->cameras();
+    request.cameras.resize(set.cameras.size());
+    for (std::size_t i = 0; i < set.cameras.size(); ++i) {
+      const detect::LumaView& luma = host[i].luma;
+      if (!set.cameras[i].present || luma.data == nullptr) {
         return core::Status::invalid_argument("camera " + ids[i] +
                                               " has no picture in the set");
       }
-      if (frame->color_bitstream.codec != sensor::ColorBitstream::Codec::Jpeg ||
-          frame->color_bitstream.data == nullptr) {
-        return core::Status::invalid_argument("camera " + ids[i] +
-                                              " sent no JPEG with its frame");
+      CameraFrameCopy& part = request.cameras[i];
+      part.width = luma.width;
+      part.height = luma.height;
+      part.luma.resize(static_cast<std::size_t>(luma.width) * luma.height);
+      for (std::uint32_t row = 0; row < luma.height; ++row) {
+        std::memcpy(&part.luma[static_cast<std::size_t>(row) * luma.width],
+                    luma.data + static_cast<std::size_t>(row) * luma.stride,
+                    luma.width);
       }
+      part.timestamp_ns = set.cameras[i].timestamp_ns;
+      part.sequence = set.sequence;
+      part.live = live.detections[i];
+      const sensor::RgbdFrame* frame = set.rgbd != nullptr &&
+                                               i < set.rgbd->frames.size() &&
+                                               set.rgbd->frames[i]
+                                           ? &*set.rgbd->frames[i]
+                                           : nullptr;
+      if (frame == nullptr) continue;
+      part.sequence = frame->sequence;
+      if (frame->color_bitstream.codec == sensor::ColorBitstream::Codec::Jpeg &&
+          frame->color_bitstream.data != nullptr) {
+        part.jpeg.assign(
+            frame->color_bitstream.data,
+            frame->color_bitstream.data + frame->color_bitstream.size);
+      }
+      if (!sourced[i].depth) continue;
       if (frame->depth == nullptr) {
         return core::Status::invalid_argument("camera " + ids[i] +
                                               " sent no depth with its frame");
       }
-      CameraFrameCopy& part = request.cameras[i];
-      const sensor::PictureView& view = *views[i];
-      part.width = view.width;
-      part.height = view.height;
-      part.luma.resize(static_cast<std::size_t>(view.width) * view.height);
-      for (std::uint32_t row = 0; row < view.height; ++row) {
-        std::memcpy(&part.luma[static_cast<std::size_t>(row) * view.width],
-                    view.luma + static_cast<std::size_t>(row) * view.stride,
-                    view.width);
-      }
-      part.jpeg.assign(
-          frame->color_bitstream.data,
-          frame->color_bitstream.data + frame->color_bitstream.size);
       const std::size_t samples =
           static_cast<std::size_t>(frame->depth_camera.size.width) *
           frame->depth_camera.size.height;
       part.depth.assign(frame->depth, frame->depth + samples);
       part.metres_per_unit = frame->metres_per_unit;
-      part.timestamp_ns = frame->timestamp_ns;
-      part.sequence = frame->sequence;
-      part.live = live.detections[i];
     }
     return request;
   }
 
-  // One set: read back, offered to the set sink, detected, checked, ruled
-  // on, published. While the worker does not detect and no capture is
-  // armed, it is offered and published alone.
-  core::Status process(sensor::FrameSet polled, core::StageMetrics stages,
-                       const std::vector<std::string>& ids) {
+  // One set: offered to the set sink, detected, checked, ruled on,
+  // published. A set taken without luma -- the worker not detecting and no
+  // capture armed -- is offered and published alone.
+  core::Status process(source::PictureSet taken, core::StageMetrics stages,
+                       bool searched, const std::vector<std::string>& ids) {
     auto out = std::make_shared<LiveSnapshot>();
     out->stages = std::move(stages);
-    if (!detecting.load() && !rule->armed()) {
-      out->set = std::make_shared<const sensor::FrameSet>(std::move(polled));
-      if (sets != nullptr) sets->offer(out->set);
+    out->set = std::make_shared<const source::PictureSet>(std::move(taken));
+    const source::PictureSet& set = *out->set;
+    if (sets != nullptr && set.rgbd != nullptr) sets->offer(set.rgbd);
+    if (!searched) {
       out->detections.assign(ids.size(), Detection{});
       out->checks.assign(ids.size(), ViewCheck{});
       out->errors.assign(ids.size(), core::Status{});
       out->stillness_px.assign(ids.size(), std::nullopt);
       have_previous = false;  // no stillness across sets not searched
-      publish(std::move(out), ids);
+      publish(std::move(out));
       return {};
     }
-    // The readback takes over each buffer picture's queue family.
-    core::Result<std::vector<std::optional<sensor::PictureView>>> read =
-        readback->read(polled.frames, sensor::PictureReadback::Planes::Luma,
-                       &out->stages);
-    if (!read.ok()) {
-      post(read.status().with_context("live view: set " +
-                                      std::to_string(polled.sequence)));
-      return {};
-    }
-    out->set = std::make_shared<const sensor::FrameSet>(std::move(polled));
-    const sensor::FrameSet& set = *out->set;
-    if (sets != nullptr) sets->offer(out->set);
-    const std::vector<std::optional<sensor::PictureView>>& views = read.value();
+    const std::vector<source::HostLuma>& host = source->host();
     {
       core::StageScope scope(out->stages, "detect");
-      detect(views, *out);
+      detect(set, host, *out);
     }
     for (std::size_t i = 0; i < out->errors.size(); ++i) {
       if (!out->errors[i].ok()) {
@@ -259,32 +251,25 @@ struct LiveWorker::State {
     quality::LiveSet live_set;
     live_set.present.resize(ids.size());
     for (std::size_t i = 0; i < ids.size(); ++i) {
-      live_set.present[i] = set.frames[i].has_value();
+      live_set.present[i] = set.cameras[i].present;
     }
     live_set.checks = out->checks;
     live_set.motion_px = motion;
-    live_set.spread_ms = static_cast<double>(set.spread_ns()) / 1e6;
+    live_set.spread_ms = static_cast<double>(set.spread_ns) / 1e6;
     live_set.saver_full = sink != nullptr && sink->full();
     VKC_ASSIGN(out->decision, rule->update(live_set, Clock::now()));
     if (out->decision.state == quality::CaptureState::Take) {
-      take(set, views, *out, ids);
+      take(set, host, *out, ids);
     }
     publish_decision(out->decision);
-    publish(std::move(out), ids);
+    publish(std::move(out));
     return {};
   }
 
-  // A set's snapshot, with the rig's counters and rate, published: newest
+  // A set's snapshot, with the source's counters and rate, published: newest
   // wins.
-  void publish(std::shared_ptr<LiveSnapshot> out,
-               const std::vector<std::string>& ids) {
-    out->lost.assign(ids.size(), std::nullopt);
-    for (std::size_t i = 0; i < ids.size(); ++i) {
-      const auto* orbbec =
-          dynamic_cast<const sensor::OrbbecSensor*>(&array.sensor(i));
-      if (orbbec != nullptr) out->lost[i] = orbbec->orbbec_stats().lost;
-    }
-    out->stats = array.stats();
+  void publish(std::shared_ptr<LiveSnapshot> out) {
+    out->stats = source->stats();
     const Clock::time_point now = Clock::now();
     if (last_set) {
       const double seconds =
@@ -307,11 +292,11 @@ struct LiveWorker::State {
   }
 
   // The rule took this set: copy it out and hand it to the sink.
-  void take(const sensor::FrameSet& set,
-            const std::vector<std::optional<sensor::PictureView>>& views,
-            LiveSnapshot& live, const std::vector<std::string>& ids) {
+  void take(const source::PictureSet& set,
+            const std::vector<source::HostLuma>& host, LiveSnapshot& live,
+            const std::vector<std::string>& ids) {
     core::Result<CaptureRequest> request =
-        capture_request(set, views, live, live.decision, ids);
+        capture_request(set, host, live, live.decision, ids);
     core::Result<bool> queued = request.ok()
                                     ? sink->submit(std::move(request).value())
                                     : core::Result<bool>(request.status());
@@ -331,17 +316,22 @@ struct LiveWorker::State {
   }
 
   core::Status loop(const std::vector<std::string>& ids) {
-    VKC_TRY(array.start());
+    VKC_TRY(source->start());
     while (!stopping.load()) {
       VKC_TRY(apply_requests());
       core::StageMetrics stages;
-      std::optional<sensor::FrameSet> set;
-      {
-        core::StageScope scope(stages, "poll");
-        VKC_ASSIGN(set, array.poll_set());
+      const bool search = detecting.load() || rule->armed();
+      core::Result<std::optional<source::PictureSet>> taken =
+          source->take(&stages, search);
+      if (!taken.ok()) {
+        // The sensors' failure ends the thread; a set's luma, that set.
+        if (source->failed()) return taken.status();
+        post(taken.status().with_context("live view"));
+        continue;
       }
-      if (set) {
-        VKC_TRY(process(std::move(*set), std::move(stages), ids));
+      if (taken.value()) {
+        VKC_TRY(
+            process(std::move(*taken.value()), std::move(stages), search, ids));
         continue;
       }
       if (rule->armed()) {
@@ -356,37 +346,56 @@ struct LiveWorker::State {
 };
 
 core::Result<std::unique_ptr<LiveWorker>> LiveWorker::create(
-    sensor::SensorArray&& array, const core::Device& device,
-    core::Allocator& allocator, const Target& board, bool square_measured,
-    CaptureSink* sink, SetSink* sets, const LiveOptions& options) {
-  auto state = std::make_unique<State>(std::move(array));
+    std::unique_ptr<source::RigSource> source,
+    const std::vector<sensor::camera::CameraModel>& lenses, const Target& board,
+    bool square_measured, CaptureSink* sink, SetSink* sets,
+    const LiveOptions& options) {
+  auto state = std::make_unique<State>(std::move(source));
+  if (state->source == nullptr) {
+    return core::Status::invalid_argument("LiveWorker: no source");
+  }
   if (options.idle.count() < 0) {
     return core::Status::invalid_argument(
         "LiveWorker: the idle wait is negative");
   }
   return compute::guarded(
       "LiveWorker::create", [&]() -> core::Result<std::unique_ptr<LiveWorker>> {
+        const std::vector<source::SourceCamera>& cameras =
+            state->source->cameras();
+        if (lenses.size() != cameras.size()) {
+          return core::Status::invalid_argument(
+              "LiveWorker: " + std::to_string(lenses.size()) + " lenses for " +
+              std::to_string(cameras.size()) + " cameras");
+        }
         std::vector<std::string> ids;
-        for (std::size_t i = 0; i < state->array.size(); ++i) {
-          const sensor::SensorInfo& info = state->array.sensor(i).info();
-          if (!info.color) {
+        for (std::size_t i = 0; i < cameras.size(); ++i) {
+          const sensor::camera::ImageSize& size = cameras[i].size;
+          if (lenses[i].size.width != size.width ||
+              lenses[i].size.height != size.height) {
             return core::Status::invalid_argument(
-                "LiveWorker: camera " + info.id + " has no colour model");
+                "LiveWorker: camera " + cameras[i].id + "'s lens is " +
+                std::to_string(lenses[i].size.width) + "x" +
+                std::to_string(lenses[i].size.height) + ", its pictures " +
+                std::to_string(size.width) + "x" + std::to_string(size.height));
           }
-          VKC_ASSIGN(compute::CvCamera cv, compute::cv_camera(*info.color));
+          VKC_ASSIGN(compute::CvCamera cv, compute::cv_camera(lenses[i]));
           state->cameras.push_back(std::move(cv));
-          ids.push_back(info.id);
+          ids.push_back(cameras[i].id);
         }
         VKC_ASSIGN(compute::Board made, compute::Board::create(board));
         state->detector_board = std::move(made);
+        state->options = options;
+        // A pair's skew within its sensor's bound is no warning.
+        if (const std::optional<std::uint64_t> bound =
+                state->source->max_skew_ns()) {
+          state->options.rule.spread_warn_ms = std::max(
+              options.rule.spread_warn_ms, static_cast<double>(*bound) / 1e6);
+        }
         VKC_ASSIGN(quality::CaptureRule rule,
-                   quality::CaptureRule::create(ids, options.rule));
+                   quality::CaptureRule::create(ids, state->options.rule));
         state->rule = std::move(rule);
-        VKC_ASSIGN(state->readback,
-                   sensor::PictureReadback::create(device, allocator));
         state->board = board;
         state->square_measured = square_measured;
-        state->options = options;
         state->sink = sink;
         state->sets = sets;
         std::unique_ptr<LiveWorker> worker(
@@ -414,7 +423,7 @@ LiveWorker::~LiveWorker() { stop(); }
 void LiveWorker::run() noexcept {
   const core::Status ended = compute::guarded(
       "live view", [this]() -> core::Status { return state_->loop(ids_); });
-  state_->array.stop();
+  state_->source->stop();
   if (!ended.ok()) state_->post(ended);
   state_->running.store(false);
 }
@@ -425,6 +434,10 @@ void LiveWorker::stop() noexcept {
 }
 
 bool LiveWorker::running() const noexcept { return state_->running.load(); }
+
+const quality::CaptureRuleOptions& LiveWorker::rule_options() const noexcept {
+  return state_->options.rule;
+}
 
 void LiveWorker::set_detecting(bool on) noexcept {
   state_->detecting.store(on);

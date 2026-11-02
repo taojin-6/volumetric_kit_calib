@@ -4,30 +4,36 @@
 #pragma once
 
 /// @file session_writer.hpp
-/// @brief A calibration session on disk: the rig, and each capture's RGB-D
-///        set, detections and checks, written on a thread of its own and
-///        never overwritten.
+/// @brief A calibration session on disk: the rig, and each capture's
+///        pictures, depth, detections and checks, written on a thread of its
+///        own and never overwritten.
 ///
 /// A session is a directory, created at its first capture:
 ///
 /// @code{.txt}
 /// session.json                 the rig, the board, the captures
 /// factory_calibration.json     sensor's calibration file, unposed
-/// images/<serial>/calib_img_<serial>_<NNN>.jpg
-///                              the camera's JPEG, byte for byte
-/// depth/<serial>/calib_depth_<serial>_<NNN>.png
+/// images/<id>/calib_img_<id>_<NNN>.jpg
+///                              the camera's JPEG, byte for byte; or .pgm,
+///                              its 8-bit luma, for a camera with no JPEG
+/// depth/<id>/calib_depth_<id>_<NNN>.png
 ///                              16-bit grey, the sensor's units
 /// captures/<NNN>.json          times, detections and checks
 /// @endcode
 ///
 /// - `<NNN>` is the capture's index, zero-padded to three digits. The image
 ///   names are the ones the legacy `camera_calibration` scripts glob for.
+/// - A PGM is the luma as read: `P5`, the size, `255`, then the rows.
 /// - `factory_calibration.json` is sensor's version-2 calibration file
-///   (`sensor/camera/array_calibration.hpp`): each camera's factory colour and
-///   depth models at the streamed mode, and its `depth_to_color`, with no pose.
-/// - Depth is as the sensor captured it: raw, not undistorted.
-/// - `streams` records the cameras' colour and depth sizes and rate, which
-///   every camera shares, and the @ref DepthMode.
+///   (`sensor/camera/array_calibration.hpp`): the factory colour and depth
+///   models at the streamed mode, and `depth_to_color`, with no pose, of
+///   each camera that has one; with none, as a stereo pair's, it is not
+///   written, and `session.json` names none.
+/// - Depth, only from a camera with depth, is as the sensor captured it:
+///   raw, not undistorted.
+/// - `streams` records the cameras' size and rate, which every camera
+///   shares, their coding when known, and the @ref DepthMode when a camera
+///   has depth.
 /// - **Never overwritten.** The directory is new, and every file in it but
 ///   `session.json` is created once, refusing one already there.
 ///   `session.json`, which lists the captures, is replaced atomically after
@@ -38,14 +44,16 @@
 ///   `float` in the shortest form that reads back to the same `float`.
 /// - Nothing reads a session back (DECISIONS.md, 2026-10-13).
 ///
-/// `session.json`:
+/// `session.json`, version 2, of a Femto rig: keys a session lacks (a sync
+/// file, an Orbbec camera's facts, depth, the SDK's version, a factory
+/// model) are left out, and a DeckLink camera has its `input`:
 ///
 /// @code{.json}
-/// {"format": "volumetric_kit_calib.session", "version": 1,
-///  "created": "2026-10-13T09:41:07.250Z",
+/// {"format": "volumetric_kit_calib.session", "version": 2,
+///  "created": "2026-10-13T09:41:07.250Z", "mode": "extrinsics",
 ///  "software": {"calib": "...", "sensor": "...", "gfx": "...", "core": "...",
 ///               "opencv": "5.0.0", "orbbec_sdk": "2.10.6"},
-///  "rig": {"sync_file": "config/femto_mega_sync.json",
+///  "rig": {"driver": "orbbec", "sync_file": "config/femto_mega_sync.json",
 ///          "sync_sha256": "...", "reference": "CL2A141000N"},
 ///  "board": {"type": "charuco", "squares": [5, 3], "square_m": 0.15,
 ///            "marker_m": 0.112, "dictionary": "DICT_4X4_100",
@@ -59,19 +67,25 @@
 ///                        "mode": "nfov_unbinned", "metres_per_unit": 0.001,
 ///                        "min_m": 0.5, "max_m": 3.86},
 ///              "fps": 25},
-///  "cameras": [{"serial": "CL2A141000N", "model": "Orbbec Femto Mega",
+///  "cameras": [{"id": "CL2A141000N", "model": "Orbbec Femto Mega",
 ///               "firmware": "...", "ip": "192.168.1.10", "role": "primary",
 ///               "sync_mode": "primary", "depth_delay_us": 0,
 ///               "color_lens_model": "brown-conrady",
-///               "depth_lens_model": "brown-conrady-k6"}],
+///               "depth_lens_model": "brown-conrady-k6",
+///               "lens": {"origin": "factory"}}],
 ///  "factory_calibration": "factory_calibration.json",
 ///  "captures": [{"index": 0, "file": "captures/000.json",
 ///                "dropped": false}]}
 /// @endcode
 ///
-/// `captures/<NNN>.json`, with `null` for a measure that is empty and for an
-/// origin tag the camera did not find; `usable_views` counts the cameras whose
-/// verdict @ref is_usable accepts:
+/// A camera's `lens` is where the lens its views were checked through came
+/// from: `factory`, `stand-in`, or `file` with the calibration file's `path`
+/// and `sha256`.
+///
+/// `captures/<NNN>.json`, with `null` for a measure that is empty, for an
+/// origin tag the camera did not find and for the depth of a camera without
+/// it; `usable_views` counts the cameras whose verdict @ref is_usable
+/// accepts:
 ///
 /// @code{.json}
 /// {"format": "volumetric_kit_calib.capture", "version": 1,
@@ -112,7 +126,8 @@
 #include "volumetric_kit/calib/core/target.hpp"
 #include "volumetric_kit/calib/core/view_check.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/sensor/rgbd_sensor.hpp"
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
+#include "volumetric_kit/sensor/camera/geometry.hpp"
 
 namespace volumetric_kit::calib::capture {
 
@@ -125,18 +140,17 @@ namespace volumetric_kit::calib::capture {
 /// software.orbbec_sdk = "2.10.6";
 /// @endcode
 struct Software {
-  std::string calib;       ///< calib's version or commit.
-  std::string sensor;      ///< volumetric_kit_sensor's.
-  std::string gfx;         ///< volumetric_kit_gfx's.
-  std::string core;        ///< volumetric_kit_core's.
-  std::string opencv;      ///< OpenCV's version.
-  std::string orbbec_sdk;  ///< The Orbbec SDK's version.
+  std::string calib;   ///< calib's version or commit.
+  std::string sensor;  ///< volumetric_kit_sensor's.
+  std::string gfx;     ///< volumetric_kit_gfx's.
+  std::string core;    ///< volumetric_kit_core's.
+  std::string opencv;  ///< OpenCV's version.
+  /// The Orbbec SDK's version; empty, and not recorded, in a build without
+  /// it.
+  std::string orbbec_sdk;
 };
 
-/// @brief The rig's depth mode: what each camera's `SensorInfo` does not say.
-///
-/// The image sizes and the rate are the cameras' own (their models and
-/// `fps`), and colour is the cameras' MJPEG.
+/// @brief The rig's depth mode: what each camera's depth model does not say.
 ///
 /// @code
 /// DepthMode depth_mode;
@@ -152,26 +166,15 @@ struct DepthMode {
   float max_m = 0.0f;  ///< The farthest depth kept (metres).
 };
 
-/// @brief One camera of the rig.
-///
-/// The vendor's facts are strings an application fills from its driver (for
-/// an Orbbec camera, sensor's `OrbbecDeviceInfo` and sync configuration), so
-/// this tier names no driver.
+/// @brief An Orbbec camera's own facts, as sensor's `OrbbecDeviceInfo` and
+///        the rig's sync file give them.
 ///
 /// @code
-/// SessionCamera camera;
-/// camera.info = sensor.info();  // serial, model, factory models, role
-/// camera.firmware = device.firmware_version;
-/// camera.ip_address = device.ip_address;
-/// camera.sync_mode = to_string(device.sync_mode);
-/// camera.depth_delay_us = sync.depth_delay_us;
-/// camera.color_lens_model = device.color_lens_model;
-/// camera.depth_lens_model = device.depth_lens_model;
+/// OrbbecFacts facts;
+/// facts.firmware = device.firmware_version;
+/// facts.depth_delay_us = sync.depth_delay_us;
 /// @endcode
-struct SessionCamera {
-  /// What the sensor is: `id` (its serial), `model`, the factory `color` and
-  /// `depth` models at the streamed mode, `depth_to_color`, `role` and `fps`.
-  sensor::SensorInfo info;
+struct OrbbecFacts {
   std::string firmware;             ///< Its firmware version.
   std::string ip_address;           ///< Its IP address; empty for a USB camera.
   std::string sync_mode;            ///< Its sync mode as its driver names it.
@@ -180,15 +183,75 @@ struct SessionCamera {
   std::string depth_lens_model;     ///< The vendor's depth lens model.
 };
 
+/// @brief Where the lens a camera's views are checked through came from.
+enum class LensOrigin : std::uint8_t {
+  Factory,  ///< The device's own (@ref SessionCamera::color).
+  File,     ///< A calibration file (@ref SessionCamera::lens_file).
+  StandIn,  ///< A stand-in, no camera's.
+};
+
+/// @return @p origin's name in `session.json`: `"factory"`, `"file"` or
+///         `"stand-in"`; `"unknown"` for a value that is none of them.
+VC_CAPTURE_API const char* to_string(LensOrigin origin) noexcept;
+
+/// @brief One camera of the rig, as its session records it: calib's own
+///        record, which names no driver's type.
+///
+/// @code
+/// SessionCamera camera;
+/// camera.id = "bm-1";
+/// camera.model = "DeckLink 8K Pro";
+/// camera.size = {3840, 2160};
+/// camera.fps = 30;
+/// camera.input = "SDI 2";
+/// camera.lens = LensOrigin::File;
+/// camera.lens_file = "bm_pair/array_calibration.json";
+/// @endcode
+struct SessionCamera {
+  /// Its calibration key, which names its files: a Femto's serial, `"bm-1"`.
+  std::string id;
+  std::string model;               ///< What it is, e.g. "Orbbec Femto Mega".
+  sensor::camera::ImageSize size;  ///< Its pictures' size.
+  std::uint32_t fps = 0;           ///< Its rate, frames a second.
+  /// Its role in a synced rig as sensor names it (`"primary"`); empty, and
+  /// not recorded, for none.
+  std::string role;
+  /// The device's own colour lens at @ref size; empty for a camera without
+  /// one (a stereo pair's).
+  std::optional<sensor::camera::CameraModel> color;
+  /// The device's own depth lens: a camera with depth, whose every capture
+  /// carries it.
+  std::optional<sensor::camera::CameraModel> depth;
+  /// Its depth camera's frame to its colour camera's: the factory extrinsic.
+  sensor::camera::Mat4d depth_to_color = sensor::camera::Mat4d(1.0);
+  std::optional<OrbbecFacts> orbbec;  ///< An Orbbec camera's own facts.
+  /// The capture card's input it comes in on (`"SDI 2"`); empty, and not
+  /// recorded, for none.
+  std::string input;
+  /// Where the lens its views are checked through came from.
+  LensOrigin lens = LensOrigin::Factory;
+  /// With @ref LensOrigin::File, the calibration file's path, whose SHA-256
+  /// the session records, reading it at the first capture; empty otherwise.
+  std::string lens_file;
+};
+
+/// @brief What a session calibrates.
+enum class SessionMode : std::uint8_t {
+  Extrinsics,  ///< The rig's poses: `"extrinsics"`.
+  Intrinsics,  ///< Each camera's lens: `"intrinsics"`.
+};
+
 /// @brief A session: where it goes, and what it records once.
 ///
 /// @code
 /// SessionInfo info;
 /// info.directory = out + "/" + session_stamp(now).value();
+/// info.driver = "orbbec";
 /// info.sync_path = "config/femto_mega_sync.json";
-/// info.reference = array.sensor(array.primary()).info().id;
+/// info.reference = cameras[primary].id;
 /// info.board = legacy_femto_board();
 /// info.depth_mode = depth_mode;
+/// info.color_codec = "mjpeg";
 /// info.cameras = cameras;
 /// @endcode
 struct SessionInfo {
@@ -196,22 +259,30 @@ struct SessionInfo {
   /// there then, and its parent must exist.
   std::string directory;
   Software software;  ///< What the session was captured with.
+  SessionMode mode = SessionMode::Extrinsics;  ///< What it calibrates.
+  /// What opened the cameras, as sensor names the driver (`"orbbec"`).
+  std::string driver;
   /// The rig's sync configuration, whose path and SHA-256 `session.json`
-  /// records; read at the first capture.
+  /// records, reading it at the first capture; empty for a rig without one.
   std::string sync_path;
-  /// The reference camera's serial: the rig's primary, whose colour camera
-  /// is the solve's world.
+  /// The reference camera's id: the rig's primary, whose colour camera is
+  /// the solve's world.
   std::string reference;
   Target board;  ///< The board: a ChArUco board @ref check_target accepts.
   /// Whether `board.square_size_m` was measured, rather than the print's
   /// nominal size.
   bool square_measured = false;
-  /// The tag each camera's colour image was searched for
+  /// The tag each camera's picture was searched for
   /// (@ref CameraCapture::origin_tag): one @ref check_origin_tag accepts.
   OriginTag origin_tag = kOriginTag;
-  DepthMode depth_mode;  ///< The rig's depth mode.
+  /// The depth mode of the cameras with depth; empty when none has it.
+  std::optional<DepthMode> depth_mode;
+  /// How the cameras code their colour (`"mjpeg"`); empty, and not recorded,
+  /// when unknown.
+  std::string color_codec;
   /// The cameras, in the order every capture gives them. Every camera
-  /// streams the same colour and depth sizes at the same rate.
+  /// streams the same size at the same rate, and its depth, if any, at the
+  /// same size as the others'.
   std::vector<SessionCamera> cameras;
 };
 
@@ -223,35 +294,36 @@ struct SessionInfo {
 ///
 /// @code
 /// CameraCapture part;
-/// part.jpeg.assign(frame.color_bitstream.data,
-///                  frame.color_bitstream.data + frame.color_bitstream.size);
-/// part.depth = std::make_shared<const std::vector<std::uint16_t>>(
-///     frame.depth, frame.depth + depth_samples);
-/// part.timestamp_ns = frame.timestamp_ns;
-/// part.sequence = frame.sequence;
+/// part.luma = std::move(host_luma);  // written as a PGM: no JPEG
+/// part.timestamp_ns = picture.timestamp_ns;
 /// part.detection = std::move(full_detection);
 /// part.check = check;
 /// part.origin_tag = tag_search.found;  // detect::detect_tag's
 /// @endcode
 struct CameraCapture {
   /// The camera's JPEG (`RgbdFrame::color_bitstream`), copied out of the
-  /// frame so the driver's buffers go back to it.
+  /// frame so the driver's buffers go back to it; empty for a camera that
+  /// sent none, whose @ref luma is written.
   std::vector<std::uint8_t> jpeg;
+  /// The picture's 8-bit luma, its rows packed: written as a PGM when there
+  /// is no @ref jpeg; ignored otherwise.
+  std::vector<std::uint8_t> luma;
   /// The depth, a sample for each of the depth model's pixels, row-major, in
-  /// the sensor's units, as `RgbdFrame::depth`; not null. Shared, so a caller
-  /// may keep the samples it hands over without a copy: the writer only reads
-  /// them, and lets them go once the capture is carried out.
+  /// the sensor's units, as `RgbdFrame::depth`: from a camera with depth, and
+  /// only then. Shared, so a caller may keep the samples it hands over
+  /// without a copy: the writer only reads them, and lets them go once the
+  /// capture is carried out.
   std::shared_ptr<const std::vector<std::uint16_t>> depth;
-  std::uint64_t timestamp_ns = 0;  ///< `RgbdFrame::timestamp_ns`.
-  std::uint64_t sequence = 0;      ///< `RgbdFrame::sequence`.
-  /// The board found in the colour image at full resolution: what the solver
-  /// takes. Its `image_size` is the colour image's. The observation's own
-  /// camera and frame are not written: the capture's file holds the
-  /// detection under the camera's serial.
+  std::uint64_t timestamp_ns = 0;  ///< The picture's capture time.
+  std::uint64_t sequence = 0;      ///< Its sequence number.
+  /// The board found in the picture at full resolution: what the solver
+  /// takes. Its `image_size` is the camera's. The observation's own camera
+  /// and frame are not written: the capture's file holds the detection under
+  /// the camera's id.
   Detection detection;
   ViewCheck check;  ///< What the view is worth.
-  /// The origin tag (@ref SessionInfo::origin_tag) found in the colour image
-  /// at full resolution, in its pixels; empty when the camera found none, or
+  /// The origin tag (@ref SessionInfo::origin_tag) found in the picture at
+  /// full resolution, in its pixels; empty when the camera found none, or
   /// more than one print of it.
   std::optional<DetectedMarker> origin_tag;
 };
@@ -263,7 +335,7 @@ struct CameraCapture {
 /// job.meta.time_ns = now_ns;  // std::chrono::system_clock
 /// job.meta.trigger_ns = set.timestamp_ns;
 /// job.meta.sequence = set.sequence;
-/// job.meta.spread_ms = set.spread_ns() / 1e6;
+/// job.meta.spread_ms = set.spread_ns / 1e6;
 /// job.cameras = std::move(parts);  // in SessionInfo::cameras order
 /// @endcode
 struct CaptureJob {
@@ -313,10 +385,9 @@ struct SessionWriterOptions {
 ///        queued, and its outcome is taken later, so no caller waits on the
 ///        disk.
 ///
-/// It encodes and writes; it detects nothing (@ref CameraCapture). Requests
-/// are carried out in the order they are made. Every member may be called
-/// from any thread. Destroying the writer first carries out every request
-/// queued.
+/// It writes; it detects nothing (@ref CameraCapture). Requests are carried
+/// out in the order they are made. Every member may be called from any
+/// thread. Destroying the writer first carries out every request queued.
 ///
 /// @code
 /// VKC_ASSIGN(std::unique_ptr<SessionWriter> writer,
@@ -332,19 +403,21 @@ class VC_CAPTURE_API SessionWriter {
  public:
   /// @brief Check @p info and start the writer's thread. Nothing is written
   ///        until the first capture.
-  /// @param info     The session. Refused unless: the directory and sync path
-  ///                 are non-empty; the board is a ChArUco board
-  ///                 @ref check_target accepts, and the origin tag one
-  ///                 @ref check_origin_tag accepts; the depth mode has a
-  ///                 finite, positive `metres_per_unit` and finite
-  ///                 `0 < min_m < max_m`; each serial is a plain file name
-  ///                 (letters, digits, `-`, `_`, `.`; not `.` or `..`), and
-  ///                 no two differ only in case; each camera has colour and
-  ///                 depth models that, with its `depth_to_color`, sensor's
-  ///                 calibration file holds (which also needs a camera at
-  ///                 least, and no serial twice); every camera streams the
-  ///                 same sizes at the same, known `fps`; and the reference
-  ///                 is a camera.
+  /// @param info     The session. Refused unless: the directory, the driver
+  ///                 and the reference are non-empty; the board is a ChArUco
+  ///                 board @ref check_target accepts, and the origin tag one
+  ///                 @ref check_origin_tag accepts; there is a depth mode,
+  ///                 with a finite, positive `metres_per_unit` and finite
+  ///                 `0 < min_m < max_m`, exactly when a camera has depth;
+  ///                 each id is a plain file name (letters, digits, `-`,
+  ///                 `_`, `.`; not `.` or `..`), and no two differ only in
+  ///                 case; every camera streams the same non-zero size at
+  ///                 the same, known `fps`, and every depth model is one
+  ///                 size; each factory colour model is the camera's size;
+  ///                 the factory models sensor's calibration file holds,
+  ///                 with their `depth_to_color`; a lens file is named
+  ///                 exactly when a camera's lens came from one; and the
+  ///                 reference is a camera.
   /// @param options  How it queues.
   /// @return The writer; `InvalidArgument` naming what @p info or @p options
   ///         gets wrong; `Unsupported` for a board that is not ChArUco;
@@ -364,16 +437,17 @@ class VC_CAPTURE_API SessionWriter {
   ///
   /// The capture is written in the order of the requests: at the first, the
   /// session's directory and `factory_calibration.json` first; then each
-  /// camera's JPEG and depth, `captures/<NNN>.json`, and `session.json`
-  /// listing it. Its @ref WriteResult has its index, or why it failed:
-  /// `InvalidArgument` when a file it would write is already there (the
-  /// session's directory included), `NotFound` when the directory's parent
-  /// or the sync file is missing, `IoError` for a write that fails (a full
-  /// disk), and `OutOfMemory`.
+  /// camera's JPEG or PGM and depth, `captures/<NNN>.json`, and
+  /// `session.json` listing it. Its @ref WriteResult has its index, or why
+  /// it failed: `InvalidArgument` when a file it would write is already there
+  /// (the session's directory included), `NotFound` when the directory's
+  /// parent, the sync file or a lens file is missing, `IoError` for a write
+  /// that fails (a full disk), and `OutOfMemory`.
   /// @param job  The capture. Refused unless it has one part per camera,
-  ///             each with a JPEG (starting with its SOI marker), depth with
-  ///             a sample per depth pixel, a detection in an image of the
-  ///             colour model's size, an origin tag, if any, with the
+  ///             each with a JPEG (starting with its SOI marker) or the
+  ///             camera's luma, depth with a sample per depth pixel from a
+  ///             camera with depth and none from another, a detection in an
+  ///             image of the camera's size, an origin tag, if any, with the
   ///             session's tag's id, and finite pixels, weights and
   ///             measures; the same for the set's measures; and a
   ///             @ref ViewVerdict for each check.

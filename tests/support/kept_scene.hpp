@@ -50,9 +50,10 @@ inline app::KeptCaptures kept_captures(const Scene& scene,
   kept.board = legacy_femto_board();
   kept.cameras = scene.cameras;
   for (const solve::RigCamera& cam : scene.cameras) {
-    sensor::SensorInfo info;
+    capture::SessionCamera info;
     info.id = cam.id;
     info.model = "synthetic";
+    info.size = cam.model.size;
     info.color = cam.model;
     info.depth = depth_like_lens();
     info.depth_to_color[3] = glm::dvec4(-0.032, 0.0, 0.002, 1.0);

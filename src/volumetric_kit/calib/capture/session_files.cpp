@@ -12,7 +12,6 @@
 #include <nlohmann/json.hpp>
 
 #include "volumetric_kit/core/base/check.hpp"
-#include "volumetric_kit/sensor/rgbd_sensor.hpp"
 
 namespace volumetric_kit::calib::capture::detail {
 namespace {
@@ -28,6 +27,17 @@ std::string padded(int index) {
   char digits[16];
   std::snprintf(digits, sizeof digits, "%03d", index);
   return digits;
+}
+
+// A PGM file's header for a picture of `size`.
+std::string pgm_header(sensor::camera::ImageSize size) {
+  return "P5\n" + std::to_string(size.width) + " " +
+         std::to_string(size.height) + "\n255\n";
+}
+
+// A PGM file's size for `pixels` bytes of a picture of `size`.
+std::size_t pgm_bytes(std::size_t pixels, sensor::camera::ImageSize size) {
+  return pgm_header(size).size() + pixels;
 }
 
 // The double of the shortest decimal that reads back to `value`, which
@@ -118,9 +128,9 @@ std::string text_of(const json& doc) {
 
 }  // namespace
 
-bool is_plain_serial(const std::string& serial) noexcept {
-  if (serial.empty() || serial == "." || serial == "..") return false;
-  for (const char ch : serial) {
+bool is_plain_serial(const std::string& id) noexcept {
+  if (id.empty() || id == "." || id == "..") return false;
+  for (const char ch : id) {
     const bool plain = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
                        (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' ||
                        ch == '.';
@@ -134,18 +144,25 @@ std::string join(const std::string& directory, const std::string& name) {
   return directory + "/" + name;
 }
 
-std::string color_file(const std::string& serial, int index) {
-  return std::string(kImagesDir) + "/" + serial + "/calib_img_" + serial + "_" +
-         padded(index) + ".jpg";
+std::string color_file(const std::string& id, int index, bool jpeg) {
+  return std::string(kImagesDir) + "/" + id + "/calib_img_" + id + "_" +
+         padded(index) + (jpeg ? ".jpg" : ".pgm");
 }
 
-std::string depth_file(const std::string& serial, int index) {
-  return std::string(kDepthDir) + "/" + serial + "/calib_depth_" + serial +
-         "_" + padded(index) + ".png";
+std::string depth_file(const std::string& id, int index) {
+  return std::string(kDepthDir) + "/" + id + "/calib_depth_" + id + "_" +
+         padded(index) + ".png";
 }
 
 std::string capture_file(int index) {
   return std::string(kCapturesDir) + "/" + padded(index) + ".json";
+}
+
+std::string pgm(const std::vector<std::uint8_t>& luma,
+                sensor::camera::ImageSize size) {
+  std::string bytes = pgm_header(size);
+  bytes.append(reinterpret_cast<const char*>(luma.data()), luma.size());
+  return bytes;
 }
 
 std::string iso_time(std::int64_t ns) {
@@ -168,13 +185,14 @@ std::string iso_time(std::int64_t ns) {
   return text;
 }
 
-std::string format_session(const SessionInfo& info, const std::string& created,
-                           const std::string& sync_sha256,
+std::string format_session(const SessionInfo& info, const SessionFacts& facts,
                            const std::vector<CaptureEntry>& captures) {
   json doc;
   doc["format"] = "volumetric_kit_calib.session";
-  doc["version"] = 1;
-  doc["created"] = created;
+  doc["version"] = 2;
+  doc["created"] = facts.created;
+  doc["mode"] =
+      info.mode == SessionMode::Intrinsics ? "intrinsics" : "extrinsics";
 
   json& software = doc["software"];
   software["calib"] = info.software.calib;
@@ -182,11 +200,16 @@ std::string format_session(const SessionInfo& info, const std::string& created,
   software["gfx"] = info.software.gfx;
   software["core"] = info.software.core;
   software["opencv"] = info.software.opencv;
-  software["orbbec_sdk"] = info.software.orbbec_sdk;
+  if (!info.software.orbbec_sdk.empty()) {
+    software["orbbec_sdk"] = info.software.orbbec_sdk;
+  }
 
   json& rig = doc["rig"];
-  rig["sync_file"] = info.sync_path;
-  rig["sync_sha256"] = sync_sha256;
+  rig["driver"] = info.driver;
+  if (!info.sync_path.empty()) {
+    rig["sync_file"] = info.sync_path;
+    rig["sync_sha256"] = facts.sync_sha256;
+  }
   rig["reference"] = info.reference;
 
   const Target& board = info.board;
@@ -208,39 +231,60 @@ std::string format_session(const SessionInfo& info, const std::string& created,
   tag["id"] = info.origin_tag.id;
   tag["edge_m"] = info.origin_tag.edge_m;
 
-  // Every camera streams what the first does.
-  const sensor::SensorInfo& first = info.cameras.front().info;
-  const DepthMode& mode = info.depth_mode;
+  // Every camera streams what the first does; every depth camera, what the
+  // first of them does.
+  const SessionCamera& first = info.cameras.front();
   json& streams = doc["streams"];
   json& color = streams["color"];
-  color["width"] = first.color->size.width;
-  color["height"] = first.color->size.height;
-  color["codec"] = "mjpeg";
-  json& depth = streams["depth"];
-  depth["width"] = first.depth->size.width;
-  depth["height"] = first.depth->size.height;
-  depth["mode"] = mode.name;
-  depth["metres_per_unit"] = shortest(mode.metres_per_unit);
-  depth["min_m"] = shortest(mode.min_m);
-  depth["max_m"] = shortest(mode.max_m);
+  color["width"] = first.size.width;
+  color["height"] = first.size.height;
+  if (!info.color_codec.empty()) color["codec"] = info.color_codec;
+  if (info.depth_mode) {
+    const DepthMode& mode = *info.depth_mode;
+    const SessionCamera* with_depth = nullptr;
+    for (const SessionCamera& camera : info.cameras) {
+      if (camera.depth && with_depth == nullptr) with_depth = &camera;
+    }
+    VKC_CHECK(with_depth != nullptr,
+              "format_session: a depth mode with no depth camera");
+    json& depth = streams["depth"];
+    depth["width"] = with_depth->depth->size.width;
+    depth["height"] = with_depth->depth->size.height;
+    depth["mode"] = mode.name;
+    depth["metres_per_unit"] = shortest(mode.metres_per_unit);
+    depth["min_m"] = shortest(mode.min_m);
+    depth["max_m"] = shortest(mode.max_m);
+  }
   streams["fps"] = first.fps;
 
   json cameras = json::array();
-  for (const SessionCamera& camera : info.cameras) {
+  for (std::size_t i = 0; i < info.cameras.size(); ++i) {
+    const SessionCamera& camera = info.cameras[i];
     json c;
-    c["serial"] = camera.info.id;
-    c["model"] = camera.info.model;
-    c["firmware"] = camera.firmware;
-    c["ip"] = camera.ip_address;
-    c["role"] = sensor::to_string(camera.info.role);
-    c["sync_mode"] = camera.sync_mode;
-    c["depth_delay_us"] = camera.depth_delay_us;
-    c["color_lens_model"] = camera.color_lens_model;
-    c["depth_lens_model"] = camera.depth_lens_model;
+    c["id"] = camera.id;
+    c["model"] = camera.model;
+    if (camera.orbbec) {
+      c["firmware"] = camera.orbbec->firmware;
+      c["ip"] = camera.orbbec->ip_address;
+    }
+    if (!camera.role.empty()) c["role"] = camera.role;
+    if (camera.orbbec) {
+      c["sync_mode"] = camera.orbbec->sync_mode;
+      c["depth_delay_us"] = camera.orbbec->depth_delay_us;
+      c["color_lens_model"] = camera.orbbec->color_lens_model;
+      c["depth_lens_model"] = camera.orbbec->depth_lens_model;
+    }
+    if (!camera.input.empty()) c["input"] = camera.input;
+    json& lens = c["lens"];
+    lens["origin"] = to_string(camera.lens);
+    if (camera.lens == LensOrigin::File) {
+      lens["path"] = camera.lens_file;
+      lens["sha256"] = facts.lens_sha256[i];
+    }
     cameras.push_back(std::move(c));
   }
   doc["cameras"] = std::move(cameras);
-  doc["factory_calibration"] = kFactoryFile;
+  if (facts.factory) doc["factory_calibration"] = kFactoryFile;
 
   json listed = json::array();
   for (const CaptureEntry& capture : captures) {
@@ -270,18 +314,22 @@ std::string format_capture(const SessionInfo& info, const CaptureJob& job) {
   json cameras = json::object();
   int usable_views = 0;
   for (std::size_t i = 0; i < info.cameras.size(); ++i) {
-    const std::string& serial = info.cameras[i].info.id;
+    const SessionCamera& camera = info.cameras[i];
+    const std::string& id = camera.id;
     const CameraCapture& part = job.cameras[i];
+    const bool jpeg = !part.jpeg.empty();
     json c;
-    c["color"] = color_file(serial, meta.index);
-    c["depth"] = depth_file(serial, meta.index);
-    c["color_bytes"] = part.jpeg.size();
+    c["color"] = color_file(id, meta.index, jpeg);
+    c["depth"] =
+        camera.depth ? json(depth_file(id, meta.index)) : json(nullptr);
+    c["color_bytes"] =
+        jpeg ? part.jpeg.size() : pgm_bytes(part.luma.size(), camera.size);
     c["timestamp_ns"] = part.timestamp_ns;
     c["sequence"] = part.sequence;
     c["detection"] = detection_json(part.detection);
     c["check"] = check_json(part.check);
     c["origin_tag"] = origin_tag_json(info.origin_tag, part.origin_tag);
-    cameras[serial] = std::move(c);
+    cameras[id] = std::move(c);
     if (is_usable(part.check.verdict)) ++usable_views;
   }
   doc["cameras"] = std::move(cameras);

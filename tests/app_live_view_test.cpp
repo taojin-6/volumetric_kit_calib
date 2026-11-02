@@ -45,6 +45,7 @@
 #include "volumetric_kit/gfx/core/device_requirements.hpp"
 #include "volumetric_kit/gfx/core/offscreen_target.hpp"
 #include "volumetric_kit/gfx/pipelines/color.hpp"
+#include "volumetric_kit/sensor/frame/device_requirements.hpp"
 
 namespace volumetric_kit::calib::app {
 namespace {
@@ -98,9 +99,22 @@ class AppLiveView : public core::test::VulkanDeviceTest {
     return out;
   }
 
+  // The set as a source hands an array's set out: each frame's NV12 images
+  // its colour tile.
+  static std::shared_ptr<const source::PictureSet> pictures_of(
+      const std::shared_ptr<const sensor::FrameSet>& frames) {
+    auto set = std::make_shared<source::PictureSet>();
+    for (const std::optional<sensor::RgbdFrame>& frame : frames->frames) {
+      source::CameraPicture& picture = set->cameras.emplace_back();
+      picture.present = frame.has_value();
+    }
+    set->rgbd = frames;
+    return set;
+  }
+
   static std::shared_ptr<const LiveSnapshot> snapshot_of(const Set& set) {
     auto snapshot = std::make_shared<LiveSnapshot>();
-    snapshot->set = set.frames;
+    snapshot->set = pictures_of(set.frames);
     const std::size_t n = set.frames->frames.size();
     snapshot->detections.resize(n);
     snapshot->checks.resize(n);
@@ -227,13 +241,16 @@ TEST_F(AppLiveView, RefusesASnapshotThatDoesNotFitTheMosaic) {
   refused =
       record_snapshot(*mosaic, retire, VK_NULL_HANDLE, snapshot_of(three), 1);
   EXPECT_EQ(refused.domain(), Code::InvalidArgument);
-  EXPECT_NE(refused.message().find("a set of 3 frames for a mosaic of 2"),
+  EXPECT_NE(refused.message().find("a set of 3 pictures for a mosaic of 2"),
             std::string::npos);
   EXPECT_EQ(retire.pending(), 0u);
 }
 
 class AppLiveCrossFamily : public core::test::SharedDeviceTest {
  protected:
+  core::DeviceRequirements compute_requirements() const override {
+    return sensor::device_requirements();
+  }
   core::DeviceRequirements graphics_requirements() const override {
     return gfx::device_requirements();
   }
@@ -278,9 +295,12 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
   core::Result<sensor::SensorArray> array =
       sensor::SensorArray::open(std::move(sensors), {});
   ASSERT_TRUE(array.ok()) << array.status().message();
+  core::Result<std::unique_ptr<source::RigSource>> rig =
+      source::RigSource::open(std::move(array).value(), two.compute(),
+                              two.compute_allocator(), families);
+  ASSERT_TRUE(rig.ok()) << rig.status().message();
   core::Result<std::unique_ptr<LiveWorker>> live = LiveWorker::create(
-      std::move(array).value(), two.compute(), two.compute_allocator(),
-      legacy_femto_board(), false, nullptr);
+      std::move(rig).value(), {lens}, legacy_femto_board(), false, nullptr);
   ASSERT_TRUE(live.ok()) << live.status().message();
   sensor::RgbdFrame frame;
   frame.color = picture;
@@ -419,20 +439,23 @@ TEST(AppLiveViewModels, GivesEachTileItsCamerasMarks) {
             Code::InvalidArgument);
 }
 
-// Each camera's panel takes its frame's presence, check, stillness, counters
-// and lost frames.
+// Each camera's panel takes its picture's presence, check, stillness and
+// counters, as sensor keeps them: sets the source skipped, newest winning,
+// and frames dropped are no loss; a frame that failed is.
 TEST(AppLiveViewModels, GivesEachCameraItsLiveState) {
   LiveSnapshot snapshot;
-  auto set = std::make_shared<sensor::FrameSet>();
-  set->frames.resize(2);
-  set->frames[0].emplace();
+  auto set = std::make_shared<source::PictureSet>();
+  set->cameras.resize(2);
+  set->cameras[0].present = true;
   snapshot.set = set;
   snapshot.checks.resize(2);
   snapshot.checks[0].verdict = ViewVerdict::Good;
   snapshot.stillness_px = {0.25, std::nullopt};
-  snapshot.lost = {std::nullopt, 7u};
+  snapshot.stats.unmatched = 12;  // sets skipped
   snapshot.stats.sensors.resize(2);
+  snapshot.stats.sensors[0].dropped = 30;
   snapshot.stats.sensors[1].received = 42;
+  snapshot.stats.sensors[1].failed = 2;
   const core::Result<std::vector<viz::CameraLive>> cameras =
       camera_lives(snapshot);
   ASSERT_TRUE(cameras.ok());
@@ -442,9 +465,37 @@ TEST(AppLiveViewModels, GivesEachCameraItsLiveState) {
   EXPECT_EQ(cameras.value()[0].check.verdict, ViewVerdict::Good);
   EXPECT_EQ(cameras.value()[0].stillness_px, 0.25);
   EXPECT_FALSE(cameras.value()[1].stillness_px.has_value());
-  EXPECT_FALSE(cameras.value()[0].lost.has_value());
-  EXPECT_EQ(cameras.value()[1].lost, 7u);
   EXPECT_EQ(cameras.value()[1].frames.received, 42u);
+  const quality::CameraSummary session;
+  const auto frames_tone = [&](std::size_t i) {
+    const core::Result<std::vector<viz::PanelLine>> lines =
+        viz::camera_panel(cameras.value()[i], session, legacy_femto_board());
+    EXPECT_TRUE(lines.ok());
+    for (const viz::PanelLine& line : lines.value()) {
+      if (line.label == "frames") return line.tone;
+    }
+    return viz::Tone::Muted;
+  };
+  EXPECT_EQ(frames_tone(0), viz::Tone::Normal);
+  EXPECT_EQ(frames_tone(1), viz::Tone::Warn);
+}
+
+// The set panel's times: each camera's picture's less the set's, either way
+// round, none where it has none; and the set's spread.
+TEST(AppLiveViewModels, GivesTheSetItsTimes) {
+  source::PictureSet set;
+  set.timestamp_ns = 1'000'000'000;
+  set.spread_ns = 16'600'000;
+  set.cameras = {{true, nullptr, 1'000'000'000},
+                 {true, nullptr, 1'000'000'000 - 16'600'000},
+                 {false, nullptr, 0}};
+  const core::Result<viz::SetLive> live = set_live(set);
+  ASSERT_TRUE(live.ok());
+  EXPECT_EQ(live->spread_ns, 16'600'000u);
+  ASSERT_EQ(live->skew_ns.size(), 3u);
+  EXPECT_EQ(live->skew_ns[0], std::optional<std::int64_t>(0));
+  EXPECT_EQ(live->skew_ns[1], std::optional<std::int64_t>(-16'600'000));
+  EXPECT_FALSE(live->skew_ns[2].has_value());
 }
 
 // The session panel's origin tag: each camera that found it in a capture
@@ -476,27 +527,31 @@ TEST(AppLiveViewModels, CountsTheCamerasAndViewsOfTheOriginTag) {
 // each camera, past the palette's own colours too, starts in gfx's
 // categorical colour of its index, so no two cameras share a tint.
 TEST(AppLiveViewModels, PlacesTheReferenceAndTintsEachCameraByItsIndex) {
-  sensor::SensorInfo info;
-  info.color = test::color_like_lens();
+  capture::SessionCamera info;
+  const sensor::camera::CameraModel lens = test::color_like_lens();
   info.depth = test::depth_like_lens();
   info.depth_to_color[3][0] = -0.032;  // the depth camera 32 mm to one side
   constexpr std::size_t kCameras = gfx::pipelines::kCategoricalPaletteSize + 3;
   constexpr std::size_t kReference = 2;
   std::vector<std::uint32_t> tints;
   for (std::size_t i = 0; i < kCameras; ++i) {
-    const viz::SceneCamera camera = scene_camera(info, i, i == kReference);
+    const viz::SceneCamera camera =
+        scene_camera(info, lens, i, i == kReference);
     EXPECT_EQ(camera.tint, gfx::pipelines::categorical_rgba8(i)) << i;
     EXPECT_EQ(camera.color_to_world.has_value(), i == kReference) << i;
     EXPECT_TRUE(camera.shown) << i;
-    EXPECT_EQ(camera.color.size.width, info.color->size.width) << i;
-    EXPECT_EQ(camera.color.intrinsics.fx, info.color->intrinsics.fx) << i;
+    EXPECT_EQ(camera.color.size.width, lens.size.width) << i;
+    EXPECT_EQ(camera.color.intrinsics.fx, lens.intrinsics.fx) << i;
     ASSERT_TRUE(camera.depth.has_value()) << i;
     EXPECT_EQ(camera.depth->intrinsics.fx, info.depth->intrinsics.fx) << i;
     EXPECT_EQ(camera.depth_to_color, info.depth_to_color) << i;
     tints.push_back(camera.tint);
   }
-  EXPECT_EQ(scene_camera(info, 0, true).color_to_world,
+  EXPECT_EQ(scene_camera(info, lens, 0, true).color_to_world,
             sensor::camera::Mat4d(1.0));
+  // A camera without depth, as a stereo pair's, is drawn as its lens alone.
+  capture::SessionCamera pair_camera;
+  EXPECT_FALSE(scene_camera(pair_camera, lens, 0, true).depth.has_value());
   std::sort(tints.begin(), tints.end());
   EXPECT_EQ(std::adjacent_find(tints.begin(), tints.end()), tints.end());
 }
@@ -505,8 +560,8 @@ TEST(AppLiveViewModels, PlacesTheReferenceAndTintsEachCameraByItsIndex) {
 // its id, the reference among them; each keeps its models, tint and toggle.
 // Poses for another number of cameras move none.
 TEST(AppLiveViewModels, PlacesEveryCameraAtItsPoseInRigOrder) {
-  sensor::SensorInfo info;
-  info.color = test::color_like_lens();
+  capture::SessionCamera info;
+  const sensor::camera::CameraModel lens = test::color_like_lens();
   info.depth = test::depth_like_lens();
   for (const std::size_t n : {1u, 3u, 5u}) {
     SCOPED_TRACE(n);
@@ -514,7 +569,7 @@ TEST(AppLiveViewModels, PlacesEveryCameraAtItsPoseInRigOrder) {
     std::vector<viz::SceneCamera> cameras;
     std::vector<sensor::camera::Mat4d> poses;
     for (std::size_t i = 0; i < n; ++i) {
-      cameras.push_back(scene_camera(info, i, i == reference));
+      cameras.push_back(scene_camera(info, lens, i, i == reference));
       cameras.back().shown = i % 2 == 0;
       cameras.back().depth_to_color[3][0] = -0.01 * static_cast<double>(i);
       // A turn about y and a step along x, each camera's own.
@@ -550,7 +605,7 @@ TEST(AppLiveViewModels, PlacesEveryCameraAtItsPoseInRigOrder) {
       EXPECT_EQ(cameras[i].tint, before[i].tint);
       EXPECT_EQ(cameras[i].shown, before[i].shown);
       EXPECT_EQ(cameras[i].depth_to_color, before[i].depth_to_color);
-      EXPECT_EQ(cameras[i].color.intrinsics.fx, info.color->intrinsics.fx);
+      EXPECT_EQ(cameras[i].color.intrinsics.fx, lens.intrinsics.fx);
       EXPECT_TRUE(cameras[i].depth.has_value());
     }
   }

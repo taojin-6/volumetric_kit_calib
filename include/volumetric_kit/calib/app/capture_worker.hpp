@@ -8,9 +8,9 @@
 ///        view takes is detected again at full resolution, checked and handed
 ///        to the session writer, off the window's thread.
 ///
-/// The live view finds the board by the faster hybrid; the solver takes full-
-/// resolution corners, so each capture's luma is searched again here (Full
-/// mode) and its views checked, the two detections compared
+/// The live view searches each picture's half; the solver takes corners found
+/// in the full picture, so each capture's luma is searched again here and
+/// its views checked, the two detections compared
 /// (`quality::live_vs_full_flagged`), the origin tag searched for in the same
 /// luma (`detect::detect_tag`, `kOriginTag`), and the capture queued on the
 /// capture tier's `SessionWriter`, which writes it on a thread of its own. The
@@ -37,8 +37,7 @@
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/core/base/result.hpp"
-#include "volumetric_kit/sensor/orbbec/orbbec_sync_config.hpp"
-#include "volumetric_kit/sensor/rgbd_sensor.hpp"
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -54,49 +53,40 @@ namespace volumetric_kit::calib::app {
 /// @endcode
 capture::Software app_software();
 
-/// @brief One camera of the rig, as its session records it.
-///
-/// @code
-/// for (std::size_t i = 0; i < array.size(); ++i) {
-///   VKC_ASSIGN(capture::SessionCamera camera,
-///              session_camera(array.sensor(i), sync));
-///   setup.cameras.push_back(std::move(camera));
-/// }
-/// @endcode
-/// @param camera  The sensor. An Orbbec camera's firmware, IP address, sync
-///                mode and lens models come from its `device_info`; another
-///                sensor's are left empty.
-/// @param sync    The rig's sync configuration: the camera's depth delay, by
-///                serial (0 for a camera it does not list).
-/// @return The camera; or `OutOfMemory`.
-core::Result<capture::SessionCamera> session_camera(
-    const sensor::IRgbdSensor& camera, const sensor::OrbbecRigSyncConfig& sync);
-
 /// @brief What the capture worker writes, and how it judges each capture.
 ///
 /// @code
 /// CaptureSetup setup;
 /// setup.root = config.output.path;
 /// setup.software = app_software();
-/// setup.sync_path = config.source.sync_config;
-/// setup.reference = array.primary();
-/// setup.depth_mode = preset.depth_mode;
-/// setup.cameras = cameras;  // session_camera's, in rig order
+/// setup.driver = opened.driver;
+/// setup.sync_path = opened.sync_path;
+/// setup.reference = opened.reference;
+/// setup.depth_mode = opened.depth_mode;
+/// setup.cameras = opened.cameras;  // the opener's, in the source's order
+/// setup.lenses = opened.lenses;
 /// @endcode
 struct CaptureSetup {
   /// The existing directory each session's own directory
   /// (`YYYY-MM-DD_HHMMSS`, `capture::session_stamp`) is created in.
   std::string root;
   capture::Software software;  ///< What the session was captured with.
-  std::string sync_path;       ///< The rig's sync configuration file.
-  std::size_t reference = 0;   ///< The reference camera, the rig's primary.
-  /// The rig's depth mode: its name and range. Its unit is the first
-  /// capture's frames' (`CameraFrameCopy::metres_per_unit`), and a later
-  /// capture in another unit fails.
-  capture::DepthMode depth_mode;
-  /// The cameras, in rig order, as every capture gives them: each with a
-  /// colour model, which the full detection's check takes.
+  std::string driver;          ///< What opened the cameras (`"orbbec"`).
+  /// The rig's sync configuration file; empty for a rig without one.
+  std::string sync_path;
+  std::size_t reference = 0;  ///< The reference camera, the rig's primary.
+  /// The depth mode of the cameras with depth: its name and range; empty
+  /// when none has depth. Its unit is the first capture's frames'
+  /// (`CameraFrameCopy::metres_per_unit`), and a later capture in another
+  /// unit fails.
+  std::optional<capture::DepthMode> depth_mode;
+  /// How the cameras code their colour (`"mjpeg"`); empty when unknown.
+  std::string color_codec;
+  /// The cameras, in rig order, as every capture gives them.
   std::vector<capture::SessionCamera> cameras;
+  /// Each camera's lens, in rig order, at its pictures' size: what its full
+  /// view is checked through, and the session's solve takes.
+  std::vector<sensor::camera::CameraModel> lenses;
   /// Each full view's check (`view`), and the session's thresholds.
   quality::SessionOptions session;
   quality::LiveVsFullOptions live_vs_full;  ///< When a capture is flagged.
@@ -118,19 +108,20 @@ struct CaptureSetup {
 /// for (std::size_t c = 0; c < capture.views.size(); ++c) {
 ///   const Observation& view = capture.views[c].observation;
 ///   if (!view.empty()) observations.push_back(view);  // the solve's input
-///   const std::vector<std::uint16_t>& depth = *capture.depth[c];
+///   if (capture.depth[c]) check_depth(*capture.depth[c]);
 ///   if (capture.tags[c]) tag_views.push_back(*capture.tags[c]);
 /// }
 /// @endcode
 struct KeptCapture {
   int index = -1;  ///< As the session numbers it (`captures/<NNN>.json`).
   /// Each camera's board found at full resolution, in rig order: the
-  /// detection its file holds, with `observation.camera_id` the camera's
-  /// serial and `observation.frame_id` the capture's index. A camera that
-  /// found no board, or whose detection failed, has no corners.
+  /// detection its file holds, with `observation.camera_id` the camera's id
+  /// and `observation.frame_id` the capture's index. A camera that found no
+  /// board, or whose detection failed, has no corners.
   std::vector<Detection> views;
-  /// Each camera's raw depth, in rig order, not null: the very samples the
-  /// session wrote as its PNG, shared with the writer, never copied.
+  /// Each camera's raw depth, in rig order: the very samples the session
+  /// wrote as its PNG, shared with the writer, never copied; null for a
+  /// camera without depth.
   std::vector<std::shared_ptr<const std::vector<std::uint16_t>>> depth;
   /// Each camera's origin tag (`kOriginTag`), in rig order, in its colour
   /// image's pixels: the corners its file holds; empty where the camera
@@ -153,14 +144,15 @@ struct KeptCapture {
 /// @endcode
 struct KeptCaptures {
   Target board;  ///< The session's board, locked at its first capture.
-  /// The rig's colour cameras, in rig order, as the session's checks take
-  /// them: each one's serial and colour model.
+  /// The rig's cameras, in rig order, as the session's checks take them:
+  /// each one's id and lens (`CaptureSetup::lenses`).
   std::vector<solve::RigCamera> cameras;
-  /// Each camera's sensor, in rig order (`CaptureSetup::cameras`): its depth
-  /// model and `depth_to_color` among them.
-  std::vector<sensor::SensorInfo> sensors;
+  /// Each camera's record, in rig order (`CaptureSetup::cameras`): its
+  /// depth model and `depth_to_color` among them.
+  std::vector<capture::SessionCamera> sensors;
   std::size_t reference = 0;  ///< The reference camera, by index.
-  /// The rig's depth mode, in the session's depth unit.
+  /// The depth mode of the cameras with depth, in the session's depth unit;
+  /// as default-made when none has depth.
   capture::DepthMode depth_mode;
   /// The solve's thresholds, the session's (`CaptureSetup::session.solve`).
   solve::InitialiseOptions solve;
@@ -218,8 +210,8 @@ class CaptureWorker final : public CaptureSink {
   /// @brief Check @p setup and start the thread; nothing is written until the
   ///        first capture.
   /// @param setup  What to write. Refused unless the root is non-empty, there
-  ///               is a camera, each with a colour model, the reference is
-  ///               one, and the capacity and `max_kept` are at least 1.
+  ///               is a camera, each with a lens at its size, the reference
+  ///               is one, and the capacity and `max_kept` are at least 1.
   /// @return The worker; `InvalidArgument` naming what @p setup gets wrong;
   ///         `IoError` if the thread cannot start; or `OutOfMemory`.
   static core::Result<std::unique_ptr<CaptureWorker>> create(
@@ -237,13 +229,16 @@ class CaptureWorker final : public CaptureSink {
 
   /// @brief Queue a capture.
   /// @param request  The capture, one part per camera, each with its luma
-  ///                 (`width * height` bytes) and the one depth unit.
+  ///                 (`width * height` bytes); a camera with depth's part
+  ///                 with its depth in the one depth unit, another's with
+  ///                 none. A part without a JPEG saves its luma.
   /// @return `true` once queued; `false`, with nothing queued, when
   ///         @ref full; `Unsupported`, with nothing queued, while the
   ///         captures kept and pending add up to `max_kept` (a drop makes
   ///         room); `InvalidArgument` for a request with a part per camera
-  ///         missing or extra, a part's luma not its size, or a part without
-  ///         a depth unit or in another unit than the first part; `IoError`
+  ///         missing or extra, a part's luma not its size, a camera with
+  ///         depth's part without a depth unit or in another unit than the
+  ///         first such part, or depth from a camera without it; `IoError`
   ///         once the thread has ended; or `OutOfMemory`.
   core::Result<bool> submit(CaptureRequest request) override;
 

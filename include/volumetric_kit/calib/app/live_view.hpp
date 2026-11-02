@@ -32,25 +32,27 @@
 #include "volumetric_kit/core/vulkan/vulkan.hpp"
 #include "volumetric_kit/gfx/core/retire_queue.hpp"
 #include "volumetric_kit/gfx/pipelines/depth_cloud_pipeline.hpp"
-#include "volumetric_kit/sensor/rgbd_sensor.hpp"
+#include "volumetric_kit/sensor/camera/camera_model.hpp"
 
 namespace volumetric_kit::calib::app {
 
 /// @brief Record @p snapshot's pictures into @p mosaic, and hold its set in
-///        @p retire until frame @p frame_number retires, so the decoder's
-///        images the copies read outlive them on the GPU.
+///        @p retire until frame @p frame_number retires, so the pictures the
+///        copies read outlive them on the GPU.
 /// @param mosaic        The rig's mosaic, one tile per camera.
 /// @param retire        The window's retire queue, on its frame loop's
 ///                      timeline.
 /// @param cmd           The frame's command buffer, recording, outside its
 ///                      rendering scope, on the renderer's graphics queue.
-/// @param snapshot      The snapshot; each camera's picture with colour is
-///                      written into its tile, a missing one keeps its last.
+/// @param snapshot      The snapshot; each camera's picture is written into
+///                      its tile -- its grey tile (`source::CameraPicture::
+///                      tile`), else its frame's colour -- and a missing one
+///                      keeps its last.
 /// @param frame_number  The frame's number (`windowing::Frame::number`).
 /// @return OK, with what the mosaic left out in its `refused`;
-///         `InvalidArgument` for a null snapshot or one whose set has a frame
-///         per camera missing or extra, with nothing recorded or held; the
-///         mosaic's `OutOfMemory`.
+///         `InvalidArgument` for a null snapshot or one whose set has a
+///         picture per camera missing or extra, with nothing recorded or
+///         held; the mosaic's `OutOfMemory`.
 ///
 /// @code
 /// if (fresh) {
@@ -102,11 +104,22 @@ core::Result<std::vector<viz::TileOverlay>> tile_overlays(
     const LiveSnapshot& snapshot, const std::vector<std::string>& ids,
     const quality::SessionSummary* session);
 
+/// @brief What the set panel shows of @p set's times (`viz::set_panel`).
+/// @param set  The set.
+/// @return Each camera's picture's time less the set's, and its spread; or
+///         `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const viz::SetLive set, set_live(*latest->set));
+/// VKC_ASSIGN(const auto lines, viz::set_panel(set, latest->stats, ids,
+///                                             saver));
+/// @endcode
+core::Result<viz::SetLive> set_live(const source::PictureSet& set);
+
 /// @brief What the camera panels show of each camera in @p snapshot.
 /// @param snapshot  The snapshot.
-/// @return One per camera, in rig order: its frame's presence, its view's
-///         check, its stillness, its counters and lost frames; or
-///         `OutOfMemory`.
+/// @return One per camera, in rig order: its picture's presence, its view's
+///         check, its stillness and its counters; or `OutOfMemory`.
 ///
 /// @code
 /// VKC_ASSIGN(const auto cameras, camera_lives(*latest));
@@ -180,25 +193,26 @@ core::Result<std::optional<core::TimelinePoint>> record_cloud(
 bool cloud_live(bool frozen, viz::ScenePlacement placement,
                 bool minimized) noexcept;
 
-/// @brief Sensor @p index's camera in the 3D view before the rig is solved
-///        (@ref placed_cameras places them all): its factory models, its tint
-///        gfx's @p index-th categorical colour, and placed, at the world's
-///        origin, only when it is the reference.
-/// @param info       The sensor: its colour model, and its depth model and
-///                   factory depth-to-colour extrinsic.
+/// @brief Camera @p index of the rig in the 3D view before the rig is solved
+///        (@ref placed_cameras places them all): its lens, its factory depth
+///        model, its tint gfx's @p index-th categorical colour, and placed,
+///        at the world's origin, only when it is the reference.
+/// @param camera     The camera's record: its depth model and factory
+///                   depth-to-colour extrinsic, if any.
+/// @param lens       Its lens: the colour camera the view draws.
 /// @param index      Its index in the rig, which picks its tint.
 /// @param reference  Whether it is the rig's reference camera.
 /// @return The view's camera, shown.
-/// @pre `info.color` holds a model.
 ///
 /// @code
-/// for (std::size_t i = 0; i < array.size(); ++i) {
-///   cameras.push_back(
-///       scene_camera(array.sensor(i).info(), i, i == array.primary()));
+/// for (std::size_t i = 0; i < opened.cameras.size(); ++i) {
+///   cameras.push_back(scene_camera(opened.cameras[i], opened.lenses[i], i,
+///                                  i == opened.reference));
 /// }
 /// @endcode
-viz::SceneCamera scene_camera(const sensor::SensorInfo& info, std::size_t index,
-                              bool reference);
+viz::SceneCamera scene_camera(const capture::SessionCamera& camera,
+                              const sensor::camera::CameraModel& lens,
+                              std::size_t index, bool reference);
 
 /// @brief Place every camera of the 3D view at Calibrate's poses; each
 ///        keeps its models, tint and toggle.

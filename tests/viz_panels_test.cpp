@@ -10,6 +10,7 @@
 
 #include "volumetric_kit/calib/viz/panels.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <limits>
 #include <optional>
@@ -135,21 +136,20 @@ TEST(CameraPanel, TonesTiltStillnessAndLossByTheQualityThresholds) {
   CameraLive camera = good_camera();
   camera.check.tilt_deg = 55.0;
   camera.stillness_px = 0.45;
-  camera.lost = 3;
   const quality::CameraSummary session;
   std::vector<PanelLine> l =
       camera_panel(camera, session, legacy_femto_board(), options).value();
   EXPECT_EQ(line(l, "tilt").tone, Tone::Warn);
   EXPECT_EQ(line(l, "stillness").tone, Tone::Good);
+  // Frames dropped, newest winning, are not a loss.
   EXPECT_EQ(line(l, "frames").value,
-            "1234 received, 1200 delivered, 30 dropped, 0 failed, 3 lost");
-  EXPECT_EQ(line(l, "frames").tone, Tone::Warn);
+            "1234 received, 1200 delivered, 30 dropped, 0 failed");
+  EXPECT_EQ(line(l, "frames").tone, Tone::Normal);
   EXPECT_EQ(line(l, "views").tone, Tone::Muted);
   EXPECT_EQ(line(l, "coverage").tone, Tone::Muted);
 
   camera.check.tilt_deg = 66.0;
   camera.stillness_px = 0.5;
-  camera.lost = 0;
   camera.frames.failed = 1;
   l = camera_panel(camera, session, legacy_femto_board(), options).value();
   EXPECT_EQ(line(l, "tilt").tone, Tone::Bad);
@@ -185,16 +185,18 @@ TEST(CameraPanel, ShowsAMissingFrameAndAViewWithoutAPose) {
       "none");
 }
 
-sensor::FrameSet set_of(const std::vector<std::optional<std::int64_t>>& at) {
-  sensor::FrameSet set;
-  set.timestamp_ns = 1'000'000'000;
+// A set whose cameras' pictures are `at` from its time; none where empty.
+SetLive set_of(const std::vector<std::optional<std::int64_t>>& at) {
+  SetLive set;
+  set.skew_ns = at;
+  std::optional<std::int64_t> lo;
+  std::optional<std::int64_t> hi;
   for (const std::optional<std::int64_t>& offset_ns : at) {
-    set.frames.emplace_back();
     if (!offset_ns) continue;
-    set.frames.back().emplace();
-    set.frames.back()->timestamp_ns =
-        static_cast<std::uint64_t>(1'000'000'000 + *offset_ns);
+    lo = std::min(lo.value_or(*offset_ns), *offset_ns);
+    hi = std::max(hi.value_or(*offset_ns), *offset_ns);
   }
+  if (lo) set.spread_ns = static_cast<std::uint64_t>(*hi - *lo);
   return set;
 }
 
@@ -238,7 +240,7 @@ TEST(SetPanel, WarnsOfAMissingFrameAWideSpreadAndAFullWriter) {
 // The writer is full when the caller says so, as it tells the capture rule:
 // the panel keeps no rule of its own.
 TEST(SetPanel, TonesTheWriterAsTheCallerJudgesIt) {
-  const sensor::FrameSet set = set_of({0, 0, 0});
+  const SetLive set = set_of({0, 0, 0});
   EXPECT_EQ(line(set_panel(set, {}, kIds, {4, 4, false}).value(), "saver").tone,
             Tone::Normal);
   EXPECT_EQ(line(set_panel(set, {}, kIds, {1, 4, true}).value(), "saver").tone,
@@ -246,8 +248,7 @@ TEST(SetPanel, TonesTheWriterAsTheCallerJudgesIt) {
 }
 
 TEST(SetPanel, WaitsForTheFirstSetAndRefusesIdsThatDoNotMatch) {
-  const std::vector<PanelLine> l =
-      set_panel(sensor::FrameSet{}, {}, {}, {}).value();
+  const std::vector<PanelLine> l = set_panel(SetLive{}, {}, {}, {}).value();
   EXPECT_EQ(line(l, "set").value, "none yet");
   EXPECT_EQ(line(l, "spread").tone, Tone::Muted);
   EXPECT_EQ(line(l, "saver").value, "0/0 queued");

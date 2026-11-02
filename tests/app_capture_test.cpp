@@ -47,6 +47,7 @@
 #include "scratch_dir.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/app/live_view.hpp"
+#include "volumetric_kit/calib/app/open_source.hpp"
 #include "volumetric_kit/calib/app/preset.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/detect/charuco.hpp"
@@ -86,14 +87,14 @@ using test::ScratchDir;
 
 capture::SessionCamera rig_camera(std::size_t i) {
   capture::SessionCamera camera;
-  camera.info.id = "SYN" + std::to_string(i);
-  camera.info.model = "fake";
-  camera.info.color = lens();
-  camera.info.depth = test::depth_like_lens();
-  camera.info.depth_to_color[3] = glm::dvec4(-0.032, 0.0, 0.002, 1.0);
-  camera.info.role =
-      i == 0 ? sensor::SyncRole::Primary : sensor::SyncRole::Secondary;
-  camera.info.fps = 25;
+  camera.id = "SYN" + std::to_string(i);
+  camera.model = "fake";
+  camera.size = {kWidth, kHeight};
+  camera.color = lens();
+  camera.depth = test::depth_like_lens();
+  camera.depth_to_color[3] = glm::dvec4(-0.032, 0.0, 0.002, 1.0);
+  camera.role = i == 0 ? "primary" : "secondary";
+  camera.fps = 25;
   return camera;
 }
 
@@ -102,11 +103,14 @@ CaptureSetup setup(const fs::path& root, std::size_t cameras,
   CaptureSetup out;
   out.root = root.string();
   out.software = app_software();
+  out.driver = "orbbec";
   out.sync_path = (root / "rig.json").string();
   out.reference = 0;
   out.depth_mode = depth_mode({640, 576}).value();
+  out.color_codec = "mjpeg";
   for (std::size_t i = 0; i < cameras; ++i) {
     out.cameras.push_back(rig_camera(i));
+    out.lenses.push_back(lens());
   }
   out.capacity = capacity;
   // The writer records the sync file's SHA-256.
@@ -491,12 +495,25 @@ TEST(AppCapture, RefusesARequestThatDoesNotFitTheRig) {
   small.cameras[1].luma.pop_back();
   queued = worker->submit(std::move(small));
   ASSERT_FALSE(queued.ok());
-  EXPECT_NE(queued.status().message().find(
-                "SYN1's luma is not its colour image's size"),
-            std::string::npos);
+  EXPECT_NE(
+      queued.status().message().find("SYN1's luma is not its pictures' size"),
+      std::string::npos);
   CaptureRequest other = request(2, 0.0);
   other.cameras[0].width = kWidth / 2;
   EXPECT_FALSE(worker->submit(std::move(other)).ok());
+  // A camera with depth sends it in a unit; one without, none.
+  CaptureRequest unitless = request(2, 0.0);
+  unitless.cameras[1].metres_per_unit = 0.0f;
+  queued = worker->submit(std::move(unitless));
+  ASSERT_FALSE(queued.ok());
+  EXPECT_EQ(queued.status().message(),
+            "capture: camera SYN1 has no depth unit");
+  CaptureRequest units = request(2, 0.0);
+  units.cameras[1].metres_per_unit = 0.0001f;
+  queued = worker->submit(std::move(units));
+  ASSERT_FALSE(queued.ok());
+  EXPECT_EQ(queued.status().message(),
+            "capture: camera SYN1's depth unit is not camera SYN0's");
   EXPECT_EQ(worker->pending(), 0u);
   worker->flush();
   EXPECT_TRUE(worker->take_events().empty());
@@ -526,8 +543,11 @@ TEST(AppCapture, RefusesASetupItCannotWrite) {
   s.capacity = 0;
   refused(s, "a capacity of 0");
   s = setup(root.path(), 2);
-  s.cameras[1].info.color.reset();
-  refused(s, "SYN1 has no colour model");
+  s.lenses.pop_back();
+  refused(s, "1 lenses for 2 cameras");
+  s = setup(root.path(), 2);
+  s.lenses[1].size = {640, 360};
+  refused(s, "SYN1's lens is not its pictures' size");
   s = setup(root.path(), 2);
   s.max_kept = 0;
   refused(s, "a max_kept of 0");
@@ -654,16 +674,16 @@ TEST(AppCapture, KeepsEachWrittenCaptureForCalibrate) {
   EXPECT_EQ(kept->directory, worker->directory());
   EXPECT_EQ(kept->reference, 1u);
   EXPECT_EQ(kept->solve.weak_below, 7);
-  EXPECT_EQ(kept->depth_mode.name, s.depth_mode.name);
+  EXPECT_EQ(kept->depth_mode.name, s.depth_mode->name);
   EXPECT_EQ(kept->depth_mode.metres_per_unit, 0.001f);
-  EXPECT_EQ(kept->depth_mode.min_m, s.depth_mode.min_m);
-  EXPECT_EQ(kept->depth_mode.max_m, s.depth_mode.max_m);
+  EXPECT_EQ(kept->depth_mode.min_m, s.depth_mode->min_m);
+  EXPECT_EQ(kept->depth_mode.max_m, s.depth_mode->max_m);
   ASSERT_EQ(kept->cameras.size(), 3u);
   ASSERT_EQ(kept->sensors.size(), 3u);
   for (std::size_t i = 0; i < 3; ++i) {
-    const sensor::SensorInfo& given = s.cameras[i].info;
+    const capture::SessionCamera& given = s.cameras[i];
     EXPECT_EQ(kept->cameras[i].id, given.id);
-    EXPECT_EQ(kept->cameras[i].model.intrinsics.fx, given.color->intrinsics.fx);
+    EXPECT_EQ(kept->cameras[i].model.intrinsics.fx, s.lenses[i].intrinsics.fx);
     EXPECT_EQ(kept->sensors[i].id, given.id);
     ASSERT_TRUE(kept->sensors[i].depth.has_value());
     EXPECT_EQ(kept->sensors[i].depth->size.width, given.depth->size.width);
@@ -804,8 +824,9 @@ TEST(AppCapture, NeverCopiesTheDepth) {
   capture::SessionInfo info;
   info.directory = (root.path() / "alone").string();
   info.software = s.software;
+  info.driver = s.driver;
   info.sync_path = s.sync_path;
-  info.reference = s.cameras[s.reference].info.id;
+  info.reference = s.cameras[s.reference].id;
   info.board = legacy_femto_board();
   info.depth_mode = s.depth_mode;
   info.cameras = s.cameras;
@@ -1201,28 +1222,127 @@ TEST(AppCapture, ADroppedCaptureTakesItsViewsOfTheTag) {
   EXPECT_TRUE(worker->take_errors().empty());
 }
 
+// A Femto's record, as the opener's Orbbec arm makes it: its sensor's facts,
+// its device's own, and its depth delay in the rig's sync file.
 TEST(AppCapture, RecordsEachCameraAndItsDepthDelay) {
-  sensor::SensorInfo info = rig_camera(1).info;
-  const test::FakeSensor fake(info);
+  sensor::SensorInfo info;
+  info.id = "SYN1";
+  info.model = "Orbbec Femto Mega";
+  info.color = lens();
+  info.depth = test::depth_like_lens();
+  info.depth_to_color[3] = glm::dvec4(-0.032, 0.0, 0.002, 1.0);
+  info.role = sensor::SyncRole::Secondary;
+  info.fps = 25;
+  sensor::OrbbecDeviceInfo device;
+  device.firmware_version = "1.2.9";
+  device.ip_address = "192.168.1.11";
+  device.sync_mode = sensor::OrbbecSyncMode::SecondarySynced;
+  device.color_lens_model = "brown-conrady";
+  device.depth_lens_model = "brown-conrady-k6";
   sensor::OrbbecRigSyncConfig sync;
   sync.devices.push_back({"SYN0", {}});
   sync.devices.push_back({"SYN1", {}});
   sync.devices[1].sync.depth_delay_us = 160;
-  core::Result<capture::SessionCamera> camera = session_camera(fake, sync);
+  core::Result<capture::SessionCamera> camera =
+      orbbec_camera(info, device, sync);
   ASSERT_TRUE(camera.ok()) << camera.status().message();
-  EXPECT_EQ(camera->info.id, "SYN1");
-  EXPECT_EQ(camera->info.color->size.width, kWidth);
-  EXPECT_EQ(camera->depth_delay_us, 160);
-  // Not an Orbbec camera: no vendor facts.
-  EXPECT_TRUE(camera->firmware.empty());
-  EXPECT_TRUE(camera->ip_address.empty());
-  EXPECT_TRUE(camera->sync_mode.empty());
-  EXPECT_TRUE(camera->color_lens_model.empty());
+  EXPECT_EQ(camera->id, "SYN1");
+  EXPECT_EQ(camera->model, "Orbbec Femto Mega");
+  EXPECT_EQ(camera->size.width, kWidth);
+  EXPECT_EQ(camera->size.height, kHeight);
+  EXPECT_EQ(camera->fps, 25u);
+  EXPECT_EQ(camera->role, "secondary");
+  ASSERT_TRUE(camera->color.has_value());
+  EXPECT_EQ(camera->color->intrinsics.fx, info.color->intrinsics.fx);
+  ASSERT_TRUE(camera->depth.has_value());
+  EXPECT_EQ(camera->depth_to_color, info.depth_to_color);
+  EXPECT_EQ(camera->lens, capture::LensOrigin::Factory);
+  EXPECT_TRUE(camera->input.empty());
+  ASSERT_TRUE(camera->orbbec.has_value());
+  EXPECT_EQ(camera->orbbec->firmware, "1.2.9");
+  EXPECT_EQ(camera->orbbec->ip_address, "192.168.1.11");
+  EXPECT_EQ(camera->orbbec->sync_mode,
+            sensor::to_string(sensor::OrbbecSyncMode::SecondarySynced));
+  EXPECT_EQ(camera->orbbec->color_lens_model, "brown-conrady");
+  EXPECT_EQ(camera->orbbec->depth_lens_model, "brown-conrady-k6");
+  EXPECT_EQ(camera->orbbec->depth_delay_us, 160);
   // A camera the sync file does not list has no delay.
   sync.devices.pop_back();
-  camera = session_camera(fake, sync);
+  camera = orbbec_camera(info, device, sync);
   ASSERT_TRUE(camera.ok());
-  EXPECT_EQ(camera->depth_delay_us, 0);
+  EXPECT_EQ(camera->orbbec->depth_delay_us, 0);
+}
+
+// A stereo pair's capture, grey only: each camera's luma, no JPEG and no
+// depth, which the session saves as a PGM that reads back byte for byte; its
+// session.json is version 2, with no depth or factory record; the capture
+// kept has no depth.
+TEST(AppCapture, SavesAColourOnlyCameraAsItsLuma) {
+  ScratchDir root;
+  CaptureSetup s;
+  s.root = root.path().string();
+  s.software = app_software();
+  s.driver = "decklink";
+  for (const char* id : {"bm-1", "bm-2"}) {
+    capture::SessionCamera camera;
+    camera.id = id;
+    camera.model = "DeckLink 8K Pro";
+    camera.size = {kWidth, kHeight};
+    camera.fps = 30;
+    camera.lens = capture::LensOrigin::StandIn;
+    s.cameras.push_back(std::move(camera));
+    s.lenses.push_back(lens());
+  }
+  std::unique_ptr<CaptureWorker> worker = make(std::move(s));
+  ASSERT_NE(worker, nullptr);
+  // Depth from a camera without it is refused.
+  const core::Result<bool> with_depth = worker->submit(request(2, 0.0));
+  ASSERT_FALSE(with_depth.ok());
+  EXPECT_EQ(with_depth.status().message(),
+            "capture: camera bm-1 has no depth camera");
+  CaptureRequest r = request(2, 0.0);
+  for (CameraFrameCopy& part : r.cameras) {
+    part.jpeg.clear();
+    part.depth.clear();
+    part.metres_per_unit = 0.0f;
+  }
+  const CaptureRequest sent = r;
+  ASSERT_TRUE(submit(*worker, std::move(r)));
+  worker->flush();
+  EXPECT_TRUE(worker->take_errors().empty());
+  const std::vector<CaptureEvent> events = worker->take_events();
+  ASSERT_EQ(events.size(), 1u);
+  EXPECT_EQ(events[0].kind, CaptureEvent::Kind::Saved)
+      << events[0].status.message();
+  const fs::path dir = worker->directory();
+  const std::string header = "P5\n" + std::to_string(kWidth) + " " +
+                             std::to_string(kHeight) + "\n255\n";
+  for (std::size_t i = 0; i < 2; ++i) {
+    const std::string id = i == 0 ? "bm-1" : "bm-2";
+    const std::string pgm =
+        read(dir / "images" / id / ("calib_img_" + id + "_000.pgm"));
+    ASSERT_EQ(pgm.size(), header.size() + sent.cameras[i].luma.size());
+    EXPECT_EQ(pgm.substr(0, header.size()), header);
+    EXPECT_TRUE(std::equal(
+        sent.cameras[i].luma.begin(), sent.cameras[i].luma.end(),
+        reinterpret_cast<const std::uint8_t*>(pgm.data()) + header.size()));
+  }
+  EXPECT_FALSE(fs::exists(dir / "depth"));
+  EXPECT_FALSE(fs::exists(dir / "factory_calibration.json"));
+  const json session = json::parse(read(dir / "session.json"));
+  EXPECT_EQ(session["version"], 2);
+  EXPECT_EQ(session["rig"], json::parse(R"({"driver": "decklink",
+                                            "reference": "bm-1"})"));
+  EXPECT_FALSE(session["streams"].contains("depth"));
+  EXPECT_EQ(session["cameras"][1]["lens"],
+            json::parse(R"({"origin": "stand-in"})"));
+  const std::shared_ptr<const KeptCaptures> kept = worker->kept();
+  ASSERT_NE(kept, nullptr);
+  ASSERT_EQ(kept->captures.size(), 1u);
+  for (const auto& depth : kept->captures[0]->depth) {
+    EXPECT_EQ(depth, nullptr);
+  }
+  EXPECT_EQ(kept->captures[0]->views[1].observation.points.size(), 8u);
 }
 
 // Each checkout's commit as the build read it, "-dirty" with uncommitted

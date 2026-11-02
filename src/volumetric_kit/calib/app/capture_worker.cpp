@@ -23,7 +23,6 @@
 #include "volumetric_kit/calib/detect/board.hpp"
 #include "volumetric_kit/calib/detect/tag.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
-#include "volumetric_kit/sensor/orbbec/orbbec_sensor.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -78,42 +77,18 @@ core::Status stopped() {
 
 }  // namespace
 
-core::Result<capture::SessionCamera> session_camera(
-    const sensor::IRgbdSensor& camera,
-    const sensor::OrbbecRigSyncConfig& sync) {
-  return compute::guarded(
-      "session_camera", [&]() -> core::Result<capture::SessionCamera> {
-        capture::SessionCamera out;
-        out.info = camera.info();
-        const auto* orbbec = dynamic_cast<const sensor::OrbbecSensor*>(&camera);
-        if (orbbec != nullptr) {
-          const sensor::OrbbecDeviceInfo& device = orbbec->device_info();
-          out.firmware = device.firmware_version;
-          out.ip_address = device.ip_address;
-          out.sync_mode = sensor::to_string(device.sync_mode);
-          out.color_lens_model = device.color_lens_model;
-          out.depth_lens_model = device.depth_lens_model;
-        }
-        for (const sensor::OrbbecSyncDevice& entry : sync.devices) {
-          if (entry.serial == out.info.id) {
-            out.depth_delay_us = entry.sync.depth_delay_us;
-          }
-        }
-        return out;
-      });
-}
-
 struct CaptureWorker::State {
   CaptureSetup setup;
-  std::vector<compute::CvCamera> cameras;  // each camera's colour lens
+  std::vector<compute::CvCamera> cameras;  // each camera's lens
 
   // The worker's thread's alone.
   std::unique_ptr<capture::SessionWriter> writer;
   std::optional<compute::Board> board;
   std::optional<quality::SessionChecks> checks;
-  float metres_per_unit = 0.0f;  // the session's depth unit, its first's
-  std::deque<Written> written;   // on the writer, in the order submitted
-  KeptCaptures kept_base;        // what each snapshot holds but its captures
+  // The session's depth unit, its first capture's; 0 without depth.
+  float metres_per_unit = 0.0f;
+  std::deque<Written> written;  // on the writer, in the order submitted
+  KeptCaptures kept_base;       // what each snapshot holds but its captures
   std::vector<std::shared_ptr<const KeptCapture>> kept_captures;
 
   // Shared.
@@ -174,12 +149,21 @@ struct CaptureWorker::State {
     resolve({std::move(event)}, 1, 0, {});
   }
 
+  // The depth unit of a request's cameras with depth (submit checked they
+  // share one); 0 when none has depth.
+  float unit_of(const CaptureRequest& request) const {
+    for (std::size_t i = 0; i < request.cameras.size(); ++i) {
+      if (setup.cameras[i].depth) return request.cameras[i].metres_per_unit;
+    }
+    return 0.0f;
+  }
+
   // The session's writer and checks, at its first capture, for its board.
   core::Status open_session(const CaptureRequest& request) {
     VKC_ASSIGN(compute::Board made, compute::Board::create(request.board));
     std::vector<solve::RigCamera> rig;
-    for (const capture::SessionCamera& camera : setup.cameras) {
-      rig.push_back({camera.info.id, *camera.info.color});
+    for (std::size_t i = 0; i < setup.cameras.size(); ++i) {
+      rig.push_back({setup.cameras[i].id, setup.lenses[i]});
     }
     VKC_ASSIGN(quality::SessionChecks session,
                quality::SessionChecks::create(rig, made, setup.reference,
@@ -187,25 +171,28 @@ struct CaptureWorker::State {
     KeptCaptures base;
     base.board = request.board;
     base.cameras = std::move(rig);
-    for (const capture::SessionCamera& camera : setup.cameras) {
-      base.sensors.push_back(camera.info);
-    }
+    base.sensors = setup.cameras;
     base.reference = setup.reference;
     base.solve = setup.session.solve;
     VKC_ASSIGN(const std::string stamp,
                capture::session_stamp(std::chrono::system_clock::now()));
+    const float unit = unit_of(request);
     capture::SessionInfo info;
     info.directory = (std::filesystem::path(setup.root) / stamp).string();
     info.software = setup.software;
+    info.driver = setup.driver;
     info.sync_path = setup.sync_path;
-    info.reference = setup.cameras[setup.reference].info.id;
+    info.reference = setup.cameras[setup.reference].id;
     info.board = request.board;
     info.square_measured = request.square_measured;
     info.depth_mode = setup.depth_mode;
-    info.depth_mode.metres_per_unit = request.cameras.front().metres_per_unit;
+    if (info.depth_mode) {
+      info.depth_mode->metres_per_unit = unit;
+      base.depth_mode = *info.depth_mode;
+    }
+    info.color_codec = setup.color_codec;
     info.cameras = setup.cameras;
     const std::string directory_name = info.directory;
-    base.depth_mode = info.depth_mode;
     base.directory = info.directory;
     capture::SessionWriterOptions options;
     options.queue_capacity = setup.capacity;
@@ -214,7 +201,7 @@ struct CaptureWorker::State {
     board = std::move(made);
     checks = std::move(session);
     kept_base = std::move(base);
-    metres_per_unit = request.cameras.front().metres_per_unit;
+    metres_per_unit = unit;
     const std::lock_guard<std::mutex> lock(mutex);
     directory = directory_name;
     return {};
@@ -229,7 +216,7 @@ struct CaptureWorker::State {
         fail_capture(request.meta, opened.with_context("session"));
         return;
       }
-    } else if (request.cameras.front().metres_per_unit != metres_per_unit) {
+    } else if (unit_of(request) != metres_per_unit) {
       fail_capture(request.meta,
                    core::Status::invalid_argument(
                        "capture: its depth unit is not the session's"));
@@ -252,7 +239,7 @@ struct CaptureWorker::State {
                       });
     std::vector<core::Status> failures;
     for (std::size_t i = 0; i < n; ++i) {
-      const std::string who = "capture: camera " + setup.cameras[i].info.id;
+      const std::string who = "capture: camera " + setup.cameras[i].id;
       if (!detect_errors[i].ok()) {
         failures.push_back(detect_errors[i].with_context(who));
       } else if (!check_errors[i].ok()) {
@@ -296,10 +283,14 @@ struct CaptureWorker::State {
       CameraFrameCopy& part = request.cameras[i];
       capture::CameraCapture& out = job.cameras[i];
       out.jpeg = std::move(part.jpeg);
+      // The luma the session saves of a camera with no JPEG.
+      if (out.jpeg.empty()) out.luma = std::move(part.luma);
       // The samples move into the one buffer the writer and the kept capture
       // share.
-      depth[i] = std::make_shared<const std::vector<std::uint16_t>>(
-          std::move(part.depth));
+      if (setup.cameras[i].depth) {
+        depth[i] = std::make_shared<const std::vector<std::uint16_t>>(
+            std::move(part.depth));
+      }
       out.depth = depth[i];
       out.timestamp_ns = part.timestamp_ns;
       out.sequence = part.sequence;
@@ -391,7 +382,7 @@ struct CaptureWorker::State {
           // Every view names its camera, one whose detection failed too.
           for (std::size_t c = 0; c < done.full.size(); ++c) {
             Observation& view = done.full[c].observation;
-            view.camera_id = setup.cameras[c].info.id;
+            view.camera_id = setup.cameras[c].id;
             view.frame_id = result.index;
           }
           const core::Status added = checks->add(result.index, done.full);
@@ -503,15 +494,23 @@ core::Result<std::unique_ptr<CaptureWorker>> CaptureWorker::create(
           return core::Status::invalid_argument(
               "CaptureWorker: a max_kept of 0 keeps no capture");
         }
+        if (setup.lenses.size() != setup.cameras.size()) {
+          return core::Status::invalid_argument(
+              "CaptureWorker: " + std::to_string(setup.lenses.size()) +
+              " lenses for " + std::to_string(setup.cameras.size()) +
+              " cameras");
+        }
         auto state = std::make_unique<State>();
-        for (const capture::SessionCamera& camera : setup.cameras) {
-          if (!camera.info.color) {
-            return core::Status::invalid_argument("CaptureWorker: camera " +
-                                                  camera.info.id +
-                                                  " has no colour model");
+        for (std::size_t i = 0; i < setup.cameras.size(); ++i) {
+          const capture::SessionCamera& camera = setup.cameras[i];
+          const sensor::camera::ImageSize& lens = setup.lenses[i].size;
+          if (lens.width != camera.size.width ||
+              lens.height != camera.size.height) {
+            return core::Status::invalid_argument(
+                "CaptureWorker: camera " + camera.id +
+                "'s lens is not its pictures' size");
           }
-          VKC_ASSIGN(compute::CvCamera cv,
-                     compute::cv_camera(*camera.info.color));
+          VKC_ASSIGN(compute::CvCamera cv, compute::cv_camera(setup.lenses[i]));
           state->cameras.push_back(std::move(cv));
         }
         const std::size_t capacity = setup.capacity;
@@ -561,25 +560,37 @@ core::Result<bool> CaptureWorker::submit(CaptureRequest request) {
           "capture: " + std::to_string(request.cameras.size()) +
           " cameras' frames for a rig of " + std::to_string(cameras.size()));
     }
+    const CameraFrameCopy* first_depth = nullptr;
+    std::size_t first = 0;
     for (std::size_t i = 0; i < cameras.size(); ++i) {
       const CameraFrameCopy& part = request.cameras[i];
-      const sensor::camera::ImageSize& size = cameras[i].info.color->size;
+      const sensor::camera::ImageSize& size = cameras[i].size;
       if (part.width != size.width || part.height != size.height ||
           part.luma.size() !=
               static_cast<std::size_t>(part.width) * part.height) {
         return core::Status::invalid_argument(
-            "capture: camera " + cameras[i].info.id +
-            "'s luma is not its colour image's size");
+            "capture: camera " + cameras[i].id +
+            "'s luma is not its pictures' size");
+      }
+      if (!cameras[i].depth) {
+        if (!part.depth.empty()) {
+          return core::Status::invalid_argument(
+              "capture: camera " + cameras[i].id + " has no depth camera");
+        }
+        continue;
       }
       const float unit = part.metres_per_unit;
       if (!(std::isfinite(unit) && unit > 0.0f)) {
         return core::Status::invalid_argument(
-            "capture: camera " + cameras[i].info.id + " has no depth unit");
+            "capture: camera " + cameras[i].id + " has no depth unit");
       }
-      if (unit != request.cameras.front().metres_per_unit) {
+      if (first_depth == nullptr) {
+        first_depth = &part;
+        first = i;
+      } else if (unit != first_depth->metres_per_unit) {
         return core::Status::invalid_argument(
-            "capture: camera " + cameras[i].info.id +
-            "'s depth unit is not camera " + cameras.front().info.id + "'s");
+            "capture: camera " + cameras[i].id +
+            "'s depth unit is not camera " + cameras[first].id + "'s");
       }
     }
     const std::size_t max_kept = state_->setup.max_kept;
