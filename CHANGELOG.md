@@ -47,7 +47,7 @@ release may break it, and each such entry says how to migrate
 - Loss is each camera's `SensorStats::failed`; `LiveSnapshot::lost` and
   `viz::CameraLive::lost` are gone. `viz::set_panel` takes a `viz::SetLive`
   (`app::set_live`), and `scene_camera` a record and its lens.
-- build: **calib pins sensor at #28's head** (48aba9d, 0.21.0) and requires
+- build: **calib pins sensor at #28's merge** (5697a87, 0.21.0) and requires
   sensor 0.21.0 and its stereo tier; the Orbbec SDK action follows the pin.
 - calib's version is 0.4.0, where it was 0.3.0.
 
