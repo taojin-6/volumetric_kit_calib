@@ -174,6 +174,11 @@ vc_add_test(lens_gate volumetric_kit::calib_quality vc_synthetic_rig
             opencv_calib opencv_geometry)
 target_include_directories(vc_lens_gate_test SYSTEM
                            PRIVATE "${VC_JSON_INCLUDE_DIR}")
+# quality: a stereo pair's rectified rows on a pair like the lab's, corners
+# placed in its view and seen through the true pair, against sensor's own
+# rectification; and calib's undistortion against OpenCV's default.
+vc_add_test(pair_row_check volumetric_kit::calib_quality vc_synthetic_rig
+            opencv_geometry)
 
 if(VC_WITH_RIG)
   # capture: sessions on disk, read back with sensor's readers and nlohmann.
