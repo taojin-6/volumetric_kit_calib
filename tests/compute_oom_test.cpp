@@ -30,9 +30,7 @@ TEST(ComputeOom, BoardTargetValidation) {
 
 TEST(ComputeOom, BoardUnsupportedKind) {
   Target target = legacy_femto_board();
-  target.kind = TargetKind::Checkerboard;
-  target.dictionary = MarkerDictionary::None;
-  target.marker_size_m = 0.0;
+  target.kind = TargetKind::AprilGrid;
   target.legacy_pattern = false;
   expect_oom_when_reporting([&] { return Board::create(target); },
                             Code::Unsupported);

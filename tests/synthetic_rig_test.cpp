@@ -93,7 +93,7 @@ bool sees(const SyntheticCamera& cam, const camera::Mat4d& board_to_world,
   for (const cv::Point2d& q : project(cam.model, board_to_camera, outline)) {
     if (q.x < m || q.y < m || q.x > w - m || q.y > h - m) return false;
   }
-  const cv::Point3f corner = board.charuco().getRightBottomCorner();
+  const cv::Point3f corner = board.charuco()->getRightBottomCorner();
   const camera::Vec3d centre(board_to_camera *
                              glm::dvec4(0.5 * corner.x, 0.5 * corner.y, 0, 1));
   const camera::Vec3d face = -camera::Vec3d(board_to_camera[2]);
@@ -149,7 +149,7 @@ TEST(SyntheticRig, PlanPlacesBoardsAsAPersonDoes) {
   const std::vector<Placement> plan = synthetic_plan(rig, board, options);
   ASSERT_EQ(plan.size(), options.count);
   // The centre and the normal's tilt written out, as the plan's oracle.
-  const cv::Point3f corner = board.charuco().getRightBottomCorner();
+  const cv::Point3f corner = board.charuco()->getRightBottomCorner();
   std::size_t floor = 0, level = 0, tilted = 0;
   for (std::size_t i = 0; i < plan.size(); ++i) {
     const camera::Mat4d& pose = plan[i].board_to_world;
@@ -288,7 +288,7 @@ TEST(SyntheticRig, RendersThePrintedFaceUnmirrored) {
 
   // The board fills pixels [25, 775) x [25, 475).
   cv::Mat drawn, expected;
-  board.charuco().generateImage(cv::Size(750, 450), drawn, 0, 1);
+  board.charuco()->generateImage(cv::Size(750, 450), drawn, 0, 1);
   const RenderOptions levels;
   drawn.convertTo(expected, CV_8U, (levels.white - levels.black) / 255.0,
                   levels.black);
@@ -451,7 +451,7 @@ TEST(SyntheticRig, FemtoBoardIsTheRigsBoard) {
   EXPECT_EQ(board.target().cols, rig.cols);
   EXPECT_EQ(board.target().square_size_m, rig.square_size_m);
   EXPECT_EQ(board.target().marker_size_m, rig.marker_size_m);
-  EXPECT_EQ(board.charuco().getIds(), (std::vector<int>{0, 1, 2, 3, 4, 5, 6}));
+  EXPECT_EQ(board.charuco()->getIds(), (std::vector<int>{0, 1, 2, 3, 4, 5, 6}));
 }
 
 // The chessboard's centre lands where asked. Untilted and unrolled, the

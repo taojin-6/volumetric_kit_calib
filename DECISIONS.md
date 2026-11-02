@@ -71,6 +71,63 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-11-01 — Plain checkerboards, one detector
+
+A lens is fitted from a plain checkerboard, the lab's (13 x 8 inner corners
+of 0.02 m, `legacy_checkerboard()`), which must reach the fisheye's image
+corners, past where a whole board fits.
+
+- **`compute::Board` builds a checkerboard**, with no OpenCV board: its
+  corners sit on the ChArUco board's grid, row by row. `charuco()` is a
+  pointer, null for a checkerboard (a break). Why: a checkerboard has no
+  OpenCV board, and a pointer says so where it is read.
+- **One geometric collinearity test** on the board's corners for both kinds,
+  in place of OpenCV's ChArUco-only one: three corners not on one line span
+  at least half a square. Its verdict on every ChArUco test view is
+  OpenCV's.
+- **`detect::detect_board` for both kinds.** A checkerboard is found by
+  `findChessboardCornersSB` asked for 5 x 4 inner corners with
+  `CALIB_CB_LARGER`, so any larger grid counts, a board cut by the picture's
+  edge included. Why 5 x 4: asked for the whole board, SB finds no cut board;
+  asked for 4 x 3, a still board cut by the edge comes back as a different
+  grid from frame to frame; 5 x 4 and 6 x 5 are stable. So `check_target`
+  needs at least 5 x 4, either way round. In the picture (captures) SB runs
+  with `NORMALIZE_IMAGE` and `EXHAUSTIVE`, not `ACCURACY` (four times the time
+  for 0.01-0.02 px); in the half (`DetectOptions::half`, the live view) with
+  `NORMALIZE_IMAGE`, each corner then refined in the picture by the ChArUco
+  hybrid's refinement, which both kinds share.
+- **Each corner SB returns is checked.** It is kept when it is in step with
+  its neighbours along its row and column, and its four squares, seen at
+  their centres, are dark and light by turns with at least half the grid's
+  median contrast; a grid with half its corners failing is dropped whole.
+  Why: grown past the size asked for, SB at times returns corners that are
+  not the board's. On the design review's renderer 5 of 24 views in the
+  fisheye's corners had corners 20-80 px off the board; on calib's, a whole
+  board turned 45 degrees gained a row of the T-junctions where it meets its
+  white margin (1 noise draw in 12), and a half search returned a grid
+  skipping every other row. Unchecked, such corners would be fitted, with
+  wrong ids.
+- **Measured on the way:** SB's corners err 0.14-0.19 px (median) on a board
+  square to the pixels, 0.02-0.09 px turned from them, on both renderers;
+  and on several threads SB can return a different grid from run to run on
+  one picture (8 x 4 or 7 x 4 corners), one more reason stillness pairs
+  corners by position. The detector's tests run OpenCV on one thread.
+- **The grid found is numbered row-major from its own first corner**, turned
+  a quarter when it fits the board only that way round; a grid larger than
+  the board either way round is refused, naming both sizes. Its first corner
+  can change between frames of a still board, which a lens does not mind:
+  each view has its own pose. So an id names a corner in its own view only.
+- **Stillness and live-vs-full pair a checkerboard's corners by position**
+  (`quality::CornerMatch::Nearest`, within a third of the corner's spacing),
+  a ChArUco board's by id. Why: by id, a still board whose numbering moved
+  reads a square or more of motion, and the capture would time out in the
+  corners the lens needs.
+- **The rig's solve refuses a checkerboard** (`initialise`,
+  `bundle_adjust`): extrinsics pair corners across cameras by id, which only
+  a board with markers gives.
+- The board editor and the session writer take ChArUco only until intrinsic
+  mode gives them a checkerboard's fields.
+
 ## 2026-11-01 — Depth as sensor prepares it, outliers dropped
 
 Calibrate's depth checks and the 3D view prepare depth with sensor's

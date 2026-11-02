@@ -65,7 +65,7 @@ View render(std::string name, const compute::Board& board,
       test::render_board(model, board_to_camera, board, options), optics);
   view.corners = test::project(model, board_to_camera, board.object_points());
   for (const std::vector<cv::Point3f>& marker :
-       board.charuco().getObjPoints()) {
+       board.charuco()->getObjPoints()) {
     view.markers.push_back(
         test::project(model, board_to_camera,
                       std::vector<cv::Point3d>(marker.begin(), marker.end())));
@@ -513,7 +513,7 @@ Seed hybrid_seed(const cv::Mat& image, const compute::Board& board, int id) {
   std::vector<int> ids;
   std::vector<std::vector<cv::Point2f>> markers;
   std::vector<int> marker_ids;
-  cv::aruco::CharucoDetector(board.charuco())
+  cv::aruco::CharucoDetector(*board.charuco())
       .detectBoard(half, corners, ids, markers, marker_ids);
   const auto in_image = [](const cv::Point2f& p) {
     return cv::Point2f(2.0f * p.x + 0.5f, 2.0f * p.y + 0.5f);

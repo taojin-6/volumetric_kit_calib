@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Tao Jin
 
-// The board: the rig's, what check_target accepts and refuses, and when two
-// boards are the same. The origin tag: the rig's, and what check_origin_tag
-// refuses.
+// The board: the rig's, the lab's checkerboard, what check_target accepts and
+// refuses, and when two boards are the same. The origin tag: the rig's, and
+// what check_origin_tag refuses.
 
 #include "volumetric_kit/calib/core/target.hpp"
 
 #include <cstddef>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -48,6 +49,48 @@ TEST(Target, LegacyFemtoBoardIsTheRigsBoard) {
   EXPECT_FALSE(board.square_size_tolerance_m);
   EXPECT_FALSE(board.planarity_bow_m);
   EXPECT_TRUE(check_target(board).ok()) << check_target(board).message();
+}
+
+TEST(Target, LegacyCheckerboardIsTheLabsBoard) {
+  const Target board = legacy_checkerboard();
+  EXPECT_EQ(board.kind, TargetKind::Checkerboard);
+  // 14 x 9 squares: 13 x 8 inner corners.
+  EXPECT_EQ(board.cols, 13);
+  EXPECT_EQ(board.rows, 8);
+  EXPECT_EQ(board.square_size_m, 0.02);
+  EXPECT_EQ(board.marker_size_m, 0.0);
+  EXPECT_EQ(board.dictionary, MarkerDictionary::None);
+  EXPECT_FALSE(board.legacy_pattern);
+  EXPECT_FALSE(board.square_size_tolerance_m);
+  EXPECT_FALSE(board.planarity_bow_m);
+  EXPECT_TRUE(check_target(board).ok()) << check_target(board).message();
+}
+
+// A checkerboard has at least 5 x 4 inner corners, either way round: the
+// smallest grid its detector asks for.
+TEST(Target, CheckerboardHasAtLeastFiveByFourCorners) {
+  for (const auto& [cols, rows] :
+       {std::pair{5, 4}, std::pair{4, 5}, std::pair{13, 4}, std::pair{4, 13}}) {
+    Target board = checkerboard();
+    board.cols = cols;
+    board.rows = rows;
+    EXPECT_TRUE(check_target(board).ok()) << cols << " x " << rows;
+  }
+  for (const auto& [cols, rows] :
+       {std::pair{4, 4}, std::pair{5, 3}, std::pair{3, 5}, std::pair{20, 3},
+        std::pair{1, 1}}) {
+    Target board = checkerboard();
+    board.cols = cols;
+    board.rows = rows;
+    const core::Status refused = check_target(board);
+    EXPECT_TRUE(RefusedNaming(refused, "rows")) << cols << " x " << rows;
+    EXPECT_NE(refused.message().find(std::to_string(cols) + " x " +
+                                     std::to_string(rows)),
+              std::string::npos)
+        << refused.message();
+  }
+  // A ChArUco board may be smaller: the rig's has 4 x 2.
+  EXPECT_TRUE(check_target(legacy_femto_board()).ok());
 }
 
 // A default board names no layout, markers or tolerances, so a check refuses

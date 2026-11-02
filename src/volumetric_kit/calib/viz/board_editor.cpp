@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <string>
 
 #include "imgui.h"
 #include "volumetric_kit/calib/compute/board.hpp"
@@ -15,7 +16,14 @@ namespace volumetric_kit::calib::viz {
 namespace {
 
 // A board the detector takes: one its Board builds, the rule's one home.
+// TODO: take a checkerboard once the editor has its fields (a kind, and no
+// markers) and the session writer takes one.
 core::Status check_board(const Target& board) {
+  if (board.kind != TargetKind::ChArUco) {
+    return core::Status::unsupported(
+        "BoardEditor: the board must be ChArUco, not " +
+        std::string(to_string(board.kind)));
+  }
   return compute::Board::create(board).status().with_context("BoardEditor");
 }
 

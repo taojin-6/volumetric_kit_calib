@@ -13,6 +13,7 @@
 #include <string_view>
 #include <vector>
 
+#include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/core/observation.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
@@ -38,6 +39,12 @@ core::Result<RigCameras> read_rig_cameras(const std::vector<RigCamera>& cameras,
 // InvalidArgument when a camera has two views of one capture.
 core::Status check_one_view_each(const std::vector<Observation>& views,
                                  const std::string& prefix);
+
+// InvalidArgument for a board whose corner ids do not name the same corner in
+// every camera's view (a checkerboard's): the rig's solve pairs corners
+// across cameras by id.
+core::Status check_shared_board(const compute::Board& board,
+                                const std::string& prefix);
 
 // "<prefix><name> must be <rule>", as InvalidArgument: an options check's
 // refusal, `prefix` naming the options ("initialise: options.").

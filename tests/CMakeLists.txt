@@ -70,7 +70,6 @@ vc_add_test(target vc_test_support)
 # core: the plain records (Observation / Detection / ViewCheck / CaptureMeta /
 # SensorProfile / LensProfile).
 vc_add_test(data_model volumetric_kit::calib_core)
-
 # The OpenCV modules only the tests use: imgcodecs, to compress rendered views,
 # and calib, the bundle adjustment's oracle.
 find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS imgcodecs calib)
@@ -101,6 +100,24 @@ target_sources(vc_compute_oom_test PRIVATE support/allocation_failure.cpp)
 vc_add_test(detect_charuco volumetric_kit::calib_detect vc_synthetic_rig
             opencv_imgcodecs opencv_imgproc)
 vc_add_test(detect_tag volumetric_kit::calib_detect vc_synthetic_rig)
+# detect: either board through one detector -- the lab's checkerboard rendered
+# at 4K through a fisheye truth, whole, cut and still, and the rig's ChArUco
+# board as detect_charuco finds it -- with the stillness and capture rule of a
+# still checkerboard; and, labelled slow, its search times on 20 pictures (U1),
+# `detect_board.timing`.
+vc_add_test(detect_board volumetric_kit::calib_quality
+            volumetric_kit::calib_detect vc_synthetic_rig)
+# About 40 s on an M5 Max: SB at 4K, on one thread.
+set_tests_properties(detect_board PROPERTIES TIMEOUT 300)
+add_test(NAME detect_board.timing COMMAND vc_detect_board_test
+                                          --gtest_filter=DetectBoardTiming.*)
+set_tests_properties(detect_board.timing PROPERTIES ${_vc_test_properties})
+set_tests_properties(detect_board.timing PROPERTIES TIMEOUT 300)
+set_property(TEST detect_board.timing PROPERTY LABELS slow)
+set_property(
+  TEST detect_board.timing
+  APPEND
+  PROPERTY ENVIRONMENT VC_TEST_TIMING=1)
 vc_add_test(detect_oom volumetric_kit::calib_detect vc_test_support)
 target_sources(vc_detect_oom_test PRIVATE support/allocation_failure.cpp)
 

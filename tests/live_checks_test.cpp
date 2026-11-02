@@ -7,6 +7,7 @@
 
 #include "volumetric_kit/calib/quality/live_checks.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <optional>
@@ -270,9 +271,10 @@ Detection corners(std::vector<std::pair<int, camera::Vec2d>> points) {
 }
 
 CornerShift shift_of(const std::vector<Detection>& before,
-                     const std::vector<Detection>& after) {
+                     const std::vector<Detection>& after,
+                     CornerMatch match = CornerMatch::ById) {
   core::Result<CornerShift> shift = core::Status::invalid_argument("unset");
-  EXPECT_NO_THROW(shift = corner_shift(before, after));
+  EXPECT_NO_THROW(shift = corner_shift(before, after, match));
   EXPECT_TRUE(shift.ok()) << shift.status().message();
   return shift.ok() ? *shift : CornerShift{};
 }
@@ -331,6 +333,58 @@ TEST(CornerShift, RefusesDetectionsThatDoNotPair) {
             "sizes");
   // A camera without corners may have no image.
   EXPECT_TRUE(corner_shift({Detection{}}, {one}).ok());
+}
+
+// A still checkerboard whose grid the detector numbered from another first
+// corner (turned half a turn) and found a row short: by position its corners
+// barely moved; by id they read a board's width of motion.
+TEST(CornerShift, PairsACheckerboardsCornersByPosition) {
+  const compute::Board checkerboard = test::lab_checkerboard();  // 13 x 8
+  ASSERT_EQ(corner_match(checkerboard), CornerMatch::Nearest);
+  ASSERT_EQ(corner_match(test::femto_board()), CornerMatch::ById);
+  std::vector<std::pair<int, camera::Vec2d>> first, again;
+  for (int id = 0; id < 104; ++id) {
+    const camera::Vec2d at(400.0 + 30.0 * (id % 13), 300.0 + 30.0 * (id / 13));
+    first.push_back({id, at});
+    // Each corner 0.1 px away, some way; the top row not found.
+    if (id >= 13) {
+      const double a = 0.7 * id;
+      again.push_back(
+          {103 - id, at + camera::Vec2d(0.1 * std::cos(a), 0.1 * std::sin(a))});
+    }
+  }
+  const CornerShift still =
+      shift_of({corners(first)}, {corners(again)}, corner_match(checkerboard));
+  ASSERT_TRUE(still.median_px.has_value());
+  EXPECT_NEAR(*still.median_px, 0.1, 1e-9);
+  EXPECT_NEAR(*still.max_px, 0.1, 1e-9);
+  EXPECT_GT(*shift_of({corners(first)}, {corners(again)}).median_px, 30.0);
+
+  // A corner pairs within a third of its spacing (30 px), not beyond.
+  for (const auto& [step, pairs] :
+       {std::pair{9.9, true}, std::pair{10.1, false}}) {
+    std::vector<std::pair<int, camera::Vec2d>> moved = first;
+    for (auto& corner : moved) corner.second.x += step;
+    const CornerShift shift =
+        shift_of({corners(first)}, {corners(moved)}, CornerMatch::Nearest);
+    EXPECT_EQ(shift.median_px.has_value(), pairs) << step;
+  }
+  // A lone corner has no spacing, and pairs with nothing.
+  EXPECT_FALSE(shift_of({corners({{0, {10, 10}}})}, {corners({{5, {10, 10}}})},
+                        CornerMatch::Nearest)
+                   .median_px);
+  // Ids are not read: one repeated is no fault.
+  EXPECT_TRUE(shift_of({corners({{0, {10, 10}}, {0, {40, 10}}})},
+                       {corners({{0, {10, 10}}})}, CornerMatch::Nearest)
+                  .median_px);
+}
+
+TEST(CornerShift, RefusesAMatchItDoesNotKnow) {
+  core::Result<CornerShift> shift = CornerShift{};
+  EXPECT_NO_THROW(shift = corner_shift({}, {}, static_cast<CornerMatch>(7)));
+  EXPECT_EQ(shift.status().domain(), Code::InvalidArgument);
+  EXPECT_EQ(shift.status().message(),
+            "corner_shift: match is not a CornerMatch");
 }
 
 TEST(LiveVsFull, FlagsAMedianOrAMaxAboveItsLimit) {

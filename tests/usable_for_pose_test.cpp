@@ -2,11 +2,16 @@
 // Copyright (c) 2026 Tao Jin
 
 // Whether a view fixes the board's pose: enough corners, each the board's
-// once, finite and inside the image, and not on one line.
+// once, finite and inside the image, and not on one line, as OpenCV's check
+// says of every ChArUco view, and of a checkerboard's lines.
 
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 
+#include <algorithm>
+#include <cstddef>
 #include <limits>
+#include <numeric>
+#include <random>
 #include <set>
 #include <string>
 #include <vector>
@@ -132,6 +137,109 @@ TEST(UsableForPose, NamesEachAnswer) {
   EXPECT_STREQ(to_string(ViewUse::OutsideImage), "outside_image");
   EXPECT_STREQ(to_string(ViewUse::Collinear), "collinear");
   EXPECT_STREQ(to_string(static_cast<ViewUse>(99)), "unknown");
+}
+
+// The verdict OpenCV's check gave, as usable_for_pose asked it before the
+// check became geometric: collinear when, any one corner left out, OpenCV's
+// checkCharucoCornersCollinear says the rest lie on one line.
+bool opencv_collinear(const Board& board, const std::vector<int>& ids) {
+  std::vector<int> others(ids.size() - 1);
+  for (std::size_t skip = 0; skip < ids.size(); ++skip) {
+    for (std::size_t i = 0, j = 0; i < ids.size(); ++i) {
+      if (i != skip) others[j++] = ids[i];
+    }
+    if (board.charuco()->checkCharucoCornersCollinear(others)) return true;
+  }
+  return false;
+}
+
+// Every view of the rig's board of 4 corners or more, and 4000 views of a
+// 6 x 4-corner board drawn at random, in random order: the geometric check
+// gives OpenCV's verdict on each.
+TEST(UsableForPose, CollinearAsOpenCVSaysOnEveryChArUcoView) {
+  Target larger = legacy_femto_board();
+  larger.cols = 6;
+  larger.rows = 4;
+  larger.dictionary = MarkerDictionary::ArUco4x4_50;
+  const Board boards[] = {femto_board(), Board::create(larger).value()};
+  const cv::Size tall(4000, 20000);  // view_of's pixels for ids up to 23
+
+  std::size_t views = 0;
+  std::size_t collinear = 0;
+  const auto compare = [&](const Board& board, const std::vector<int>& ids) {
+    core::Result<ViewUse> use = ViewUse::Usable;
+    EXPECT_NO_THROW(use = usable_for_pose(board, view_of(ids), tall));
+    ASSERT_TRUE(use.ok()) << use.status().message();
+    const bool opencv = opencv_collinear(board, ids);
+    EXPECT_EQ(*use == ViewUse::Collinear, opencv)
+        << ::testing::PrintToString(ids);
+    EXPECT_TRUE(*use == ViewUse::Collinear || *use == ViewUse::Usable);
+    ++views;
+    if (opencv) ++collinear;
+  };
+  for (unsigned mask = 0; mask < 256; ++mask) {
+    std::vector<int> ids;
+    for (int id = 0; id < 8; ++id) {
+      if ((mask >> id) & 1u) ids.push_back(id);
+    }
+    if (ids.size() >= 4) compare(boards[0], ids);
+  }
+  std::mt19937 rng(7);
+  for (int n = 0; n < 4000; ++n) {
+    std::vector<int> all(24);
+    std::iota(all.begin(), all.end(), 0);
+    std::shuffle(all.begin(), all.end(), rng);
+    // Mostly few corners, where lines are likely; some from one row or
+    // column, plus one.
+    const std::size_t count = 4 + rng() % 4;
+    std::vector<int> ids(all.begin(), all.begin() + count);
+    if (n % 4 == 0) {
+      const int row = static_cast<int>(rng() % 4);
+      ids = {row * 6, row * 6 + 1, row * 6 + 3, row * 6 + 5};
+      ids.push_back(all[0]);
+    } else if (n % 4 == 1) {
+      const int col = static_cast<int>(rng() % 6);
+      ids = {col, col + 6, col + 12, col + 18};
+      ids.push_back(all[0]);
+    }
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    std::shuffle(ids.begin(), ids.end(), rng);
+    compare(boards[1], ids);
+  }
+  EXPECT_EQ(views, 163u + 4000u);
+  EXPECT_GT(collinear, 1000u);  // both verdicts met often
+  EXPECT_LT(collinear, 3000u);
+}
+
+// A checkerboard's corners on a row, a column, a diagonal or a steeper line
+// are collinear, with any one more corner too; two off the line are usable.
+TEST(UsableForPose, ChecksACheckerboardsLinesToo) {
+  const Board board = Board::create(legacy_checkerboard()).value();  // 13 x 8
+  const cv::Size tall(4000, 20000);
+  const auto use_on = [&](const std::vector<int>& ids) {
+    Observation view;  // the pixels do not matter, only the ids
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+      const double k = static_cast<double>(i);
+      view.points.push_back(
+          {ids[i], {100.0 + 31.0 * k, 100.0 + 17.0 * k * k}, 1.0});
+    }
+    return usable_for_pose(board, view, tall).value();
+  };
+  for (const std::vector<int>& line :
+       std::vector<std::vector<int>>{{0, 1, 2, 3, 12},
+                                     {0, 13, 26, 39, 91},
+                                     {0, 14, 28, 42, 56},
+                                     {0, 15, 30, 45},
+                                     {12, 24, 36, 48}}) {
+    EXPECT_EQ(use_on(line), ViewUse::Collinear) << line[1];
+    std::vector<int> plus_one = line;
+    plus_one.push_back(line[1] == 1 ? 20 : 5);
+    EXPECT_EQ(use_on(plus_one), ViewUse::Collinear) << line[1];
+    std::vector<int> plus_two = plus_one;
+    plus_two.push_back(line[1] == 1 ? 33 : 7);
+    EXPECT_EQ(use_on(plus_two), ViewUse::Usable) << line[1];
+  }
 }
 
 TEST(UsableForPose, RefusesAnImageOfNoArea) {

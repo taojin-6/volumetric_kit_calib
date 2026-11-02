@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <numeric>
 #include <optional>
@@ -67,10 +68,11 @@ std::optional<cv::aruco::PredefinedDictionaryType> opencv_dictionary(
   return std::nullopt;
 }
 
-Board::Board(const Target& target, const cv::aruco::CharucoBoard& charuco,
+Board::Board(const Target& target,
+             std::optional<cv::aruco::CharucoBoard> charuco,
              std::vector<cv::Point3d> object_points)
     : target_(target),
-      charuco_(charuco),
+      charuco_(std::move(charuco)),
       object_points_(std::move(object_points)) {}
 
 cv::Point3d Board::centre() const noexcept {
@@ -93,13 +95,15 @@ sensor::camera::Vec3d face_normal(
 core::Result<Board> Board::create(const Target& target) {
   return guarded("Board::create", [&]() -> core::Result<Board> {
     VKC_TRY(check_target(target));
-    if (target.kind != TargetKind::ChArUco) {
+    if (target.kind != TargetKind::ChArUco &&
+        target.kind != TargetKind::Checkerboard) {
       return core::Status::unsupported(
-          "target.kind must be ChArUco for a Board");
+          "target.kind must be ChArUco or Checkerboard for a Board");
     }
-    // OpenCV's board keeps its lengths and corners as float, its far corner at
-    // squares x square_size_m: each must be a normal float (a double beyond
-    // float's range does not even convert).
+    // OpenCV keeps a board's lengths and corners as float (its ChArUco board,
+    // and the corners its solves take), the far corner at squares x
+    // square_size_m: each must be a normal float (a double beyond float's
+    // range does not even convert).
     constexpr float kMin = std::numeric_limits<float>::min();
     if (!(target.square_size_m >= kMin &&
           target.square_size_m <= std::numeric_limits<float>::max())) {
@@ -112,6 +116,18 @@ core::Result<Board> Board::create(const Target& target) {
     if (!std::isfinite(square * (max_corners + 1.0f))) {
       return core::Status::invalid_argument(
           "target.square_size_m must keep the board's extent a float");
+    }
+    if (target.kind == TargetKind::Checkerboard) {
+      // The ChArUco board's grid (getChessboardCorners), row by row.
+      std::vector<cv::Point3d> corners;
+      corners.reserve(static_cast<std::size_t>(target.rows) * target.cols);
+      for (int r = 0; r < target.rows; ++r) {
+        for (int c = 0; c < target.cols; ++c) {
+          corners.emplace_back((c + 1) * target.square_size_m,
+                               (r + 1) * target.square_size_m, 0.0);
+        }
+      }
+      return Board(target, std::nullopt, std::move(corners));
     }
     const float marker = static_cast<float>(target.marker_size_m);
     if (!(marker >= kMin && marker < square)) {

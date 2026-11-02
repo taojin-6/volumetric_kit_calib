@@ -60,10 +60,13 @@ renderer.
   on the core's vulkan tier, on a `VkDevice` shared with `sensor` and `gfx`, so
   frames pass between them without copies (MoltenVK on Apple; native Metal
   deferred).
-- **Detection:** the `detect` tier finds the ChArUco board in an 8-bit luma
-  image with OpenCV's detector, as corners by id and markers, at full
-  resolution or by the live view's faster hybrid; and the origin tag on the
-  floor, one AprilTag by id, its corners refined to sub-pixel.
+- **Detection:** the `detect` tier finds the board in an 8-bit luma image,
+  through one detector for both kinds: a ChArUco board with OpenCV's
+  detector, as corners by id and markers; a plain checkerboard with
+  `findChessboardCornersSB`, cut by the image's edge too, its ids holding in
+  one view only. It searches the image, or the image halved for the live
+  view, refining each corner in the image. It also finds the origin tag on
+  the floor, one AprilTag by id, its corners refined to sub-pixel.
 - **Solve:** the rig's extrinsics from views of the board. `initialise` places
   every camera and board from the views alone -- each view's own pose (IPPE),
   the spanning tree of the camera links that share the most captures, each

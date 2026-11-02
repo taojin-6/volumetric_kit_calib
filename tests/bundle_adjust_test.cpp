@@ -368,7 +368,7 @@ TEST(ViewResiduals, JacobiansMatchCentralDifferences) {
       glm::normalize(camera::Vec3d(0.3, -0.5, 0.8));
   const camera::Vec3d board_axis =
       glm::normalize(camera::Vec3d(-0.6, 0.2, 0.7));
-  const cv::Point3f corner = board.charuco().getRightBottomCorner();
+  const cv::Point3f corner = board.charuco()->getRightBottomCorner();
   const camera::Vec3d middle(0.5 * corner.x, 0.5 * corner.y, 0.0);
   Observation view;
   for (int id = 0; id < 8; ++id) {
@@ -1435,6 +1435,20 @@ TEST(BundleAdjust, RefusesWhatItCannotSolve) {
     EXPECT_NE(solution.status().message().find(c.says), std::string::npos)
         << c.name << ": " << solution.status().message();
   }
+}
+
+// The checkerboard initialise refuses, refused here too.
+TEST(BundleAdjust, RefusesACheckerboard) {
+  const Scene scene = make_scene(10);
+  core::Result<RigSolution> solution = core::Status::invalid_argument("unset");
+  EXPECT_NO_THROW(solution =
+                      bundle_adjust(scene.cameras, test::lab_checkerboard(),
+                                    scene.views, first_rig(scene), {}));
+  EXPECT_EQ(solution.status().domain(), Code::InvalidArgument);
+  EXPECT_EQ(solution.status().message().rfind(
+                "bundle_adjust: a checkerboard has no markers", 0),
+            0u)
+      << solution.status().message();
 }
 
 TEST(BundleAdjust, RefusesOptionsOutOfRange) {

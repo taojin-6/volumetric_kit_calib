@@ -861,6 +861,19 @@ TEST(Initialise, RefusesWhatItCannotSolve) {
   }
 }
 
+// A checkerboard's ids name its corners in one view only, so no capture's
+// views pair across cameras: the rig's extrinsics refuse it.
+TEST(Initialise, RefusesACheckerboard) {
+  const Scene scene = make_scene(10);
+  const core::Result<InitialRig> rig =
+      run(scene.cameras, test::lab_checkerboard(), scene.views, 0);
+  EXPECT_EQ(rig.status().domain(), Code::InvalidArgument);
+  EXPECT_EQ(rig.status().message(),
+            "initialise: a checkerboard has no markers, so its corner ids do "
+            "not match across cameras; the rig's extrinsics need a ChArUco "
+            "board");
+}
+
 TEST(Initialise, RefusesOptionsOutOfRange) {
   const Scene scene = make_scene(10);
   const double nan = std::numeric_limits<double>::quiet_NaN();

@@ -8,7 +8,8 @@
 ///        id and its markers.
 ///
 /// The detector is OpenCV's `CharucoDetector` with its default parameters and
-/// no camera model.
+/// no camera model. Internal: callers find either kind of board with
+/// `detect_board` (board.hpp).
 
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/core/detection.hpp"
@@ -54,8 +55,9 @@ enum class Mode {
 ///         (another board's markers of the same dictionary are left out).
 ///         Or `InvalidArgument` for an image with no pixels (or too few for
 ///         @p mode), a null `data`, a `stride` below `width`, a side longer
-///         than OpenCV's `int` holds, or a @p mode that is not a @ref Mode;
-///         or what OpenCV threw (`compute::guarded`).
+///         than OpenCV's `int` holds, a @p mode that is not a @ref Mode, or a
+///         board that is not ChArUco; or what OpenCV threw
+///         (`compute::guarded`).
 ///
 /// @code
 /// VKC_ASSIGN(Detection detection,
