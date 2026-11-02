@@ -26,6 +26,7 @@ using Verdict = PairRowCheck::Verdict;
 
 constexpr const char* kWho = "check_pair_rows";
 constexpr int kColumns = 3;
+constexpr double kPi = 3.14159265358979323846;
 constexpr std::array<const char*, kPairRowCells> kCellNames = {
     "top-left", "top",         "top-right", "left",        "centre",
     "right",    "bottom-left", "bottom",    "bottom-right"};
@@ -81,9 +82,9 @@ core::Result<CaptureViews> pair_views(const std::vector<Observation>& views,
   return out;
 }
 
-// Where `pixels` of one camera land in its rectified view: undistorted
-// exactly, turned by `rotation` (R1 or R2), projected by `k`. NaN for a ray
-// that does not reach the view's front.
+// Where `pixels` of one camera land in its rectified view: undistorted to
+// convergence, turned by `rotation` (R1 or R2), projected by `k`. NaN for a
+// ray that does not reach the view's front.
 core::Result<std::vector<camera::Vec2d>> rectify_pixels(
     const camera::CameraModel& model, const camera::Mat3d& rotation,
     const camera::PinholeIntrinsics& k,
@@ -104,6 +105,35 @@ core::Result<std::vector<camera::Vec2d>> rectify_pixels(
   return out;
 }
 
+// The standard errors in a cell's limit for its `n` corners: Student's t for
+// n - 1 degrees of freedom at the two-sided tail a normal's 3 leaves, 0.27%.
+// Its distribution for whole degrees of freedom (Abramowitz and Stegun 26.7.3
+// and 26.7.4), solved by bisection.
+double student_t(std::size_t n) {
+  const std::size_t dof = n - 1;
+  const double inside = std::erf(3.0 / std::sqrt(2.0));
+  // P(|T| <= sqrt(dof) tan(theta)).
+  const auto within = [dof](double theta) {
+    const double s = std::sin(theta);
+    const double c = std::cos(theta);
+    double term = dof % 2 == 0 ? 1.0 : c;
+    double sum = term;
+    for (std::size_t k = dof % 2 == 0 ? 2 : 3; k + 2 <= dof; k += 2) {
+      term *= (k - 1.0) / static_cast<double>(k) * c * c;
+      sum += term;
+    }
+    if (dof % 2 == 0) return s * sum;
+    return 2.0 / kPi * (theta + (dof > 1 ? s * sum : 0.0));
+  };
+  double lo = 0.0;
+  double hi = kPi / 2.0;
+  for (int i = 0; i < 60; ++i) {
+    const double mid = 0.5 * (lo + hi);
+    (within(mid) < inside ? lo : hi) = mid;
+  }
+  return std::sqrt(static_cast<double>(dof)) * std::tan(0.5 * (lo + hi));
+}
+
 // The gate over the cells' Δy: fills the cells, the verdict and its reason.
 void judge_cells(const std::array<std::vector<double>, kPairRowCells>& cells,
                  PairRowCheck& out) {
@@ -122,7 +152,8 @@ void judge_cells(const std::array<std::vector<double>, kPairRowCells>& cells,
     double squares = 0.0;
     for (const double d : dy) squares += (d - mean) * (d - mean);
     const double standard_error = std::sqrt(squares / (n - 1.0) / n);
-    const double limit = std::max(o.max_cell_mean_px, 3.0 * standard_error);
+    const double limit =
+        std::max(o.max_cell_mean_px, student_t(dy.size()) * standard_error);
     out.cell_mean_px[c] = mean;
     out.cell_limit_px[c] = limit;
     ++judged;

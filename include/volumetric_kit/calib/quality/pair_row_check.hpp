@@ -47,8 +47,10 @@ struct PairRowCheckOptions {
   sensor::camera::ImageSize rectified{0, 0};
   double alpha = 0.0;  ///< As the runtime's rectifier; in [0, 1].
   /// In every cell of a 3 x 3 grid over the rectified view with at least
-  /// `min_cell_corners` corners, the mean Δy at most this, or 3 standard
-  /// errors of that mean if larger: noise alone cannot fail a right pair.
+  /// `min_cell_corners` corners, the mean Δy at most this, or t standard
+  /// errors of that mean if larger: t is Student's for the cell's corners at
+  /// the two-sided 0.27% of a normal's 3 (4.53 at 8 corners, 3.28 at 30), so
+  /// noise alone fails a cell of a right pair at most 0.27% of the time.
   double max_cell_mean_px = 0.15;
   std::size_t min_cell_corners = 8;  ///< At least 2.
   /// Cells with `min_cell_corners`, at least, one in each outer column among
@@ -103,8 +105,9 @@ struct PairRowCheck {
       std::numeric_limits<double>::quiet_NaN(),
       std::numeric_limits<double>::quiet_NaN(),
       std::numeric_limits<double>::quiet_NaN()};
-  /// Each judged cell's limit: `max_cell_mean_px`, or 3 standard errors of
-  /// its mean if larger; not a number where the mean is.
+  /// Each judged cell's limit: `max_cell_mean_px`, or Student's t standard
+  /// errors of its mean if larger (@ref PairRowCheckOptions::max_cell_mean_px);
+  /// not a number where the mean is.
   std::array<double, kPairRowCells> cell_limit_px = cell_mean_px;
   /// The median of every counted corner's |Δy| (pixels); reported, not
   /// gated. Not a number with none counted.
@@ -124,11 +127,11 @@ VC_QUALITY_API const char* to_string(PairRowCheck::Verdict verdict) noexcept;
 ///
 /// The pair is sensor's `stereo_calibration(solved, left, right)`, rectified
 /// by `rectify_stereo` at `options.rectified` and `options.alpha`. Each corner
-/// is undistorted exactly (`compute::undistort_points`, to 1e-10 px:
-/// OpenCV's default five iterations stop short of a fisheye's lens), turned by
-/// its camera's rectifying rotation (OpenCV's `R1` or `R2`) and projected by
-/// the rectified camera. A corner outside either rectified view is not
-/// counted.
+/// is undistorted by `compute::undistort_points`, iterated toward 1e-10 px
+/// at most 100 times (OpenCV's default five iterations stop short of a
+/// fisheye's lens), turned by its camera's rectifying rotation (OpenCV's `R1`
+/// or `R2`) and projected by the rectified camera. A corner outside either
+/// rectified view is not counted.
 ///
 /// **The gate.** Cells of a 3 x 3 grid over the left rectified view with at
 /// least `min_cell_corners` corners are judged: each mean Δy within its limit

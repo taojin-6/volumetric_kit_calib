@@ -6,14 +6,15 @@
 // runtime's 960 x 544: corners placed in the rectified view at 1.2-4 m and
 // projected through the true pair. An exact pair reads nothing in any cell; a
 // 1 mrad pitch reads f times it, as analysed, the means equal to rows through
-// rectify_stereo's own R1, R2 and K to 1e-9 px; noise passes, its 95th
-// percentile as the noise and each corner's slope predict, and heavy noise is
-// held to its own standard error; a lens bent at one edge fails that cell,
-// where a percentile would pass it; no corner, corners in the centre alone,
-// or no side are not enough, and say where to capture; the pair named the
-// other way round is Swapped, a vertical one Refused; corners outside the
-// view are not counted; and calib's undistortion is exact to the lab lens's
-// image corners.
+// rectify_stereo's own R1, R2 and K to 1e-8 px at alpha 0 and 1; noise
+// passes, its 95th percentile as the noise and each corner's slope predict,
+// and heavy noise is held to Student's t standard errors for each cell's
+// corners; a lens bent at one edge fails that cell, where a percentile would
+// pass it; no corner, corners in the centre alone, or no side are not enough,
+// and say where to capture, unless a cell fails first; the pair named the
+// other way round is Swapped, a vertical one Refused, quoting the refusal as
+// named; corners outside the view are not counted; and calib's undistortion
+// holds within 1e-6 px out to the lab lens's image corners.
 
 #include "volumetric_kit/calib/quality/pair_row_check.hpp"
 
@@ -76,15 +77,16 @@ camera::ArrayCalibration file_of(const Rig& rig) {
   return file;
 }
 
-sensor::StereoRectification rectification(const Rig& rig) {
+sensor::StereoRectification rectification(const Rig& rig, double alpha = 0.0) {
   const sensor::StereoCalibration pair =
       value_of(sensor::stereo_calibration(file_of(rig), "bm-1", "bm-2"));
-  return value_of(sensor::rectify_stereo(pair, kRectified, 0.0));
+  return value_of(sensor::rectify_stereo(pair, kRectified, alpha));
 }
 
-PairRowCheckOptions options() {
+PairRowCheckOptions options(double alpha = 0.0) {
   PairRowCheckOptions o;
   o.rectified = kRectified;
+  o.alpha = alpha;
   return o;
 }
 
@@ -111,11 +113,11 @@ struct Region {
 };
 
 // `captures` captures of `per_capture` corners each, placed uniformly in
-// `region` of `rig`'s left rectified view, 1.2-4 m deep.
+// `region` of `rig`'s left rectified view at `alpha`, 1.2-4 m deep.
 std::vector<Corner> place(const Rig& rig, const Region& region, int captures,
                           int per_capture, std::uint32_t seed = 1,
-                          std::int64_t first = 0) {
-  const sensor::StereoRectification rect = rectification(rig);
+                          std::int64_t first = 0, double alpha = 0.0) {
+  const sensor::StereoRectification rect = rectification(rig, alpha);
   const camera::PinholeIntrinsics& k = rect.rig.camera.intrinsics;
   const camera::Mat4d to_world = camera::rigid_inverse(rig[0].world_to_camera) *
                                  rect.rig.rectified_to_left;
@@ -245,24 +247,32 @@ TEST(PairRowCheck, AnExactPairReadsNothingInAnyCell) {
 
 TEST(PairRowCheck, MeasuresThroughRectifyStereosRotationsAndCamera) {
   // The solved pair a milliradian off in pitch and roll: each corner's rows,
-  // through the solved pair's rectify_stereo and the true rays, are what the
-  // check reads, cell by cell.
+  // through the solved pair's rectify_stereo at the runtime's alpha and the
+  // true rays, are what the check reads, cell by cell. At alpha 1 the view
+  // reaches the picture's corners (worst 7e-10 px there).
   const Rig truth = test::lab_pair();
   const Rig solved = turned(truth, {0.001, 0.0, 0.0005});
-  const std::vector<Corner> corners = place(truth, {}, 40, 40);
-  const PairRowCheck check = value_of(check_pair_rows(
-      file_of(solved), "bm-1", "bm-2", observe(truth, corners), options()));
-  const sensor::StereoRectification rect = rectification(solved);
-  std::array<std::size_t, kPairRowCells> counts{};
-  const std::array<double, kPairRowCells> expected = cell_means(
-      rect, truth, corners,
-      [](const std::array<camera::Vec2d, 2>& at) { return at[0].y - at[1].y; },
-      &counts);
-  EXPECT_EQ(check.cell_corners, counts);
-  for (std::size_t c = 0; c < expected.size(); ++c) {
-    EXPECT_NEAR(check.cell_mean_px[c], expected[c], 1e-9) << "cell " << c;
+  for (const double alpha : {0.0, 1.0}) {
+    const std::vector<Corner> corners = place(truth, {}, 40, 40, 1, 0, alpha);
+    const PairRowCheck check =
+        value_of(check_pair_rows(file_of(solved), "bm-1", "bm-2",
+                                 observe(truth, corners), options(alpha)));
+    const sensor::StereoRectification rect = rectification(solved, alpha);
+    std::array<std::size_t, kPairRowCells> counts{};
+    const std::array<double, kPairRowCells> expected = cell_means(
+        rect, truth, corners,
+        [](const std::array<camera::Vec2d, 2>& at) {
+          return at[0].y - at[1].y;
+        },
+        &counts);
+    EXPECT_EQ(check.cell_corners, counts) << "alpha " << alpha;
+    for (std::size_t c = 0; c < expected.size(); ++c) {
+      EXPECT_GT(counts[c], 100u) << "alpha " << alpha << ", cell " << c;
+      EXPECT_NEAR(check.cell_mean_px[c], expected[c], 1e-8)
+          << "alpha " << alpha << ", cell " << c;
+    }
+    EXPECT_EQ(check.baseline_m, rect.rig.baseline);
   }
-  EXPECT_EQ(check.baseline_m, rect.rig.baseline);
 }
 
 TEST(PairRowCheck, AMilliradianOfPitchReadsFTimesItInEveryCell) {
@@ -369,7 +379,7 @@ TEST(PairRowCheck, NoisePassesItsPercentileAsPredicted) {
 
 TEST(PairRowCheck, HeavyNoiseIsJudgedByItsOwnStandardError) {
   // 1.5 px of noise on few corners: a cell's mean strays past 0.15 px by
-  // chance, within 3 standard errors of it.
+  // chance, within its limit in standard errors.
   const Rig pair = test::lab_pair();
   const std::vector<Corner> corners = place(pair, {}, 6, 40);
   const PairRowCheck check = value_of(check_pair_rows(
@@ -381,6 +391,58 @@ TEST(PairRowCheck, HeavyNoiseIsJudgedByItsOwnStandardError) {
     strayed = strayed || std::fabs(check.cell_mean_px[c]) > 0.15;
   }
   EXPECT_TRUE(strayed) << named(check);
+}
+
+TEST(PairRowCheck, EachCellsLimitIsStudentsTForItsCorners) {
+  // A roll of 10 mrad spreads Δy across each cell, so its standard errors
+  // pass 0.15 px. Each cell's limit is Student's t for its corners at the
+  // two-sided 0.27% of a normal's 3, times its mean's standard error from
+  // the true rows; a cell of exactly 8 corners is judged.
+  const Rig truth = test::lab_pair();
+  const Rig solved = turned(truth, {0.0, 0.0, 0.01});
+  const std::array<std::size_t, kPairRowCells> count = {8,  8, 8, 10, 15,
+                                                        30, 8, 8, 8};
+  // Student's t at P(|T| > t) = P(|Z| > 3), by integrating its density.
+  const auto t_of = [](std::size_t n) {
+    return n == 8    ? 4.529974
+           : n == 10 ? 4.094255
+           : n == 15 ? 3.635801
+                     : 3.280426;
+  };
+  // Each cell's corners clear of its edges, and in the right view (124 px of
+  // disparity at 1.2 m).
+  std::vector<Corner> corners;
+  for (std::size_t c = 0; c < count.size(); ++c) {
+    const double u0 = static_cast<double>(c % 3) / 3.0;
+    const double v0 = static_cast<double>(c / 3) / 3.0;
+    const std::vector<Corner> cell =
+        place(truth, {u0 + 0.17, u0 + 0.31, v0 + 0.04, v0 + 0.29}, 1,
+              static_cast<int>(count[c]), static_cast<std::uint32_t>(c + 1),
+              static_cast<std::int64_t>(c));
+    corners.insert(corners.end(), cell.begin(), cell.end());
+  }
+  const PairRowCheck check = value_of(check_pair_rows(
+      file_of(solved), "bm-1", "bm-2", observe(truth, corners), options()));
+  const sensor::StereoRectification rect = rectification(solved);
+  std::array<std::vector<double>, kPairRowCells> dy;
+  for (const Corner& corner : corners) {
+    const std::array<camera::Vec2d, 2> at = rows_of(rect, truth, corner.world);
+    ASSERT_GE(cell_of(at[1]), 0);
+    ASSERT_EQ(cell_of(at[0]), corner.capture);
+    dy[static_cast<std::size_t>(corner.capture)].push_back(at[0].y - at[1].y);
+  }
+  for (std::size_t c = 0; c < count.size(); ++c) {
+    const double n = static_cast<double>(count[c]);
+    double mean = 0.0;
+    for (const double d : dy[c]) mean += d / n;
+    double squares = 0.0;
+    for (const double d : dy[c]) squares += (d - mean) * (d - mean);
+    const double limit = t_of(count[c]) * std::sqrt(squares / (n - 1) / n);
+    EXPECT_GT(limit, 0.15) << "cell " << c;
+    EXPECT_EQ(check.cell_corners[c], count[c]) << "cell " << c;
+    EXPECT_NEAR(check.cell_mean_px[c], mean, 1e-9) << "cell " << c;
+    EXPECT_NEAR(check.cell_limit_px[c], limit, 1e-6 * limit) << "cell " << c;
+  }
 }
 
 TEST(PairRowCheck, ALensBentAtOneEdgeFailsThatCellWhereAPercentilePasses) {
@@ -433,6 +495,24 @@ TEST(PairRowCheck, CornersInTheCentreAloneAreNotEnoughAndSayWhereToCapture) {
     EXPECT_NE(check.reason.find(where), std::string::npos) << check.reason;
   }
   EXPECT_EQ(check.reason.find("centre"), std::string::npos) << check.reason;
+}
+
+TEST(PairRowCheck, ACellPastItsLimitFailsThePairBeforeTheCellsAreCounted) {
+  // A milliradian of pitch with corners in the centre alone: too few cells
+  // to pass, yet the centre's 0.38 px fails the pair, as no capture elsewhere
+  // mends it.
+  const Rig truth = test::lab_pair();
+  const Rig solved = turned(truth, {0.001, 0.0, 0.0});
+  const std::vector<Corner> corners =
+      place(truth, {0.36, 0.64, 0.36, 0.64}, 20, 40);
+  const PairRowCheck check = value_of(check_pair_rows(
+      file_of(solved), "bm-1", "bm-2", observe(truth, corners), options()));
+  ASSERT_EQ(check.verdict, Verdict::Fail) << named(check);
+  EXPECT_NE(check.reason.find("in the view's centre,"), std::string::npos)
+      << check.reason;
+  for (std::size_t c = 0; c < check.cell_corners.size(); ++c) {
+    EXPECT_EQ(check.cell_corners[c] > 0, c == 4) << "cell " << c;
+  }
 }
 
 TEST(PairRowCheck, NoCornerSeenByBothIsNotEnough) {
@@ -505,6 +585,18 @@ TEST(PairRowCheck, AVerticalPairIsRefusedEitherWayRound) {
     EXPECT_NE(check.reason.find("vertical"), std::string::npos) << check.reason;
     EXPECT_EQ(check.baseline_m, 0.0);
   }
+}
+
+TEST(PairRowCheck, RefusedQuotesThePairAsNamed) {
+  // bm-2 turned 1.5 rad about its x axis: as named, rectify_stereo calls the
+  // pair degenerate; named the other way round, swapped. Refused says the
+  // first.
+  const Rig pair = turned(test::lab_pair(), {1.5, 0.0, 0.0});
+  const PairRowCheck check =
+      value_of(check_pair_rows(file_of(pair), "bm-1", "bm-2", {}, options()));
+  EXPECT_EQ(check.verdict, Verdict::Refused) << named(check);
+  EXPECT_NE(check.reason.find("degenerate"), std::string::npos) << check.reason;
+  EXPECT_EQ(check.reason.find("swap"), std::string::npos) << check.reason;
 }
 
 // Whether `p` lies `margin` px or more inside the rectified view, or as far

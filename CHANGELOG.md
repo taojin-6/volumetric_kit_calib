@@ -14,9 +14,9 @@ release may break it, and each such entry says how to migrate
 - **A stereo pair's rectified rows** (DECISIONS.md, 2026-11-02):
   `quality::check_pair_rows` (`quality/pair_row_check.hpp`) rectifies a solved
   pair through sensor's `stereo_calibration` and `rectify_stereo` at the
-  runtime's size, takes every corner both cameras saw through it, undistorted
-  exactly, and holds each cell of a 3 x 3 grid over the view to a mean row
-  error of 0.15 px, or 3 standard errors if larger; too few cells is
+  runtime's size, takes every corner both cameras saw through it, and holds
+  each cell of a 3 x 3 grid over the view to a mean row error of 0.15 px, or
+  Student's t standard errors for its corners if larger; too few cells is
   `Insufficient`, naming where to capture, and a pair named the wrong way
   round is `Swapped`. The median and 95th percentile are reported.
 - `format_results` takes a trailing `pairs`, which the report writes as its
