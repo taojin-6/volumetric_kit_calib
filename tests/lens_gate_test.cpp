@@ -601,7 +601,9 @@ TEST(JudgeLens, AWrongMinimumFailsTheBiasGateAndTheLowerFitPasses) {
         value_of(solve::solve_lens("bm-1", kSize, board(), views, poor));
     EXPECT_NEAR(both.rms_px, right.rms_px, 1e-3) << seed;
     EXPECT_TRUE(value_of(judge_lens(both)).pass) << seed;
-    if (alone.rms_px > 1.5 * right.rms_px) EXPECT_FALSE(both.from_start);
+    if (alone.rms_px > 1.5 * right.rms_px) {
+      EXPECT_FALSE(both.from_start);
+    }
   }
   EXPECT_GE(wrong, 3);
 }
