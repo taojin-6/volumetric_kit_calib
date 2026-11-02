@@ -53,6 +53,9 @@ struct RigMode {
   bool calibrated = false;         ///< A Calibrate result has been shown.
   /// A Calibrate is running (`CalibrateWorker::busy`).
   bool calibrating = false;
+  /// The session fits lenses (intrinsic mode): no 3D view, and Calibrate
+  /// waits for a camera's views (the Lenses panel).
+  bool intrinsic = false;
 };
 
 /// @brief What the window does for a key's request.
@@ -86,7 +89,8 @@ struct RigStep {
 ///   "press again to drop the last capture".
 /// - `Calibrate`: `Calibrate` in both.
 /// - `SwitchView`: `ShowScene` in the images once calibrated, else `Ignore`
-///   with "calibrate first"; `ShowImages` in the 3D view.
+///   with "calibrate first"; `ShowImages` in the 3D view; in intrinsic mode
+///   `Ignore` with "intrinsic mode has no 3D view".
 /// - `Cancel`: `Cancel` while calibrating, else `Ignore`, in both.
 /// - `None`: `Ignore`.
 ///
@@ -121,14 +125,15 @@ struct CalibrateGate {
 ///        share it.
 /// @param mode        Where the window stands: `calibrating` holds it back.
 /// @param ready       Whether the session's checks let Calibrate run
-///                    (`quality::SessionSummary::ready`); false before the
-///                    first capture is written.
+///                    (`session_ready`); false before the first capture is
+///                    written.
 /// @param unresolved  The captures and drops queued or in progress
 ///                    (`CaptureWorker::unresolved`), which a snapshot taken
 ///                    now would not reflect.
 /// @return Enabled; or not, the reason the first of "already running", "a
 ///         capture or a drop is still being written" and "the session is
-///         not ready (see the Session panel)" that holds.
+///         not ready (see the Session panel)", in intrinsic mode "no camera
+///         is ready (see the Lenses panel)", that holds.
 ///
 /// @code
 /// const std::size_t unresolved = captures->unresolved();  // first
@@ -151,10 +156,11 @@ CalibrateGate calibrate_gate(const RigMode& mode, bool ready,
 viz::ScenePlacement scene_placement(const RigMode& mode) noexcept;
 
 /// @brief The mode once a Calibrate result is shown: the 3D view,
-///        calibrated. A refusal, a cancel or a failure has no such step: the
-///        view and the result shown stay.
+///        calibrated; in intrinsic mode the images, calibrated. A refusal, a
+///        cancel or a failure has no such step: the view and the result
+///        shown stay.
 /// @param mode  Where the window stood.
-/// @return @p mode in the 3D view, calibrated.
+/// @return @p mode calibrated, in the 3D view unless intrinsic.
 ///
 /// @code
 /// if (auto result = calibrate->take_result()) mode = on_result(mode);

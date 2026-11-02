@@ -45,6 +45,10 @@
 #include "volumetric_kit/core/testing/vulkan_fixture.hpp"
 #include "volumetric_kit/sensor/frame/device_requirements.hpp"
 
+#if defined(VC_WITH_ORBBEC)
+#include "volumetric_kit/calib/app/orbbec_arm.hpp"
+#endif
+
 namespace volumetric_kit::calib::app {
 namespace {
 
@@ -1014,6 +1018,7 @@ TEST_F(AppLive, StopsCleanlyAndReleasesEveryFrame) {
   for (const Camera& cam : cameras_) EXPECT_TRUE(cam.pixels.expired());
 }
 
+#if defined(VC_WITH_ORBBEC)
 TEST_F(AppLive, OpensOrbbecCamerasAtThePresetReadableByEachFamily) {
   RigPreset preset;
   preset.color = {1920, 1080};
@@ -1053,6 +1058,7 @@ TEST_F(AppLive, OpensOrbbecCamerasAtThePresetReadableByEachFamily) {
   EXPECT_EQ(many.color_queue_family_count, 5u);
   EXPECT_EQ(many.color_queue_families[3], 4u);
 }
+#endif  // VC_WITH_ORBBEC
 
 }  // namespace
 }  // namespace volumetric_kit::calib::app

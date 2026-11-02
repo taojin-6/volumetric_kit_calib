@@ -4,6 +4,7 @@
 #include "volumetric_kit/calib/app/calibrate_worker.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
@@ -13,11 +14,13 @@
 #include <thread>
 #include <utility>
 
+#include "volumetric_kit/calib/app/calib_mode.hpp"
 #include "volumetric_kit/calib/capture/session_writer.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/depth/depth_checks.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
+#include "volumetric_kit/calib/solve/lens.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
 #include "volumetric_kit/sensor/camera/array_calibration.hpp"
 #include "volumetric_kit/sensor/prep/gpu_frame_prep.hpp"
@@ -244,6 +247,82 @@ core::Result<quality::DepthSummary> check_depth(
   return quality::summarize_depth_checks(n, run.checked, run.pairs, options);
 }
 
+// What a camera's views lack to be fitted, the first of its readiness's
+// thresholds unmet.
+std::string not_ready(const quality::LensReadiness& state) {
+  const quality::LensReadyOptions want;
+  const auto percent = [](double share) {
+    return std::to_string(static_cast<int>(std::lround(100.0 * share))) + "%";
+  };
+  if (state.views < want.min_views) {
+    return "not ready: " + std::to_string(state.views) + " views of " +
+           std::to_string(want.min_views);
+  }
+  if (state.cells < want.min_cells) {
+    return "not ready: " + percent(state.cells) + " of the cells, of " +
+           percent(want.min_cells);
+  }
+  if (*std::min_element(state.reach.begin(), state.reach.end()) <
+      want.min_reach) {
+    return "not ready: its corners reach too little of the way to an image "
+           "corner or side";
+  }
+  return "not ready: " + percent(state.frontal.value_or(0.0)) +
+         " of its views frontal, over " + percent(want.max_frontal);
+}
+
+// A lens session's Calibrate: each ready camera's lens fitted and judged,
+// and the lens results' files. `step` is called with the cameras fitted,
+// before each and after the last.
+core::Result<CalibrateResult> calibrate_lenses(
+    const KeptCaptures& kept, const std::function<void(std::size_t)>& step) {
+  VKC_ASSIGN(const std::vector<Observation> views, solve_views(kept));
+  VKC_ASSIGN(const compute::Board board, compute::Board::create(kept.board));
+  VKC_ASSIGN(const std::vector<quality::LensReadiness> states,
+             lens_states(kept));
+  CalibrateResult out;
+  out.mode = capture::SessionMode::Intrinsics;
+  out.reference = kept.reference;
+  out.captures = kept.captures.size();
+  std::vector<std::string> unsolved;
+  const std::size_t n = kept.cameras.size();
+  for (std::size_t c = 0; c < n; ++c) {
+    step(c);
+    const capture::SessionCamera& camera = kept.sensors[c];
+    out.ids.push_back(camera.id);
+    if (!states[c].ready) {
+      out.unsolved.push_back({camera.id, not_ready(states[c])});
+      continue;
+    }
+    // A real lens only: the stand-in is never a start.
+    const std::optional<camera::CameraModel> start = lens_start(
+        camera.id, camera.size, camera.color, kept.calibration.get());
+    core::Result<solve::LensFit> fit =
+        solve::solve_lens(camera.id, camera.size, board, views, start);
+    if (!fit.ok()) {
+      const core::Status::Code code = fit.status().domain();
+      if (code != core::Status::Code::InvalidArgument &&
+          code != core::Status::Code::Numerical) {
+        return fit.status();
+      }
+      out.unsolved.push_back(
+          {camera.id, "fit failed: " + fit.status().message()});
+      continue;
+    }
+    VKC_ASSIGN(quality::LensVerdict verdict,
+               quality::judge_lens(*std::move(fit)));
+    // The runtime reads a factory lens: its fit is for the report.
+    if (camera.color) out.report_only.push_back(camera.id);
+    out.lenses.push_back(std::move(verdict));
+  }
+  step(n);
+  for (const UnsolvedLens& lens : out.unsolved) unsolved.push_back(lens.id);
+  VKC_ASSIGN(out.files, quality::format_lens_results(out.lenses, unsolved,
+                                                     kept.calibration.get(),
+                                                     out.report_only));
+  return out;
+}
+
 }  // namespace
 
 const char* to_string(CalibrateStage stage) noexcept {
@@ -311,6 +390,15 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
     const auto in = [&](const core::Status& status) {
       return status.with_context(kWhat);
     };
+    if (kept.mode == capture::SessionMode::Intrinsics) {
+      core::Result<CalibrateResult> lenses =
+          calibrate_lenses(kept, [&](std::size_t done) {
+            report(CalibrateStage::Solving, done, kept.cameras.size());
+          });
+      if (!lenses.ok()) return in(lenses.status());
+      lenses->seconds = seconds_since(began);
+      return lenses;
+    }
     report(CalibrateStage::Solving, 0, 0);
     core::Result<std::vector<Observation>> views = solve_views(kept);
     if (!views.ok()) return in(views.status());
@@ -501,6 +589,8 @@ core::Result<WrittenResults> write_results(
         {quality::kReportFile, &files.report},
         {quality::kArrayCalibrationFile, &files.array_calibration}};
     for (const auto& [name, text] : order) {
+      // A lens run with no lens to write has no calibration file.
+      if (text == &files.array_calibration && text->empty()) continue;
       const core::Status written =
           write((fs::path(directory) / name).string(), *text);
       if (!written.ok()) return in(written);

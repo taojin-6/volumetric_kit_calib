@@ -15,8 +15,10 @@
 /// locates the origin tag (`solve::origin_tag_frame`), checks the kept raw
 /// depth against the solved rig on sensor's device (@ref CalibrateDepth),
 /// moves the outputs into the tag's world (`solve::anchor_rig`), and formats
-/// the results files (`quality::format_results`); @ref write_results writes
-/// them to the session's `results/<RRR>_<YYYY-MM-DD_HHMMSS>/`.
+/// the results files (`quality::format_results`); in an intrinsic session it
+/// fits each ready camera's lens instead (`solve::solve_lens`,
+/// `quality::judge_lens`, `quality::format_lens_results`). @ref write_results
+/// writes them to the session's `results/<RRR>_<YYYY-MM-DD_HHMMSS>/`.
 /// @ref CalibrateWorker runs the two on a thread of its own and publishes the
 /// result only once the files are on disk.
 
@@ -32,6 +34,7 @@
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
+#include "volumetric_kit/calib/quality/lens_gate.hpp"
 #include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/world_tag.hpp"
@@ -47,7 +50,9 @@ namespace volumetric_kit::calib::app {
 
 /// @brief Where a Calibrate is.
 enum class CalibrateStage {
-  Solving,    ///< `initialise` and `bundle_adjust`.
+  /// `initialise` and `bundle_adjust`; or, fitting lenses, each camera's
+  /// fit, `done` of `total` cameras.
+  Solving,
   Measuring,  ///< `calibration_metrics`: leave one out, then the A/B test.
   Locating,   ///< `origin_tag_frame`: the origin tag from the solved rig.
   Checking,   ///< The depth checks (@ref CalibrateDepth), capture by capture.
@@ -74,10 +79,10 @@ const char* to_string(CalibrateStage stage) noexcept;
 struct CalibrateProgress {
   CalibrateStage stage = CalibrateStage::Solving;  ///< Where it is.
   /// Measuring: the leave-one-out re-solves done; Checking: the captures
-  /// checked; otherwise 0.
+  /// checked; Solving lenses: the cameras fitted; otherwise 0.
   std::size_t done = 0;
   /// Measuring: the re-solves in all, once the first is done; Checking: the
-  /// captures; otherwise 0.
+  /// captures; Solving lenses: the cameras; otherwise 0.
   std::size_t total = 0;
   double seconds = 0.0;  ///< Since it began.
 };
@@ -88,12 +93,21 @@ struct CalibrateProgress {
 ///        the last. A throw stops the run (@ref calibrate).
 using CalibrateCallback = std::function<void(const CalibrateProgress&)>;
 
-/// @brief A solved and measured rig, and its results files.
+/// @brief A lens run's camera that was not fitted, and why.
+struct UnsolvedLens {
+  std::string id;      ///< The camera.
+  std::string reason;  ///< Not ready (what it lacks), or why its fit failed.
+};
+
+/// @brief A solved and measured rig, or each camera's lens, and its results
+///        files.
 ///
-/// Its poses are in its world (@ref world): the origin tag's, or, without
-/// one, the reference camera's colour frame, whose `color_to_world` is then
-/// exactly the identity. The solution, the metrics and the depth checks stay
-/// in the reference camera's gauge.
+/// A rig's poses are in its world (@ref world): the origin tag's, or,
+/// without one, the reference camera's colour frame, whose `color_to_world`
+/// is then exactly the identity. The solution, the metrics and the depth
+/// checks stay in the reference camera's gauge. A lens run (`mode`
+/// `Intrinsics`) fills @ref lenses, @ref unsolved and @ref report_only, and
+/// none of the rig's fields.
 ///
 /// @code
 /// VKC_ASSIGN(CalibrateResult result, calibrate(*kept));
@@ -102,14 +116,24 @@ using CalibrateCallback = std::function<void(const CalibrateProgress&)>;
 /// }
 /// @endcode
 struct CalibrateResult {
+  /// What was calibrated (`KeptCaptures::mode`): each camera's lens, or the
+  /// rig's poses.
+  capture::SessionMode mode = capture::SessionMode::Extrinsics;
   /// The results directory's number, `RRR`; -1 until written
   /// (@ref write_results).
   int number = -1;
   std::string directory;  ///< The results directory; empty until written.
   std::vector<std::string> ids;  ///< Each camera's id, in rig order.
-  std::size_t reference = 0;     ///< The reference camera, by index.
-  std::size_t captures = 0;      ///< The kept captures it was solved from.
-  solve::RigSolution solution;   ///< The adjustment's solution.
+  /// A lens run's cameras fitted, in rig order, each judged.
+  std::vector<quality::LensVerdict> lenses;
+  /// A lens run's cameras not fitted, in rig order.
+  std::vector<UnsolvedLens> unsolved;
+  /// Of @ref lenses, those fitted for the report alone, never written: the
+  /// cameras with a factory lens, which the runtime reads.
+  std::vector<std::string> report_only;
+  std::size_t reference = 0;    ///< The reference camera, by index.
+  std::size_t captures = 0;     ///< The kept captures it was solved from.
+  solve::RigSolution solution;  ///< The adjustment's solution.
   quality::CalibrationMetrics metrics;  ///< Its metrics.
   /// Its world: the origin tag's, located from every kept capture's
   /// `KeptCapture::tags` (`kOriginTag`), or why the reference camera stays
@@ -146,9 +170,18 @@ class CalibrateDepth;
 /// raw depth (@ref CalibrateDepth); then `solve::anchor_rig` and, in a tag
 /// world, `quality::floor_boards`; and `quality::format_results`. A failure
 /// of the depth checks fails nothing else: the result is formatted without
-/// them, naming it (@ref CalibrateResult::depth_failure). Thread-free: it runs
-/// on the calling thread and holds no state between calls, so the same
-/// snapshot gives the same result, but for the times.
+/// them, naming it (@ref CalibrateResult::depth_failure).
+///
+/// An intrinsic session (`kept.mode`) fits lenses instead, with no depth:
+/// each camera ready by `lens_states` is fitted by `solve::solve_lens`
+/// (its defaults), from OpenCV's own start and `lens_start`'s, and judged by
+/// `quality::judge_lens`; a camera not ready, or whose fit fails for too few
+/// views or no finite fit, is listed unsolved, with why; a camera with a
+/// factory lens is fitted for the report alone. Then
+/// `quality::format_lens_results`, over the scenario's file
+/// (`kept.calibration`). Thread-free: it runs on the calling thread and holds
+/// no state between calls, so the same snapshot gives the same result, but
+/// for the times.
 /// @param kept      The captures and what they were taken with.
 /// @param progress  Called as the run moves on (@ref CalibrateCallback); may
 ///                  be empty. To stop the run it throws: the run then returns
@@ -277,7 +310,8 @@ struct WrittenResults {
 ///    number.
 /// 3. `residuals.csv`, then `report.json`, then `array_calibration.json`
 ///    last, each through @p sink: a directory left by a failure never holds a
-///    calibration file.
+///    calibration file. A lens run with no lens to write has no calibration
+///    file (its text is empty).
 /// @param session       The session's directory; it must exist.
 /// @param first_number  The lowest number to take, from 0 to 999.
 /// @param stamp         When Calibrate was pressed (@ref results_directory).

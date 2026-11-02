@@ -180,6 +180,33 @@ TEST(AppRigMode, AResultShowsTheSceneCalibrated) {
             RigAction::ShowScene);
 }
 
+// Intrinsic mode has no 3D view: V says so, a result stays on the images,
+// calibrated, and Calibrate waits for the Lenses panel; the other keys are
+// as in extrinsic mode.
+TEST(AppRigMode, IntrinsicModeStaysOnTheImages) {
+  RigMode mode;
+  mode.intrinsic = true;
+  for (const bool calibrated : {false, true}) {
+    mode.calibrated = calibrated;
+    const RigStep step = rig_action(mode, KeyRequest::SwitchView);
+    EXPECT_EQ(step.action, RigAction::Ignore);
+    EXPECT_EQ(step.hint, "intrinsic mode has no 3D view");
+    EXPECT_EQ(rig_action(mode, KeyRequest::Capture).action, RigAction::Arm);
+    EXPECT_EQ(rig_action(mode, KeyRequest::Calibrate).action,
+              RigAction::Calibrate);
+  }
+  mode.calibrated = false;
+  const RigMode after = on_result(mode);
+  EXPECT_EQ(after.view, RigView::Images);
+  EXPECT_TRUE(after.calibrated);
+  EXPECT_TRUE(after.intrinsic);
+  EXPECT_EQ(scene_placement(after), ScenePlacement::Hidden);
+  const CalibrateGate gate = calibrate_gate(mode, false, 0);
+  EXPECT_FALSE(gate.enabled);
+  EXPECT_EQ(gate.reason, "no camera is ready (see the Lenses panel)");
+  EXPECT_TRUE(calibrate_gate(mode, true, 0).enabled);
+}
+
 // The view is framed at the first result and when the world's origin moves;
 // otherwise the orbit stays.
 TEST(AppRigMode, FramesAtTheFirstResultAndANewOrigin) {

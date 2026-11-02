@@ -108,31 +108,4 @@ core::Status check_preset(const std::vector<sensor::SensorInfo>& cameras,
   });
 }
 
-sensor::OrbbecSensor::Options orbbec_options(
-    const RigPreset& preset, const core::Device& device,
-    core::Allocator& allocator, const std::vector<std::uint32_t>& families) {
-  sensor::OrbbecSensor::Options options;
-  options.color_width = preset.color.width;
-  options.color_height = preset.color.height;
-  options.depth_width = preset.depth.width;
-  options.depth_height = preset.depth.height;
-  options.fps = preset.fps;
-  options.color_codec = preset.color_codec == core::config::ColorCodec::Hevc
-                            ? sensor::OrbbecColorCodec::Hevc
-                            : sensor::OrbbecColorCodec::Mjpeg;
-  options.min_depth = preset.depth_mode.min_m;
-  options.max_depth = preset.depth_mode.max_m;
-  options.device = &device;
-  options.allocator = &allocator;
-  // A count past the array is kept, for the camera's open to refuse.
-  const std::size_t kept =
-      std::min<std::size_t>(families.size(), sensor::kMaxColorQueueFamilies);
-  for (std::size_t i = 0; i < kept; ++i) {
-    options.color_queue_families[i] = families[i];
-  }
-  options.color_queue_family_count = static_cast<std::uint32_t>(
-      std::min<std::size_t>(families.size(), 0xFFFFFFFFu));
-  return options;
-}
-
 }  // namespace volumetric_kit::calib::app

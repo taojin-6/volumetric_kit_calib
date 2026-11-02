@@ -7,106 +7,104 @@
 #include <system_error>
 #include <utility>
 
+#include "volumetric_kit/calib/app/calib_mode.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
-#include "volumetric_kit/core/base/check.hpp"
-#include "volumetric_kit/sensor/array/sensor_array.hpp"
-#include "volumetric_kit/sensor/orbbec/orbbec_sensor.hpp"
+
+#if defined(VC_WITH_ORBBEC)
+#include "orbbec_arm.hpp"
+#endif
+#if defined(VC_WITH_DECKLINK)
+#include "decklink_arm.hpp"
+#endif
 
 namespace volumetric_kit::calib::app {
+
+namespace {
+
+constexpr const char* kOrbbec = "orbbec";
+constexpr const char* kDecklink = "decklink";
+
+// The driver's own checks (check_scenario's step 5), or why this build has
+// no arm for it.
+core::Status check_driver(const core::config::Config& config) {
+  const std::string& driver = config.source.driver;
+  if (driver == kOrbbec) {
+#if defined(VC_WITH_ORBBEC)
+    return check_orbbec(config);
+#else
+    return core::Status::invalid_argument(
+        "source.driver: orbbec: this calib_rig was built without sensor's "
+        "Orbbec driver (configure with -DVS_WITH_ORBBEC=ON)");
+#endif
+  }
+#if defined(VC_WITH_DECKLINK)
+  return decklink_options(config.source).status();
+#else
+  return core::Status::invalid_argument(
+      "source.driver: decklink: this calib_rig was built without sensor's "
+      "DeckLink driver (configure with -DVS_WITH_DECKLINK=ON, on Linux "
+      "x86-64, with the DeckLink SDK)");
+#endif
+}
+
+}  // namespace
 
 core::Result<RigScenario> check_scenario(const core::config::Config& config) {
   return compute::guarded("check_scenario", [&]() -> core::Result<RigScenario> {
     RigScenario scenario;
-    VKC_ASSIGN(scenario.preset, rig_preset(config.source));
+    VKC_ASSIGN(scenario.mode, session_mode(config.operation));
+    scenario.driver = config.source.driver;
+    if (scenario.driver != kOrbbec && scenario.driver != kDecklink) {
+      return core::Status::invalid_argument(
+          "source.driver: \"" + scenario.driver +
+          "\" is not one calib_rig opens (orbbec, decklink)");
+    }
+    // TODO: a DeckLink pair's poses, with its rectified rows (A6).
+    if (scenario.driver == kDecklink &&
+        scenario.mode != capture::SessionMode::Intrinsics) {
+      return core::Status::invalid_argument(
+          "source.driver: decklink with operation calibrate: calib_rig fits a "
+          "DeckLink pair's lenses alone (operation calibrate_intrinsics)");
+    }
     std::error_code ec;
     if (!std::filesystem::is_directory(config.output.path, ec)) {
       return core::Status::not_found("output.path: " + config.output.path +
                                      " is not an existing directory");
     }
-    // sensor's reader refuses a file that lists no camera.
-    core::Result<sensor::OrbbecRigSyncConfig> sync =
-        sensor::read_orbbec_sync_config(config.source.sync_config);
-    if (!sync.ok()) return sync.status().with_context("source.sync_config");
-    scenario.sync = std::move(sync).value();
+    if (!config.source.calibration.empty()) {
+      core::Result<sensor::camera::ArrayCalibration> file =
+          sensor::camera::read_array_calibration(config.source.calibration);
+      if (!file.ok()) return file.status().with_context("source.calibration");
+      scenario.calibration =
+          std::make_shared<const sensor::camera::ArrayCalibration>(
+              std::move(file).value());
+    }
+    VKC_TRY(check_driver(config));
     return scenario;
   });
-}
-
-core::Result<capture::SessionCamera> orbbec_camera(
-    const sensor::SensorInfo& info, const sensor::OrbbecDeviceInfo& device,
-    const sensor::OrbbecRigSyncConfig& sync) {
-  return compute::guarded(
-      "orbbec_camera", [&]() -> core::Result<capture::SessionCamera> {
-        VKC_CHECK(info.color.has_value(), "orbbec_camera: no colour model");
-        capture::SessionCamera out;
-        out.id = info.id;
-        out.model = info.model;
-        out.size = info.color->size;
-        out.fps = info.fps;
-        out.role = sensor::to_string(info.role);
-        out.color = info.color;
-        out.depth = info.depth;
-        out.depth_to_color = info.depth_to_color;
-        out.lens = capture::LensOrigin::Factory;
-        capture::OrbbecFacts& facts = out.orbbec.emplace();
-        facts.firmware = device.firmware_version;
-        facts.ip_address = device.ip_address;
-        facts.sync_mode = sensor::to_string(device.sync_mode);
-        facts.color_lens_model = device.color_lens_model;
-        facts.depth_lens_model = device.depth_lens_model;
-        for (const sensor::OrbbecSyncDevice& entry : sync.devices) {
-          if (entry.serial == out.id) {
-            facts.depth_delay_us = entry.sync.depth_delay_us;
-          }
-        }
-        return out;
-      });
 }
 
 core::Result<OpenedSource> open_source(
     const core::config::Config& config, const RigScenario& scenario,
     const core::Device& device, core::Allocator& allocator,
     const std::vector<std::uint32_t>& families) {
-  // TODO: the decklink arm, on core's source.driver (A5).
-  return compute::guarded("open_source", [&]() -> core::Result<OpenedSource> {
-    const RigPreset& preset = scenario.preset;
-    // TODO: open the rig from scenario.sync once sensor's open_orbbec_sensors
-    // takes a parsed sync configuration, so the file is read once.
-    VKC_ASSIGN(auto sensors,
-               sensor::open_orbbec_sensors(
-                   config.source.sync_config,
-                   orbbec_options(preset, device, allocator, families)));
-    OpenedSource out;
-    std::vector<sensor::SensorInfo> infos;
-    for (const std::unique_ptr<sensor::IRgbdSensor>& camera : sensors) {
-      infos.push_back(camera->info());
-    }
-    VKC_TRY(check_preset(infos, preset));
-    for (std::size_t i = 0; i < sensors.size(); ++i) {
-      // open_orbbec_sensors hands out one OrbbecSensor per camera.
-      const auto* orbbec =
-          dynamic_cast<const sensor::OrbbecSensor*>(sensors[i].get());
-      if (orbbec == nullptr) {
-        return core::Status::invalid_argument(
-            "open_source: camera " + infos[i].id + " is not an Orbbec sensor");
-      }
-      VKC_ASSIGN(capture::SessionCamera camera,
-                 orbbec_camera(infos[i], orbbec->device_info(), scenario.sync));
-      out.cameras.push_back(std::move(camera));
-      out.lenses.push_back(*infos[i].color);
-    }
-    VKC_ASSIGN(sensor::SensorArray array,
-               sensor::SensorArray::open(std::move(sensors), {}));
-    out.reference = array.primary();
-    VKC_ASSIGN(out.source, source::RigSource::open(std::move(array), device,
-                                                   allocator, families));
-    out.driver = "orbbec";
-    out.sync_path = config.source.sync_config;
-    out.depth_mode = preset.depth_mode;
-    out.color_codec =
-        preset.color_codec == core::config::ColorCodec::Hevc ? "hevc" : "mjpeg";
-    return out;
-  });
+#if defined(VC_WITH_ORBBEC)
+  if (scenario.driver == kOrbbec) {
+    return open_orbbec(config, scenario, device, allocator, families);
+  }
+#endif
+#if defined(VC_WITH_DECKLINK)
+  if (scenario.driver == kDecklink) {
+    return open_decklink(config, scenario, device, allocator, families);
+  }
+#endif
+  static_cast<void>(config);
+  static_cast<void>(device);
+  static_cast<void>(allocator);
+  static_cast<void>(families);
+  return core::Status::invalid_argument(
+      "open_source: no arm opens source.driver \"" + scenario.driver +
+      "\" (check_scenario refuses it)");
 }
 
 }  // namespace volumetric_kit::calib::app

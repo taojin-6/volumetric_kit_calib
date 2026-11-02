@@ -53,6 +53,10 @@
 #include "volumetric_kit/core/base/file_io.hpp"
 #include "volumetric_kit/sensor/io/image_io.hpp"
 
+#if defined(VC_WITH_ORBBEC)
+#include "volumetric_kit/calib/app/orbbec_arm.hpp"
+#endif
+
 namespace volumetric_kit::calib::app {
 namespace {
 
@@ -1223,6 +1227,7 @@ TEST(AppCapture, ADroppedCaptureTakesItsViewsOfTheTag) {
 
 // A Femto's record, as the opener's Orbbec arm makes it: its sensor's facts,
 // its device's own, and its depth delay in the rig's sync file.
+#if defined(VC_WITH_ORBBEC)
 TEST(AppCapture, RecordsEachCameraAndItsDepthDelay) {
   sensor::SensorInfo info;
   info.id = "SYN1";
@@ -1271,6 +1276,7 @@ TEST(AppCapture, RecordsEachCameraAndItsDepthDelay) {
   ASSERT_TRUE(camera.ok());
   EXPECT_EQ(camera->orbbec->depth_delay_us, 0);
 }
+#endif  // VC_WITH_ORBBEC
 
 // A stereo pair's capture, grey only: each camera's luma, no JPEG and no
 // depth, which the session saves as a PGM that reads back byte for byte; its
@@ -1358,9 +1364,11 @@ TEST(AppCapture, RecordsTheSoftwareItWasBuiltFrom) {
   if (const char* expected = std::getenv("VC_EXPECT_CALIB_COMMIT")) {
     EXPECT_EQ(software.calib, expected);
   }
+#if defined(VC_WITH_ORBBEC)
   EXPECT_TRUE(
       std::regex_match(software.orbbec_sdk, std::regex(R"(\d+\.\d+\.\d+)")))
       << software.orbbec_sdk;
+#endif
 }
 
 }  // namespace

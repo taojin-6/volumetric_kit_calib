@@ -17,20 +17,17 @@ if(VC_WITH_RIG)
   add_subdirectory(volumetric_kit/calib/viz)
 endif()
 # The app tier, calib_rig's (VC_BUILD_APPS), also needs gfx's GLFW glue (an
-# installed GLFW) and sensor's Orbbec driver (VS_WITH_ORBBEC).
+# installed GLFW) and a sensor driver: Orbbec's (VS_WITH_ORBBEC) or DeckLink's
+# (VS_WITH_DECKLINK).
 if(VC_WITH_RIG AND VC_BUILD_APPS)
-  set(_vc_app_needs volumetric_kit::gfx_glfw volumetric_kit::sensor_orbbec)
-  set(_vc_build_app ON)
-  foreach(_vc_need IN LISTS _vc_app_needs)
-    if(NOT TARGET ${_vc_need})
-      set(_vc_build_app OFF)
-    endif()
-  endforeach()
-  if(_vc_build_app)
+  if(TARGET volumetric_kit::gfx_glfw
+     AND (TARGET volumetric_kit::sensor_orbbec
+          OR TARGET volumetric_kit::sensor_decklink))
     add_subdirectory(volumetric_kit/calib/app)
   else()
-    message(STATUS "calib_app and calib_rig: skipped (they need gfx_glfw, "
-                   "from an installed GLFW, and sensor's VS_WITH_ORBBEC)")
+    message(
+      STATUS "calib_app and calib_rig: skipped (they need gfx_glfw, from an "
+             "installed GLFW, and sensor's VS_WITH_ORBBEC or VS_WITH_DECKLINK)")
   endif()
 endif()
 # TODO: add_subdirectory() for color as that tier lands (see DESIGN.md).

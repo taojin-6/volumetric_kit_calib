@@ -23,6 +23,7 @@
 #include <glm/vec2.hpp>
 
 #include "imgui.h"
+#include "volumetric_kit/calib/app/calib_mode.hpp"
 #include "volumetric_kit/calib/app/calibrate_worker.hpp"
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 #include "volumetric_kit/calib/app/cloud_worker.hpp"
@@ -262,18 +263,27 @@ void drop_last(CaptureWorker& captures, Notices& notices) {
   if (!dropped.ok()) notices.note(dropped.message());
 }
 
+// The session's mode, as the window's mode says it.
+capture::SessionMode session_of(const RigMode& mode) {
+  return mode.intrinsic ? capture::SessionMode::Intrinsics
+                        : capture::SessionMode::Extrinsics;
+}
+
 // Everything a frame's UI reads.
 struct FrameInputs {
   const std::vector<std::string>* ids = nullptr;
+  const std::vector<std::string>* origins = nullptr;  // each lens's
+  capture::SessionMode session = capture::SessionMode::Extrinsics;
   viz::PanelOptions panel;  // the rule's thresholds as the source sets them
   std::optional<quality::SessionSummary> summary;
+  std::vector<quality::LensReadiness> lenses;  // a lens session's
   std::shared_ptr<const KeptCaptures> kept;
-  std::size_t unresolved = 0;  // captures and drops; read before both above
+  std::size_t unresolved = 0;  // captures and drops; read before all above
   viz::SaverQueue saver;
   std::string directory;
   core::StageMetrics stages;
 
-  bool ready() const { return summary && summary->ready; }
+  bool ready() const { return session_ready(session, summary, lenses); }
 };
 
 // What the window's requests reach.
@@ -292,9 +302,10 @@ void press_calibrate(const Workers& workers, RigMode& mode, Notices& notices) {
   const CaptureWorker& captures = workers.captures;
   const std::size_t unresolved = captures.unresolved();
   const std::optional<quality::SessionSummary> summary = captures.summary();
+  const std::vector<quality::LensReadiness> lenses = captures.lenses();
   std::shared_ptr<const KeptCaptures> kept = captures.kept();
-  const CalibrateGate gate =
-      calibrate_gate(mode, summary && summary->ready, unresolved);
+  const CalibrateGate gate = calibrate_gate(
+      mode, session_ready(session_of(mode), summary, lenses), unresolved);
   if (!gate.enabled) {
     notices.note("calibrate: " + std::string(gate.reason));
     return;
@@ -441,7 +452,14 @@ void rig_windows(const LiveSnapshot& snapshot, const viz::BoardEditor& editor,
   }
   ImGui::End();
 
-  if (in.summary) {
+  // A lens session's panel: how far each camera's views are.
+  if (in.session == capture::SessionMode::Intrinsics) {
+    const core::Result<std::vector<viz::PanelLine>> lenses =
+        viz::lens_panel(ids, in.lenses, *in.origins);
+    ImGui::Begin("Lenses");
+    if (lenses.ok()) viz::draw_panel_lines("lenses", lenses.value());
+    ImGui::End();
+  } else if (in.summary) {
     core::Result<viz::SessionPanel> panel =
         viz::session_panel(*in.summary, ids);
     if (panel.ok()) {
@@ -750,6 +768,23 @@ core::Status show_result(const CalibrateResult& result,
                          const KeptCaptures& kept, RigMode& mode, View3d& v,
                          std::optional<RigOrigin>& framed,
                          std::vector<viz::PanelLine>& panel, Notices& notices) {
+  // A lens run: its panel and where it was written; no 3D view.
+  if (result.mode == capture::SessionMode::Intrinsics) {
+    std::vector<std::pair<std::string, std::string>> unsolved;
+    for (const UnsolvedLens& lens : result.unsolved) {
+      unsolved.emplace_back(lens.id, lens.reason);
+    }
+    VKC_ASSIGN(std::vector<viz::PanelLine> lines,
+               viz::lens_results_panel(
+                   result.lenses, result.report_only, unsolved, result.number,
+                   result.directory, result.captures, result.seconds));
+    VKC_ASSIGN(const std::vector<std::string> said,
+               viz::calibration_notices(result.number, result.directory, {}));
+    panel = std::move(lines);
+    mode = on_result(mode);
+    for (const std::string& notice : said) notices.note(notice);
+    return {};
+  }
   VKC_ASSIGN(compute::Board board, compute::Board::create(kept.board));
   VKC_ASSIGN(std::vector<viz::PanelLine> lines,
              viz::calibration_panel(result.ids, result.metrics, result.number,
@@ -874,6 +909,8 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   CaptureSetup setup;
   setup.root = config.output.path;
   setup.software = app_software();
+  setup.mode = scenario.mode;
+  setup.calibration = scenario.calibration;
   setup.driver = opened.driver;
   setup.sync_path = opened.sync_path;
   setup.reference = opened.reference;
@@ -882,19 +919,23 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   setup.lenses = opened.lenses;
   std::vector<sensor::camera::ImageSize> sizes;
   std::vector<viz::SceneCamera> scene_cameras;
+  std::vector<std::string> origins;  // each lens's, for the Lenses panel
   for (std::size_t i = 0; i < camera_count; ++i) {
     const capture::SessionCamera& camera = opened.cameras[i];
     sizes.push_back(camera.size);
     scene_cameras.push_back(
         scene_camera(camera, opened.lenses[i], i, i == opened.reference));
+    origins.emplace_back(capture::to_string(camera.lens));
   }
   setup.cameras = opened.cameras;
   // TODO: cap cv::setNumThreads once H4 measures the contention between
   // OpenCV, the SDK and the decode threads.
   VKC_ASSIGN(std::unique_ptr<CaptureWorker> captures,
              CaptureWorker::create(std::move(setup)));
+  // The mode's board, and the boards it takes.
   VKC_ASSIGN(viz::BoardEditor editor,
-             viz::BoardEditor::create(legacy_femto_board()));
+             viz::BoardEditor::create(board_seed(scenario.mode), false,
+                                      board_rule(scenario.mode)));
   // The 3D view's worker, prepared frames shared with the renderer's family.
   VKC_ASSIGN(std::unique_ptr<CloudWorker> cloud,
              CloudWorker::create(
@@ -944,15 +985,18 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   // --- The live worker last, as its thread starts the cameras: from here
   // every way out stops Calibrate's worker, then it, then the 3D view's
   // (Teardown), so no set is held when the source closes.
+  LiveOptions live_options;
+  live_options.rule = capture_rule(scenario.mode);
   VKC_ASSIGN(std::unique_ptr<LiveWorker> live,
              LiveWorker::create(std::move(opened.source), opened.lenses,
                                 editor.board(), editor.square_measured(),
-                                captures.get(), cloud.get()));
+                                captures.get(), cloud.get(), live_options));
   const std::vector<std::string>& ids = live->ids();
   std::shared_ptr<const LiveSnapshot> latest;  // released before live
   const Teardown teardown(*calibrate, *live, *cloud, app, retire);
   const Workers workers{*live, *captures, *calibrate};
   RigMode mode;
+  mode.intrinsic = scenario.mode == capture::SessionMode::Intrinsics;
   RigView shown = mode.view;        // the last frame's
   std::optional<RigOrigin> framed;  // the 3D view's, once framed on a result
   std::vector<viz::PanelLine> calibration;  // the result's panel
@@ -1001,10 +1045,13 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     // reflects every one made before.
     FrameInputs in;
     in.ids = &ids;
+    in.origins = &origins;
+    in.session = scenario.mode;
     in.panel.rule = live->rule_options();
     in.unresolved = captures->unresolved();
     in.saver = {captures->pending(), captures->capacity(), captures->full()};
     in.summary = captures->summary();
+    in.lenses = captures->lenses();
     in.kept = captures->kept();
     in.directory = captures->directory();
     if (latest) in.stages = latest->stages;
