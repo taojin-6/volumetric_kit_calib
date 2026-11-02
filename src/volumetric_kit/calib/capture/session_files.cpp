@@ -218,10 +218,13 @@ std::string format_session(const SessionInfo& info, const SessionFacts& facts,
   // OpenCV's CharucoBoard counts squares, x then y: one more than corners.
   b["squares"] = json::array({board.cols + 1, board.rows + 1});
   b["square_m"] = board.square_size_m;
-  b["marker_m"] = board.marker_size_m;
-  b["dictionary"] = to_string(board.dictionary);
-  b["first_marker_id"] = board.first_marker_id;
-  b["legacy_pattern"] = board.legacy_pattern;
+  // A checkerboard has no markers.
+  if (board.kind == TargetKind::ChArUco) {
+    b["marker_m"] = board.marker_size_m;
+    b["dictionary"] = to_string(board.dictionary);
+    b["first_marker_id"] = board.first_marker_id;
+    b["legacy_pattern"] = board.legacy_pattern;
+  }
   b["square_measured"] = info.square_measured;
   b["square_tolerance_m"] = optional_number(board.square_size_tolerance_m);
   b["planarity_bow_m"] = optional_number(board.planarity_bow_m);
