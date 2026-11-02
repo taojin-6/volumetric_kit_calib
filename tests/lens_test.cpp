@@ -24,7 +24,6 @@
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <glm/gtc/matrix_transform.hpp>
 #include <opencv2/core.hpp>
 
 #include "result_checks.hpp"
@@ -286,6 +285,9 @@ TEST(PlanLensViews, Refuses) {
   options = {};
   options.outlier_rounds = -1;
   expect_refused(refused(options), "plan_lens_views", "options.outlier_rounds");
+  options = {};
+  options.max_iterations = 0;
+  expect_refused(refused(options), "plan_lens_views", "options.max_iterations");
   expect_refused(plan_lens_views("", kSize, board(), views).status(),
                  "plan_lens_views", "no id");
   expect_refused(plan_lens_views("bm-1", {0, 2160}, board(), views).status(),

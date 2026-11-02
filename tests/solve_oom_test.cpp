@@ -8,6 +8,7 @@
 // pose or half of one, and view_pose reports either as a Backend error naming
 // solvePnPGeneric.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -79,12 +80,12 @@ TEST(SolveOom, InitialiseRefusingAView) {
       });
 }
 
-// Eight views through a lens the fit can reach exactly, so it takes few
-// iterations, a corner of one bad so a round drops it and fits again, some
-// held out: each allocation of two starts' fits, the rounds and a held-out
-// view's pose fails. On one OpenCV thread, as the sweep needs the same
-// allocations each run: its threads leave a fit's last bits, and so its
-// iterations, to chance.
+// Eight views through a lens given as the start, a corner of one bad so a
+// round drops it and fits again, some held out: each allocation of two starts'
+// fits, the rounds and a held-out view's pose fails. A few iterations, as a
+// sweep runs a fit hundreds of times, on one OpenCV thread, as it needs the
+// same allocations each run: OpenCV's threads leave a fit's last bits to
+// chance.
 TEST(SolveOom, SolveLens) {
   const compute::Board board = test::lab_checkerboard();
   const camera::CameraModel lens = test::color_like_lens();
@@ -98,7 +99,7 @@ TEST(SolveOom, SolveLens) {
     view.frame_id = v;
     const std::vector<cv::Point2d> pixels =
         test::project(lens, pose, board.object_points());
-    for (std::size_t i = 0; i < pixels.size(); i += 2) {
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
       view.points.push_back(
           {static_cast<int>(i), {pixels[i].x, pixels[i].y}, 1.0});
     }
@@ -106,8 +107,16 @@ TEST(SolveOom, SolveLens) {
   views[1].points[3].pixel.x += 25.0;
   LensOptions options;
   options.min_views = 4;
+  options.max_iterations = 5;
   const int threads = cv::getNumThreads();
   cv::setNumThreads(1);
+  const LensFit fit =
+      solve_lens("bm-1", lens.size, board, views, lens, options).value();
+  EXPECT_TRUE(std::any_of(
+      fit.views.begin(), fit.views.end(),
+      [](const LensView& view) { return view.use == LensView::Use::HeldOut; }));
+  EXPECT_TRUE(std::any_of(fit.residuals.begin(), fit.residuals.end(),
+                          [](const CornerResidual& r) { return r.dropped; }));
   expect_oom_anywhere(
       [&] {
         return solve_lens("bm-1", lens.size, board, views, lens, options);

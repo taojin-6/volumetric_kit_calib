@@ -509,5 +509,47 @@ TEST(SyntheticRig, CameraImageBlursThenAddsNoise) {
   EXPECT_NE(same.data, step.data);
 }
 
+// The lens tests' truth is cv::fisheye's own model, out past the image's
+// corners, and its capture stays on the image.
+TEST(SyntheticRig, TheFisheyeTruthIsOpenCVs) {
+  FisheyeTruth lens;
+  lens.cx = 1917.4;
+  lens.cy = 1108.3;
+  lens.k = {-0.033, 0.002, -0.0004, 0.00005};
+  std::vector<cv::Point3d> rays;
+  for (double deg = 1.0; deg <= 85.0; deg += 3.0) {
+    for (double around = 0.0; around < 360.0; around += 30.0) {
+      const double off = deg * kPi / 180.0;
+      const double a = around * kPi / 180.0;
+      rays.emplace_back(std::sin(off) * std::cos(a),
+                        std::sin(off) * std::sin(a), std::cos(off));
+    }
+  }
+  std::vector<cv::Point2d> pixels;
+  cv::fisheye::projectPoints(
+      rays, pixels, cv::Vec3d::all(0.0), cv::Vec3d::all(0.0),
+      cv::Matx33d(lens.f, 0.0, lens.cx, 0.0, lens.f, lens.cy, 0.0, 0.0, 1.0),
+      cv::Vec4d(lens.k[0], lens.k[1], lens.k[2], lens.k[3]));
+  ASSERT_EQ(pixels.size(), rays.size());
+  for (std::size_t i = 0; i < rays.size(); ++i) {
+    const cv::Point2d ours = lens.project(rays[i]);
+    EXPECT_NEAR(ours.x, pixels[i].x, 1e-9);
+    EXPECT_NEAR(ours.y, pixels[i].y, 1e-9);
+  }
+
+  const compute::Board board = lab_checkerboard();
+  const std::vector<Observation> views = fisheye_views(board, lens);
+  EXPECT_GE(views.size(), 30u);
+  for (const Observation& view : views) {
+    EXPECT_GE(view.points.size(), 12u);
+    for (const DetectedPoint& point : view.points) {
+      EXPECT_GE(point.pixel.x, 3.0);
+      EXPECT_LE(point.pixel.x, 3836.0);
+      EXPECT_GE(point.pixel.y, 3.0);
+      EXPECT_LE(point.pixel.y, 2156.0);
+    }
+  }
+}
+
 }  // namespace
 }  // namespace volumetric_kit::calib::test

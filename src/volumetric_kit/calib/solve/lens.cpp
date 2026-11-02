@@ -73,6 +73,9 @@ core::Status check_options(const LensOptions& o, std::string_view prefix) {
   if (o.outlier_rounds < 0) {
     return detail::refuse_option(prefix, "outlier_rounds", "at least 0");
   }
+  if (o.max_iterations < 1) {
+    return detail::refuse_option(prefix, "max_iterations", "at least 1");
+  }
   return {};
 }
 
@@ -209,7 +212,7 @@ std::optional<Solved> fit_from(const Plan& plan,
                                const std::vector<ViewState>& states,
                                const cv::Size& image,
                                const compute::CvCamera* start,
-                               std::string& why) {
+                               int max_iterations, std::string& why) {
   // OpenCV's calibration takes single precision alone: 2e-4 px at 4K.
   std::vector<std::vector<cv::Point3f>> object;
   std::vector<std::vector<cv::Point2f>> pixels;
@@ -231,9 +234,8 @@ std::optional<Solved> fit_from(const Plan& plan,
     distortion = cv::Mat(start->distortion).clone();
     flags |= cv::CALIB_USE_INTRINSIC_GUESS;
   }
-  // A fisheye's fit creeps for hundreds of iterations before it settles.
   const cv::TermCriteria criteria(
-      cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 500, 1e-14);
+      cv::TermCriteria::COUNT + cv::TermCriteria::EPS, max_iterations, 1e-14);
   // OpenCV sizes these in its own, uninstrumented, code: a fresh vector each
   // time, as AddressSanitizer's container checks need.
   std::vector<cv::Mat> rvecs;
@@ -281,11 +283,14 @@ std::optional<Solved> fit_from(const Plan& plan,
 core::Result<Solved> best_fit(const Plan& plan,
                               const std::vector<ViewState>& states,
                               const cv::Size& image,
-                              const compute::CvCamera* start) {
+                              const compute::CvCamera* start,
+                              int max_iterations) {
   std::string why;
-  std::optional<Solved> best = fit_from(plan, states, image, nullptr, why);
+  std::optional<Solved> best =
+      fit_from(plan, states, image, nullptr, max_iterations, why);
   if (start != nullptr) {
-    std::optional<Solved> other = fit_from(plan, states, image, start, why);
+    std::optional<Solved> other =
+        fit_from(plan, states, image, start, max_iterations, why);
     if (other && (!best || other->rms < best->rms)) best = std::move(other);
   }
   if (!best) {
@@ -513,7 +518,8 @@ core::Result<LensFit> solve_lens(
     const compute::CvCamera* from = given ? &*given : nullptr;
     Solved best;
     for (int round = 0;; ++round) {
-      VKC_ASSIGN(best, best_fit(plan, states, image, from));
+      VKC_ASSIGN(best,
+                 best_fit(plan, states, image, from, options.max_iterations));
       if (round == options.outlier_rounds) break;
       VKC_ASSIGN(const bool dropped,
                  drop_outliers(states, best, board, image, options, plan));

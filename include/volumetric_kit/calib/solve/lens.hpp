@@ -72,6 +72,9 @@ struct LensOptions {
   /// Solves after outliers are dropped, at most, by the bundle adjustment's
   /// rule and bounds (@ref BundleAdjustOptions); 0 drops none.
   int outlier_rounds = 3;
+  /// `calibrateCamera`'s iterations in one fit, at most; at least 1. A
+  /// fisheye's fit creeps for hundreds before it settles.
+  int max_iterations = 500;
 };
 
 /// @brief What @ref solve_lens did with one view.
