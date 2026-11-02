@@ -70,6 +70,10 @@ vc_add_test(target vc_test_support)
 # core: the plain records (Observation / Detection / ViewCheck / CaptureMeta /
 # SensorProfile / LensProfile).
 vc_add_test(data_model volumetric_kit::calib_core)
+# The stable API (README.md's table): the sample mains, built on its headers
+# alone, run on synthetic data.
+vc_add_test(api volumetric_kit::calib_compute)
+
 # The OpenCV modules only the tests use: imgcodecs, to compress rendered views,
 # and calib, the bundle adjustment's oracle.
 find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS imgcodecs calib)

@@ -71,6 +71,38 @@ Windows would be a new decision, landing with its CI leg -- and the core's.
 None at present. (The GPU compute path, open until 2026-10-03, is now the
 locked decision above.)
 
+## 2026-11-01 — The stable API
+
+The brain is calib's API for programs built on it: the headers in
+README.md's [table](README.md#stable-api) (board, detect, views, solve,
+quality, and sensor's calibration file, which calib formats and the caller
+writes). From 0.1.0:
+
+1. The API is the headers in that table, and the OpenCV 5 and sensor camera
+   types they use (`cv::Point3d`, `cv::aruco::CharucoBoard`, `CameraModel`,
+   `ArrayCalibration`, ...): a break there is a calib break.
+2. Additive changes are free: new headers, functions or overloads; trailing
+   parameters and struct fields with defaults; trailing enum values.
+3. Anything else is breaking: a `!` commit, a CHANGELOG "Breaking" line with
+   its one-line migration, and a line here saying why.
+4. Every feature PR bumps the minor version, in merge order, as sensor and
+   the core do.
+5. `tests/api_test.cpp` builds and runs the sample programs on the table's
+   headers alone, on synthetic data. A break in a call they make fails the
+   build; a break elsewhere in the table is caught in review against it.
+6. calib stays consumed by commit, never installed (the 2026-10-22 entry):
+   no ABI promise. Output files keep their own versions (sensor's file,
+   `report.json`, `session.json`).
+7. The house rules stay: `core::Status` and `Result`, no exception across the
+   API, a `@code` example per class.
+
+Every other header is internal and changes freely: `app/`, `viz/`,
+`capture/`, `depth/`, the rest of `compute/` and `quality/`, and
+`detect/charuco.hpp`. Why: other programs (an offline lens solve, the second
+camera pair) assemble the brain, and a rule that shows in review costs
+little. Freezing everything would stall the app; an ABI promise means
+nothing for a library nobody installs.
+
 ## 2026-11-01 — Plain checkerboards, one detector
 
 A lens is fitted from a plain checkerboard, the lab's (13 x 8 inner corners

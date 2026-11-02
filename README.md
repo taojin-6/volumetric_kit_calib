@@ -136,6 +136,23 @@ renderer.
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
 
+## Stable API
+
+A program built on calib uses the brain through these headers, under
+`include/volumetric_kit/calib/`; each builds without Vulkan or gfx. What
+stays stable, and how a break is flagged, is
+[DECISIONS.md](DECISIONS.md#2026-11-01--the-stable-api)'s rule; every other
+header is internal.
+
+| Layer | Headers |
+| --- | --- |
+| Board | `core/target.hpp`, `compute/board.hpp` |
+| Detect | `detect/luma.hpp`, `detect/board.hpp`, `detect/tag.hpp` |
+| Views | `core/observation.hpp`, `core/detection.hpp`: the views are a `std::vector<Observation>`, by camera id and capture index |
+| Solve | `solve/initialise.hpp`, `solve/bundle_adjust.hpp`, `solve/world_tag.hpp` |
+| Quality | `quality/calibration_metrics.hpp`, `quality/results.hpp` |
+| File | sensor's `camera/array_calibration.hpp`: calib formats it, the caller writes it |
+
 ## Prerequisites
 
 calib needs a C++17 compiler -- GCC or Clang; Windows and MSVC are not

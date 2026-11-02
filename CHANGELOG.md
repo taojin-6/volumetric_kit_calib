@@ -2,12 +2,17 @@
 
 All notable changes to `volumetric_kit_calib` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project
-adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
+0.1.0 the API is README.md's [table](README.md#stable-api); before 1.0 a minor
+release may break it, and each such entry says how to migrate
+(DECISIONS.md, 2026-11-01).
 
-## [Unreleased]
+## [0.1.0] - 2026-11-01
 
 ### Added
 
+- **The stable API** (DECISIONS.md, 2026-11-01): the brain's headers in
+  README.md's table. `api_test` builds the sample programs on them alone.
 - **Plain checkerboards** (DECISIONS.md, 2026-11-01): `compute::Board`
   builds a `TargetKind::Checkerboard`, its corners on the ChArUco board's
   grid, and `legacy_checkerboard()` is the lab's, 13 x 8 inner corners of
@@ -46,6 +51,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`InvalidArgument`): extrinsics pair corners across cameras by id.
   `detect_charuco` refuses one too, and `viz::BoardEditor` takes ChArUco
   only, until it has a checkerboard's fields.
+- calib's version is 0.1.0, where it was 0.0.1.
 - build: **calib builds on volumetric_kit_sensor, not recon** (BREAKING for
   consumers; DECISIONS.md, 2026-10-29). recon's camera and sensor tiers are
   now [volumetric_kit_sensor](https://github.com/taojin-6/volumetric_kit_sensor)
