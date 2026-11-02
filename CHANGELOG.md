@@ -15,17 +15,19 @@ release may break it, and each such entry says how to migrate
   `solve::solve_lens` (`solve/lens.hpp`) fits sensor's rational lens by
   `cv::calibrateCamera`, from OpenCV's own start and a given one, the lower RMS
   kept, with views held out in every region of the image and the adjustment's
-  outlier bounds. `solve::plan_lens_views` says which views it takes.
+  outlier bounds, and a second pass with everything back when a round dropped
+  anything. `solve::plan_lens_views` says which views it takes.
 - **Its gates and files** (`quality/lens_gate.hpp`): `judge_lens` holds a fit
-  to its held-out RMS, that over the fit's, the cells' mean residuals and the
-  lens's fold; `format_lens_results` gives a lens-only calibration file, the
-  report and the residuals.
+  to its held-out RMS, that over the fit's, its held-out corners past the fit's
+  bound, the cells' mean residuals, the lens's fold and the fitted corners'
+  reach; `format_lens_results` gives a lens-only calibration file, the report
+  and the residuals.
 - `quality::lens_readiness`: whether a camera's views are enough yet, counted
   on those the solve will fit.
 - `RigCamera::source`: a lens's provenance, which `bundle_adjust` carries into
   the calibration file, where it wrote `Factory`.
-- `examples/02_lens_from_images`: a lens from saved pictures, on the stable
-  API alone.
+- `examples/02_lens_from_images`: a lens, its report and its residuals from
+  saved pictures, every gate missed printed, on the stable API alone.
 - `compute::grid_cell`, moved down from the quality tier for the hold-out.
 
 ### Changed

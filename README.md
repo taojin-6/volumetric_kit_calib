@@ -101,9 +101,10 @@ renderer.
   `report.json` and `residuals.csv` -- which the application writes
   ([DECISIONS.md](DECISIONS.md#2026-10-16--the-solved-rigs-metrics-and-its-results-files)).
   For a lens: whether a camera's views are enough yet, its gates (the
-  held-out RMS and its ratio to the fit's, no pattern left in the residuals
-  over the image, no fold inside the frame), and a lens-only results
-  directory
+  held-out RMS and its ratio to the fit's, few held-out corners past the fit's
+  bound, no pattern left in the residuals over the image, no fold inside the
+  frame, corners reaching the image's corners and sides), and a lens-only
+  results directory
   ([DECISIONS.md](DECISIONS.md#2026-11-01--a-cameras-lens-from-its-views)).
   Over the device's depth results, for any number of cameras: the board's
   scale and plane from each view's depth, each ordered pair's depth
@@ -222,8 +223,9 @@ to change the camera and point. The demo accepts only `--config PATH` and `--hel
 the calibration library itself keeps its core_base/sensor_camera dependency.
 
 Fit one camera's lens from saved pictures of a checkerboard, offline, with the
-stable API alone: here 14 x 9 squares of 20 mm, the lens file written to `out/`
-(which must exist).
+stable API alone: here 14 x 9 squares of 20 mm. It prints every gate missed,
+and writes the lens file, the report and the residuals to `out/` (which must
+exist).
 
 ```bash
 ./build/examples/example_02_lens_from_images bm-1 14 9 20 out images/bm-1/*.pgm

@@ -130,27 +130,46 @@ judges one again offline, from its saved pictures.
   3 gives one, where the 5th of each would give few from 40 views over 9
   regions. It never takes the last view reaching 0.9 toward a corner or side,
   so the fit keeps its reach.
-- **Nothing is dropped from a held-out view.** The outlier rule would hide the
-  overfit they are held out to show, so a detector's bad corner there fails
-  the gate instead, and shows in the report.
+- **Held-out corners answer to the final fit's corner bound,** as a fitted
+  view's do, so the ratio compares like with like. Those past it are marked
+  dropped and the view is posed again on the rest. The bound is at least 3 px,
+  six times the 0.5 px gate, so an overfit of the size the gates judge cannot
+  hide under it, and a detector's glitch does not end a session, which no
+  later capture could mend: a held-out view stays held out. More than 1% of
+  held-out corners past it fails, so a wrong lens cannot hide there either.
 - **The adjustment's outlier bounds, corners first.** One rule, in
   `solve/common`. A lens fit has no robust loss, so a bad corner pulls its
   view's pose: its corners go first, a few good neighbours with them at
-  worst, and the view is judged in the next round. A view's own pose takes
-  up a whole shift of it, 40 px and more on this lens, and harms nothing.
+  worst, and the view is judged in the next round. A whole view shifted is not
+  dropped: its pose takes up nearly all of it, 40 px and more on this lens, and
+  it pulls the lens a little, to 1.7 px at 56 degrees for one such view. No
+  physical cause of one is known.
+- **A second pass when a round dropped anything.** OpenCV's own start can land
+  at 2 px RMS in the first round, and what that fit condemns was never bad: one
+  session lost a view that alone reached a corner. So the rounds run once more
+  with everything back, from the lens they reached. That doubles the time, and
+  only then.
 - **The gates:** the held-out RMS at most 0.5 px at 3840 wide, scaled by width;
-  it over the fit's at most 1.3; in each 8 x 6 cell of 30 fitted corners or
-  more, the mean residual at most 0.1 px, or 3 standard errors of that mean if
-  larger; no image corner past the lens's fold. Why the cells: each view's pose
-  absorbs most of a wrong lens, and one 6 px off at 56 degrees passed every RMS
-  gate, where right fits leave 0.03-0.05 px in the worst cell and wrong ones
-  0.12 px and up. The floor keeps noisier real corners from failing a right
-  lens: the mean's standard error is taken as a vector, so a cell's false alarm
-  is about 1 in 8000.
+  it over the fit's at most 1.3, judged only above 0.1 px at that width, as a
+  right lens down at the detector's noise (rendered pictures give 0.03 px) can
+  miss a ratio of two small numbers; at most 1% of held-out corners past the
+  bound; in each 8 x 6 cell of 30 fitted corners or more, the mean residual at
+  most 0.1 px, or 3 standard errors of that mean if larger; no image corner past
+  the lens's fold; and reach, below. Why the cells: each view's pose absorbs
+  most of a wrong lens, and one 6 px off at 56 degrees passed every RMS gate,
+  where right fits leave 0.03-0.07 px in the worst cell and wrong ones 0.12 px
+  and up. The floor keeps noisier real corners from failing a right lens: the
+  mean's standard error is taken as a vector, so a cell's false alarm is about
+  1 in 2500 at 30 corners and 1 in 8000 in a large cell.
 - **The fold is compared in normalized radius**, through sensor's
-  `fold_radius2`: a lens whose fold lies past the frame is a good lens, and a
-  pole of its denominator bounds no radius. The 2024 bm-2 fit folds at 74.8
-  degrees, its image corners about 79 degrees off axis; M0's never folds.
+  `fold_radius2`: a lens whose fold lies past the frame is a good lens. A pole
+  of its denominator bounds no radius, but a fit can hold one inside the frame
+  with its numerator all but cancelling it, its curve running on past: so each
+  image corner must also read nearer the axis than the fold through the fit.
+  Boards stopping at 0.7 gave a pole at 55.8 degrees, the corners reading 79,
+  and the runtime cuts every ray at that number. The 2024 bm-2 fit folds at 74.8
+  degrees, its image corners about 79 degrees off axis; the lab's current lens
+  never folds.
 - **Sigma is reported, not gated.** R8's focal length trades against its
   coefficients: units' sets differ 5 times over while their curves agree.
 - **Reach is lens-free:** how far corners get toward an image corner or side,
@@ -158,7 +177,12 @@ judges one again offline, from its saved pictures.
   to fit, 75% of the 8 x 6 cells, 0.9 toward every corner and side, and at most
   half frontal, that last with a real lens only: a stand-in's tilt is wrong at
   a fisheye's edge. Corner cells alone are met at about 56 degrees, where R8
-  fits still fold inside the frame; at 0.9, about 70, none does.
+  fits still fold inside the frame; at 0.9, about 70, no right fit does.
+- **Reach is a gate too,** on the fitted corners kept, beside readiness, which
+  counts the plan before any fit and has only the app to ask it: a verdict's
+  `pass` must hold by itself, and outlier rounds can take reach away. Boards
+  stopping at 0.7 passed every other gate with 40 px off at 68 degrees, with
+  no corner there to show it.
 - **A lens-only file:** sensor's version 2, colour lenses alone: those solved,
   and the base file's other cameras' as they are. Its poses, solved with old
   lenses, its world and everything else are dropped. A lens that misses a gate
