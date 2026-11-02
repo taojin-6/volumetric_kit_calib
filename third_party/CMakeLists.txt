@@ -78,12 +78,12 @@ endif()
 # and VS_WITH_CUDA apply. Work on both checkouts at once with
 # -DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_SENSOR=<sensor checkout>.
 #
-# The pin is sensor main at #26's merge (b66e96f, 0.19.0), as is its Orbbec SDK
-# action in .github/workflows/_build.yml.
+# The pin is sensor main at #27's merge (aa7d940, 0.20.0), for fold_radius2 on
+# its camera tier, as is its Orbbec SDK action in .github/workflows/_build.yml.
 FetchContent_Declare(
   volumetric_kit_sensor
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_sensor.git
-  GIT_TAG b66e96f8d67856674d00069805db6822fbea7bf7)
+  GIT_TAG aa7d9402ae6726a84995c7bc52f936298d0d36d1)
 if(VC_WITH_RIG)
   set(VS_CAMERA_ONLY OFF)
 elseif(NOT DEFINED VS_CAMERA_ONLY)
