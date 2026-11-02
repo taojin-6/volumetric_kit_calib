@@ -84,10 +84,14 @@ core::Result<OpenedSource> open_source(
     VKC_TRY(check_preset(infos, preset));
     for (std::size_t i = 0; i < sensors.size(); ++i) {
       // open_orbbec_sensors hands out one OrbbecSensor per camera.
-      const auto& orbbec =
-          static_cast<const sensor::OrbbecSensor&>(*sensors[i]);
+      const auto* orbbec =
+          dynamic_cast<const sensor::OrbbecSensor*>(sensors[i].get());
+      if (orbbec == nullptr) {
+        return core::Status::invalid_argument(
+            "open_source: camera " + infos[i].id + " is not an Orbbec sensor");
+      }
       VKC_ASSIGN(capture::SessionCamera camera,
-                 orbbec_camera(infos[i], orbbec.device_info(), scenario.sync));
+                 orbbec_camera(infos[i], orbbec->device_info(), scenario.sync));
       out.cameras.push_back(std::move(camera));
       out.lenses.push_back(*infos[i].color);
     }

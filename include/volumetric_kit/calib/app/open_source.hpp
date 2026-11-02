@@ -118,8 +118,9 @@ struct OpenedSource {
 ///                   compute library's and the renderer's.
 /// @return The source and its records; what sensor's opener or
 ///         `SensorArray::open` refuses (a camera that does not answer
-///         among them); @ref check_preset's refusals; what
-///         `source::RigSource::open` refuses; or `OutOfMemory`.
+///         among them); @ref check_preset's refusals; `InvalidArgument`
+///         for a camera the opener did not hand out as an `OrbbecSensor`;
+///         what `source::RigSource::open` refuses; or `OutOfMemory`.
 ///
 /// @code
 /// VKC_ASSIGN(OpenedSource opened,

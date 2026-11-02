@@ -75,7 +75,8 @@ add_dependencies(calib_app calib_app_software)
 # preparation, the opener's Orbbec arm (its preset, options and sync file),
 # gfx's retire queue and depth-cloud pipeline, and the core's scenario. The
 # window, the shared device and its requirements, the depth checks' kernels,
-# OpenCV's thread pool and the threads stay private.
+# OpenCV's thread pool and the threads stay private. TODO: link sensor_orbbec
+# privately once no public header names an Orbbec type (the decklink arm, A5).
 target_link_libraries(
   calib_app
   PUBLIC calib_viz
