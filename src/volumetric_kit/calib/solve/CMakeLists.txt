@@ -4,7 +4,8 @@
 # --- calib_solve: Tier 2 -----------------------------------------------------
 # The rig solve on OpenCV: each view's own pose (IPPE), the cameras' spanning
 # tree, the first rig, the bundle adjustment that refines it (LevMarq), and the
-# world at the origin tag; and a camera's lens from its views (calibrateCamera).
+# world at the origin tag; a tracked camera's world from its stills of the tag;
+# and a camera's lens from its views (calibrateCamera).
 include(GenerateExportHeader)
 
 set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
@@ -20,6 +21,7 @@ target_sources(
           lens.cpp
           reprojection.cpp
           spanning_tree.cpp
+          tracked_world.cpp
           view_pose.cpp
           world_tag.cpp)
 

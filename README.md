@@ -88,6 +88,11 @@ renderer.
   floor from the solved rig, and `anchor_rig` moves the outputs into its
   world, z up from the floor
   ([DECISIONS.md](DECISIONS.md#2026-10-19--the-world-at-the-origin-tag)).
+  `tracked_world_from_tag` places a tracked camera's world (ARKit's) in the
+  tag's from its stills of the tag, the tilt from its gravity and the yaw
+  and position fitted to the rig's measured edge, and `register_tracked`
+  gives sensor's registration file from it
+  ([DECISIONS.md](DECISIONS.md#2026-11-03--a-tracked-cameras-world-at-the-origin-tag)).
   `solve_lens` fits one camera's lens from its own views of a board, either
   kind: sensor's rational lens by `cv::calibrateCamera`, from two starts, with
   views held out in every region of the image, and the adjustment's outlier
@@ -183,9 +188,9 @@ it.
 | Board | `core/target.hpp`, `compute/board.hpp` |
 | Detect | `detect/luma.hpp`, `detect/board.hpp`, `detect/tag.hpp` |
 | Views | `core/observation.hpp`, `core/detection.hpp`: the views are a `std::vector<Observation>`, by camera id and capture index |
-| Solve | `solve/initialise.hpp`, `solve/bundle_adjust.hpp`, `solve/world_tag.hpp`, `solve/lens.hpp` |
+| Solve | `solve/initialise.hpp`, `solve/bundle_adjust.hpp`, `solve/world_tag.hpp`, `solve/tracked_world.hpp`, `solve/lens.hpp` |
 | Quality | `quality/calibration_metrics.hpp`, `quality/results.hpp`, `quality/lens_gate.hpp`, `quality/pair_row_check.hpp` |
-| File | sensor's `camera/array_calibration.hpp`: calib formats it, the caller writes it |
+| File | sensor's `camera/array_calibration.hpp` and `camera/tracked_registration.hpp`: calib formats them, the caller writes them |
 
 ## Prerequisites
 
@@ -253,6 +258,15 @@ exist).
 
 ```bash
 ./build/examples/example_02_lens_from_images bm-1 14 9 20 out images/bm-1/*.pgm
+```
+
+Register a tracked camera's world into the rig's from its stills of the origin
+tag (sensor's `camera/tracked_stills.hpp`), with the edge the rig measured,
+here from the hold in the take's first 3 s:
+
+```bash
+./build/examples/example_03_register_tracked array_calibration.json \
+  take/stills.json 147.25 take/registration.json 0 3
 ```
 
 Run calib_rig on a rig (the session root must exist):

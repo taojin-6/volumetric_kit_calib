@@ -7,6 +7,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.9.0] - 2026-11-03
+
+### Added
+
+- **A tracked camera's world at the origin tag** (DECISIONS.md, 2026-11-03):
+  `solve/tracked_world.hpp`. `tracked_world_from_tag` places a tracked
+  camera's world (ARKit's) in the tag's from its stills of the tag at their
+  recorded poses: the tilt from the tracking's gravity, the yaw and the
+  translation fitted to a square of the edge the rig measured. Its misses
+  are `TagMiss` values: `NotSeen`, `CameraBelowTag`, `Numerical`, and
+  `PoorFit` above `kMaxTrackedRmsPx` or `kMaxTrackedSeedGapM`.
+  `register_tracked` turns the fit of a session's stills into sensor's
+  `TrackedRegistration`, which the caller writes.
+- `examples/03_register_tracked`: a registration file from a calibration, a
+  stills file and the rig's measured edge, optionally from one hold's window.
+
+### Changed
+
+- build: **calib pins sensor at its tracked stills** (#48's merge, dfe601f,
+  0.41.0), where it was at #47's merge (881f42b, 0.36.0), as is sensor's
+  Orbbec SDK action in CI; calib needs sensor 0.41.0
+  (`VC_SENSOR_MIN_VERSION`), for `camera/tracked_stills.hpp`.
+- calib's version is 0.9.0, where it was 0.8.0.
+
 ## [0.8.0] - 2026-11-03
 
 ### Changed

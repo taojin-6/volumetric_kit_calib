@@ -9,6 +9,7 @@
 // solvePnPGeneric.
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -23,6 +24,7 @@
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/calib/solve/lens.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
+#include "volumetric_kit/calib/solve/tracked_world.hpp"
 #include "volumetric_kit/calib/solve/view_pose.hpp"
 #include "volumetric_kit/calib/solve/world_tag.hpp"
 
@@ -258,6 +260,79 @@ TEST(SolveOom, AnchorRig) {
   WorldOrigin aruco = origin;
   aruco.sought.dictionary = MarkerDictionary::ArUco4x4_50;
   expect_oom_anywhere([&] { return anchor_rig(tagged.solution, aruco); });
+}
+
+// Two exact stills of the floor tag from a tracked camera 1.2 m out, ARKit's
+// world (y up) the tag's turned a quarter about x, and the stills a session
+// records for them.
+struct Tracked {
+  camera::Mat4d tracking_to_world{1.0};
+  std::vector<TrackedTagView> views;
+  camera::TrackedStills stills;
+
+  Tracked() {
+    tracking_to_world[1] = glm::dvec4(0.0, 0.0, 1.0, 0.0);
+    tracking_to_world[2] = glm::dvec4(0.0, -1.0, 0.0, 0.0);
+    const camera::CameraModel model = test::tracked_pinhole();
+    const std::array<cv::Point3d, 4> corners =
+        test::floor_tag_corners({0.14725, {}, 0.0});
+    stills.sensor = "ipad-pro-m5";
+    stills.session[0] = 1;
+    for (int i = 0; i < 2; ++i) {
+      const camera::Mat4d at =
+          test::camera_over_tag(1.2, 40.0, 20.0 + 5.0 * i, 0.0);
+      const std::vector<cv::Point2d> pixels = test::project(
+          model, camera::rigid_inverse(at), {corners.begin(), corners.end()});
+      TrackedTagView& v = views.emplace_back();
+      v.still = "still_" + std::to_string(i) + ".png";
+      v.image_size = model.size;
+      v.model = model;
+      v.cam_to_tracking = camera::rigid_inverse(tracking_to_world) * at;
+      v.marker.id = kOriginTag.id;
+      for (std::size_t k = 0; k < 4; ++k) {
+        v.marker.corners[k] = {pixels[k].x, pixels[k].y};
+      }
+      stills.stills.push_back(
+          {v.still, std::uint64_t(1 + i), model, v.cam_to_tracking});
+    }
+  }
+};
+
+TEST(SolveOom, TrackedWorldFromTag) {
+  const Tracked tracked;
+  const auto place = [&](const std::vector<TrackedTagView>& views) {
+    return [&, views] {
+      return tracked_world_from_tag(views, kOriginTag, 0.14725);
+    };
+  };
+  const core::Result<TrackedWorld> found = place(tracked.views)();
+  ASSERT_TRUE(found.ok() && found->fit);
+  expect_oom_anywhere(place(tracked.views));
+  // A miss, and a refusal.
+  std::vector<TrackedTagView> moved = tracked.views;
+  moved[1].cam_to_tracking[3].x += 0.10;
+  ASSERT_EQ(place(moved)()->miss, TagMiss::PoorFit);
+  expect_oom_anywhere(place(moved));
+  std::vector<TrackedTagView> other = tracked.views;
+  other[1].marker.id = 3;
+  expect_oom_anywhere(place(other));
+}
+
+TEST(SolveOom, RegisterTracked) {
+  const Tracked tracked;
+  const TrackedWorld found =
+      tracked_world_from_tag(tracked.views, kOriginTag, 0.14725).value();
+  ASSERT_TRUE(found.fit);
+  const camera::WorldFrame world{{},
+                                 camera::AprilTagWorld{"tag36h11", 0, 0.15}};
+  expect_oom_anywhere(
+      [&] { return register_tracked(tracked.stills, world, found); });
+  // Refusals.
+  expect_oom_anywhere(
+      [&] { return register_tracked(tracked.stills, world, TrackedWorld{}); });
+  const camera::WorldFrame sensor{"femto-1", {}};
+  expect_oom_anywhere(
+      [&] { return register_tracked(tracked.stills, sensor, found); });
 }
 
 TEST(SolveOom, ViewResiduals) {
