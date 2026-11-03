@@ -106,6 +106,51 @@ solve, the second camera pair) assemble the brain, and a rule that shows in
 review costs little. Freezing everything would stall the app; an ABI promise
 means nothing for a library nobody installs.
 
+## 2026-11-03 — Fast tests in CI
+
+CI's tests prove each rule on the smallest case that shows it; full-size
+work and statistical sweeps are for hand runs.
+
+- **A test binary takes about 5 s in Release on an M5 Max and 30 s under
+  the sanitizers**, with the fewest pictures, captures and fits that still
+  prove each of its rules, and no fixed sleeps. A slow binary is cut by
+  sharing what its cases make (renders, searches, fits) and by holding each
+  rule on the inputs that show it, found by probing: detect_board keeps the
+  searches that fail with its corner filter off and the half that differs
+  with OpenCV's random numbers unseeded. A rule is never dropped: every
+  scene, seed and state stays registered as `<name>.sweeps`, labelled
+  `slow`, as `detect_board.sweeps` does detect_board's.
+- **No CI leg runs the `slow` label**; `ctest -L slow` runs the sweeps and
+  `detect_board.timing` by hand. The `package` tests, calib's nested
+  configures, run on the Release rig leg.
+- **On Linux a lens fit costs its dense solve over every view's pose**,
+  whatever its iterations: under the sanitizers a one-iteration fit of a
+  38-view session takes about 650 ms, against 23 ms in Release on the Mac.
+  So the lens tests share each seed's fit across cases and run the rules on
+  a fit's mechanics (starts, passes, outlier rounds) on half a session,
+  every other view; rules about the session itself (reach, wrong minima,
+  the curve) keep all of it.
+- **The deps caches hash the pins (`third_party/CMakeLists.txt`), not the
+  root CMakeLists.txt**, whose version every PR bumps, and each restores by
+  prefix. The prefix carries what make does not track in a restored tree:
+  the workspace path, the Homebrew key on macOS and, in the sanitizer job,
+  the compiler, the OS release and the versions of the header and
+  shader-tool packages. After a restore from other pins, FetchContent checks
+  the moved dependency out again and make rebuilds only what changed.
+- **Why, in numbers.** CI took about 12 minutes on main (run 41711671795),
+  set by the sanitizer job: 727 s, Build 445 s and Test 195 s. Its cache
+  had hit on 6 of the last 25 runs, each a PR's rerun of itself; a hit
+  builds in 160 s. Its slowest tests were detect_board 168 s, lens_check,
+  lens_gate and lens 61-62 s each, and detect_charuco 50 s. In Release on
+  an M5 Max, each binary alone, detect_board now takes 3.9 s (was 24.2 s),
+  detect_charuco 3.6 s (8.5 s), lens, lens_gate and lens_check 3.0-3.6 s
+  (4.8-5.6 s) and source_rig 1.2 s (4.0 s).
+- **Still over:** the app's end-to-end tests (app_setup 14 s, app_intrinsic
+  9 s, app_calibrate 8 s, app_extrinsic 7 s in Release), whose sessions are
+  at their smallest and spend most of each capture writing its files to
+  disk, and `SolveOom.SolveLens`, which fails each of 886 allocation sites
+  of a lens solve once.
+
 ## 2026-11-03 — A tracked camera's world at the origin tag
 
 `solve::tracked_world_from_tag` places a tracked camera's world in the
