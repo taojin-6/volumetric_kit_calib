@@ -37,6 +37,7 @@
 #include "device_picture.hpp"
 #include "fake_sensor.hpp"
 #include "fake_stereo.hpp"
+#include "live_pair.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/app/live_worker.hpp"
 #include "volumetric_kit/calib/app/preset.hpp"
@@ -54,6 +55,8 @@ namespace {
 
 namespace camera = sensor::camera;
 using Code = core::Status::Code;
+using test::next_snapshot;
+using test::wait_armed;
 
 constexpr std::uint64_t kPeriodNs = 40'000'000;  // 25 fps
 constexpr std::uint64_t kStartNs = 1'760'000'000'000'000'000ull;
@@ -300,37 +303,6 @@ class AppLive : public core::test::VulkanDeviceTest {
     }
   }
 
-  // The next snapshot after number `after`; what the worker reported on the
-  // way is a failure, or kept in `errors` when it is given.
-  static std::shared_ptr<const LiveSnapshot> next(
-      LiveWorker& live, std::uint64_t after,
-      std::vector<core::Status>* errors = nullptr) {
-    const auto give_up = std::chrono::steady_clock::now() + kPatience;
-    while (std::chrono::steady_clock::now() < give_up) {
-      for (core::Status& error : live.take_errors()) {
-        if (errors != nullptr) {
-          errors->push_back(std::move(error));
-        } else {
-          ADD_FAILURE() << error.message();
-        }
-      }
-      std::shared_ptr<const LiveSnapshot> s = live.take_snapshot();
-      if (s && s->number > after) return s;
-      std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    ADD_FAILURE() << "no snapshot after " << after;
-    return nullptr;
-  }
-
-  // Waits until the rule is armed (it answers a set-less poll with Waiting).
-  static void wait_armed(const LiveWorker& live) {
-    const auto give_up = std::chrono::steady_clock::now() + kPatience;
-    while (live.decision().state != quality::CaptureState::Waiting) {
-      ASSERT_LT(std::chrono::steady_clock::now(), give_up);
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-  }
-
   std::vector<Camera> cameras_;
   std::vector<std::unique_ptr<sensor::IRgbdSensor>> sensors_;
 };
@@ -345,7 +317,7 @@ TEST_F(AppLive, FindsEachCamerasBoardWhereItProjects) {
     ASSERT_NE(live, nullptr);
     ASSERT_EQ(live->ids().size(), n);
     push(1);
-    const std::shared_ptr<const LiveSnapshot> s = next(*live, 0);
+    const std::shared_ptr<const LiveSnapshot> s = next_snapshot(*live, 0);
     ASSERT_NE(s, nullptr);
     ASSERT_NE(s->set, nullptr);
     ASSERT_EQ(s->set->cameras.size(), n);
@@ -379,7 +351,8 @@ TEST_F(AppLive, FindsEachCamerasBoardWhereItProjects) {
 
     // The next set: every corner where it was, so each is still.
     push(2);
-    const std::shared_ptr<const LiveSnapshot> again = next(*live, s->number);
+    const std::shared_ptr<const LiveSnapshot> again =
+        next_snapshot(*live, s->number);
     ASSERT_NE(again, nullptr);
     for (std::size_t i = 0; i < n; ++i) {
       ASSERT_TRUE(again->stillness_px[i].has_value());
@@ -396,7 +369,7 @@ TEST_F(AppLive, ACameraWithoutTheBoardLeavesTheOthersFound) {
   std::unique_ptr<LiveWorker> live = start();
   ASSERT_NE(live, nullptr);
   push(1);
-  const std::shared_ptr<const LiveSnapshot> s = next(*live, 0);
+  const std::shared_ptr<const LiveSnapshot> s = next_snapshot(*live, 0);
   ASSERT_NE(s, nullptr);
   EXPECT_TRUE(s->detections[1].observation.points.empty());
   EXPECT_EQ(s->checks[1].verdict, ViewVerdict::None);
@@ -414,7 +387,7 @@ TEST_F(AppLive, ACaptureCopiesEveryCamerasFrameOutOfItsSet) {
   std::unique_ptr<LiveWorker> live = start(&sink);
   ASSERT_NE(live, nullptr);
   push(1);
-  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live, 0);
   ASSERT_NE(first, nullptr);
   EXPECT_TRUE(sink.taken().empty());
   EXPECT_TRUE(live->set_board(legacy_femto_board(), true).ok());
@@ -422,7 +395,8 @@ TEST_F(AppLive, ACaptureCopiesEveryCamerasFrameOutOfItsSet) {
   ASSERT_TRUE(live->arm());
   wait_armed(*live);
   push(2);
-  const std::shared_ptr<const LiveSnapshot> s = next(*live, first->number);
+  const std::shared_ptr<const LiveSnapshot> s =
+      next_snapshot(*live, first->number);
   ASSERT_NE(s, nullptr);
   EXPECT_EQ(s->decision.state, quality::CaptureState::Take);
   const std::vector<CaptureRequest> taken = sink.taken();
@@ -490,12 +464,13 @@ TEST_F(AppLive, AFullWriterRefusesTheCapture) {
     std::unique_ptr<LiveWorker> live = start(&sink);
     ASSERT_NE(live, nullptr);
     push(1);
-    const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+    const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live, 0);
     ASSERT_NE(first, nullptr);
     ASSERT_TRUE(live->arm());
     wait_armed(*live);
     push(2);
-    const std::shared_ptr<const LiveSnapshot> s = next(*live, first->number);
+    const std::shared_ptr<const LiveSnapshot> s =
+        next_snapshot(*live, first->number);
     ASSERT_NE(s, nullptr);
     EXPECT_EQ(s->decision.state, quality::CaptureState::Failed);
     EXPECT_EQ(s->decision.hold, quality::Hold::SaverFull);
@@ -589,7 +564,7 @@ TEST_F(AppLive, ACameraDisconnectedEndsTheThread) {
   std::unique_ptr<LiveWorker> live = start(&sink);
   ASSERT_NE(live, nullptr);
   push(1);
-  ASSERT_NE(next(*live, 0), nullptr);
+  ASSERT_NE(next_snapshot(*live, 0), nullptr);
   gone->disconnect();
   const auto give_up = std::chrono::steady_clock::now() + kPatience;
   while (live->running()) {
@@ -698,10 +673,11 @@ TEST_F(AppLive, OffersEachSetItReadsBackToItsSetSink) {
   std::unique_ptr<LiveWorker> live = start(nullptr, &sets);
   ASSERT_NE(live, nullptr);
   push(1);
-  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live, 0);
   ASSERT_NE(first, nullptr);
   push(2);
-  const std::shared_ptr<const LiveSnapshot> second = next(*live, first->number);
+  const std::shared_ptr<const LiveSnapshot> second =
+      next_snapshot(*live, first->number);
   ASSERT_NE(second, nullptr);
   const std::vector<std::shared_ptr<const sensor::FrameSet>> taken =
       sets.taken();
@@ -734,13 +710,14 @@ TEST_F(AppLive, SearchesNoSetWhileNotDetectingUnlessACaptureIsArmed) {
   std::unique_ptr<LiveWorker> live = start(&sink, &sets);
   ASSERT_NE(live, nullptr);
   push(1);
-  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live, 0);
   ASSERT_NE(first, nullptr);
   EXPECT_EQ(stages_of(*first), searched);
 
   live->set_detecting(false);
   push(2);
-  const std::shared_ptr<const LiveSnapshot> off = next(*live, first->number);
+  const std::shared_ptr<const LiveSnapshot> off =
+      next_snapshot(*live, first->number);
   ASSERT_NE(off, nullptr);
   EXPECT_EQ(stages_of(*off), std::vector<std::string>{"poll"});
   ASSERT_EQ(off->detections.size(), 2u);
@@ -760,7 +737,8 @@ TEST_F(AppLive, SearchesNoSetWhileNotDetectingUnlessACaptureIsArmed) {
 
   live->set_detecting(true);
   push(3);
-  const std::shared_ptr<const LiveSnapshot> on = next(*live, off->number);
+  const std::shared_ptr<const LiveSnapshot> on =
+      next_snapshot(*live, off->number);
   ASSERT_NE(on, nullptr);
   EXPECT_EQ(stages_of(*on), searched);
   for (std::size_t i = 0; i < 2; ++i) {
@@ -772,14 +750,16 @@ TEST_F(AppLive, SearchesNoSetWhileNotDetectingUnlessACaptureIsArmed) {
   wait_armed(*live);
   live->set_detecting(false);
   push(4);
-  const std::shared_ptr<const LiveSnapshot> armed = next(*live, on->number);
+  const std::shared_ptr<const LiveSnapshot> armed =
+      next_snapshot(*live, on->number);
   ASSERT_NE(armed, nullptr);
   EXPECT_EQ(stages_of(*armed), searched);
   EXPECT_EQ(armed->decision.state, quality::CaptureState::Take);
   EXPECT_EQ(sink.taken().size(), 1u);
   // The take disarmed the rule: the next set is not searched.
   push(5);
-  const std::shared_ptr<const LiveSnapshot> after = next(*live, armed->number);
+  const std::shared_ptr<const LiveSnapshot> after =
+      next_snapshot(*live, armed->number);
   ASSERT_NE(after, nullptr);
   EXPECT_EQ(stages_of(*after), std::vector<std::string>{"poll"});
   EXPECT_EQ(sets.taken().size(), 5u);
@@ -795,14 +775,15 @@ TEST_F(AppLive, ASetMissingACameraIsNotTaken) {
   std::unique_ptr<LiveWorker> live = start(&sink);
   ASSERT_NE(live, nullptr);
   push(1);
-  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live, 0);
   ASSERT_NE(first, nullptr);
   ASSERT_TRUE(live->arm());
   wait_armed(*live);
   Push without;
   without.missing = {2};
   push(2, without);
-  const std::shared_ptr<const LiveSnapshot> s = next(*live, first->number);
+  const std::shared_ptr<const LiveSnapshot> s =
+      next_snapshot(*live, first->number);
   ASSERT_NE(s, nullptr);
   EXPECT_FALSE(s->set->cameras[2].present);
   EXPECT_EQ(s->decision.state, quality::CaptureState::Waiting);
@@ -821,14 +802,15 @@ TEST_F(AppLive, ATakenSetWithoutAJpegCapturesItsLuma) {
   std::unique_ptr<LiveWorker> live = start(&sink);
   ASSERT_NE(live, nullptr);
   push(1);
-  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live, 0);
   ASSERT_NE(first, nullptr);
   ASSERT_TRUE(live->arm());
   wait_armed(*live);
   Push no_jpeg;
   no_jpeg.without_jpeg = 1;
   push(2, no_jpeg);
-  const std::shared_ptr<const LiveSnapshot> s = next(*live, first->number);
+  const std::shared_ptr<const LiveSnapshot> s =
+      next_snapshot(*live, first->number);
   ASSERT_NE(s, nullptr);
   EXPECT_EQ(s->decision.state, quality::CaptureState::Take);
   const std::vector<CaptureRequest> taken = sink.taken();
@@ -849,7 +831,7 @@ TEST_F(AppLive, ATakenSetWithoutDepthFailsTheCapture) {
   std::unique_ptr<LiveWorker> live = start(&sink);
   ASSERT_NE(live, nullptr);
   push(1);
-  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live, 0);
   ASSERT_NE(first, nullptr);
   ASSERT_TRUE(live->arm());
   wait_armed(*live);
@@ -858,7 +840,7 @@ TEST_F(AppLive, ATakenSetWithoutDepthFailsTheCapture) {
   push(2, no_depth);
   std::vector<core::Status> errors;
   const std::shared_ptr<const LiveSnapshot> s =
-      next(*live, first->number, &errors);
+      next_snapshot(*live, first->number, &errors);
   ASSERT_NE(s, nullptr);
   for (core::Status& error : live->take_errors()) {
     errors.push_back(std::move(error));
@@ -882,14 +864,15 @@ TEST_F(AppLive, ACaptureRecordsItsSpreadAndWarnsOfIt) {
   std::unique_ptr<LiveWorker> live = start(&sink);
   ASSERT_NE(live, nullptr);
   push(1);
-  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live, 0);
   ASSERT_NE(first, nullptr);
   ASSERT_TRUE(live->arm());
   wait_armed(*live);
   Push skewed;
   skewed.skew_ns = {0, 8'000'000, -1'000'000};  // 8 ms late, 1 ms early
   push(2, skewed);
-  const std::shared_ptr<const LiveSnapshot> s = next(*live, first->number);
+  const std::shared_ptr<const LiveSnapshot> s =
+      next_snapshot(*live, first->number);
   ASSERT_NE(s, nullptr);
   EXPECT_EQ(s->decision.state, quality::CaptureState::Take);
   EXPECT_TRUE(s->decision.spread_high);  // past spread_warn_ms, 5 ms
@@ -909,14 +892,15 @@ TEST_F(AppLive, ASixMillisecondSpreadStillWarnsOnAnArray) {
   ASSERT_NE(live, nullptr);
   EXPECT_EQ(live->rule_options().spread_warn_ms, 5.0);
   push(1);
-  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live, 0);
   ASSERT_NE(first, nullptr);
   ASSERT_TRUE(live->arm());
   wait_armed(*live);
   Push skewed;
   skewed.skew_ns = {0, 6'000'000};
   push(2, skewed);
-  const std::shared_ptr<const LiveSnapshot> s = next(*live, first->number);
+  const std::shared_ptr<const LiveSnapshot> s =
+      next_snapshot(*live, first->number);
   ASSERT_NE(s, nullptr);
   EXPECT_EQ(s->decision.state, quality::CaptureState::Take);
   EXPECT_TRUE(s->decision.spread_high);
@@ -937,7 +921,7 @@ TEST_F(AppLive, AStillPairCapturesAtItsSkewBoundWithoutAWarning) {
   EXPECT_EQ(live->ids(), (std::vector<std::string>{"bm-1", "bm-2"}));
   constexpr std::int64_t kSkew = 16'600'000;
   push_pair(*fake, 0, 1, kSkew);
-  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live, 0);
   ASSERT_NE(first, nullptr);
   EXPECT_EQ(first->set->rgbd, nullptr);
   ASSERT_EQ(first->detections.size(), 2u);
@@ -945,7 +929,8 @@ TEST_F(AppLive, AStillPairCapturesAtItsSkewBoundWithoutAWarning) {
   ASSERT_TRUE(live->arm());
   wait_armed(*live);
   push_pair(*fake, 0, 2, kSkew);
-  const std::shared_ptr<const LiveSnapshot> s = next(*live, first->number);
+  const std::shared_ptr<const LiveSnapshot> s =
+      next_snapshot(*live, first->number);
   ASSERT_NE(s, nullptr);
   EXPECT_EQ(s->decision.state, quality::CaptureState::Take);
   EXPECT_FALSE(s->decision.spread_high);
@@ -976,12 +961,13 @@ TEST_F(AppLive, AMovingPairDoesNotCapture) {
   std::unique_ptr<LiveWorker> live = start_pair(&fake, &sink);
   ASSERT_NE(live, nullptr);
   push_pair(*fake, 0, 1, 16'600'000);
-  const std::shared_ptr<const LiveSnapshot> first = next(*live, 0);
+  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live, 0);
   ASSERT_NE(first, nullptr);
   ASSERT_TRUE(live->arm());
   wait_armed(*live);
   push_pair(*fake, 1, 2, 16'600'000);  // the board elsewhere
-  const std::shared_ptr<const LiveSnapshot> s = next(*live, first->number);
+  const std::shared_ptr<const LiveSnapshot> s =
+      next_snapshot(*live, first->number);
   ASSERT_NE(s, nullptr);
   EXPECT_EQ(s->decision.state, quality::CaptureState::Waiting);
   EXPECT_EQ(s->decision.hold, quality::Hold::Moving);
@@ -998,7 +984,7 @@ TEST_F(AppLive, StopsCleanlyAndReleasesEveryFrame) {
   std::vector<test::FakeSensor*> fakes;
   for (const Camera& cam : cameras_) fakes.push_back(cam.fake);
   push(1);
-  std::shared_ptr<const LiveSnapshot> held = next(*live, 0);
+  std::shared_ptr<const LiveSnapshot> held = next_snapshot(*live, 0);
   ASSERT_NE(held, nullptr);
   const std::weak_ptr<const void> first = held->set->rgbd->frames[0]->pixels;
   push(2);  // published by the worker, never taken

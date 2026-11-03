@@ -245,6 +245,12 @@ struct FisheyeTruth {
   sensor::camera::CameraModel frame() const;
 };
 
+/// @brief @ref FisheyeTruth's lab lens at a quarter of its size, 960 x 540,
+///        pixel centres at integers: the app's end-to-end pictures, as a 4K
+///        picture's quarter.
+/// @return The lens.
+FisheyeTruth quarter_fisheye();
+
 /// @brief How far a fitted lens is from @p truth: the most pixels its image
 ///        of a ray differs from the truth's, over rays up to @p band_deg off
 ///        axis in every direction, once the fit is turned by the rotation
