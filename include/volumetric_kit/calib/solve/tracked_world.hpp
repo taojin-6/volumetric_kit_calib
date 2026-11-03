@@ -84,7 +84,7 @@ struct TrackedWorldOptions {
 /// to a fraction of a pixel: each still carries its tracker's own pose
 /// error. On synthetic holds, a tracker off by 0.1 degrees and 2 mm per
 /// still fits at up to 9.2 px RMS from 1.2 m (5.7 px at p95), and 11.7 px
-/// from 0.8 m; one still moved 10 cm fits at 19 px or more from as far as
+/// from 0.8 m; one still moved 10 cm fits at 18.9 px or more from as far as
 /// 3 m, and 48 px from 1.2 m.
 ///
 /// @code
