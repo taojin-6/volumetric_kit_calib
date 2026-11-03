@@ -80,7 +80,9 @@
 ///
 /// A camera's `lens` is where the lens its views were checked through came
 /// from: `factory`, `stand-in`, or `file` with the calibration file's `path`
-/// and `sha256`.
+/// and `sha256`. A checkerboard's `board` has no marker keys
+/// (`"type": "checkerboard"`, its squares, square and tolerances); an
+/// intrinsic session's `mode` is `"intrinsics"`.
 ///
 /// `captures/<NNN>.json`, with `null` for a measure that is empty, for an
 /// origin tag the camera did not find and for the depth of a camera without
@@ -268,7 +270,8 @@ struct SessionInfo {
   /// The reference camera's id: the rig's primary, whose colour camera is
   /// the solve's world.
   std::string reference;
-  Target board;  ///< The board: a ChArUco board @ref check_target accepts.
+  /// The board: a ChArUco board or a checkerboard @ref check_target accepts.
+  Target board;
   /// Whether `board.square_size_m` was measured, rather than the print's
   /// nominal size.
   bool square_measured = false;
@@ -405,7 +408,8 @@ class VC_CAPTURE_API SessionWriter {
   ///        until the first capture.
   /// @param info     The session. Refused unless: the directory, the driver
   ///                 and the reference are non-empty; the board is a ChArUco
-  ///                 board @ref check_target accepts, and the origin tag one
+  ///                 board or a checkerboard @ref check_target accepts, and
+  ///                 the origin tag one
   ///                 @ref check_origin_tag accepts; there is a depth mode,
   ///                 with a finite, positive `metres_per_unit` and finite
   ///                 `0 < min_m < max_m`, exactly when a camera has depth;
@@ -421,7 +425,7 @@ class VC_CAPTURE_API SessionWriter {
   ///                 model; and the reference is a camera.
   /// @param options  How it queues.
   /// @return The writer; `InvalidArgument` naming what @p info or @p options
-  ///         gets wrong; `Unsupported` for a board that is not ChArUco;
+  ///         gets wrong; `Unsupported` for a board of another kind;
   ///         `IoError` if the thread cannot start; or `OutOfMemory`.
   static core::Result<std::unique_ptr<SessionWriter>> create(
       SessionInfo info, SessionWriterOptions options = {});

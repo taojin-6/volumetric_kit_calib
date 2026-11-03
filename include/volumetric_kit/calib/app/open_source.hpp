@@ -4,14 +4,22 @@
 #pragma once
 
 /// @file open_source.hpp
-/// @brief calib_rig's opener, the one code that names a driver: its scenario's
-///        source read and checked before a window opens (@ref check_scenario),
-///        then its cameras opened as one `source::RigSource`, with what the
+/// @brief calib_rig's opener, the one code that names a driver: its scenario
+///        read and checked before a window opens (@ref check_scenario), then
+///        its cameras opened as one `source::RigSource`, with what the
 ///        session records of each (@ref open_source).
 ///
-/// One arm today, `orbbec`: the rig's sync file, the Femto preset and its
-/// check, and each camera's Orbbec facts. Everything after it -- the
-/// workers, the session, the views -- reads the source and the records alone.
+/// Two arms, each built where sensor builds its driver:
+/// - `orbbec` (`VS_WITH_ORBBEC`): the rig's sync file, the Femto preset and
+///   its check, and each camera's Orbbec facts;
+/// - `decklink` (`VS_WITH_DECKLINK`, Linux x86-64): the scenario's one pair
+///   of SDI inputs as sensor's `DecklinkStereo`, opened with no calibration,
+///   for its lenses (intrinsic mode).
+///
+/// Each camera's lens is the mode's (`rig_lens`, calib_mode.hpp). Everything
+/// after the opener -- the workers, the session, the views -- reads the
+/// source and the records alone, and no public header of the app names a
+/// driver's type.
 
 #include <cstddef>
 #include <cstdint>
@@ -20,15 +28,12 @@
 #include <string>
 #include <vector>
 
-#include "volumetric_kit/calib/app/preset.hpp"
 #include "volumetric_kit/calib/capture/session_writer.hpp"
 #include "volumetric_kit/calib/source/rig_source.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/config/config.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
 #include "volumetric_kit/sensor/camera/camera_model.hpp"
-#include "volumetric_kit/sensor/orbbec/orbbec_stream.hpp"
-#include "volumetric_kit/sensor/orbbec/orbbec_sync_config.hpp"
-#include "volumetric_kit/sensor/rgbd_sensor.hpp"
 
 namespace volumetric_kit::core {
 class Allocator;
@@ -42,46 +47,45 @@ namespace volumetric_kit::calib::app {
 ///
 /// @code
 /// VKC_ASSIGN(const RigScenario scenario, check_scenario(config));
-/// const std::size_t cameras = scenario.sync.devices.size();
+/// if (scenario.mode == capture::SessionMode::Intrinsics) seed_checkerboard();
 /// @endcode
 struct RigScenario {
-  RigPreset preset;  ///< The modes every camera streams at.
-  /// The rig's sync file (`source.sync_config`), read: its cameras, each
-  /// one's sync settings.
-  sensor::OrbbecRigSyncConfig sync;
+  /// What it calibrates, by `operation`: `calibrate_intrinsics` each
+  /// camera's lens, `calibrate` the rig's poses.
+  capture::SessionMode mode = capture::SessionMode::Extrinsics;
+  std::string driver;  ///< `source.driver`: `"orbbec"` or `"decklink"`.
+  /// `source.calibration`, read: the lenses the cameras start from; null
+  /// for none.
+  std::shared_ptr<const sensor::camera::ArrayCalibration> calibration;
 };
 
 /// @brief What calib_rig checks of its scenario before it opens a window or
-///        a camera.
+///        a camera: that it runs what calib supports, so no scenario runs
+///        another solve than it asks for.
+///
+/// 1. `operation` is `calibrate` or `calibrate_intrinsics`.
+/// 2. `source.driver` is `orbbec`, or `decklink` with `calibrate_intrinsics`
+///    (a DeckLink pair's poses are not solved yet), and this build has the
+///    driver's arm.
+/// 3. `output.path` is an existing directory.
+/// 4. `source.calibration`, when given, reads as sensor's calibration file.
+/// 5. The driver's own: for `orbbec`, the preset (`rig_preset`) and the
+///    sync file (`source.sync_config`); for `decklink`, the pair and its
+///    cameras (`source.pairs`, `source.cameras`) as its driver takes them.
 /// @param config  The scenario, as `core::config::load` resolved it for
 ///                `Application::CalibRig`.
-/// @return The scenario's preset and sync file; @ref rig_preset's refusals;
-///         `NotFound` when `output.path` is not an existing directory;
-///         `sensor::read_orbbec_sync_config`'s refusals of the sync
-///         file (missing, unreadable, malformed or listing no camera); or
-///         `OutOfMemory`.
+/// @return The mode, the driver and the calibration file; `InvalidArgument`
+///         naming the field and its value for an operation or a driver
+///         calib_rig does not run, or a driver this build lacks, saying how
+///         to build it; `NotFound` when `output.path` is not an existing
+///         directory; `read_array_calibration`'s refusals of
+///         `source.calibration`; the driver's refusals, each in its field's
+///         context (`source.sync_config`, ...); or `OutOfMemory`.
 ///
 /// @code
 /// VKC_ASSIGN(const RigScenario scenario, check_scenario(config));
 /// @endcode
 core::Result<RigScenario> check_scenario(const core::config::Config& config);
-
-/// @brief A Femto's record in its session: its sensor's facts, its device's
-///        own and its depth delay in the rig's sync file.
-/// @param info    The camera's `SensorInfo`, with its colour model.
-/// @param device  What the camera said of itself when it opened.
-/// @param sync    The rig's sync configuration: the camera's depth delay, by
-///                serial (0 for a camera it does not list).
-/// @return The record, its lens the factory's; or `OutOfMemory`.
-/// @pre `info.color` holds a model.
-///
-/// @code
-/// VKC_ASSIGN(const capture::SessionCamera camera,
-///            orbbec_camera(sensor.info(), sensor.device_info(), sync));
-/// @endcode
-core::Result<capture::SessionCamera> orbbec_camera(
-    const sensor::SensorInfo& info, const sensor::OrbbecDeviceInfo& device,
-    const sensor::OrbbecRigSyncConfig& sync);
 
 /// @brief The rig's cameras, open, and what the session records of them.
 ///
@@ -93,22 +97,33 @@ core::Result<capture::SessionCamera> orbbec_camera(
 struct OpenedSource {
   /// Every camera, as one source; opened, not started.
   std::unique_ptr<source::RigSource> source;
-  /// Each camera's record, in the source's order.
+  /// Each camera's record, in the source's order, its lens's origin among
+  /// it.
   std::vector<capture::SessionCamera> cameras;
-  /// Each camera's lens, in the source's order: what its views are checked
-  /// through and the solve takes.
+  /// Each camera's lens, in the source's order (`rig_lens`): what its views
+  /// are checked through and the solve takes.
   std::vector<sensor::camera::CameraModel> lenses;
   std::size_t reference = 0;  ///< The reference camera: the rig's primary.
-  std::string driver;         ///< What opened the cameras: `"orbbec"`.
-  std::string sync_path;      ///< The rig's sync file; empty for none.
+  /// What opened the cameras: `"orbbec"` or `"decklink"`.
+  std::string driver;
+  std::string sync_path;  ///< The rig's sync file; empty for none.
   /// The cameras' depth mode; empty when none has depth.
   std::optional<capture::DepthMode> depth_mode;
-  std::string color_codec;  ///< How the cameras code colour: `"mjpeg"`.
+  /// How the cameras code colour (`"mjpeg"`); empty when not coded.
+  std::string color_codec;
 };
 
-/// @brief Open the scenario's cameras: the rig's sync file's, each at the
-///        preset, decoded onto @p device and readable from each of
-///        @p families, checked (@ref check_preset), as one source.
+/// @brief Open the scenario's cameras by its driver's arm, decoded onto
+///        @p device and readable from each of @p families, as one source.
+///
+/// - `orbbec`: the rig's sync file's cameras at the preset, each checked
+///   (`check_preset`), its factory lens the driver's.
+/// - `decklink`: the pair's two inputs at the scenario's mode, with no
+///   calibration (`DecklinkStereo::Options::calibration` empty), the left
+///   camera the reference.
+///
+/// Each camera's lens is `rig_lens`'s for the mode, from
+/// `scenario.calibration`, and its record says where it came from.
 /// @param config     The scenario.
 /// @param scenario   What @ref check_scenario read of it.
 /// @param device     The compute library's device, which the cameras decode
@@ -116,11 +131,10 @@ struct OpenedSource {
 /// @param allocator  Its allocator.
 /// @param families   The queue families that read the pictures: the
 ///                   compute library's and the renderer's.
-/// @return The source and its records; what sensor's opener or
-///         `SensorArray::open` refuses (a camera that does not answer
-///         among them); @ref check_preset's refusals; `InvalidArgument`
-///         for a camera the opener did not hand out as an `OrbbecSensor`;
-///         what `source::RigSource::open` refuses; or `OutOfMemory`.
+/// @return The source and its records; what the driver refuses (a camera
+///         that does not answer among them); `check_preset`'s refusals;
+///         `rig_lens`'s; what `source::RigSource::open` refuses; or
+///         `OutOfMemory`.
 ///
 /// @code
 /// VKC_ASSIGN(OpenedSource opened,
@@ -131,5 +145,25 @@ core::Result<OpenedSource> open_source(
     const core::config::Config& config, const RigScenario& scenario,
     const core::Device& device, core::Allocator& allocator,
     const std::vector<std::uint32_t>& families);
+
+/// @brief One camera of a stereo pair opened with no calibration, added to
+///        @p opened with its live lens: `rig_lens`'s for the mode, with no
+///        factory lens, its origin recorded, and `lens_file` the scenario's
+///        file where the lens is from it. The DeckLink arm's records, built
+///        on any host, so a test makes the same.
+/// @param camera    Its record as the driver gives it: id, model, size, rate
+///                  and input.
+/// @param scenario  What @ref check_scenario read: the mode and the file.
+/// @param path      `source.calibration`, for the record and the messages.
+/// @param opened    Where the record and the lens are added.
+/// @return OK; or what `rig_lens` refuses.
+///
+/// @code
+/// VKC_TRY(add_stereo_camera(std::move(left), scenario,
+///                           config.source.calibration, opened));
+/// @endcode
+core::Status add_stereo_camera(capture::SessionCamera camera,
+                               const RigScenario& scenario,
+                               const std::string& path, OpenedSource& opened);
 
 }  // namespace volumetric_kit::calib::app

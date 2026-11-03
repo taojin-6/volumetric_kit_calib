@@ -14,7 +14,6 @@
 
 #include "allocation_failure.hpp"
 #include "volumetric_kit/calib/detect/board.hpp"
-#include "volumetric_kit/calib/detect/charuco.hpp"
 #include "volumetric_kit/calib/detect/tag.hpp"
 
 namespace volumetric_kit::calib::detect {
@@ -28,7 +27,7 @@ TEST(DetectOom, ImageValidation) {
       compute::Board::create(legacy_femto_board()).value();
   const std::vector<std::uint8_t> pixels(64, 0);
   const LumaView narrow{8, 8, 7, pixels.data()};
-  expect_oom_when_reporting([&] { return detect_charuco(narrow, board); },
+  expect_oom_when_reporting([&] { return detect_board(narrow, board); },
                             Code::InvalidArgument);
   expect_oom_when_reporting([&] { return detect_tag(narrow, kOriginTag); },
                             Code::InvalidArgument);
@@ -49,8 +48,6 @@ TEST(DetectOom, BoardRefusals) {
                             Code::InvalidArgument);
   options.half = &wrong_half;
   expect_oom_when_reporting([&] { return detect_board(good, board, options); },
-                            Code::InvalidArgument);
-  expect_oom_when_reporting([&] { return detect_charuco(good, board); },
                             Code::InvalidArgument);
 }
 

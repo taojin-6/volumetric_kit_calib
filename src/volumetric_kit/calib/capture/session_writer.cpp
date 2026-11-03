@@ -164,9 +164,11 @@ core::Result<std::optional<ArrayCalibration>> check_info(
   if (core::Status board = check_target(info.board); !board.ok()) {
     return std::move(board).with_context("SessionWriter: board");
   }
-  if (info.board.kind != TargetKind::ChArUco) {
+  if (info.board.kind != TargetKind::ChArUco &&
+      info.board.kind != TargetKind::Checkerboard) {
     return core::Status::unsupported(
-        std::string("SessionWriter: a session's board is ChArUco, not ") +
+        std::string("SessionWriter: a session's board is ChArUco or a "
+                    "checkerboard, not ") +
         to_string(info.board.kind));
   }
   if (core::Status tag = check_origin_tag(info.origin_tag); !tag.ok()) {

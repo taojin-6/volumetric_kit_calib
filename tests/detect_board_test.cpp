@@ -8,7 +8,8 @@
 // adds off the board and grids that skip squares are dropped; a grid larger
 // than the board is refused; a picture gives one detection; a still board
 // reads still, by position, between noise-only pictures. A ChArUco board is
-// found as detect_charuco finds it. DetectBoardTiming prints
+// found in the picture and its half (detect_charuco_test holds that path to
+// where the board projects). DetectBoardTiming prints
 // findChessboardCornersSB's times on 20 pictures (`detect_board.timing`,
 // labelled slow).
 
@@ -34,7 +35,6 @@
 #include "detect_helpers.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
-#include "volumetric_kit/calib/detect/charuco.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
 #include "volumetric_kit/calib/quality/live_checks.hpp"
 
@@ -45,38 +45,8 @@ namespace camera = sensor::camera;
 using Code = core::Status::Code;
 using test::luma;
 
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kDeg = kPi / 180.0;
-
 // The lab's Blackmagic lens at 4K.
 const test::FisheyeTruth kLens;
-
-// The board's centre `off_axis_deg` off the optical axis, toward
-// `azimuth_deg` (0 the picture's right, 90 its bottom), `distance_m` away,
-// its printed face turned to the camera, then rolled `roll_deg` about the
-// line of sight, then tilted `tilt_deg` about its own x axis.
-camera::Mat4d facing(const compute::Board& board, double off_axis_deg,
-                     double azimuth_deg, double distance_m, double roll_deg,
-                     double tilt_deg) {
-  const double t = off_axis_deg * kDeg;
-  const double a = azimuth_deg * kDeg;
-  const camera::Vec3d centre =
-      distance_m * camera::Vec3d(std::sin(t) * std::cos(a),
-                                 std::sin(t) * std::sin(a), std::cos(t));
-  const camera::Vec3d z = glm::normalize(centre);
-  const camera::Vec3d x =
-      glm::normalize(glm::cross(camera::Vec3d(0.0, 1.0, 0.0), z));
-  const camera::Vec3d y = glm::cross(z, x);
-  const camera::Mat3d turn =
-      camera::Mat3d(x, y, z) *
-      camera::rotation_from_rodrigues({0.0, 0.0, roll_deg * kDeg}) *
-      camera::rotation_from_rodrigues({tilt_deg * kDeg, 0.0, 0.0});
-  camera::Mat4d pose(turn);
-  const cv::Point3d middle = board.centre();
-  pose[3] = glm::dvec4(
-      centre - turn * camera::Vec3d(middle.x, middle.y, middle.z), 1.0);
-  return pose;
-}
 
 // The board's corners where the lens images them, by id.
 std::vector<cv::Point2d> truth(const compute::Board& board,
@@ -208,8 +178,9 @@ struct Scene {
 };
 
 camera::Mat4d pose_of(const Scene& scene) {
-  return facing(test::lab_checkerboard(), scene.off_axis_deg, scene.azimuth_deg,
-                scene.distance_m, scene.roll_deg, scene.tilt_deg);
+  return test::facing(test::lab_checkerboard(), scene.off_axis_deg,
+                      scene.azimuth_deg, scene.distance_m, scene.roll_deg,
+                      scene.tilt_deg);
 }
 
 const cv::Mat& clean(const Scene& scene) {
@@ -384,8 +355,8 @@ TEST(DetectBoard, FindsNothingInAPictureWithoutABoard) {
   }
 }
 
-// The picture and its half are checked as detect_charuco checks a picture,
-// and the half must be the picture's halved size.
+// The picture and its half are checked alike, and the half must be the
+// picture's halved size.
 TEST(DetectBoard, RefusesAPictureOrHalfItCannotRead) {
   const compute::Board board = test::lab_checkerboard();
   const cv::Mat image(9, 7, CV_8U, cv::Scalar(0));
@@ -422,9 +393,9 @@ TEST(DetectBoard, RefusesAPictureOrHalfItCannotRead) {
                             "picture halved (0 x 0)"));
 }
 
-// A ChArUco board: in the picture, as detect_charuco finds it; in its half
-// (detect_charuco's own tests hold that path to where the board projects).
-TEST(DetectBoard, FindsAChArUcoBoardAsDetectCharucoDoes) {
+// A ChArUco board, in the picture and in its half, by id with its markers
+// (detect_charuco_test holds both paths to where the board projects).
+TEST(DetectBoard, FindsAChArUcoBoard) {
   const compute::Board board = test::femto_board();
   const cv::Mat image = test::camera_image(test::render_board(
       test::color_like_lens(),
@@ -434,22 +405,12 @@ TEST(DetectBoard, FindsAChArUcoBoardAsDetectCharucoDoes) {
   const Detection live = detect(image, board, &half);
   ASSERT_EQ(full.observation.size(), 8u);
   ASSERT_EQ(live.observation.size(), 8u);
-  const Detection want = detect_charuco(luma(image), board).value();
-  ASSERT_EQ(full.observation.size(), want.observation.size());
   for (std::size_t i = 0; i < full.observation.size(); ++i) {
-    EXPECT_EQ(full.observation.points[i].id, want.observation.points[i].id);
-    EXPECT_EQ(full.observation.points[i].pixel,
-              want.observation.points[i].pixel);
+    EXPECT_EQ(full.observation.points[i].id, static_cast<int>(i));
+    EXPECT_EQ(live.observation.points[i].id, static_cast<int>(i));
   }
-  ASSERT_EQ(full.markers.size(), want.markers.size());
-  for (std::size_t i = 0; i < full.markers.size(); ++i) {
-    EXPECT_EQ(full.markers[i].id, want.markers[i].id);
-    EXPECT_EQ(full.markers[i].corners, want.markers[i].corners);
-  }
-  // detect_charuco takes no checkerboard.
-  EXPECT_EQ(
-      detect_charuco(luma(image), test::lab_checkerboard()).status().domain(),
-      Code::InvalidArgument);
+  EXPECT_EQ(full.markers.size(), 7u);
+  EXPECT_EQ(live.markers.size(), 7u);
 }
 
 // A still board, turned 45 degrees or cut by an edge, in two pictures that

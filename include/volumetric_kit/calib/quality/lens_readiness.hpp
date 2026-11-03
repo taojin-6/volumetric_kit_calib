@@ -11,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -56,6 +57,9 @@ struct LensReadiness {
   /// The share of them frontal; empty without a real lens to tell by.
   std::optional<double> frontal;
   bool ready = false;  ///< All of it enough.
+  /// What is not enough yet, in words: the first of the views, cells, reach
+  /// and frontal share that falls short ("22 views of 30"); empty when ready.
+  std::string unmet;
 };
 
 /// @brief How far along @p camera_id's views are.

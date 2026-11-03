@@ -13,13 +13,29 @@
 
 namespace volumetric_kit::calib::viz {
 
-/// @brief The ChArUco board a session is captured with, and whether its
-///        square size was measured: editable until @ref lock, at the
-///        session's first capture.
+/// @brief Which boards a session takes: its mode's.
+///
+/// @code
+/// BoardRule lenses;
+/// lenses.checkerboard = true;
+/// lenses.min_corners = solve::LensOptions{}.min_corners;  // 12
+/// @endcode
+struct BoardRule {
+  /// A plain checkerboard too (a lens session), not a ChArUco board alone.
+  bool checkerboard = false;
+  /// Inner corners the board has, at least, all of them seen: the fewest a
+  /// view is fitted from (`solve::LensOptions::min_corners`); 0 for none.
+  int min_corners = 0;
+};
+
+/// @brief The board a session is captured with, and whether its square size
+///        was measured: editable until @ref lock, at the session's first
+///        capture.
 ///
 /// Every edit is checked by building the detector's board
-/// (`compute::Board::create`), so the board it holds is always one the
-/// detector, and so the session writer, take. A value; not thread-safe.
+/// (`compute::Board::create`) and by the session's @ref BoardRule, so the
+/// board it holds is always one the detector, the session writer and the
+/// session's solve take. A value; not thread-safe.
 ///
 /// @code
 /// VKC_ASSIGN(BoardEditor editor, BoardEditor::create(legacy_femto_board()));
@@ -33,14 +49,18 @@ namespace volumetric_kit::calib::viz {
 class BoardEditor {
  public:
   /// @brief An editor holding @p board, unlocked.
-  /// @param board            A ChArUco board the detector takes.
+  /// @param board            A board the detector and @p rule take.
   /// @param square_measured  Whether its square size was measured, rather
   ///                         than the print's nominal size.
-  /// @return The editor; `Unsupported` for a board that is not ChArUco;
-  ///         what `compute::Board::create` refuses (`InvalidArgument` naming
-  ///         the field); or `OutOfMemory`.
+  /// @param rule             Which boards the session takes.
+  /// @return The editor; `Unsupported` for a board that is neither ChArUco
+  ///         nor, where @p rule takes one, a checkerboard; what
+  ///         `compute::Board::create` refuses (`InvalidArgument` naming the
+  ///         field); `InvalidArgument` for fewer inner corners than
+  ///         `rule.min_corners`, saying why; or `OutOfMemory`.
   static core::Result<BoardEditor> create(const Target& board,
-                                          bool square_measured = false);
+                                          bool square_measured = false,
+                                          const BoardRule& rule = {});
 
   /// @return The board.
   const Target& board() const noexcept { return board_; }
@@ -48,6 +68,8 @@ class BoardEditor {
   bool square_measured() const noexcept { return square_measured_; }
   /// @return Whether the board is locked: a capture has been taken.
   bool locked() const noexcept { return locked_; }
+  /// @return Which boards it takes.
+  const BoardRule& rule() const noexcept { return rule_; }
 
   /// @brief Replace the board, before the first capture.
   /// @param board            The new board, as @ref create takes it.
@@ -61,11 +83,13 @@ class BoardEditor {
   void lock() noexcept { locked_ = true; }
 
  private:
-  BoardEditor(const Target& board, bool square_measured) noexcept;
+  BoardEditor(const Target& board, bool square_measured,
+              const BoardRule& rule) noexcept;
 
   Target board_;
   bool square_measured_ = false;
   bool locked_ = false;
+  BoardRule rule_;
 };
 
 /// @brief A board's fields as @ref draw_board_editor shows them: squares, as
@@ -109,12 +133,14 @@ BoardFields board_fields(const Target& board) noexcept;
 Target apply_fields(const Target& board, const BoardFields& fields) noexcept;
 
 /// @brief Draw @p editor's fields as ImGui widgets -- the squares across and
-///        down, the square and marker sizes (millimetres), the dictionary,
-///        the first marker's id, the legacy layout, and whether the square
-///        was measured -- and apply what the user changes through
-///        @ref BoardEditor::edit. Once locked, the widgets are disabled. The
-///        widgets' ImGui ids are scoped to @p editor, so two editors can
-///        share a window.
+///        down; the square size (millimetres); for a ChArUco board, the
+///        marker size, the dictionary, the first marker's id and the legacy
+///        layout; for a checkerboard, its inner corners as a hint; and
+///        whether the square was measured -- and apply what the user changes
+///        through @ref BoardEditor::edit. The board's kind is its seed's
+///        (a session's mode seeds it). Once locked, the widgets are
+///        disabled. The widgets' ImGui ids are scoped to @p editor, so two
+///        editors can share a window.
 /// @param editor  The editor.
 /// @return OK when nothing changed or the change was taken; else why
 ///         @ref BoardEditor::edit refused it, for the caller to show.

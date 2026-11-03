@@ -4,14 +4,15 @@
 #pragma once
 
 /// @file preset.hpp
-/// @brief The modes calib_rig streams every camera at, from its scenario, and
-///        the check that each camera opened at them.
+/// @brief The modes calib_rig streams a Femto rig's cameras at, from its
+///        scenario, and the check that each camera opened at them.
 ///
 /// The scenario (`core::config::Application::CalibRig`) names the colour and
 /// depth sizes, the colour's coding and the rate, with their defaults and
 /// checks. Whether a camera has the mode is the driver's to say when it
 /// opens, and whether every camera opened at it is @ref check_preset's, before
-/// the app draws a frame. A rig of any number of cameras.
+/// the app draws a frame. A rig of any number of cameras. What the Orbbec
+/// driver is opened with is the opener's Orbbec arm's (`open_source`).
 
 #include <cstdint>
 #include <string>
@@ -21,13 +22,7 @@
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/config/config.hpp"
 #include "volumetric_kit/sensor/camera/camera_model.hpp"
-#include "volumetric_kit/sensor/orbbec/orbbec_sensor.hpp"
 #include "volumetric_kit/sensor/rgbd_sensor.hpp"
-
-namespace volumetric_kit::core {
-class Allocator;
-class Device;
-}  // namespace volumetric_kit::core
 
 namespace volumetric_kit::calib::app {
 
@@ -98,31 +93,5 @@ core::Result<RigPreset> rig_preset(const core::config::Source& source);
 /// @endcode
 core::Status check_preset(const std::vector<sensor::SensorInfo>& cameras,
                           const RigPreset& preset);
-
-/// @brief What each Orbbec camera of the rig is opened with: @p preset's
-///        modes and colour coding, decoded onto @p device and readable from
-///        each of @p families, its range @p preset's depth mode's.
-/// @param preset     The modes.
-/// @param device     The compute library's device, which the cameras decode
-///                   onto; it must outlive them and every frame.
-/// @param allocator  Its allocator, as `OrbbecStreamOptions::allocator`.
-/// @param families   The queue families that read the decoded pictures: the
-///                   readback's and the renderer's; at most
-///                   `sensor::kMaxColorQueueFamilies`, and the count
-///                   is checked when a camera opens.
-/// @return The options, for `sensor::open_orbbec_sensors`; no serial,
-///         sync settings or pose, which the rig's sync file and calibration
-///         give, and no colour controls, so each camera opens at auto
-///         exposure with auto white balance on, written where it differs.
-///
-/// @code
-/// const auto options = orbbec_options(preset, device, allocator,
-///                                     {compute_family, graphics_family});
-/// VKC_ASSIGN(auto sensors, sensor::open_orbbec_sensors(
-///                              config.source.sync_config, options));
-/// @endcode
-sensor::OrbbecSensor::Options orbbec_options(
-    const RigPreset& preset, const core::Device& device,
-    core::Allocator& allocator, const std::vector<std::uint32_t>& families);
 
 }  // namespace volumetric_kit::calib::app

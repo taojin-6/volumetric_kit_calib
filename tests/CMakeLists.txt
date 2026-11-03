@@ -108,8 +108,8 @@ vc_add_test(detect_charuco volumetric_kit::calib_detect vc_synthetic_rig
 vc_add_test(detect_tag volumetric_kit::calib_detect vc_synthetic_rig)
 # detect: either board through one detector -- the lab's checkerboard rendered
 # at 4K through a fisheye truth, whole, cut and still, and the rig's ChArUco
-# board as detect_charuco finds it -- with the stillness and capture rule of a
-# still checkerboard; and, labelled slow, its search times on 20 pictures (U1),
+# board, full and half -- with the stillness and capture rule of a still
+# checkerboard; and, labelled slow, its search times on 20 pictures (U1),
 # `detect_board.timing`.
 vc_add_test(detect_board volumetric_kit::calib_quality
             volumetric_kit::calib_detect vc_synthetic_rig)
@@ -257,7 +257,7 @@ if(TARGET calib_app)
   # drawn from its snapshots, through the core's Vulkan test fixtures (they skip
   # without a device); the capture worker's sessions on disk, read back with
   # sensor's readers and nlohmann.
-  vc_add_test(app_preset volumetric_kit::calib_app)
+  vc_add_test(app_preset volumetric_kit::calib_app vc_test_support)
   # GLFW's key codes, through gfx_glfw, whose GLFW is gfx's own find.
   vc_add_test(app_keys volumetric_kit::calib_app volumetric_kit::gfx_glfw)
   # The window's mode: each key's action in each view, Calibrate's gate, the 3D
@@ -289,6 +289,37 @@ if(TARGET calib_app)
       ${CMAKE_CURRENT_SOURCE_DIR}/app_software_commit.cmake)
   set_tests_properties(app_capture.software_commit
                        PROPERTIES SKIP_REGULAR_EXPRESSION "not a git checkout")
+  # The opener's arms are internal to calib_app (src/.../app/*_arm.hpp): a test
+  # of one takes its header from the sources, and its driver's tier, where it is
+  # built.
+  function(vc_with_arm name driver)
+    target_include_directories(vc_${name}_test
+                               PRIVATE "${PROJECT_SOURCE_DIR}/src")
+    target_link_libraries(vc_${name}_test PRIVATE ${driver})
+  endfunction()
+  if(TARGET volumetric_kit::sensor_orbbec)
+    vc_with_arm(app_live volumetric_kit::sensor_orbbec)
+    vc_with_arm(app_capture volumetric_kit::sensor_orbbec)
+  endif()
+  if(TARGET volumetric_kit::sensor_decklink)
+    # The DeckLink arm's options from a scenario: host-only, no card.
+    vc_add_test(app_decklink volumetric_kit::calib_app)
+    vc_with_arm(app_decklink volumetric_kit::sensor_decklink)
+  endif()
+  # app: each mode's table -- the lens rule, a fit's start, the board, the
+  # capture rule, Calibrate's gate, the window's parts -- and a stereo pair's
+  # camera records, from host data.
+  vc_add_test(app_calib_mode volumetric_kit::calib_app)
+  # app: intrinsic mode end to end, through a fake stereo pair of 960 x 540
+  # pictures of the lab's checkerboard rendered through its fisheye (scaled), on
+  # a device: the live view, the captures, the session, Calibrate's lens file;
+  # and Calibrate's lens run on synthetic views.
+  vc_add_test(app_intrinsic volumetric_kit::calib_app vc_synthetic_rig
+              volumetric_kit::core_test_support)
+  target_include_directories(vc_app_intrinsic_test SYSTEM
+                             PRIVATE "${VC_JSON_INCLUDE_DIR}")
+  # About 15 s on an M5 Max: 400 renders and searches, 60 captures, one fit.
+  set_tests_properties(app_intrinsic PROPERTIES TIMEOUT 300)
   # app: Calibrate on the synthetic rig's detections, its results directories
   # read back with sensor's reader and nlohmann; its out-of-memory sweep.
   vc_add_test(app_calibrate volumetric_kit::calib_app vc_synthetic_rig)

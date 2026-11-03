@@ -7,7 +7,8 @@
 /// @brief calib_rig, the live rig calibration application: a window showing
 ///        every camera of the rig live, with the board found in each,
 ///        captures saved to a session on disk, and Calibrate, whose result
-///        shows the live points at the solved poses.
+///        is each camera's lens (intrinsic mode) or the rig's poses, the live
+///        points shown at them (extrinsic mode).
 ///
 /// Five threads. The window's (T0) draws the rig mosaic and its marks and
 /// panels, or the 3D view (@ref RigMode), and turns the keys and buttons into
@@ -65,8 +66,9 @@ core::Result<RigRequirements> rig_requirements(bool large_points = true);
 ///
 /// After @ref check_scenario it opens a window of `config.window`'s size,
 /// with the validation layer when `window.validation`, the one device gfx and
-/// sensor's tiers share, and every camera of the rig's sync file
-/// (`source.sync_config`) at the preset (@ref check_preset). Ctrl+C or
+/// sensor's tiers share, and the scenario's cameras by its driver
+/// (@ref open_source), in its mode (calib_mode.hpp): intrinsic mode fits each
+/// camera's lens and has no 3D view; extrinsic mode solves the rig. Ctrl+C or
 /// SIGTERM closes the window while it runs; the handlers it replaced are put
 /// back when it returns. The camera images come first: there the keys
 /// (@ref key_request) or the buttons capture, drop the last capture and run
@@ -77,8 +79,8 @@ core::Result<RigRequirements> rig_requirements(bool large_points = true);
 /// capture worker write what it holds, and waits for the GPU.
 /// @param config  The scenario.
 /// @return OK once the window closes; or what failed: the scenario, the
-///         window or device, a camera's open or preset, a frame, or what
-///         anything it called threw.
+///         window or device, a camera's open, preset or lens, a frame, or
+///         what anything it called threw.
 ///
 /// @code
 /// VKC_ASSIGN(const auto config, core::config::load(

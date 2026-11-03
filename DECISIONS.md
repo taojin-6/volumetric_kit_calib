@@ -99,12 +99,60 @@ writes). From 0.1.0:
    API, a `@code` example per class.
 
 Every other header is internal and, those types aside, changes freely: `app/`,
-`viz/`, `capture/`, `depth/`, the rest of `compute/` and `quality/`, and
-`detect/charuco.hpp`. `source/rig_source.hpp` is public but not promised
+`viz/`, `capture/`, `depth/`, and the rest of `compute/` and `quality/`.
+`source/rig_source.hpp` is public but not promised
 (the 2026-11-02 entry on the source). Why: other programs (an offline lens
 solve, the second camera pair) assemble the brain, and a rule that shows in
 review costs little. Freezing everything would stall the app; an ABI promise
 means nothing for a library nobody installs.
+
+## 2026-11-02 — Intrinsic mode
+
+calib_rig's mode is its scenario's `operation`: `calibrate_intrinsics` fits
+each camera's lens, `calibrate` solves the rig's poses as before. One table
+holds what differs (`app/calib_mode.hpp`); the workers read the mode, never
+the driver. `calib_app` needs core 0.40.0 (`VC_APP_CORE_MIN_VERSION`), the
+rest of calib still 0.29.0.
+
+- **Only what calib runs.** `check_scenario` takes those two operations, and
+  the drivers `orbbec` and, for lenses alone, `decklink`, each where the
+  build has its arm; anything else is refused, naming the field and its
+  value. Why: the core's config carries both from 0.40.0, and no scenario
+  may run another solve than it asks for. A DeckLink pair's poses wait for
+  the app to check its rectified rows.
+- **Each camera's live lens** (`rig_lens`): the scenario's file's
+  (`source.calibration`) at exactly the stream's size, else the driver's
+  factory lens, else, for lenses alone, a stand-in (fx = fy = width / 2,
+  centred). Through it distance and tilt are rough and frontal views are not
+  judged; corners, cells and reach need no lens. For poses a camera with no
+  lens stops the run, naming the file, and a factory camera with a
+  calibrated lens in the file is refused: the runtime reads the factory
+  lens.
+- **A fit's start** (`lens_start`): the camera's file lens, another camera's
+  at its size, its factory lens; else OpenCV's own alone. Never the
+  stand-in: from a poor start the fit lands in wrong minima.
+- **The board** is entered in the Board window, seeded per mode, its kind
+  the seed's: the checkerboard for lenses, the rig's ChArUco board for
+  poses. A lens session takes a board of at least
+  `LensOptions::min_corners` (12) inner corners, so a whole board gives a
+  lens view: the rig's 5 x 3 board has 8 and is refused, saying why; the
+  floor stays 12. No kind switch: the lab has no ChArUco board that large.
+- **Capture and Calibrate.** One view is a lens capture (`min_views` 1). The
+  Lenses panel shows each camera's readiness (`quality::lens_readiness`),
+  and C waits for one camera to be ready. Calibrate fits each ready camera
+  (`solve_lens`, `judge_lens`, `format_lens_results` over the scenario's
+  file), lists the others with why, and fits a factory camera for its report
+  alone; with no lens to write it leaves no calibration file. No origin tag
+  search, no 3D view, no depth work.
+- **The opener's arms are internal,** each built where sensor builds its
+  driver: no public header of the app names a driver's type, `calib_app`
+  links `sensor_orbbec` privately and builds with either driver. The
+  DeckLink arm opens the scenario's pair with no calibration (sensor reports
+  its cameras 0 x 0), its ports, mode and rate from the scenario; CI's
+  ubuntu-24.04 leg builds it on the core's copy of the SDK's headers and
+  runs the host tests on its path, with no card.
+- **One detector.** `detect_charuco` and its header are gone: `detect_board`
+  finds both kinds, its ChArUco half the one home of that search.
 
 ## 2026-11-02 — Every camera through one source
 
@@ -127,8 +175,8 @@ cameras' ids (a DeckLink pair).
   snapshot keeps the set and the detections, never the host views.
 - **One code names a driver.** The app's opener (`app/open_source.hpp`)
   opens the cameras and hands the rest a source and calib's own camera
-  records. Its one arm is Orbbec's; DeckLink's comes with intrinsic mode. The
-  workers hold no driver type and cast nothing.
+  records. Its arms are Orbbec's and DeckLink's (the entry on intrinsic
+  mode). The workers hold no driver type and cast nothing.
 - **Loss as sensor counts it.** A camera's `failed` frames are a loss; its
   `dropped` ones, a newer frame winning, and the sets an array skips are not.
 - **The spread warning per source.** An array keeps 5 ms. A stereo sensor
@@ -374,8 +422,8 @@ corners, past where a whole board fits.
 - **The rig's solve refuses a checkerboard** (`initialise`,
   `bundle_adjust`): extrinsics pair corners across cameras by id, which only
   a board with markers gives.
-- The board editor and the session writer take ChArUco only until intrinsic
-  mode gives them a checkerboard's fields.
+- The session writer takes a checkerboard, and the board editor one in
+  intrinsic mode (the 2026-11-02 entry).
 
 ## 2026-11-01 — Depth as sensor prepares it, outliers dropped
 

@@ -687,6 +687,30 @@ TEST(SessionWriter, APairsSessionHasNoRgbdKeys) {
   EXPECT_TRUE(capture["cameras"]["bm-2"]["depth"].is_null());
 }
 
+// An intrinsic session of a pair, on the lab's checkerboard measured: its
+// mode, and a board block with no marker keys.
+TEST(SessionWriter, AnIntrinsicSessionTakesACheckerboard) {
+  const ScratchDir dir;
+  SessionInfo info = pair_info(dir);
+  info.mode = SessionMode::Intrinsics;
+  info.board = legacy_checkerboard();
+  info.board.square_size_m = 0.01994;
+  info.square_measured = true;
+  auto writer = make_writer(info);
+  ASSERT_TRUE(writer);
+  submit(*writer, pair_job());
+  const std::vector<WriteResult> results = finish(*writer);
+  ASSERT_EQ(results.size(), 1u);
+  expect_written(results[0], WriteResult::Kind::Capture, 0);
+  const json doc = parse(info.directory + "/session.json");
+  EXPECT_EQ(doc["mode"], "intrinsics");
+  EXPECT_EQ(doc["board"], json::parse(R"({
+    "type": "checkerboard", "squares": [14, 9], "square_m": 0.01994,
+    "square_measured": true, "square_tolerance_m": null,
+    "planarity_bow_m": null})"))
+      << doc["board"].dump(2);
+}
+
 // A camera's luma, with no JPEG, is a PGM that reads back byte for byte; its
 // size is the capture's `color_bytes`.
 TEST(SessionWriter, WritesALumaWithoutAJpegAsAPgm) {
@@ -1297,11 +1321,12 @@ TEST(SessionWriter, RefusesASessionItCannotWrite) {
   {
     SessionInfo info = good;
     info.board = Target{};
-    info.board.kind = TargetKind::Checkerboard;
+    info.board.kind = TargetKind::SymmetricCircleGrid;
     info.board.rows = 6;
     info.board.cols = 9;
     info.board.square_size_m = 0.025;
-    refused(info, Code::Unsupported, "checkerboard");
+    refused(info, Code::Unsupported,
+            "ChArUco or a checkerboard, not symmetric_circle_grid");
   }
   {
     SessionInfo info = good;

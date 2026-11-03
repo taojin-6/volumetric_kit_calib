@@ -17,6 +17,7 @@
 
 #include <opencv2/core/utility.hpp>
 
+#include "volumetric_kit/calib/app/calib_mode.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
@@ -40,6 +41,7 @@ struct Written {
   std::vector<Detection> full;      // each camera's, for the session's checks
   std::vector<DepthSamples> depth;  // each camera's, shared with the writer
   std::vector<Tag> tags;            // each camera's origin tag
+  std::vector<bool> frontal;        // each camera's view frontal
   CaptureEvent event;               // Saved, once its index is known
 };
 
@@ -104,17 +106,20 @@ struct CaptureWorker::State {
   bool ended = false;  // the thread has returned: no job is carried out
   std::vector<CaptureEvent> events;
   std::optional<quality::SessionSummary> summary;
-  std::shared_ptr<const KeptCaptures> kept;  // published with `summary`
+  std::vector<quality::LensReadiness> lenses;  // published with `summary`
+  std::shared_ptr<const KeptCaptures> kept;    // published with `summary`
   std::string directory;
   std::vector<core::Status> errors;
   std::thread thread;
 
   // Report outcomes, the captures and drops they resolve, and errors, with
   // the session's summary and kept captures when they changed.
-  void resolve(std::vector<CaptureEvent> outcomes, std::size_t captures_done,
-               std::size_t drops_done, std::vector<core::Status> failures,
-               std::optional<quality::SessionSummary> latest = {},
-               std::shared_ptr<const KeptCaptures> kept_latest = {}) {
+  void resolve(
+      std::vector<CaptureEvent> outcomes, std::size_t captures_done,
+      std::size_t drops_done, std::vector<core::Status> failures,
+      std::optional<quality::SessionSummary> latest = {},
+      std::shared_ptr<const KeptCaptures> kept_latest = {},
+      std::optional<std::vector<quality::LensReadiness>> lenses_latest = {}) {
     const bool replaced = kept_latest != nullptr;
     {
       const std::lock_guard<std::mutex> lock(mutex);
@@ -125,6 +130,7 @@ struct CaptureWorker::State {
       captures -= captures_done;
       drops -= drops_done;
       if (latest) summary = std::move(latest);
+      if (lenses_latest) lenses = std::move(*lenses_latest);
       if (replaced) {
         kept.swap(kept_latest);
         releasing = true;
@@ -169,6 +175,8 @@ struct CaptureWorker::State {
                quality::SessionChecks::create(rig, made, setup.reference,
                                               setup.session));
     KeptCaptures base;
+    base.mode = setup.mode;
+    base.calibration = setup.calibration;
     base.board = request.board;
     base.cameras = std::move(rig);
     base.sensors = setup.cameras;
@@ -180,6 +188,7 @@ struct CaptureWorker::State {
     capture::SessionInfo info;
     info.directory = (std::filesystem::path(setup.root) / stamp).string();
     info.software = setup.software;
+    info.mode = setup.mode;
     info.driver = setup.driver;
     info.sync_path = setup.sync_path;
     info.reference = setup.cameras[setup.reference].id;
@@ -225,18 +234,22 @@ struct CaptureWorker::State {
     const std::size_t n = request.cameras.size();
     std::vector<Detection> full(n);
     std::vector<ViewCheck> views(n);
+    // Not a vector<bool>: each thread writes its own camera's.
+    std::vector<char> frontal(n, 0);
     std::vector<core::Status> detect_errors(n);
     std::vector<core::Status> check_errors(n);
     std::vector<TagSearch> searches(n);
-    cv::parallel_for_(cv::Range(0, static_cast<int>(n)),
-                      [&](const cv::Range& range) {
-                        for (int c = range.start; c < range.end; ++c) {
-                          const auto i = static_cast<std::size_t>(c);
-                          detect_one(i, request.cameras[i], full[i], views[i],
-                                     detect_errors[i], check_errors[i]);
-                          searches[i] = search_tag(request.cameras[i]);
-                        }
-                      });
+    // The origin tag places the rig's poses; a lens session has none.
+    const bool tag = setup.mode == capture::SessionMode::Extrinsics;
+    cv::parallel_for_(
+        cv::Range(0, static_cast<int>(n)), [&](const cv::Range& range) {
+          for (int c = range.start; c < range.end; ++c) {
+            const auto i = static_cast<std::size_t>(c);
+            detect_one(i, request.cameras[i], full[i], views[i], frontal[i],
+                       detect_errors[i], check_errors[i]);
+            if (tag) searches[i] = search_tag(request.cameras[i]);
+          }
+        });
     std::vector<core::Status> failures;
     for (std::size_t i = 0; i < n; ++i) {
       const std::string who = "capture: camera " + setup.cameras[i].id;
@@ -310,12 +323,13 @@ struct CaptureWorker::State {
                        "capture refused: the session writer is full"));
       return;
     }
-    written.push_back(
-        {std::move(full), std::move(depth), std::move(tags), std::move(event)});
+    written.push_back({std::move(full), std::move(depth), std::move(tags),
+                       std::vector<bool>(frontal.begin(), frontal.end()),
+                       std::move(event)});
   }
 
   void detect_one(std::size_t i, const CameraFrameCopy& part, Detection& found,
-                  ViewCheck& view, core::Status& detect_error,
+                  ViewCheck& view, char& frontal, core::Status& detect_error,
                   core::Status& check_error) const {
     const sensor::camera::ImageSize size{part.width, part.height};
     detect_error = compute::guarded("full detection", [&]() -> core::Status {
@@ -334,6 +348,7 @@ struct CaptureWorker::State {
           const quality::CheckedView checked,
           quality::check_view(cameras[i], *board, found, setup.session.view));
       view = checked.check;
+      frontal = checked.frontal ? 1 : 0;
       return {};
     });
     if (!check_error.ok()) view = ViewCheck{};
@@ -392,6 +407,7 @@ struct CaptureWorker::State {
           kept_capture->views = std::move(done.full);
           kept_capture->depth = std::move(done.depth);
           kept_capture->tags = std::move(done.tags);
+          kept_capture->frontal = std::move(done.frontal);
           now.push_back(std::move(kept_capture));
           kept_changed = true;
         }
@@ -425,14 +441,25 @@ struct CaptureWorker::State {
       failures.push_back(latest.status().with_context("session"));
     }
     std::shared_ptr<const KeptCaptures> kept_now;
+    std::optional<std::vector<quality::LensReadiness>> lenses_now;
     if (kept_changed) {
       auto snapshot = std::make_shared<KeptCaptures>(kept_base);
       snapshot->captures = now;
       kept_now = std::move(snapshot);
       kept_captures = std::move(now);
+      // A lens session's readiness, for its panel and Calibrate's gate.
+      if (setup.mode == capture::SessionMode::Intrinsics) {
+        core::Result<std::vector<quality::LensReadiness>> states =
+            lens_states(*kept_now);
+        if (states.ok()) {
+          lenses_now = std::move(states).value();
+        } else {
+          failures.push_back(states.status().with_context("session"));
+        }
+      }
     }
     resolve(std::move(outcomes), captures_done, drops_done, std::move(failures),
-            std::move(summary_now), std::move(kept_now));
+            std::move(summary_now), std::move(kept_now), std::move(lenses_now));
   }
 
   core::Status loop() {
@@ -636,6 +663,11 @@ std::vector<CaptureEvent> CaptureWorker::take_events() {
 std::optional<quality::SessionSummary> CaptureWorker::summary() const {
   const std::lock_guard<std::mutex> lock(state_->mutex);
   return state_->summary;
+}
+
+std::vector<quality::LensReadiness> CaptureWorker::lenses() const {
+  const std::lock_guard<std::mutex> lock(state_->mutex);
+  return state_->lenses;
 }
 
 std::shared_ptr<const KeptCaptures> CaptureWorker::kept() const {

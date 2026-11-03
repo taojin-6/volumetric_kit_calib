@@ -899,6 +899,83 @@ TEST(CalibrationNotices, SayWhereAndEachWorldWarning) {
             Said{"calibration 012: written to results/012_b"});
 }
 
+// The Lenses panel: one line per camera, its views of the fit's need, cells,
+// reach toward each corner and side, frontal share (none through a
+// stand-in) and lens origin; amber until ready, then green.
+TEST(LensPanel, SaysHowFarEachCamerasViewsAre) {
+  quality::LensReadiness bm1;
+  bm1.views = 22;
+  bm1.cells = 0.7083;
+  bm1.reach = {0.93, 0.88, 0.95, 0.71, 0.94, 0.9};
+  bm1.frontal = 0.4;
+  quality::LensReadiness bm2 = bm1;
+  bm2.views = 31;
+  bm2.reach = {1.0, 0.91, 0.95, 0.92, 0.94, 0.9};
+  bm2.frontal.reset();
+  bm2.ready = true;
+  const std::vector<PanelLine> lines =
+      lens_panel({"bm-1", "bm-2"}, {bm1, bm2}, {"file", "stand-in"}).value();
+  ASSERT_EQ(lines.size(), 2u);
+  EXPECT_EQ(lines[0].label, "bm-1");
+  EXPECT_EQ(lines[0].value,
+            "views 22/30  cells 71%  reach TL .93 TR .88 BL .95 BR .71  sides "
+            "L .94 R .90  frontal 40%  lens: file");
+  EXPECT_EQ(lines[0].tone, Tone::Warn);
+  EXPECT_EQ(lines[1].value,
+            "views 31/30  cells 71%  reach TL 1.00 TR .91 BL .95 BR .92  sides "
+            "L .94 R .90  frontal -  lens: stand-in");
+  EXPECT_EQ(lines[1].tone, Tone::Good);
+  // Before the first capture.
+  const std::vector<PanelLine> none =
+      lens_panel({"bm-1"}, {}, {"factory"}).value();
+  ASSERT_EQ(none.size(), 1u);
+  EXPECT_EQ(none[0].value, "no views yet  lens: factory");
+  EXPECT_EQ(lens_panel({"bm-1"}, {bm1, bm2}, {"file"}).status().domain(),
+            Code::InvalidArgument);
+}
+
+// A lens run's lines: each fit's verdict, held-out RMS and fold, a factory
+// camera's report alone, each camera not fitted and why, and the directory.
+TEST(LensResultsPanel, SaysWhatEachLensIsWorth) {
+  quality::LensVerdict pass;
+  pass.fit.camera.id = "bm-1";
+  pass.fit.holdout_rms_px = 0.0812;
+  pass.pass = true;
+  quality::LensVerdict fail = pass;
+  fail.fit.camera.id = "CL2A141000N";
+  fail.pass = false;
+  fail.failed = {"fold at 74.8 deg, inside the frame"};
+  fail.fold_deg = 74.8;
+  const std::vector<PanelLine> lines =
+      lens_results_panel({pass, fail}, {"CL2A141000N"},
+                         {{"bm-2", "not ready: 6 views of 30"}}, 3,
+                         "results/003_a", 40, 2.04)
+          .value();
+  ASSERT_EQ(lines.size(), 5u);
+  EXPECT_EQ(lines[0].label, "calibration");
+  EXPECT_EQ(lines[0].value, "003, 40 captures, 2.0 s");
+  EXPECT_EQ(lines[1].label, "lens bm-1");
+  EXPECT_EQ(lines[1].value, "pass, hold-out 0.08 px, no fold");
+  EXPECT_EQ(lines[1].tone, Tone::Good);
+  EXPECT_EQ(lines[2].value,
+            "fail: fold at 74.8 deg, inside the frame, hold-out 0.08 px, fold "
+            "at 74.8 deg, report only");
+  EXPECT_EQ(lines[2].tone, Tone::Bad);
+  EXPECT_EQ(lines[3].label, "lens bm-2");
+  EXPECT_EQ(lines[3].value, "not ready: 6 views of 30");
+  EXPECT_EQ(lines[3].tone, Tone::Warn);
+  EXPECT_EQ(lines[4].label, "results");
+  EXPECT_EQ(lines[4].value, "results/003_a");
+  // A failed lens says so, even with no gate named.
+  fail.failed.clear();
+  const std::vector<PanelLine> unnamed =
+      lens_results_panel({fail}, {}, {}, 3, "results/003_a", 40, 2.04).value();
+  ASSERT_EQ(unnamed.size(), 3u);
+  EXPECT_EQ(unnamed[1].value.rfind("fail: a gate, ", 0), 0u)
+      << unnamed[1].value;
+  EXPECT_EQ(unnamed[1].tone, Tone::Bad);
+}
+
 // The stages' rows go to gfx's panel as they are; the frame's time is their
 // host total without breakdowns.
 TEST(StageFrameMetrics, CarriesTheStagesToGfxsPanel) {

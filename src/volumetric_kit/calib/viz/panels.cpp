@@ -735,6 +735,94 @@ core::Result<std::vector<std::string>> calibration_notices(
       });
 }
 
+core::Result<std::vector<PanelLine>> lens_panel(
+    const std::vector<std::string>& ids,
+    const std::vector<quality::LensReadiness>& lenses,
+    const std::vector<std::string>& origins,
+    const quality::LensReadyOptions& options) {
+  return compute::guarded(
+      "lens_panel", [&]() -> core::Result<std::vector<PanelLine>> {
+        const std::size_t n = ids.size();
+        if (origins.size() != n || (!lenses.empty() && lenses.size() != n)) {
+          return core::Status::invalid_argument(
+              "lens_panel: " + std::to_string(n) + " ids, " +
+              std::to_string(lenses.size()) + " lenses and " +
+              std::to_string(origins.size()) + " origins");
+        }
+        // A share of the way, as ".93": two places, no leading zero.
+        const auto reach = [](double share) {
+          std::string text = fixed(share, 2);
+          return text.rfind("0.", 0) == 0 ? text.substr(1) : text;
+        };
+        const auto percent = [](double share) {
+          return fixed(100.0 * share, 0) + "%";
+        };
+        std::vector<PanelLine> lines;
+        for (std::size_t c = 0; c < n; ++c) {
+          const std::string lens = "lens: " + origins[c];
+          if (lenses.empty()) {
+            lines.push_back({ids[c], "no views yet  " + lens, Tone::Warn});
+            continue;
+          }
+          const quality::LensReadiness& state = lenses[c];
+          const solve::LensReach& r = state.reach;
+          lines.push_back({ids[c],
+                           "views " + std::to_string(state.views) + "/" +
+                               std::to_string(options.min_views) + "  cells " +
+                               percent(state.cells) + "  reach TL " +
+                               reach(r[0]) + " TR " + reach(r[1]) + " BL " +
+                               reach(r[2]) + " BR " + reach(r[3]) +
+                               "  sides L " + reach(r[4]) + " R " +
+                               reach(r[5]) + "  frontal " +
+                               (state.frontal ? percent(*state.frontal) : "-") +
+                               "  " + lens,
+                           state.ready ? Tone::Good : Tone::Warn});
+        }
+        return lines;
+      });
+}
+
+core::Result<std::vector<PanelLine>> lens_results_panel(
+    const std::vector<quality::LensVerdict>& lenses,
+    const std::vector<std::string>& report_only,
+    const std::vector<std::pair<std::string, std::string>>& unsolved,
+    int number, const std::string& directory, std::size_t captures,
+    double seconds) {
+  return compute::guarded(
+      "lens_results_panel", [&]() -> core::Result<std::vector<PanelLine>> {
+        std::vector<PanelLine> lines;
+        lines.push_back({"calibration",
+                         results_number(number) + ", " +
+                             std::to_string(captures) +
+                             (captures == 1 ? " capture, " : " captures, ") +
+                             fixed(seconds, 1) + " s",
+                         Tone::Normal});
+        for (const quality::LensVerdict& lens : lenses) {
+          const std::string& id = lens.fit.camera.id;
+          std::string value =
+              lens.pass
+                  ? std::string("pass")
+                  : "fail: " + (lens.failed.empty() ? std::string("a gate")
+                                                    : lens.failed.front());
+          value += ", hold-out " + figure(lens.fit.holdout_rms_px, 2, " px");
+          value += lens.fold_deg >= 90.0
+                       ? std::string(", no fold")
+                       : ", fold at " + figure(lens.fold_deg, 1, " deg");
+          if (std::find(report_only.begin(), report_only.end(), id) !=
+              report_only.end()) {
+            value += ", report only";
+          }
+          lines.push_back(
+              {"lens " + id, value, lens.pass ? Tone::Good : Tone::Bad});
+        }
+        for (const auto& [id, why] : unsolved) {
+          lines.push_back({"lens " + id, why, Tone::Warn});
+        }
+        lines.push_back({"results", directory, Tone::Normal});
+        return lines;
+      });
+}
+
 core::Result<gfx::FrameMetrics> stage_frame_metrics(
     const core::StageMetrics& stages, double fps) {
   return compute::guarded("stage_frame_metrics",

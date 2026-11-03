@@ -11,8 +11,9 @@
 // their depth shared with the writer, their cap, and the captures and drops
 // unresolved until a snapshot reflects them; the origin tag found in
 // each camera's luma, kept, written and counted, an image with two prints of
-// it and a failed search. Synthetic board and tag renders, a few cameras, no
-// device. Then what a session records of each camera and of the software.
+// it, a failed search, and none in a lens session. Synthetic board and tag
+// renders, a few cameras, no device. Then what a session records of each camera
+// and of the software.
 
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 
@@ -50,9 +51,12 @@
 #include "volumetric_kit/calib/app/open_source.hpp"
 #include "volumetric_kit/calib/app/preset.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
-#include "volumetric_kit/calib/detect/charuco.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
 #include "volumetric_kit/sensor/io/image_io.hpp"
+
+#if defined(VC_WITH_ORBBEC)
+#include "volumetric_kit/calib/app/orbbec_arm.hpp"
+#endif
 
 namespace volumetric_kit::calib::app {
 namespace {
@@ -383,7 +387,7 @@ TEST(AppCapture, WritesEachCaptureDetectedAtFullResolution) {
     ASSERT_EQ(ids.size(), 8u);
     for (std::size_t k = 0; k < ids.size(); ++k) {
       const cv::Point2d& t = truth[ids[k].get<std::size_t>()];
-      // Full mode's own bound (detect_charuco's tests).
+      // The picture's own bound (detect_charuco_test).
       EXPECT_LT(std::hypot(corners[k][0].get<double>() - t.x,
                            corners[k][1].get<double>() - t.y),
                 0.3);
@@ -1088,6 +1092,30 @@ TEST(AppCapture, KeepsAndWritesTheOriginTagEachCameraFinds) {
   EXPECT_EQ(session["origin_tag"]["edge_m"].get<double>(), kOriginTag.edge_m);
 }
 
+// A lens session places no pose, so it searches for no tag: a print in view
+// is neither kept nor counted.
+TEST(AppCapture, ALensSessionSearchesForNoTag) {
+  ScratchDir root;
+  CaptureSetup lenses = setup(root.path(), 2);
+  lenses.mode = capture::SessionMode::Intrinsics;
+  std::unique_ptr<CaptureWorker> worker = make(std::move(lenses));
+  ASSERT_NE(worker, nullptr);
+  CaptureRequest r = request(2, 0.0);
+  draw_origin_tag(r, 1);
+  ASSERT_TRUE(submit(*worker, std::move(r)));
+  worker->flush();
+  EXPECT_TRUE(worker->take_errors().empty());
+  const std::vector<CaptureEvent> events = worker->take_events();
+  ASSERT_EQ(events.size(), 1u);
+  ASSERT_EQ(events[0].kind, CaptureEvent::Kind::Saved)
+      << events[0].status.message();
+  EXPECT_EQ(events[0].tag_cameras, 0);
+  const std::vector<std::optional<DetectedMarker>>& tags =
+      worker->kept()->captures[0]->tags;
+  ASSERT_EQ(tags.size(), 2u);
+  EXPECT_FALSE(tags[1].has_value());
+}
+
 // Two prints of the tag in a camera's image: neither is taken for the tag,
 // which the worker says, and the capture is saved all the same, with another
 // camera's tag.
@@ -1224,6 +1252,7 @@ TEST(AppCapture, ADroppedCaptureTakesItsViewsOfTheTag) {
 
 // A Femto's record, as the opener's Orbbec arm makes it: its sensor's facts,
 // its device's own, and its depth delay in the rig's sync file.
+#if defined(VC_WITH_ORBBEC)
 TEST(AppCapture, RecordsEachCameraAndItsDepthDelay) {
   sensor::SensorInfo info;
   info.id = "SYN1";
@@ -1272,6 +1301,7 @@ TEST(AppCapture, RecordsEachCameraAndItsDepthDelay) {
   ASSERT_TRUE(camera.ok());
   EXPECT_EQ(camera->orbbec->depth_delay_us, 0);
 }
+#endif  // VC_WITH_ORBBEC
 
 // A stereo pair's capture, grey only: each camera's luma, no JPEG and no
 // depth, which the session saves as a PGM that reads back byte for byte; its
@@ -1359,9 +1389,11 @@ TEST(AppCapture, RecordsTheSoftwareItWasBuiltFrom) {
   if (const char* expected = std::getenv("VC_EXPECT_CALIB_COMMIT")) {
     EXPECT_EQ(software.calib, expected);
   }
+#if defined(VC_WITH_ORBBEC)
   EXPECT_TRUE(
       std::regex_match(software.orbbec_sdk, std::regex(R"(\d+\.\d+\.\d+)")))
       << software.orbbec_sdk;
+#endif
 }
 
 }  // namespace

@@ -245,6 +245,18 @@ struct FisheyeTruth {
   sensor::camera::CameraModel frame() const;
 };
 
+/// @brief How far a fitted lens is from @p truth: the most pixels its image
+///        of a ray differs from the truth's, over rays up to @p band_deg off
+///        axis in every direction, once the fit is turned by the rotation
+///        that best maps rays to 68 degrees onto it, as the views' poses
+///        absorb any turn of the camera's frame.
+/// @param fit       The fitted lens, at @p truth's size.
+/// @param truth     The lens the views were made through.
+/// @param band_deg  The rays compared, this far off axis at most (degrees).
+/// @return The error (pixels); infinity where the fit images a ray nowhere.
+double curve_error_px(const sensor::camera::CameraModel& fit,
+                      const FisheyeTruth& truth, double band_deg);
+
 /// @brief What @ref fisheye_views captures.
 struct FisheyeCapture {
   std::uint32_t seed = 1;   ///< The placements' and the noise's seed.
@@ -376,6 +388,22 @@ compute::Board lab_checkerboard();
 sensor::camera::Mat4d board_facing_camera(const compute::Board& board,
                                           const sensor::camera::Vec3d& centre,
                                           double tilt_deg, double roll_deg);
+
+/// @brief @p board seen off the axis: its centre @p off_axis_deg off the
+///        optical axis, toward @p azimuth_deg (0 the picture's right, 90 its
+///        bottom), @p distance_m away, its printed face turned to the camera
+///        along that line of sight, then rolled @p roll_deg about it, then
+///        tilted @p tilt_deg about its own x axis.
+/// @param board         The board.
+/// @param off_axis_deg  Its centre's angle off the axis (degrees).
+/// @param azimuth_deg   Which way (degrees).
+/// @param distance_m    How far (metres).
+/// @param roll_deg      Its roll about the line of sight (degrees).
+/// @param tilt_deg      Its tilt about its x axis (degrees).
+/// @return T_cb.
+sensor::camera::Mat4d facing(const compute::Board& board, double off_axis_deg,
+                             double azimuth_deg, double distance_m,
+                             double roll_deg, double tilt_deg);
 
 /// @brief What @ref camera_image adds to a render.
 struct CameraOptions {

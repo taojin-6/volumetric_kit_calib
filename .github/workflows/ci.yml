@@ -34,7 +34,8 @@ jobs:
       # libraries there would build core, sensor and gfx shared too, which none
       # of them is. The first macOS leg runs the tests of calib's threads under
       # ThreadSanitizer, in RelWithDebInfo, as Debug would make them minutes
-      # long.
+      # long. The ubuntu-24.04 leg also builds calib_rig with the opener's
+      # DeckLink arm, whose driver builds on Linux x86-64 alone; no card.
       #
       # `runner: ''` moves a macOS leg back to a hosted runner, which then
       # installs its formulae itself.
@@ -42,6 +43,7 @@ jobs:
         include:
           - os: ubuntu-24.04
             build_types: '["Release"]'
+            decklink: true
           - os: ubuntu-26.04
             build_types: '["Release"]'
             shared: true
@@ -62,6 +64,7 @@ jobs:
       shared: ${{ matrix.shared || false }}
       rig: ${{ matrix.rig || false }}
       tsan: ${{ matrix.tsan || false }}
+      decklink: ${{ matrix.decklink || false }}
 
   lint:
     uses: ./.github/workflows/lint.yml

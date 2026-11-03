@@ -32,11 +32,13 @@
 #include "volumetric_kit/calib/core/capture_meta.hpp"
 #include "volumetric_kit/calib/core/detection.hpp"
 #include "volumetric_kit/calib/core/target.hpp"
+#include "volumetric_kit/calib/quality/lens_readiness.hpp"
 #include "volumetric_kit/calib/quality/live_checks.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/core/base/result.hpp"
+#include "volumetric_kit/sensor/camera/array_calibration.hpp"
 #include "volumetric_kit/sensor/camera/camera_model.hpp"
 
 namespace volumetric_kit::calib::app {
@@ -71,7 +73,13 @@ struct CaptureSetup {
   /// (`YYYY-MM-DD_HHMMSS`, `capture::session_stamp`) is created in.
   std::string root;
   capture::Software software;  ///< What the session was captured with.
-  std::string driver;          ///< What opened the cameras (`"orbbec"`).
+  /// What the session calibrates: each camera's lens, or the rig's poses.
+  capture::SessionMode mode = capture::SessionMode::Extrinsics;
+  /// The scenario's calibration file (`source.calibration`), read; null for
+  /// none. A lens run's file carries its other cameras' lenses
+  /// (`quality::format_lens_results`), and its lenses are fits' starts.
+  std::shared_ptr<const sensor::camera::ArrayCalibration> calibration;
+  std::string driver;  ///< What opened the cameras (`"orbbec"`).
   /// The rig's sync configuration file; empty for a rig without one.
   std::string sync_path;
   std::size_t reference = 0;  ///< The reference camera, the rig's primary.
@@ -127,6 +135,9 @@ struct KeptCapture {
   /// image's pixels: the corners its file holds; empty where the camera
   /// found none, more than one print of it, or its search failed.
   std::vector<std::optional<DetectedMarker>> tags;
+  /// Whether each camera's view, in rig order, is frontal through its lens
+  /// (`quality::CheckedView::frontal`).
+  std::vector<bool> frontal;
 };
 
 /// @brief What Calibrate works on: the session's kept captures and what they
@@ -143,6 +154,11 @@ struct KeptCapture {
 /// const solve::RigCamera& reference = kept->cameras[kept->reference];
 /// @endcode
 struct KeptCaptures {
+  /// What the session calibrates (`CaptureSetup::mode`).
+  capture::SessionMode mode = capture::SessionMode::Extrinsics;
+  /// The scenario's calibration file (`CaptureSetup::calibration`); null for
+  /// none.
+  std::shared_ptr<const sensor::camera::ArrayCalibration> calibration;
   Target board;  ///< The session's board, locked at its first capture.
   /// The rig's cameras, in rig order, as the session's checks take them:
   /// each one's id and lens (`CaptureSetup::lenses`).
@@ -257,6 +273,12 @@ class CaptureWorker final : public CaptureSink {
   /// @return What the captures kept add up to; empty before the first is
   ///         written.
   std::optional<quality::SessionSummary> summary() const;
+
+  /// @return In an intrinsic session, how far along each camera's views are
+  ///         toward its lens fit (`lens_states`), in rig order, published
+  ///         with @ref summary; empty before the first capture is written
+  ///         and in an extrinsic session.
+  std::vector<quality::LensReadiness> lenses() const;
 
   /// @brief The captures kept, for Calibrate.
   ///

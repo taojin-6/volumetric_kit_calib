@@ -15,16 +15,27 @@
 namespace volumetric_kit::calib::viz {
 namespace {
 
-// A board the detector takes: one its Board builds, the rule's one home.
-// TODO: take a checkerboard once the editor has its fields (a kind, and no
-// markers) and the session writer takes one.
-core::Status check_board(const Target& board) {
-  if (board.kind != TargetKind::ChArUco) {
+// A board the detector takes, one its Board builds (the rule's one home), of
+// a kind `rule` takes and with as many inner corners as it asks.
+core::Status check_board(const Target& board, const BoardRule& rule) {
+  const bool checkerboard = board.kind == TargetKind::Checkerboard;
+  if (board.kind != TargetKind::ChArUco &&
+      !(checkerboard && rule.checkerboard)) {
     return core::Status::unsupported(
-        "BoardEditor: the board must be ChArUco, not " +
-        std::string(to_string(board.kind)));
+        std::string("BoardEditor: the board must be ChArUco") +
+        (rule.checkerboard ? " or a checkerboard" : "") + ", not " +
+        to_string(board.kind));
   }
-  return compute::Board::create(board).status().with_context("BoardEditor");
+  VKC_TRY(compute::Board::create(board).status().with_context("BoardEditor"));
+  const std::int64_t corners = std::int64_t{board.rows} * board.cols;
+  if (corners < rule.min_corners) {
+    return core::Status::invalid_argument(
+        "BoardEditor: a lens view needs " + std::to_string(rule.min_corners) +
+        " corners, and this board has " + std::to_string(corners) + " (" +
+        std::to_string(board.cols) + " x " + std::to_string(board.rows) +
+        " inner corners), so it would never give one: take the checkerboard");
+  }
+  return {};
 }
 
 // `value` held to int's range.
@@ -57,14 +68,16 @@ Target apply_fields(const Target& board, const BoardFields& fields) noexcept {
   return edited;
 }
 
-BoardEditor::BoardEditor(const Target& board, bool square_measured) noexcept
-    : board_(board), square_measured_(square_measured) {}
+BoardEditor::BoardEditor(const Target& board, bool square_measured,
+                         const BoardRule& rule) noexcept
+    : board_(board), square_measured_(square_measured), rule_(rule) {}
 
 core::Result<BoardEditor> BoardEditor::create(const Target& board,
-                                              bool square_measured) {
+                                              bool square_measured,
+                                              const BoardRule& rule) {
   return compute::guarded("BoardEditor", [&]() -> core::Result<BoardEditor> {
-    VKC_TRY(check_board(board));
-    return BoardEditor(board, square_measured);
+    VKC_TRY(check_board(board, rule));
+    return BoardEditor(board, square_measured, rule);
   });
 }
 
@@ -74,7 +87,7 @@ core::Status BoardEditor::edit(const Target& board, bool square_measured) {
       return core::Status::invalid_argument(
           "BoardEditor: the board is locked after the first capture");
     }
-    VKC_TRY(check_board(board));
+    VKC_TRY(check_board(board, rule_));
     board_ = board;
     square_measured_ = square_measured;
     return {};
@@ -86,11 +99,12 @@ core::Status draw_board_editor(BoardEditor& editor) {
   ImGui::PushID(&editor);
   if (locked) ImGui::TextUnformatted("locked after the first capture");
   ImGui::BeginDisabled(locked);
-  BoardFields fields = board_fields(editor.board());
   bool measured = editor.square_measured();
   bool changed = false;
   constexpr ImGuiInputTextFlags kOnEnter = ImGuiInputTextFlags_EnterReturnsTrue;
 
+  const Target& shown = editor.board();
+  BoardFields fields = board_fields(shown);
   int squares[2] = {fields.squares_across, fields.squares_down};
   if (ImGui::InputInt2("squares across, down", squares, kOnEnter)) {
     fields.squares_across = squares[0];
@@ -99,10 +113,15 @@ core::Status draw_board_editor(BoardEditor& editor) {
   }
   changed |= ImGui::InputDouble("square (mm)", &fields.square_mm, 0.0, 0.0,
                                 "%.2f", kOnEnter);
-  changed |= ImGui::InputDouble("marker (mm)", &fields.marker_mm, 0.0, 0.0,
-                                "%.2f", kOnEnter);
-  Target board = apply_fields(editor.board(), fields);
-  if (ImGui::BeginCombo("dictionary", to_string(board.dictionary))) {
+  const bool markers = shown.kind == TargetKind::ChArUco;
+  if (markers) {
+    changed |= ImGui::InputDouble("marker (mm)", &fields.marker_mm, 0.0, 0.0,
+                                  "%.2f", kOnEnter);
+  }
+  Target board = apply_fields(shown, fields);
+  if (!markers) {
+    ImGui::TextDisabled("= %d x %d inner corners", board.cols, board.rows);
+  } else if (ImGui::BeginCombo("dictionary", to_string(board.dictionary))) {
     // Every dictionary but None, which a ChArUco board cannot take:
     // ArUcoMip36h12 is the enum's last.
     for (int d = static_cast<int>(MarkerDictionary::ArUco4x4_50);
@@ -117,11 +136,13 @@ core::Status draw_board_editor(BoardEditor& editor) {
     }
     ImGui::EndCombo();
   }
-  if (ImGui::InputInt("first marker id", &board.first_marker_id, 1, 10,
-                      kOnEnter)) {
-    changed = true;
+  if (markers) {
+    if (ImGui::InputInt("first marker id", &board.first_marker_id, 1, 10,
+                        kOnEnter)) {
+      changed = true;
+    }
+    changed |= ImGui::Checkbox("legacy layout", &board.legacy_pattern);
   }
-  changed |= ImGui::Checkbox("legacy layout", &board.legacy_pattern);
   changed |= ImGui::Checkbox("square measured", &measured);
   ImGui::EndDisabled();
   ImGui::PopID();

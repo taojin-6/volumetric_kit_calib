@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(
   volumetric_kit_calib
-  VERSION 0.4.0
+  VERSION 0.5.0
   DESCRIPTION
     "Calibration companion for volumetric_kit: diagnostics, acquisition guidance, and a requirements solver"
   HOMEPAGE_URL "https://github.com/taojin-6/volumetric_kit_calib"
@@ -44,11 +44,11 @@ option(
   OFF)
 # calib_rig and its app tier, an application: by default only at the top level,
 # as the examples are, so a project that adds calib builds neither. It needs the
-# viz tier (VC_WITH_RIG above), GLFW and sensor's Orbbec driver too
-# (src/CMakeLists.txt).
+# viz tier (VC_WITH_RIG above), GLFW and a sensor driver too, Orbbec's or
+# DeckLink's (src/CMakeLists.txt).
 option(
   VC_BUILD_APPS
-  "Build calib_rig and its app tier (with VC_WITH_RIG; needs GLFW and sensor's VS_WITH_ORBBEC)"
+  "Build calib_rig and its app tier (with VC_WITH_RIG; needs GLFW and sensor's VS_WITH_ORBBEC or VS_WITH_DECKLINK)"
   ${VC_IS_TOP_LEVEL})
 
 # Semicolon list of sanitizers (e.g. "address;undefined"); empty = off. Applied
@@ -67,6 +67,9 @@ include(vc_sanitizers)
 # 2026-11-02).
 set(VC_CORE_MIN_VERSION 0.29.0)
 set(VC_SENSOR_MIN_VERSION 0.21.0)
+# calib_app's: CalibRig's operation and DeckLink cameras (DECISIONS.md,
+# 2026-11-02, intrinsic mode).
+set(VC_APP_CORE_MIN_VERSION 0.40.0)
 # OpenCV 5, a prerequisite of the compute tier and those built on it
 # (DECISIONS.md, 2026-10-17): Homebrew's on macOS, tools/install-opencv.sh's on
 # Linux (README, "Prerequisites"). Found here so its imported targets reach

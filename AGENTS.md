@@ -168,10 +168,12 @@ ctest.
   core's Vulkan fixtures, which skip without a device; run them under the
   validation layer with `VKC_TEST_VALIDATION=1` (on macOS, with
   `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib` so the layer loads).
-- The `app` tier and `calib_rig` also need an installed GLFW and
-  `-DVS_WITH_ORBBEC=ON`, as CI's rig job builds them, and off Apple
-  `-DVS_WITH_FFMPEG=ON -DVS_WITH_CUDA=ON`. No test opens a camera: the app's
-  tests drive fake sensors.
+- The `app` tier and `calib_rig` also need an installed GLFW and a sensor
+  driver: `-DVS_WITH_ORBBEC=ON`, as CI's rig job builds them, and off Apple
+  `-DVS_WITH_FFMPEG=ON -DVS_WITH_CUDA=ON`; or `-DVS_WITH_DECKLINK=ON` (Linux
+  x86-64, the SDK's headers at `DeckLinkSDK_ROOT`), as CI's ubuntu-24.04 leg
+  builds the DeckLink arm. No test opens a camera: the app's tests drive fake
+  sensors.
 
 ## Keeping guidance current
 

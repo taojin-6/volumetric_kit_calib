@@ -38,8 +38,8 @@ endif()
 # on for sensor or gfx keeps it. Only the examples and calib_rig opt into
 # core_config.
 #
-# The pin is core 0.39.0 (1972079, core #85's merge), as are the core's actions
-# in .github/workflows.
+# The pin is core 0.40.0 (e1adf08, core #86's merge), for CalibRig's operation
+# and DeckLink cameras, as are the core's actions in .github/workflows.
 if(VC_WITH_RIG)
   set(VKC_WITH_VULKAN ON)
 endif()
@@ -51,7 +51,7 @@ endif()
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG 19720798ef25d76c6fa570052a0cc6a32883e3c5)
+  GIT_TAG e1adf08203b6eb5956ebaa48f511a9a73996009b)
 FetchContent_MakeAvailable(volumetric_kit_core)
 # The set() above is lost when the application made the core available first.
 if(VC_WITH_RIG)

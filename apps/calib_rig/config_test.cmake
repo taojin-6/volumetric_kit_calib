@@ -89,6 +89,26 @@ expect_run(
   empty_sync "--config;empty_sync.json" FALSE stderr
   "source\\.sync_config: .*empty_rig\\.json: sync config: no \"devices\"")
 
+# What calib_rig runs, of what the core's config takes: a DeckLink pair's
+# lenses, not yet its poses; and a calibration file it can read.
+file(
+  WRITE "${WORK_DIR}/decklink_poses.json"
+  "{\"version\":1,\"operation\":\"calibrate\",\"source\":{\"kind\":\"live\","
+  "\"driver\":\"decklink\",\"cameras\":[{\"id\":\"bm-1\",\"input\":\"SDI 2\"},"
+  "{\"id\":\"bm-2\",\"input\":\"SDI 1\"}],"
+  "\"pairs\":[{\"left\":\"bm-1\",\"right\":\"bm-2\"}]},"
+  "\"output\":{\"path\":\"sessions\"}}\n")
+expect_run(decklink_poses "--config;decklink_poses.json" FALSE stderr
+           "source\\.driver: decklink with operation calibrate")
+file(
+  WRITE "${WORK_DIR}/missing_lenses.json"
+  "{\"version\":1,\"operation\":\"calibrate_intrinsics\",\"source\":{"
+  "\"kind\":\"live\",\"sync_config\":\"rig.json\","
+  "\"calibration\":\"no-such-lenses.json\"},\"output\":{\"path\":\"sessions\"}}\n"
+)
+expect_run(missing_lenses "--config;missing_lenses.json" FALSE stderr
+           "NotFound: source\\.calibration: .*no-such-lenses\\.json")
+
 # The core's refusals reach the user: H.265 colour, and a setting calib_rig does
 # not use.
 write_scenario(hevc rig.json ",\"color_codec\":\"hevc\"" "sessions" "")
