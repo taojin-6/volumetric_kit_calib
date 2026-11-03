@@ -36,7 +36,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake clang llvm libglm-dev libvulkan-dev glslang-tools spirv-tools
+            cmake clang llvm ccache libglm-dev libvulkan-dev glslang-tools \
+            spirv-tools
           sudo apt-get install -y mesa-vulkan-drivers
           icd=""
           for f in /usr/share/vulkan/icd.d/lvp_icd*.json; do
@@ -50,19 +51,11 @@ jobs:
       - name: OpenCV 5
         uses: ./.github/actions/opencv
 
-      # Cache the FetchContent dependency tree, as _build.yml does. Here the
-      # dependencies are compiled with the sanitizers too (VC_SANITIZE sets its
-      # flags globally). The prefix carries what make does not track in the
-      # tree: the workspace path, which FetchContent bakes in, the compiler,
-      # and the OS release and installed versions of the headers and shader
-      # tools the dependencies build on (a package keeps its files' old
-      # mtimes), as sensor's sanitizer job keys them. The hash after it covers
-      # what the build does track -- the pins, vc_sanitizers.cmake and this
-      # workflow, which sets the flags -- and leaves out the root
-      # CMakeLists.txt, whose version every PR bumps. So a restore by prefix
-      # from other pins or flags is safe: FetchContent checks the moved
-      # dependency out again and make rebuilds only the objects whose sources
-      # or flags changed.
+      # Cache the FetchContent dependency tree, compiled with the sanitizers
+      # too (VC_SANITIZE sets its flags globally), and ccache's: their keys
+      # and why are DECISIONS.md's (2026-11-03, fast tests in CI). The prefix
+      # is what make does not track in a restored tree; the deps hash, what
+      # it does, but for the root CMakeLists.txt's version.
       - name: Dependency cache key
         id: deps
         run: |
@@ -73,6 +66,7 @@ jobs:
           pk=$(dpkg-query -W -f='${Package}=${Version}\n' \
             libvulkan-dev libglm-dev glslang-tools spirv-tools | hash)
           echo "key=sanitizers-deps-ws${ws}-cc${cc}-${os}-pk${pk}" >> "${GITHUB_OUTPUT}"
+          echo "ccache=sanitizers-ccache-ws${ws}-cc${cc}-${os}-pk${pk}" >> "${GITHUB_OUTPUT}"
 
       - name: Cache third-party deps
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -82,17 +76,33 @@ jobs:
           restore-keys: |
             ${{ steps.deps.outputs.key }}-
 
+      - name: Cache ccache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ccache
+          key: ${{ steps.deps.outputs.ccache }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ steps.deps.outputs.ccache }}-
+
       # Debug, at -O1 under the sanitizers (cmake/vc_sanitizers.cmake).
       - name: Configure
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DVC_SANITIZE="address;undefined" -DVC_WITH_RIG=ON
 
       # The level, not a bare --parallel (_build.yml's Build step says why).
       - name: Build
-        run: cmake --build build --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
+        env:
+          CCACHE_MAXSIZE: 1G
+        run: |
+          export CCACHE_DIR="${HOME}/.cache/ccache"
+          ccache --zero-stats
+          cmake --build build --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
+          ccache --show-stats
 
       # No CI leg runs the `slow` tests (_build.yml's Test step), and the
       # `package` tests, whose nested builds are not sanitized, run on

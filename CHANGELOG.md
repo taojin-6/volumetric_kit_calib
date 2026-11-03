@@ -18,7 +18,7 @@ release may break it, and each such entry says how to migrate
   detect_board's cases. The library and its API are unchanged.
 - CI runs no `slow` test, and its deps caches hash the pins rather than the
   root CMakeLists.txt and restore by prefix, so a version bump no longer
-  misses them.
+  misses them. The sanitizer job compiles through ccache.
 
 ## [0.9.0] - 2026-11-03
 

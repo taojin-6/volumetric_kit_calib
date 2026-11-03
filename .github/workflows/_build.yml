@@ -198,16 +198,12 @@ jobs:
         with:
           formulae: ${{ steps.formulae.outputs.formulae }}
 
-      # Cache the FetchContent dependency tree (sources and builds), keyed as
-      # sensor's _build.yml keys it, which says why: FetchContent bakes the
-      # absolute build path in, so the key carries a hash of the workspace
-      # path, and the pins' file -- not the root CMakeLists.txt, whose
-      # version every PR bumps: make rebuilds what a change to its flags
-      # touches, as it does after a restore by prefix from other pins
-      # (sanitizers.yml says how). Every key and restore-keys prefix carries
-      # the Homebrew key (a pre-commit hook checks), so no tree built on
-      # other versions comes back; checkout cleans the rest of build/ each
-      # run.
+      # Cache the FetchContent dependency tree (sources and builds), keyed on
+      # the workspace path and the pins' file, not the root CMakeLists.txt as
+      # sensor's is: DECISIONS.md says why (2026-11-03, fast tests in CI).
+      # Every key and restore-keys prefix carries the Homebrew key (a
+      # pre-commit hook checks), so no tree built on other versions comes
+      # back; checkout cleans the rest of build/ each run.
       - name: Workspace fingerprint
         id: ws
         run: |

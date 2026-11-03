@@ -153,9 +153,9 @@ calib's build; `-L slow` and `-L package` run them. CI runs `package` on its
 Release rig leg and no `slow` test. Each test binary but the
 out-of-memory ones is one ctest test, named for its file (`detect_charuco`);
 run one case with the binary's `--gtest_filter`, or `GTEST_FILTER` under
-ctest. A test binary takes about 5 s in Release on an M5 Max and 30 s under
-the sanitizers: each rule on the smallest case that proves it, every scene
-and seed under `slow`
+ctest. A test binary should take about 5 s in Release and 30 s under a
+sanitizer, both on an M5 Max: each rule on the smallest case that proves it,
+full-size work and sweeps under `slow`
 ([DECISIONS.md](DECISIONS.md#2026-11-03--fast-tests-in-ci)).
 
 - Use the pinned formatting tools in `.pre-commit-config.yaml`; CI runs the
