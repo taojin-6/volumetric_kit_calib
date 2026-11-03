@@ -22,6 +22,7 @@
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
+#include "volumetric_kit/calib/quality/lens_check.hpp"
 #include "volumetric_kit/calib/quality/lens_gate.hpp"
 #include "volumetric_kit/calib/quality/lens_readiness.hpp"
 #include "volumetric_kit/calib/quality/live_checks.hpp"
@@ -289,6 +290,23 @@ TEST(QualityOom, CrossCameraTransfer) {
       [](const core::Result<Transfer>& r) { return ippe_failed(r.status()); });
 }
 
+// A camera's lens checked on the rig's solve and on its residuals alone; and
+// refused.
+TEST(QualityOom, TheLensChecksOnASolve) {
+  const Solved s(2);
+  const std::string& id = s.cameras[0].id;
+  expect_oom_anywhere(
+      [&] { return check_rig_lens(id, s.cameras, s.solution); });
+  std::vector<solve::CornerResidual> its;
+  for (const solve::CornerResidual& r : s.solution.residuals) {
+    if (r.camera == 0) its.push_back(r);
+  }
+  expect_oom_anywhere(
+      [&] { return check_lens_residuals(id, s.cameras[0].model.size, its); });
+  expect_oom_anywhere(
+      [&] { return check_rig_lens("none", s.cameras, s.solution); });
+}
+
 // Out of memory anywhere, a re-solve's included, fails the whole, as IPPE's
 // failure in the transfer does. Two cameras make about half the allocations
 // four do, from every call stack four do but cv::invert's buffer for the
@@ -415,8 +433,8 @@ TEST(QualityOom, FormatResults) {
   });
 }
 
-// A fitted lens's gates, its results files and a session's readiness: on a
-// failing gate and a refusal too.
+// A fitted lens's gates, its results files, a session's readiness and the
+// lens checked on views: on a failing gate and a refusal too.
 TEST(QualityOom, TheLensGates) {
   const compute::Board board = test::lab_checkerboard();
   const test::FisheyeTruth lens;
@@ -473,6 +491,24 @@ TEST(QualityOom, TheLensGates) {
   expect_oom_anywhere([&] {
     return lens_readiness("bm-1", lens.size, board, views, nullptr, wrong);
   });
+
+  // The fitted lens checked on a few views, held fixed: as it is, off enough
+  // to drop corners, and refused.
+  const std::vector<Observation> few(views.begin(), views.begin() + 6);
+  const auto swallowed = [](const core::Result<LensCheck>& check) {
+    return !check.ok() && ippe_failed(check.status());
+  };
+  expect_oom_anywhere(
+      [&] { return check_lens("bm-1", fit.camera.model, board, few); },
+      swallowed);
+  camera::CameraModel off = fit.camera.model;
+  off.distortion.k1 *= 1.5;
+  expect_oom_anywhere([&] { return check_lens("bm-1", off, board, few); },
+                      swallowed);
+  LensCheckOptions unchecked;
+  unchecked.min_corners = 0;
+  expect_oom_anywhere(
+      [&] { return check_lens("bm-1", off, board, few, unchecked); });
 }
 
 // The world at the floor tag, seen by every camera in 2 captures: the

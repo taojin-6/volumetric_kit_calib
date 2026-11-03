@@ -21,6 +21,7 @@
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
+#include "volumetric_kit/calib/solve/lens_poses.hpp"
 
 namespace volumetric_kit::calib::solve {
 namespace {
@@ -660,6 +661,77 @@ core::Result<LensFit> solve_lens(
     fit.views = std::move(plan.uses);
     return fit;
   });
+}
+
+core::Result<PosedLensViews> pose_lens_views(
+    std::string_view camera_id, const camera::CameraModel& lens,
+    const compute::Board& board, const std::vector<Observation>& views,
+    const LensOptions& options) {
+  return compute::guarded(
+      "pose_lens_views", [&]() -> core::Result<PosedLensViews> {
+        VKC_ASSIGN(Plan plan, plan_views(camera_id, lens.size, board, views,
+                                         options, "pose_lens_views: "));
+        core::Result<compute::CvCamera> held = compute::cv_camera(lens);
+        if (!held.ok()) {
+          return held.status().with_context("pose_lens_views: lens");
+        }
+        for (LensView& use : plan.uses) {
+          if (use.use != Use::TooFew) use.use = Use::HeldOut;
+        }
+        const cv::Size image = image_of(lens.size);
+        std::vector<ViewState> states = read_views(board, plan);
+
+        // The bound, as solve_lens's over the fitted views: the adjustment's
+        // rule over each view's residuals at its pose on all its corners.
+        std::vector<double> components;
+        Projection at;
+        for (const ViewState& state : states) {
+          VKC_ASSIGN(
+              const std::optional<Pose> pose,
+              pose_through(*held, board, *plan.views[state.planned], state));
+          if (!pose) continue;
+          project_view(*held, state, *pose, at);
+          for (const cv::Vec2d& e : at.residuals) {
+            components.push_back(e[0]);
+            components.push_back(e[1]);
+          }
+        }
+        PosedLensViews out;
+        if (!components.empty()) {
+          const BundleAdjustOptions rule;
+          out.bound_px = detail::outlier_bound(
+              std::move(components), rule.outlier_px, rule.outlier_mads);
+        }
+
+        // Each view as a held-out one; score() adds its corners to `scored`.
+        LensFit scored;
+        for (ViewState& state : states) {
+          const Observation& view = *plan.views[state.planned];
+          LensView& use = plan.uses[state.planned];
+          VKC_ASSIGN(const std::optional<Pose> pose,
+                     judge_held_out(*held, board, view, image, out.bound_px,
+                                    options, state));
+          if (pose) {
+            state.pose = *pose;
+            score(*held, state, view, scored, use);
+            continue;
+          }
+          use.use = Use::Dropped;
+          use.rms_px = kInfinity;
+          for (const DetectedPoint& point : view.points) {
+            CornerResidual& r = scored.residuals.emplace_back();
+            r.capture = view.frame_id;
+            r.corner = point.id;
+            r.pixel = point.pixel;
+            r.residual = camera::Vec2d(kNaN);
+            r.weight = point.weight;
+            r.dropped = true;
+          }
+        }
+        out.views = std::move(plan.uses);
+        out.residuals = std::move(scored.residuals);
+        return out;
+      });
 }
 
 }  // namespace volumetric_kit::calib::solve
