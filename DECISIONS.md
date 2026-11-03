@@ -109,13 +109,16 @@ means nothing for a library nobody installs.
 ## 2026-11-02 — A lens checked on views of any board
 
 `quality/lens_check.hpp` says whether a lens holds on one camera's residuals,
-held to the lens gates' limits: `check_lens` poses each of its views of
-either board through the lens held fixed; `check_lens_residuals` takes any
-solve's residuals, and `check_rig_lens` a rig solve's. A lens session's views
-go to `check_lens`; a pose session's solve to `check_rig_lens`, whose cameras
-share each capture's board pose, so its residuals keep what a view's own pose
-takes up. The numbers are the lab lens's, synthetic, 0.15 px of corner noise,
-and for the rig the lab-like pair's (amended 2026-11-03).
+their RMS and share dropped held to the lens gates' limits and each cell's
+mean to Student's t: `check_lens` poses each of its views of either board
+through the lens held fixed; `check_lens_residuals` takes any solve's
+residuals, and `check_rig_lens` a rig solve's. A lens session's views go to
+`check_lens`; a pose session's solve to `check_rig_lens`, whose cameras share
+each capture's board pose, so its residuals keep what a view's own pose takes
+up. The numbers are the lab lens's, synthetic, 0.15 px of corner noise, and
+for the rig the lab-like pair's (amended 2026-11-03). `lens_check.sweeps`
+gives the noise-alone numbers at the defaults; the rest come from a study
+outside the suite (random sessions as the sweep draws them, 50 to 200 each).
 
 - **Posed as a held-out view.** `solve::pose_lens_views`
   (`solve/lens_poses.hpp`, outside the stable table) poses each view through
@@ -144,10 +147,11 @@ and for the rig the lab-like pair's (amended 2026-11-03).
   6, none of some 135,000 cells. So the limit sets the minimum: 6 is the
   fewest whose limit, t over the root of the corners times the solve's
   0.19 px, stays within the RMS limit (0.43 px; 5 gives 0.56, 4 gives 0.88).
-  Its cost is coverage: the true pair over random sessions reads good 0.3, 4,
-  32 and 65% of the time at 15, 20, 30 and 40 captures (at 8 corners 0, 0, 6
-  and 24%), else insufficient, naming where to capture. `check_lens` takes
-  the same rule: its 300 noise checks stay good.
+  Its cost is coverage: the true pair over random sessions reads good 0.75,
+  4, 31 and 67.5% of the time at 15, 20, 30 and 40 captures
+  (`lens_check.sweeps`, 400 checks each; at 8 corners about 0, 0, 6 and 24%),
+  else insufficient, naming where to capture. `check_lens` takes the same
+  rule: its 300 noise checks stay good.
 - **Views of 6 corners or more:** a pose takes 6 of a view's numbers, so 6
   corners leave 6 to show the lens, and a 5 x 3 board's view keeps its pose
   with 2 corners lost. A corner 8 px off costs such a view that corner; one
@@ -157,7 +161,8 @@ and for the rig the lab-like pair's (amended 2026-11-03).
   by the part of the image it lies in; else `Insufficient` when a part of the
   image's 3 x 3 split (the cells by their centres: 3, 2 and 3 columns, 2
   rows each) has no judged cell, naming those parts and their fullest cell's
-  corners; else `Good`. Suspect comes first, as in the pair check: no capture
+  corners, or the corners past the dropped share lie in one view (below);
+  else `Good`. Suspect comes first, as in the pair check: no capture
   elsewhere mends it. `LensCheck::Verdict` is nested as `PairRowCheck`'s is,
   and `check_lens` takes a camera id and `Observation`s, as `solve_lens`
   does: a `LensView` holds no corners. Every entry returns a `LensCheck`; a
@@ -184,22 +189,54 @@ and for the rig the lab-like pair's (amended 2026-11-03).
   high and cx 5 px off read good: the solve's poses take them up. Noise alone
   on main 5's session (`lens_check.sweeps`, 300 checks) reads good, the worst
   cell at 0.78.
-- **A lens off shows in every camera sharing its boards:** bm-2's true lens
-  reads suspect in 76 to 100% of those sessions too. The check says the
-  lenses disagree with each other, not which is off; `check_lens` on a lens
-  session says which.
-- **The solve's dropped corners count.** A lens off by pixels has its corners
-  dropped and the rest fit (k3 raised by 3e-4: a median 7% of them, by 1e-3:
-  14%), so the share is held to 1%, as `check_lens`'s. On noise alone the
-  solve also drops boards its first round left 1 to 2 px off in both cameras,
-  where `initialise` marked views ambiguous: at 0.15 px that reads 1.5% of
-  cameras suspect at 15 random captures and none from 20 on; at 0.3 px 10,
-  5.5, 2.5 and 2% at 15, 20, 30 and 40; none on gridded sessions. Those drops
-  are open, the solve's to mend.
+- **A lens off shows in every camera sharing its boards,** and not always
+  most in its own. With bm-1's lens off and bm-2's true, each camera's own
+  residuals read bm-2 alone suspect in 66 of the 74 gridded sessions of 20
+  captures where either did (f 0.3% high), and bm-1 good beside a suspect
+  bm-2 in 24 of 200 of 30 captures (k1 0.3% high). So `check_rig_lens` reads
+  a camera suspect too when it shares boards with one whose own residuals
+  read suspect, naming it: the wrong lens never reads good beside it. Two
+  cameras share a board when both kept corners of its capture. The check
+  says the lenses disagree, not which is off; `check_lens` on a lens session
+  says which.
+- **Boards one camera saw alone are left out** (`LensCheck::unshared`
+  counts their corners). Such a board's pose is that camera's own, which
+  takes up what the check looks for, and the capture rule warns of such
+  sets without refusing them: bm-1's 30 captures over its view seen by it
+  alone, with 10 seen by both, read k1 1% high good on all 40 (RMS 0.32 px);
+  the same 30 seen by both read suspect (0.65 px).
+- **The solve's dropped corners count, from 2 views on.** A lens off by
+  pixels has its corners dropped and the rest fit (k3 raised by 3e-4: a
+  median 7% of them, by 1e-3: 14%), so the share is held to 1%, as
+  `check_lens`'s. A pose session's view has 8 corners, so one board dropped
+  is past 1% under 100 captures, and the solve drops a whole view for one
+  corner 2 to 3 px off: with 1% of corners 1.5 px off, bm-1's own residuals
+  read suspect in 8.5, 7.5 and 10% of random sessions of 15, 20 and 30
+  captures, and 2, 1 and 1.5% when the share counts only from 2 views on
+  (`min_dropped_views`); beside bm-2, whose own read so more often, 3, 5.5
+  and 4%, still above the design's 2%. Drops in one view read insufficient
+  instead, naming them: capture the board there again. The cost is
+  detection at 15 to 20 captures (k3 raised by 3e-4: suspect in 96 rather
+  than 157 of 200 sessions of 15), those sessions insufficient, not good. Noise alone (`lens_check.sweeps`, 400
+  checks each) reads no camera suspect at 0.15 px from 15 to 40 captures;
+  at 0.3 px 2, 2, 0 and 1% at 15, 20, 30 and 40, half by drops from 2 views
+  or more (the solve's first round leaves boards 1 to 2 px off where
+  `initialise` marked views ambiguous), the rest beside such a camera or by
+  the RMS; none on gridded sessions. Those drops are open, the solve's to
+  mend; the rule is the owner's call.
+- **Good holds as far as the corners reach** (`LensCheck::reach`, by
+  `solve::pixel_reach`). Inner cells meet the 9 parts' rule: on
+  `test::view_plan`'s 30 captures over bm-1's view, its true lens reads good
+  with its corners 0.62 to 0.68 of the way to each image corner and side (a
+  lens fit's gates ask 0.9), and k3 raised by 3e-4, 13 to 60 px in the outer
+  columns, reads good too, in 200 of 200 sessions each. A floor on good is
+  open, the owner's call: 0.7 would keep 23 of 72 good verdicts at 30 random
+  captures and none on the gridded 30, and remove every good verdict for k3
+  raised by 3e-4.
 - **The lab's first pose session** (2026-11-02, 10 captures along the bottom
   of the pair's rectified view) reads insufficient for both cameras, the
   image's top and middle unjudged; RMS 0.163 and 0.156 px, the worst judged
-  cell at 0.53 of its limit.
+  cell at 0.52 of its limit.
 
 ## 2026-11-02 — A DeckLink pair's poses
 

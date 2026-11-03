@@ -9,10 +9,13 @@
 // only in the centre are insufficient, naming the parts to capture, and a
 // limit passed comes first; noise alone does not read suspect; and what it
 // poses, drops and refuses. A lens checked on a solve's residuals: each cell
-// held to Student's t, the corners dropped counted and placed; and on the
-// lab-like pair's rig solve, the true pair good, a lens off or bent at one
-// edge suspect where the check of its views reads good, a session along the
-// bottom insufficient, naming where to capture, and noise alone good.
+// held to Student's t, the corners dropped counted, placed and held to their
+// share from 2 views on; and on the lab-like pair's rig solve, the true pair
+// good as far as its corners reach, a lens off or bent at one edge suspect
+// where the check of its views reads good, a camera sharing boards with a
+// suspect one suspect too, boards one camera saw alone left out, each camera
+// at its own size, a session along the bottom insufficient, naming where to
+// capture, and noise alone good on gridded and random sessions.
 
 #include "volumetric_kit/calib/quality/lens_check.hpp"
 
@@ -22,6 +25,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <random>
 #include <string>
 #include <utility>
 #include <vector>
@@ -192,6 +196,22 @@ int worst_cell_at(const LensCheck& check) {
   return at;
 }
 
+// How far `views`' corners of camera `id` reach (@ref solve::pixel_reach).
+solve::LensReach reach_of(const std::vector<Observation>& views,
+                          const std::string& id) {
+  solve::LensReach reach{};
+  for (const Observation& view : views) {
+    if (view.camera_id != id) continue;
+    for (const DetectedPoint& point : view.points) {
+      const solve::LensReach here = solve::pixel_reach(kSize, point.pixel);
+      for (std::size_t d = 0; d < reach.size(); ++d) {
+        reach[d] = std::max(reach[d], here[d]);
+      }
+    }
+  }
+  return reach;
+}
+
 // A pose session of the lab-like pair: the rig's ChArUco board over each
 // camera's view in turn (`test::view_plan`), 60 captures.
 std::vector<test::Placement> pose_plan() {
@@ -235,6 +255,55 @@ PairSolve solve_pair(const std::vector<Observation>& views,
   return out;
 }
 
+// Placements as a person makes them over the lab-like pair's shared view: the
+// board's centre aimed anywhere in bm-1's image but its outer 5%, 1.4 to 3 m
+// away, tilted up to 30 degrees and rolled up to 20, kept when both cameras
+// see it whole 10 px inside their images; drawn the same with every standard
+// library.
+std::vector<test::Placement> random_plan(std::size_t count,
+                                         std::uint32_t seed) {
+  const std::vector<test::SyntheticCamera> pair = test::lab_pair();
+  std::mt19937 rng(seed);
+  const auto uniform = [&rng](double from, double to) {
+    constexpr double kToUnit = 1.0 / 4294967296.0;  // 2^-32
+    return from + (to - from) * (static_cast<double>(rng()) + 0.5) * kToUnit;
+  };
+  const camera::CameraModel& lens = pair[0].model;
+  const compute::CvCamera cam = value_of(compute::cv_camera(lens));
+  const camera::Mat4d camera_to_world =
+      camera::rigid_inverse(pair[0].world_to_camera);
+  std::vector<test::Placement> plan;
+  for (int tries = 0; plan.size() < count && tries < 100000; ++tries) {
+    const double x = uniform(0.05, 0.95) * lens.size.width;
+    const double y = uniform(0.05, 0.95) * lens.size.height;
+    const double distance = uniform(1.4, 3.0);
+    const double roll = uniform(-20.0, 20.0);
+    const double tilt = uniform(-30.0, 30.0);
+    const cv::Point2d ray =
+        value_of(compute::undistort_points(cam, {cv::Point2d(x, y)}))[0];
+    test::Placement p{
+        camera_to_world *
+            test::facing(charuco(), std::atan(std::hypot(ray.x, ray.y)) / kDeg,
+                         std::atan2(ray.y, ray.x) / kDeg, distance, roll, tilt),
+        {0, 1}};
+    bool both = true;
+    for (const test::SyntheticCamera& c : pair) {
+      const camera::Mat4d to_camera = c.world_to_camera * p.board_to_world;
+      for (const cv::Point3d& q : charuco().object_points()) {
+        both = both && (to_camera * glm::dvec4(q.x, q.y, q.z, 1.0)).z >= 0.3;
+      }
+      for (const cv::Point2d& px :
+           test::project(c.model, to_camera, charuco().object_points())) {
+        both = both && px.x >= 10.0 && px.y >= 10.0 &&
+               px.x <= c.model.size.width - 11.0 &&
+               px.y <= c.model.size.height - 11.0;
+      }
+    }
+    if (both) plan.push_back(std::move(p));
+  }
+  return plan;
+}
+
 // A corner of capture `capture` at `pixel` with `residual`.
 solve::CornerResidual corner(std::int64_t capture, double u, double v,
                              double du = 0.0, double dv = 0.0,
@@ -248,15 +317,15 @@ solve::CornerResidual corner(std::int64_t capture, double u, double v,
 }
 
 // 6 corners with no residual in the middle of a cell of each part of the
-// image, so every part is judged: captures 100 to 108.
-std::vector<solve::CornerResidual> every_part() {
+// image, so every part is judged: captures `first` to `first` + 8.
+std::vector<solve::CornerResidual> every_part(std::int64_t first = 100) {
   std::vector<solve::CornerResidual> out;
   const int cols[] = {1, 3, 6};
   const int rows[] = {0, 2, 4};
   for (int j = 0; j < 3; ++j) {
     for (int i = 0; i < 3; ++i) {
       for (int k = 0; k < 6; ++k) {
-        out.push_back(corner(100 + 3 * j + i, 480.0 * cols[i] + 200.0 + k,
+        out.push_back(corner(first + 3 * j + i, 480.0 * cols[i] + 200.0 + k,
                              360.0 * rows[j] + 180.0));
       }
     }
@@ -264,8 +333,17 @@ std::vector<solve::CornerResidual> every_part() {
   return out;
 }
 
+// `residuals` as camera `camera`'s of a rig solve, added to `solution`.
+void add_as(std::size_t camera, std::vector<solve::CornerResidual> residuals,
+            solve::RigSolution& solution) {
+  for (solve::CornerResidual& r : residuals) {
+    r.camera = camera;
+    solution.residuals.push_back(r);
+  }
+}
+
 // Every corner of the views posed is kept or dropped, and every part of the
-// image judged: the defaults' 9.
+// image judged: the defaults' 9; the corners reach as far as the views do.
 TEST(CheckLens, TheTrueLensIsGoodOnEitherBoard) {
   for (const compute::Board* board : {&checkerboard(), &charuco()}) {
     const std::vector<Observation> views = spread_views(*board);
@@ -278,6 +356,8 @@ TEST(CheckLens, TheTrueLensIsGoodOnEitherBoard) {
     EXPECT_EQ(check.views, views.size());
     EXPECT_EQ(check.corners, views.size() * per_view);
     EXPECT_EQ(check.dropped, 0u);
+    EXPECT_EQ(check.unshared, 0u);
+    EXPECT_EQ(check.reach, reach_of(views, "bm-1"));
     EXPECT_DOUBLE_EQ(check.bound_px, 3.0);  // the adjustment's floor
     EXPECT_GT(check.rms_px, 0.1);
     EXPECT_LT(check.rms_px, 0.25);
@@ -500,6 +580,9 @@ TEST(CheckLens, Refuses) {
   options.max_dropped = 1.5;
   expect_refused(refused(options), "check_lens", "options.max_dropped");
   options = {};
+  options.min_dropped_views = 0;
+  expect_refused(refused(options), "check_lens", "options.min_dropped_views");
+  options = {};
   options.max_cell_bias_px = std::numeric_limits<double>::quiet_NaN();
   expect_refused(refused(options), "check_lens", "options.max_cell_bias_px");
   options = {};
@@ -574,32 +657,47 @@ TEST(CheckLensResiduals, HoldsEachCellToStudentsT) {
 }
 
 // Dropped corners, and those behind the camera, are held to 1% of all and
-// named by where they lie; the corners kept alone make the RMS and cells.
+// named by where they lie: past it from 2 views or more, suspect; from one, a
+// glitch as like as the lens, insufficient. The corners kept alone make the
+// RMS and cells.
 TEST(CheckLensResiduals, CountsWhatTheSolveDropped) {
   std::vector<solve::CornerResidual> residuals = every_part();  // 54
   residuals.push_back(corner(7, 3700.0, 1000.0, 9.0, 0.0, true));
+  residuals.push_back(corner(7, 3700.0, 1100.0, 9.0, 0.0, true));
   LensCheck check = value_of(check_lens_residuals("bm-1", kSize, residuals));
-  EXPECT_EQ(check.verdict, Verdict::Suspect);
+  EXPECT_EQ(check.verdict, Verdict::Insufficient);
+  EXPECT_EQ(check.reason,
+            "2 of 56 corners were dropped by the solve or behind the camera, "
+            "above 1%, from 1 view, in the image's right (2): too few views "
+            "to tell the lens from a board's detection; capture the board "
+            "there again");
   EXPECT_EQ(check.corners, 54u);
-  EXPECT_EQ(check.dropped, 1u);
+  EXPECT_EQ(check.dropped, 2u);
   EXPECT_DOUBLE_EQ(check.rms_px, 0.0);
-  EXPECT_TRUE(
-      says(check,
-           "1 of 55 corners were dropped by the solve or behind the camera, "
-           "above 1%, in the image's right (1)"))
-      << check.reason;
+  LensCheckOptions any;
+  any.min_dropped_views = 1;
+  check = value_of(check_lens_residuals("bm-1", kSize, residuals, any));
+  EXPECT_EQ(check.verdict, Verdict::Suspect);
+  EXPECT_EQ(check.reason,
+            "2 of 56 corners were dropped by the solve or behind the camera, "
+            "above 1%, from 1 view, in the image's right (2)");
 
+  residuals.back().capture = 8;
   residuals.back().dropped = false;
   residuals.back().residual.x = std::numeric_limits<double>::quiet_NaN();
   check = value_of(check_lens_residuals("bm-1", kSize, residuals));
-  EXPECT_EQ(check.dropped, 1u);
+  EXPECT_EQ(check.dropped, 2u);
   EXPECT_EQ(check.verdict, Verdict::Suspect);
+  EXPECT_TRUE(says(check,
+                   "2 of 56 corners were dropped by the solve or "
+                   "behind the camera, above 1%, from 2 views"))
+      << check.reason;
 
-  // 1 of 100 is within 1%.
-  for (int k = 0; k < 45; ++k) residuals.push_back(corner(8, 2000.0, 1000.0));
+  // 2 of 200 is within 1%.
+  for (int k = 0; k < 144; ++k) residuals.push_back(corner(9, 2000.0, 1000.0));
   check = value_of(check_lens_residuals("bm-1", kSize, residuals));
   EXPECT_EQ(check.verdict, Verdict::Good) << check.reason;
-  EXPECT_EQ(check.views, 11u);
+  EXPECT_EQ(check.views, 12u);
 }
 
 // The parts of the image with no cell of 6 corners are named.
@@ -630,15 +728,16 @@ TEST(CheckLensResiduals, Refuses) {
   outside[3].pixel.x = 3839.5;
   expect_refused(check_lens_residuals("bm-1", kSize, outside).status(),
                  "check_lens_residuals",
-                 "a corner of capture 100 at (3.84e+03, 180) is not finite "
-                 "or outside the 3840 x 2160 image");
+                 "a corner of bm-1 in capture 100 at (3.84e+03, 180) is not "
+                 "finite or outside the 3840 x 2160 image");
   outside[3].pixel.x = std::numeric_limits<double>::quiet_NaN();
   expect_refused(check_lens_residuals("bm-1", kSize, outside).status(),
                  "check_lens_residuals", "is not finite or outside");
 }
 
 // The true pair over its view, both cameras sharing each capture's board:
-// good, each camera's cells holding its own corners.
+// good, each camera's cells holding its own corners; good as far out as they
+// reach, short of what a lens fit's gates ask.
 TEST(CheckRigLens, TheTruePairIsGood) {
   const std::vector<test::Placement> plan = pose_plan();
   for (const std::uint32_t seed : {1u, 2u, 3u}) {
@@ -651,6 +750,10 @@ TEST(CheckRigLens, TheTruePairIsGood) {
       EXPECT_EQ(check.camera, cam.id);
       EXPECT_EQ(check.views, plan.size());
       EXPECT_EQ(check.dropped, 0u);
+      EXPECT_EQ(check.unshared, 0u);
+      EXPECT_EQ(check.reach, reach_of(views, cam.id));
+      EXPECT_LT(*std::min_element(check.reach.begin(), check.reach.end()),
+                solve::kLensReach);
       EXPECT_GT(check.rms_px, 0.1);
       EXPECT_LT(check.rms_px, 0.25);
       EXPECT_TRUE(std::isnan(check.bound_px));
@@ -734,8 +837,129 @@ TEST(CheckRigLens, TooFewCapturesAreInsufficientNamingWhereToCapture) {
                              "left (0)", "centre (0)", "right (0)"}) {
       EXPECT_TRUE(says(check, part)) << part << ": " << check.reason;
     }
-    EXPECT_TRUE(says(check, "capture the board there")) << check.reason;
+    EXPECT_TRUE(
+        says(check, "capture the board there, where another camera sees it"))
+        << check.reason;
   }
+}
+
+// bm-1's k1 0.3% high, the board over bm-1's view (seed 1): bm-2's true lens
+// reads a cell past its limit and bm-1's own residuals none, yet bm-1 reads
+// suspect too, naming bm-2. The boards they share say their lenses disagree,
+// not which is off.
+TEST(CheckRigLens, ACameraSharingBoardsWithASuspectOneIsSuspect) {
+  const PairSolve rig = solve_pair(
+      pair_views(test::view_plan(test::lab_pair(), 0, charuco()), 0.15), 1.003);
+  std::vector<solve::CornerResidual> own;
+  for (const solve::CornerResidual& r : rig.solution.residuals) {
+    if (r.camera == 0) own.push_back(r);
+  }
+  const LensCheck alone = value_of(check_lens_residuals("bm-1", kSize, own));
+  EXPECT_EQ(alone.verdict, Verdict::Good) << alone.reason;
+  const LensCheck partner =
+      value_of(check_rig_lens("bm-2", rig.cameras, rig.solution));
+  EXPECT_EQ(partner.verdict, Verdict::Suspect);
+  EXPECT_TRUE(says(partner, "the mean residual is")) << partner.reason;
+  const LensCheck off =
+      value_of(check_rig_lens("bm-1", rig.cameras, rig.solution));
+  EXPECT_EQ(off.verdict, Verdict::Suspect);
+  EXPECT_EQ(off.reason,
+            "bm-2 reads suspect on the boards they share: their lenses "
+            "disagree");
+}
+
+// Three cameras, crafted: bm-2 shares captures 100 to 108 with bm-1, bm-3
+// captures 200 to 208. bm-2's mean in one cell is past its limit, so bm-1,
+// which shares its boards, reads suspect, naming it; bm-3 shares none of
+// them, and bm-1's own residuals are good, so bm-3 reads good.
+TEST(CheckRigLens, SuspectReachesOnlyTheCamerasSharingItsBoards) {
+  const std::vector<solve::RigCamera> cameras = {
+      {"bm-1", lab_lens()}, {"bm-2", lab_lens()}, {"bm-3", lab_lens()}};
+  solve::RigSolution solution;
+  solution.world_to_camera.resize(3);
+  add_as(0, every_part(100), solution);
+  add_as(0, every_part(200), solution);
+  std::vector<solve::CornerResidual> off = every_part(100);
+  for (std::size_t k = 0; k < 6; ++k) off[k].residual = {0.5, 0.0};
+  add_as(1, off, solution);
+  add_as(2, every_part(200), solution);
+  const auto check = [&](const char* id) {
+    return value_of(check_rig_lens(id, cameras, solution));
+  };
+  const LensCheck bm2 = check("bm-2");
+  EXPECT_EQ(bm2.verdict, Verdict::Suspect);
+  EXPECT_TRUE(says(bm2, "0.5 px in the image's top-left (cell 1, 0)"))
+      << bm2.reason;
+  EXPECT_FALSE(says(bm2, "disagree")) << bm2.reason;
+  const LensCheck bm1 = check("bm-1");
+  EXPECT_EQ(bm1.verdict, Verdict::Suspect);
+  EXPECT_EQ(bm1.reason,
+            "bm-2 reads suspect on the boards they share: their lenses "
+            "disagree");
+  EXPECT_EQ(bm1.corners, 108u);
+  const LensCheck bm3 = check("bm-3");
+  EXPECT_EQ(bm3.verdict, Verdict::Good) << bm3.reason;
+}
+
+// bm-1's view covered by boards bm-1 alone sees (its view plan), and 10 boards
+// both see (the first of bm-2's): the lone boards' poses are bm-1's own and
+// take up k1 1% high, so their corners are left out. The true lens is then
+// insufficient, the shared boards short of its view; k1 1% high reads suspect
+// by bm-1's own RMS, not only beside bm-2.
+TEST(CheckRigLens, BoardsOneCameraSawAloneAreLeftOut) {
+  const std::vector<test::SyntheticCamera> pair = test::lab_pair();
+  std::vector<test::Placement> alone = test::view_plan(pair, 0, charuco());
+  for (test::Placement& p : alone) p.cameras = {0};
+  const std::vector<test::Placement> plan = test::view_plan(pair, 1, charuco());
+  const std::vector<test::Placement> both(plan.begin(), plan.begin() + 10);
+  std::vector<Observation> views = pair_views(alone, 0.15);
+  for (Observation& view : pair_views(both, 0.15, 2)) {
+    view.frame_id += 1000;
+    views.push_back(std::move(view));
+  }
+  for (const bool off : {false, true}) {
+    const PairSolve rig = solve_pair(views, off ? 1.01 : 1.0);
+    const LensCheck check =
+        value_of(check_rig_lens("bm-1", rig.cameras, rig.solution));
+    EXPECT_EQ(check.unshared, 8 * alone.size()) << off;
+    EXPECT_EQ(check.views, 10u) << off;
+    EXPECT_EQ(check.corners + check.dropped, 80u) << off;
+    if (!off) {
+      EXPECT_EQ(check.verdict, Verdict::Insufficient) << check.reason;
+      EXPECT_TRUE(says(check, "where another camera sees it too"))
+          << check.reason;
+    } else {
+      EXPECT_EQ(check.verdict, Verdict::Suspect);
+      EXPECT_TRUE(says(check, "the RMS through the lens is")) << check.reason;
+    }
+  }
+}
+
+// Each camera judged at its own image's size: bm-2's half-size image bins its
+// corners on its own 8 x 6 grid and refuses one outside it.
+TEST(CheckRigLens, JudgesEachCameraAtItsOwnSize) {
+  std::vector<solve::RigCamera> cameras = {{"bm-1", lab_lens()},
+                                           {"bm-2", lab_lens()}};
+  cameras[1].model.size = {1920, 1080};
+  solve::RigSolution solution;
+  solution.world_to_camera.resize(2);
+  add_as(0, every_part(), solution);
+  std::vector<solve::CornerResidual> half = every_part();
+  for (solve::CornerResidual& r : half) r.pixel *= 0.5;
+  add_as(1, half, solution);
+  const LensCheck full = value_of(check_rig_lens("bm-1", cameras, solution));
+  const LensCheck small = value_of(check_rig_lens("bm-2", cameras, solution));
+  EXPECT_EQ(small.verdict, Verdict::Good) << small.reason;
+  for (std::size_t c = 0; c < small.cells.size(); ++c) {
+    EXPECT_EQ(small.cells[c].corners, full.cells[c].corners) << c;
+  }
+  solution.residuals.back().pixel = {1919.0, 100.0};
+  EXPECT_TRUE(check_rig_lens("bm-2", cameras, solution).ok());
+  solution.residuals.back().pixel = {3000.0, 100.0};
+  expect_refused(check_rig_lens("bm-2", cameras, solution).status(),
+                 "check_rig_lens",
+                 "a corner of bm-2 in capture 108 at (3e+03, 100) is not "
+                 "finite or outside the 1920 x 1080 image");
 }
 
 TEST(CheckRigLens, Refuses) {
@@ -813,6 +1037,43 @@ TEST(CheckRigLensSweep, NoiseAloneDoesNotReadSuspect) {
   RecordProperty("checks", checks);
   RecordProperty("worst_cell", std::to_string(worst));
   EXPECT_LT(worst, 0.9);
+}
+
+// The true pair over random sessions (random_plan) of 15, 20, 30 and 40
+// captures at 0.15 and 0.3 px of corner noise, 200 sessions each in the sweep
+// (DECISIONS.md): the share of cameras read suspect, at most the design's 2%
+// at 0.15 px, and the share read good, the rest insufficient. The default
+// suite draws 2 sessions of each.
+TEST(CheckRigLensSweep, RandomSessionsOfNoiseAlone) {
+  const std::uint32_t sessions = test::sweep_size(2, 200);
+  for (const std::size_t captures : {15u, 20u, 30u, 40u}) {
+    for (const char* noise : {"0.15", "0.3"}) {
+      const double noise_px = std::stod(noise);
+      int checks = 0;
+      int suspect = 0;
+      int good = 0;
+      for (std::uint32_t s = 1; s <= sessions; ++s) {
+        const std::vector<test::Placement> plan =
+            random_plan(captures, 1000 + s);
+        ASSERT_EQ(plan.size(), captures);
+        const PairSolve rig = solve_pair(pair_views(plan, noise_px, s));
+        for (const solve::RigCamera& cam : rig.cameras) {
+          const LensCheck check =
+              value_of(check_rig_lens(cam.id, rig.cameras, rig.solution));
+          ++checks;
+          suspect += check.verdict == Verdict::Suspect ? 1 : 0;
+          good += check.verdict == Verdict::Good ? 1 : 0;
+        }
+      }
+      const std::string at = std::to_string(captures) + "_" + noise;
+      RecordProperty("suspect_" + at, suspect);
+      RecordProperty("good_" + at, good);
+      RecordProperty("checks_" + at, checks);
+      if (noise_px < 0.2) {
+        EXPECT_LE(suspect, 0.02 * checks) << captures << " captures";
+      }
+    }
+  }
 }
 
 }  // namespace

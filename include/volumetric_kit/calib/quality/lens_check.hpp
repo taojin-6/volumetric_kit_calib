@@ -4,18 +4,23 @@
 #pragma once
 
 /// @file lens_check.hpp
-/// @brief Whether a lens holds, its residuals held to the lens gates' hold-out
-///        and bias limits (`quality/lens_gate.hpp`): on views of any board,
-///        each posed through the lens held fixed (@ref check_lens), or on a
-///        solve's residuals (@ref check_lens_residuals, @ref check_rig_lens).
+/// @brief Whether a lens holds on a camera's residuals: their RMS, the share
+///        of corners dropped and the 0.1 px cell floor the lens gates'
+///        (`quality/lens_gate.hpp`), each cell's mean held to Student's t. On
+///        views of any board, each posed through the lens held fixed
+///        (@ref check_lens), or on a solve's residuals
+///        (@ref check_lens_residuals, @ref check_rig_lens).
 ///
 /// Which to use: a lens session's checkerboard views, @ref check_lens; a pose
-/// session, @ref check_rig_lens on its rig solve. A view's own pose takes up
-/// any error of the lens that is close to affine over the board, so on the
-/// rig's 5 x 3 ChArUco board @ref check_lens shows only a lens off by pixels;
-/// the rig solve shares each capture's board pose between the cameras, so its
-/// residuals keep most of what a view's own pose would take up (DECISIONS.md,
-/// 2026-11-02, a lens checked on views of any board).
+/// session, @ref check_rig_lens on its rig solve; a solve's residuals read
+/// back, @ref check_lens_residuals. A lens's own fit is @ref judge_lens's to
+/// gate. A view's own pose takes up any error of the lens that is close to
+/// affine over the board, so on the rig's 5 x 3 ChArUco board @ref check_lens
+/// shows only a lens off by pixels; the rig solve shares each capture's board
+/// pose between the cameras, so its residuals keep most of what a view's own
+/// pose would take up (DECISIONS.md, 2026-11-02, a lens checked on views of
+/// any board). A good verdict holds only as far out as the corners reach
+/// (@ref LensCheck::reach).
 
 #include <array>
 #include <cstddef>
@@ -42,9 +47,10 @@ namespace volumetric_kit::calib::quality {
 /// The cells of the grid the lens checks judge: the lens gates' 8 x 6.
 inline constexpr int kLensCells = kCoverageCols * kCoverageRows;
 
-/// @brief The limits the lens checks hold a lens's residuals to, the lens
-///        gates' own as @ref LensGateOptions sets them, and what
-///        @ref check_lens poses.
+/// @brief The limits the lens checks hold a lens's residuals to, and what
+///        @ref check_lens poses: the RMS, the share dropped and the cell floor
+///        the lens gates' (@ref LensGateOptions), each cell held to Student's
+///        t at `min_cell_corners`.
 ///
 /// @code
 /// LensCheckOptions options;
@@ -57,6 +63,12 @@ struct LensCheckOptions {
   /// The corners not kept, as a share, at most; in [0, 1]: the held-out
   /// corners' limit.
   double max_dropped = LensGateOptions{}.max_holdout_dropped;
+  /// The corners not kept past `max_dropped` read suspect when they lie in at
+  /// least this many views, and insufficient when in fewer; at least 1. One
+  /// board dropped, a glitch or a blur, cannot tell the lens from its
+  /// detection, and on a 5 x 3 ChArUco board's 8 corners it is past 1% in any
+  /// session under 100 captures.
+  int min_dropped_views = 2;
   /// In every cell of the 8 x 6 grid with at least `min_cell_corners`
   /// corners, their mean residual at most this, or t standard errors of that
   /// mean if larger (@ref LensCell::limit_px): the bias gate's floor.
@@ -107,10 +119,14 @@ struct LensCell {
 struct LensCheck {
   /// What the check found.
   enum class Verdict : std::uint8_t {
-    Good,  ///< Within every limit, a judged cell in every part of the image.
-    /// A judged cell, the RMS or the share of corners dropped past its limit.
+    /// Within every limit, a judged cell in every part of the image: as far
+    /// out as the corners reach (`reach`).
+    Good,
+    /// A judged cell, the RMS or the share of corners dropped past its limit;
+    /// or, for @ref check_rig_lens, a camera sharing boards with it so.
     Suspect,
-    /// Within every limit, but some part of the image without a judged cell.
+    /// Within every limit, but some part of the image without a judged cell,
+    /// or the corners dropped past their share from too few views.
     Insufficient,
   };
 
@@ -125,7 +141,7 @@ struct LensCheck {
   /// The 95th percentile of their residuals' lengths (`compute::quantile`);
   /// reported, not gated. Not a number with none.
   double p95_px = std::numeric_limits<double>::quiet_NaN();
-  /// The views judged: those posed, or the captures with a residual given.
+  /// The views judged: those posed, or the captures with a residual judged.
   std::size_t views = 0;
   /// The corners kept, their residual finite: in a view posed and within the
   /// bound, or not dropped by the solve.
@@ -134,9 +150,19 @@ struct LensCheck {
   /// posed, and every corner of a view left with no pose; or dropped by the
   /// solve, or behind the camera.
   std::size_t dropped = 0;
+  /// @ref check_rig_lens alone: the camera's corners left out, kept or not,
+  /// of captures in which no other camera kept a corner, their board posed
+  /// by this camera alone; 0 otherwise.
+  std::size_t unshared = 0;
   /// The corner bound (@ref solve::PosedLensViews::bound_px); not a number
   /// for a solve's residuals, whose own rule dropped its corners.
   double bound_px = std::numeric_limits<double>::quiet_NaN();
+  /// How far the corners kept get toward each image corner and side
+  /// (@ref solve::pixel_reach); all 0 with none. A good verdict holds this
+  /// far out: a lens error beyond does not show. A lens fit's gates ask
+  /// @ref solve::kLensReach of its corners; a pose session's corners, in the
+  /// pair's shared view, reach less.
+  solve::LensReach reach{};
   /// Each cell of the 8 x 6 grid, row-major from the top left.
   std::array<LensCell, kLensCells> cells{};
 };
@@ -157,17 +183,18 @@ VC_QUALITY_API const char* to_string(LensCheck::Verdict verdict) noexcept;
 ///
 /// 1. **Corners.** Those not dropped whose residual is finite are kept; the
 ///    rest are dropped.
-/// 2. **Limits.** The corners kept are held to the lens gates' limits
-///    (@ref judge_lens): their RMS within `max_rms_px`, scaled by width; the
-///    corners dropped within `max_dropped` of all; and in each cell of the
-///    8 x 6 grid with `min_cell_corners`, the mean residual within its limit
-///    (@ref LensCell::limit_px).
+/// 2. **Limits.** The corners kept: their RMS within `max_rms_px`, scaled by
+///    width; the corners dropped within `max_dropped` of all, a limit passed
+///    when they lie in `min_dropped_views` views or more; and in each cell of
+///    the 8 x 6 grid with `min_cell_corners`, the mean residual within its
+///    limit (@ref LensCell::limit_px).
 /// 3. **Verdict.** Any limit passed: `Suspect`, naming each with its numbers
 ///    and each cell past its limit by the part of the image it lies in
 ///    ("top-right"). Else some part of a 3 x 3 split of the image, each cell
-///    in the part its centre lies in, without a judged cell: `Insufficient`,
-///    naming those parts, where to capture. Else `Good`. A limit passed comes
-///    first: no capture elsewhere mends it.
+///    in the part its centre lies in, without a judged cell, or the corners
+///    dropped past `max_dropped` from fewer views: `Insufficient`, naming
+///    those parts, where to capture. Else `Good`. A limit passed comes first:
+///    no capture elsewhere mends it.
 ///
 /// @param camera_id  The camera, its id for the check.
 /// @param size       Its image's size, the residuals' pixels within it.
@@ -177,13 +204,14 @@ VC_QUALITY_API const char* to_string(LensCheck::Verdict verdict) noexcept;
 ///                   checked, not used.
 /// @return The check; `InvalidArgument` for an option out of range (naming
 ///         it), an empty id, a size with a side 0, or a pixel not finite or
-///         outside the image (naming its capture). Each message starts
-///         `check_lens_residuals: `.
+///         outside the image (naming the camera and capture). Each message
+///         starts `check_lens_residuals: `.
 ///
 /// @code
+/// // bm-5's rows of a pose session's residuals.csv (quality/results.hpp),
+/// // read back as solve::CornerResidual.
 /// VKC_ASSIGN(const LensCheck check,
-///            check_lens_residuals("bm-1", fit.camera.model.size,
-///                                 fit.residuals));
+///            check_lens_residuals("bm-5", {3840, 2160}, bm5_rows));
 /// @endcode
 VC_QUALITY_API core::Result<LensCheck> check_lens_residuals(
     std::string_view camera_id, sensor::camera::ImageSize size,
@@ -191,21 +219,33 @@ VC_QUALITY_API core::Result<LensCheck> check_lens_residuals(
     const LensCheckOptions& options = {});
 
 /// @brief Whether @p camera_id's lens holds on a rig solve: its residuals in
-///        @p solution, judged as @ref check_lens_residuals judges them.
+///        @p solution, judged as @ref check_lens_residuals judges them, and
+///        then beside the cameras it shares boards with.
 ///
-/// The solve's cameras share each capture's board pose, so a lens off shows
-/// in its residuals where a view's own pose would take it up. It shows in the
-/// residuals of the cameras sharing those boards too: a suspect camera says
-/// the lenses disagree, and @ref check_lens on a lens session says which is
-/// off. The corners the solve dropped count against `max_dropped`, whatever
+/// 1. **Shared captures.** The solve's cameras share each capture's board
+///    pose, so a lens off shows in its residuals where a view's own pose
+///    would take it up. Only the camera's corners of captures in which
+///    another camera kept a corner are judged; the rest, their board posed
+///    by this camera alone, are counted in `unshared`.
+/// 2. **Its own residuals,** as @ref check_lens_residuals judges them,
+///    `Insufficient` asking for boards another camera sees too.
+/// 3. **Boards shared.** Two cameras that both kept corners of a capture
+///    share its board. A lens off shows in the residuals of every camera
+///    sharing its boards, and not always most in its own: so a camera that
+///    shares boards with one whose own residuals read `Suspect` reads
+///    `Suspect` too, naming it. Such a verdict says the lenses disagree;
+///    @ref check_lens on a lens session says which is off.
+///
+/// The corners the solve dropped count against `max_dropped`, whatever
 /// dropped them (@ref solve::RigSolution::rejections says what).
 /// @param camera_id  The camera.
 /// @param cameras    The rig's cameras, as the solve took them.
 /// @param solution   @ref solve::bundle_adjust's solution for them.
 /// @param options    The limits.
 /// @return The check; `InvalidArgument` for an id the rig does not have, a
-///         solution of another rig, or as @ref check_lens_residuals refuses.
-///         Each message starts `check_rig_lens: `.
+///         solution of another rig, or as @ref check_lens_residuals refuses
+///         any camera's residuals judged. Each message starts
+///         `check_rig_lens: `.
 ///
 /// @code
 /// for (const solve::RigCamera& cam : cameras) {

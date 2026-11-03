@@ -13,24 +13,28 @@ release may break it, and each such entry says how to migrate
 
 - **A lens checked on views of any board, or on a solve** (DECISIONS.md,
   2026-11-02): `quality/lens_check.hpp`, in the stable API, holds a camera's
-  residuals to the lens gates' limits: the RMS, the corners dropped and each
-  8 x 6 cell's mean, a cell of 6 corners within 0.1 px or Student's t
-  standard errors (`LensCheckOptions`, `LensCheck`, `LensCell`). `Suspect`
-  names each limit passed and the part of the image of each cell past its
-  own; `Insufficient`, the parts without a judged cell, where to capture.
+  residuals to the lens gates' RMS and share of corners dropped, the share
+  only when the drops lie in 2 views or more, and each 8 x 6 cell's mean, a
+  cell of 6 corners, to 0.1 px or Student's t standard errors
+  (`LensCheckOptions`, `LensCheck`, `LensCell`). `Suspect` names each limit
+  passed and the part of the image of each cell past its own;
+  `Insufficient`, the parts without a judged cell, where to capture;
+  `LensCheck::reach`, how far out the corners judged get, as far as a good
+  verdict holds.
   `quality::check_lens` poses each of a camera's views through a lens held
   fixed, ChArUco views of 8 corners as well as a checkerboard's;
   `quality::check_lens_residuals` takes any solve's residuals, and
   `quality::check_rig_lens` a camera's in a rig solve, whose shared board
-  poses show a lens error a view's own pose takes up.
-  `to_string(LensCheck::Verdict)`.
+  poses show a lens error a view's own pose takes up: only its corners of
+  captures another camera kept corners of, and suspect too when a camera
+  sharing its boards reads suspect. `to_string(LensCheck::Verdict)`.
 - `solve::pose_lens_views` (`solve/lens_poses.hpp`, outside the stable
   table): a camera's views posed through a lens held fixed, as `solve_lens`
   poses a held-out view, and each corner's residual.
 - Sample main 5 in `tests/api_test.cpp`: the lenses a pose session uses,
   checked on its rig solve.
-- `lens_check.sweeps` (label `slow`): noise alone over 300 checks of views
-  and 300 of rig solves.
+- `lens_check.sweeps` (label `slow`): noise alone over 300 checks of views,
+  300 of rig solves and 3,200 of rig solves over random sessions.
 
 ### Changed
 

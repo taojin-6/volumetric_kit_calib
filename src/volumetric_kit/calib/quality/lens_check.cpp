@@ -7,10 +7,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "checks.hpp"
 #include "lens_cells.hpp"
@@ -42,6 +44,7 @@ core::Status check_options(const LensCheckOptions& o, const char* who) {
   if (!(o.max_dropped >= 0.0 && o.max_dropped <= 1.0)) {
     return refuse("max_dropped", "in [0, 1]");
   }
+  if (o.min_dropped_views < 1) return refuse("min_dropped_views", "at least 1");
   if (!(o.max_cell_bias_px > 0.0) || !std::isfinite(o.max_cell_bias_px)) {
     return refuse("max_cell_bias_px", "positive and finite");
   }
@@ -65,10 +68,18 @@ std::size_t part_of(std::size_t cell) {
 
 using Parts = std::array<int, kParts * kParts>;
 
-// The limits over `out`'s figures: its verdict and reason. `dropped_as` says
-// what became of the corners dropped, `dropped_in` how many lie in each part.
-void judge(camera::ImageSize size, const std::string& dropped_as,
-           const Parts& dropped_in, LensCheck& out) {
+// What became of the corners dropped: `as`, in words, `in` how many lie in
+// each part, `views` how many views they lie in.
+struct Drops {
+  std::string as;
+  Parts in{};
+  std::size_t views = 0;
+};
+
+// The limits over `out`'s figures: its verdict and reason. `capture` says
+// where to capture a part short of corners.
+void judge(camera::ImageSize size, const Drops& drops, const char* capture,
+           LensCheck& out) {
   const LensCheckOptions& o = out.options;
   std::string passed;
   const auto add = [&passed](const std::string& why) {
@@ -81,18 +92,27 @@ void judge(camera::ImageSize size, const std::string& dropped_as,
         number(most) + " px");
   }
   const std::size_t all = out.corners + out.dropped;
+  // Past the share from too few views: the board, not the lens, may be off.
+  std::string unsure;
   if (static_cast<double>(out.dropped) >
       o.max_dropped * static_cast<double>(all)) {
-    std::string where;
-    for (std::size_t p = 0; p < dropped_in.size(); ++p) {
-      if (dropped_in[p] == 0) continue;
-      where += where.empty() ? ", in the image's " : ", ";
-      where += std::string(pair_row_cell_name(p)) + " (" +
-               std::to_string(dropped_in[p]) + ")";
+    std::string why = std::to_string(out.dropped) + " of " +
+                      std::to_string(all) + " corners " + drops.as +
+                      ", above " + number(100.0 * o.max_dropped) + "%, from " +
+                      std::to_string(drops.views) +
+                      (drops.views == 1 ? " view" : " views");
+    for (std::size_t p = 0, named = 0; p < drops.in.size(); ++p) {
+      if (drops.in[p] == 0) continue;
+      why += named++ == 0 ? ", in the image's " : ", ";
+      why += std::string(pair_row_cell_name(p)) + " (" +
+             std::to_string(drops.in[p]) + ")";
     }
-    add(std::to_string(out.dropped) + " of " + std::to_string(all) +
-        " corners " + dropped_as + ", above " + number(100.0 * o.max_dropped) +
-        "%" + where);
+    if (drops.views >= static_cast<std::size_t>(o.min_dropped_views)) {
+      add(why);
+    } else {
+      unsure = why + ": too few views to tell the lens from a board's " +
+               "detection; capture the board there again";
+    }
   }
 
   std::array<bool, kParts * kParts> judged{};
@@ -127,49 +147,66 @@ void judge(camera::ImageSize size, const std::string& dropped_as,
                    std::to_string(fullest[p]) + ")";
   }
   if (!short_parts.empty()) {
-    out.verdict = Verdict::Insufficient;
     out.reason = "too few corners in the image's " + short_parts +
                  ", the most in one of its cells: each of its 9 parts needs " +
                  std::to_string(o.min_cell_corners) +
-                 " in a cell of the 8 x 6 grid; capture the board there";
-    return;
+                 " in a cell of the 8 x 6 grid; " + capture;
   }
-  out.verdict = Verdict::Good;
+  if (!unsure.empty()) {
+    out.reason += out.reason.empty() ? "" : "; ";
+    out.reason += unsure;
+  }
+  out.verdict = out.reason.empty() ? Verdict::Good : Verdict::Insufficient;
+}
+
+bool kept(const solve::CornerResidual& r) {
+  return !r.dropped && std::isfinite(r.residual.x) &&
+         std::isfinite(r.residual.y);
 }
 
 // `out`'s figures over `residuals` of an image of `size`, then its verdict.
+// `dropped_as` says what became of the corners dropped, `capture` where to
+// capture.
 void measure(const std::vector<solve::CornerResidual>& residuals,
-             camera::ImageSize size, const std::string& dropped_as,
-             LensCheck& out) {
-  std::vector<const solve::CornerResidual*> kept;
+             camera::ImageSize size, std::string dropped_as,
+             const char* capture, LensCheck& out) {
+  std::vector<const solve::CornerResidual*> corners;
   std::vector<double> lengths;
   double squares = 0.0;
-  Parts dropped_in{};
+  Drops drops{std::move(dropped_as)};
+  std::set<std::int64_t> dropped_views;
   for (const solve::CornerResidual& r : residuals) {
-    if (r.dropped || !std::isfinite(r.residual.x) ||
-        !std::isfinite(r.residual.y)) {
+    if (!kept(r)) {
       ++out.dropped;
+      dropped_views.insert(r.capture);
       const std::optional<int> at = compute::grid_cell(
           r.pixel.x, r.pixel.y, static_cast<int>(size.width),
           static_cast<int>(size.height), kCoverageCols, kCoverageRows);
-      if (at) ++dropped_in[part_of(static_cast<std::size_t>(*at))];
+      if (at) ++drops.in[part_of(static_cast<std::size_t>(*at))];
       continue;
     }
-    kept.push_back(&r);
+    corners.push_back(&r);
     const double square = glm::dot(r.residual, r.residual);
     squares += square;
     lengths.push_back(std::sqrt(square));
+    const solve::LensReach here = solve::pixel_reach(size, r.pixel);
+    for (std::size_t d = 0; d < here.size(); ++d) {
+      out.reach[d] = std::max(out.reach[d], here[d]);
+    }
   }
-  out.corners = kept.size();
-  if (!kept.empty()) {
-    out.rms_px = std::sqrt(squares / static_cast<double>(kept.size()));
+  drops.views = dropped_views.size();
+  out.corners = corners.size();
+  if (!corners.empty()) {
+    out.rms_px = std::sqrt(squares / static_cast<double>(corners.size()));
     out.p95_px = compute::quantile(std::move(lengths), 0.95);
   }
-  out.cells = detail::lens_cells(kept, size, out.options.max_cell_bias_px,
+  out.cells = detail::lens_cells(corners, size, out.options.max_cell_bias_px,
                                  out.options.min_cell_corners,
                                  detail::CellErrors::StudentT);
-  judge(size, dropped_as, dropped_in, out);
+  judge(size, drops, capture, out);
 }
+
+constexpr const char* kCaptureThere = "capture the board there";
 
 core::Result<LensCheck> check_views(std::string_view camera_id,
                                     const camera::CameraModel& lens,
@@ -194,14 +231,14 @@ core::Result<LensCheck> check_views(std::string_view camera_id,
   measure(posed->residuals, lens.size,
           "are past the bound (" + number(out.bound_px) +
               " px) or in a view with no pose",
-          out);
+          kCaptureThere, out);
   return out;
 }
 
 core::Result<LensCheck> check_residuals(
     const char* who, std::string_view camera_id, camera::ImageSize size,
     const std::vector<solve::CornerResidual>& residuals,
-    const LensCheckOptions& options) {
+    const LensCheckOptions& options, const char* capture = kCaptureThere) {
   VKC_TRY(check_options(options, who));
   if (camera_id.empty()) {
     return core::Status::invalid_argument(std::string(who) + ": no id");
@@ -218,9 +255,9 @@ core::Result<LensCheck> check_residuals(
     if (!compute::grid_cell(p.x, p.y, static_cast<int>(size.width),
                             static_cast<int>(size.height), 1, 1)) {
       return core::Status::invalid_argument(
-          std::string(who) + ": a corner of capture " +
-          std::to_string(r.capture) + " at (" + number(p.x) + ", " +
-          number(p.y) + ") is not finite or outside the " +
+          std::string(who) + ": a corner of " + std::string(camera_id) +
+          " in capture " + std::to_string(r.capture) + " at (" + number(p.x) +
+          ", " + number(p.y) + ") is not finite or outside the " +
           std::to_string(size.width) + " x " + std::to_string(size.height) +
           " image");
     }
@@ -232,7 +269,69 @@ core::Result<LensCheck> check_residuals(
   out.camera = std::string(camera_id);
   out.views = captures.size();
   measure(residuals, size, "were dropped by the solve or behind the camera",
-          out);
+          capture, out);
+  return out;
+}
+
+// Each camera of a rig `cameras` checked on its own residuals in `solution`,
+// those of captures another camera kept a corner of, and which cameras it
+// shares boards with (both kept corners of a capture), each in the rig's
+// order.
+struct OwnChecks {
+  std::vector<LensCheck> checks;
+  std::vector<std::vector<bool>> shares;
+};
+
+core::Result<OwnChecks> own_checks(const std::vector<solve::RigCamera>& cameras,
+                                   const solve::RigSolution& solution,
+                                   const LensCheckOptions& options) {
+  const std::size_t n = cameras.size();
+  // The cameras that kept a corner of each capture.
+  std::map<std::int64_t, std::vector<bool>> keepers;
+  for (const solve::CornerResidual& r : solution.residuals) {
+    if (r.camera >= n) {
+      return core::Status::invalid_argument(
+          std::string(kRigWho) + ": a residual of camera " +
+          std::to_string(r.camera) + ", which the rig does not have");
+    }
+    if (!kept(r)) continue;
+    std::vector<bool>& by = keepers[r.capture];
+    by.resize(n, false);
+    by[r.camera] = true;
+  }
+  OwnChecks out;
+  out.shares.assign(n, std::vector<bool>(n, false));
+  for (const auto& [capture, by] : keepers) {
+    for (std::size_t a = 0; a < n; ++a) {
+      for (std::size_t b = 0; b < n; ++b) {
+        if (a != b && by[a] && by[b]) out.shares[a][b] = true;
+      }
+    }
+  }
+  for (std::size_t c = 0; c < n; ++c) {
+    std::vector<solve::CornerResidual> shared;
+    std::size_t alone = 0;
+    for (const solve::CornerResidual& r : solution.residuals) {
+      if (r.camera != c) continue;
+      const auto at = keepers.find(r.capture);
+      bool another = false;
+      if (at != keepers.end()) {
+        for (std::size_t b = 0; b < n; ++b) another |= b != c && at->second[b];
+      }
+      if (another) {
+        shared.push_back(r);
+      } else {
+        ++alone;
+      }
+    }
+    VKC_ASSIGN(LensCheck check,
+               check_residuals(kRigWho, cameras[c].id, cameras[c].model.size,
+                               shared, options,
+                               "capture the board there, where another "
+                               "camera sees it too"));
+    check.unshared = alone;
+    out.checks.push_back(std::move(check));
+  }
   return out;
 }
 
@@ -278,15 +377,26 @@ core::Result<LensCheck> check_rig_lens(
                     " cameras, the rig " + std::to_string(cameras.size()));
     }
     const auto index = static_cast<std::size_t>(at - cameras.begin());
-    std::vector<solve::CornerResidual> mine;
-    for (const solve::CornerResidual& r : solution.residuals) {
-      if (r.camera >= cameras.size()) {
-        return refuse("a residual of camera " + std::to_string(r.camera) +
-                      ", which the rig does not have");
+    VKC_ASSIGN(OwnChecks own, own_checks(cameras, solution, options));
+    LensCheck out = std::move(own.checks[index]);
+    std::string disagree;
+    for (std::size_t c = 0; c < cameras.size(); ++c) {
+      if (!own.shares[index][c] || own.checks[c].verdict != Verdict::Suspect) {
+        continue;
       }
-      if (r.camera == index) mine.push_back(r);
+      disagree += disagree.empty() ? "" : "; ";
+      disagree += cameras[c].id +
+                  " reads suspect on the boards they share: their lenses "
+                  "disagree";
     }
-    return check_residuals(kRigWho, camera_id, at->model.size, mine, options);
+    if (disagree.empty()) return out;
+    if (out.verdict == Verdict::Suspect) {
+      out.reason += "; " + disagree;
+    } else {
+      out.verdict = Verdict::Suspect;
+      out.reason = std::move(disagree);
+    }
+    return out;
   });
 }
 
