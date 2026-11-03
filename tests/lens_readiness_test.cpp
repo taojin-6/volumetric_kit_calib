@@ -135,6 +135,9 @@ TEST(LensReadiness, FlipsAtThirtyViewsTheSolveWillFit) {
     short_of_it = short_of_it || state.views == 29;
     at_it = at_it || state.views == 30;
     EXPECT_EQ(state.ready, state.views >= 30) << state.views;
+    EXPECT_EQ(state.unmet, state.ready
+                               ? std::string()
+                               : std::to_string(state.views) + " views of 30");
   }
   EXPECT_TRUE(short_of_it);
   EXPECT_TRUE(at_it);
@@ -163,9 +166,11 @@ TEST(LensReadiness, FlipsAtThreeQuartersOfTheCells) {
   LensReadiness state = state_of(session(34, 30), nullptr, options);
   EXPECT_EQ(state.cells, 0.75);
   EXPECT_TRUE(state.ready);
+  EXPECT_EQ(state.unmet, "");
   state = state_of(session(33, 30), nullptr, options);
   EXPECT_EQ(state.cells, 35.0 / 48.0);
   EXPECT_FALSE(state.ready);
+  EXPECT_EQ(state.unmet, "73% of the cells, of 75%");
 }
 
 // Each direction alone, just short of 0.9 and just past it.
@@ -177,6 +182,10 @@ TEST(LensReadiness, FlipsAtEachCornersAndSidesReach) {
     LensReadiness state = state_of(views);
     EXPECT_FALSE(state.ready) << d;
     EXPECT_LT(state.reach[d], 0.9) << d;
+    EXPECT_EQ(state.unmet,
+              "its corners reach too little of the way to an image corner or "
+              "side")
+        << d;
     view = reaching(view.frame_id, d, 0.9 + 1e-6);
     state = state_of(views);
     EXPECT_TRUE(state.ready) << d;
@@ -201,6 +210,7 @@ TEST(LensReadiness, FlipsAtHalfFrontalAndOnlyWithARealLens) {
   state = state_of(views, &frontal, options);
   EXPECT_EQ(*state.frontal, 21.0 / 40.0);
   EXPECT_FALSE(state.ready);
+  EXPECT_EQ(state.unmet, "53% of its views frontal, over 50%");
 }
 
 // A frontal view the solve will not fit does not count.

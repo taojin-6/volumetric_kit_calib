@@ -35,6 +35,33 @@ core::Status check_options(const LensReadyOptions& o) {
   return {};
 }
 
+// What `state` lacks of `options`, in words: the first of its views, cells,
+// reach and frontal share that falls short; empty for none.
+std::string shortfall(const LensReadiness& state,
+                      const LensReadyOptions& options) {
+  const auto percent = [](double share) {
+    return std::to_string(static_cast<int>(std::lround(100.0 * share))) + "%";
+  };
+  if (state.views < options.min_views) {
+    return std::to_string(state.views) + " views of " +
+           std::to_string(options.min_views);
+  }
+  if (state.cells < options.min_cells) {
+    return percent(state.cells) + " of the cells, of " +
+           percent(options.min_cells);
+  }
+  if (*std::min_element(state.reach.begin(), state.reach.end()) <
+      options.min_reach) {
+    return "its corners reach too little of the way to an image corner or "
+           "side";
+  }
+  if (state.frontal && *state.frontal > options.max_frontal) {
+    return percent(*state.frontal) + " of its views frontal, over " +
+           percent(options.max_frontal);
+  }
+  return {};
+}
+
 }  // namespace
 
 core::Result<LensReadiness> lens_readiness(
@@ -81,12 +108,8 @@ core::Result<LensReadiness> lens_readiness(
         if (frontal != nullptr && state.views > 0) {
           state.frontal = static_cast<double>(frontal_views) / state.views;
         }
-        state.ready =
-            state.views >= options.min_views &&
-            state.cells >= options.min_cells &&
-            *std::min_element(state.reach.begin(), state.reach.end()) >=
-                options.min_reach &&
-            (!state.frontal || *state.frontal <= options.max_frontal);
+        state.unmet = shortfall(state, options);
+        state.ready = state.unmet.empty();
         return state;
       });
 }

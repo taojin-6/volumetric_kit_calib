@@ -4,7 +4,6 @@
 #include "volumetric_kit/calib/app/calibrate_worker.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
@@ -247,30 +246,6 @@ core::Result<quality::DepthSummary> check_depth(
   return quality::summarize_depth_checks(n, run.checked, run.pairs, options);
 }
 
-// What a camera's views lack to be fitted, the first of its readiness's
-// thresholds unmet.
-std::string not_ready(const quality::LensReadiness& state) {
-  const quality::LensReadyOptions want;
-  const auto percent = [](double share) {
-    return std::to_string(static_cast<int>(std::lround(100.0 * share))) + "%";
-  };
-  if (state.views < want.min_views) {
-    return "not ready: " + std::to_string(state.views) + " views of " +
-           std::to_string(want.min_views);
-  }
-  if (state.cells < want.min_cells) {
-    return "not ready: " + percent(state.cells) + " of the cells, of " +
-           percent(want.min_cells);
-  }
-  if (*std::min_element(state.reach.begin(), state.reach.end()) <
-      want.min_reach) {
-    return "not ready: its corners reach too little of the way to an image "
-           "corner or side";
-  }
-  return "not ready: " + percent(state.frontal.value_or(0.0)) +
-         " of its views frontal, over " + percent(want.max_frontal);
-}
-
 // A lens session's Calibrate: each ready camera's lens fitted and judged,
 // and the lens results' files. `step` is called with the cameras fitted,
 // before each and after the last.
@@ -291,7 +266,7 @@ core::Result<CalibrateResult> calibrate_lenses(
     const capture::SessionCamera& camera = kept.sensors[c];
     out.ids.push_back(camera.id);
     if (!states[c].ready) {
-      out.unsolved.push_back({camera.id, not_ready(states[c])});
+      out.unsolved.push_back({camera.id, "not ready: " + states[c].unmet});
       continue;
     }
     // A real lens only: the stand-in is never a start.
