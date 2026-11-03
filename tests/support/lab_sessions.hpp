@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <iterator>
 #include <optional>
 #include <thread>
@@ -94,23 +95,34 @@ inline constexpr std::size_t kPlacedAtOnce = 2;
 /// @brief @ref place_board at each of @p poses, @ref kPlacedAtOnce at a time:
 ///        the placements are independent, and each search seeds its own
 ///        random numbers (detect_board), so the results are a loop's, in
-///        order.
+///        order. What a placement throws stops the rest and is rethrown here,
+///        so it fails the test that asked, as a loop's would.
 inline std::vector<std::optional<PlacedBoard>> place_boards(
     const FisheyeTruth& truth, const compute::Board& board,
     const std::vector<sensor::camera::Mat4d>& poses, std::size_t min_live,
     std::size_t min_full) {
   std::vector<std::optional<PlacedBoard>> placed(poses.size());
   std::atomic<std::size_t> next{0};
-  const auto work = [&] {
-    for (std::size_t i = next++; i < poses.size(); i = next++) {
-      placed[i] = place_board(truth, board, poses[i], min_live, min_full);
+  const std::size_t workers =
+      std::max<std::size_t>(1, std::min(poses.size(), kPlacedAtOnce));
+  std::vector<std::exception_ptr> thrown(workers);
+  const auto work = [&](std::size_t worker) {
+    try {
+      for (std::size_t i = next++; i < poses.size(); i = next++) {
+        placed[i] = place_board(truth, board, poses[i], min_live, min_full);
+      }
+    } catch (...) {
+      thrown[worker] = std::current_exception();
+      next = poses.size();
     }
   };
-  const std::size_t workers = std::min(poses.size(), kPlacedAtOnce);
-  std::vector<std::thread> threads(workers > 1 ? workers - 1 : 0);
-  for (std::thread& thread : threads) thread = std::thread(work);
-  work();
+  std::vector<std::thread> threads;
+  for (std::size_t w = 1; w < workers; ++w) threads.emplace_back(work, w);
+  work(0);
   for (std::thread& thread : threads) thread.join();
+  for (const std::exception_ptr& e : thrown) {
+    if (e) std::rethrow_exception(e);
+  }
   return placed;
 }
 

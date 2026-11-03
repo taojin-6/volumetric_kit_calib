@@ -355,6 +355,9 @@ if(TARGET calib_app)
               volumetric_kit::core_test_support)
   target_include_directories(vc_app_setup_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
+  # About 9 and 13 s alone on an M5 Max, and app_setup 36 s on CI's loaded Mac:
+  # a minute is too near.
+  set_tests_properties(app_intrinsic app_setup PROPERTIES TIMEOUT 120)
   # app: Calibrate on the synthetic rig's detections, its results directories
   # read back with sensor's reader and nlohmann; its out-of-memory sweep.
   vc_add_test(app_calibrate volumetric_kit::calib_app vc_synthetic_rig)

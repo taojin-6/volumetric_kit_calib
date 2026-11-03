@@ -512,21 +512,25 @@ struct Search {
 // of squares. Over such views, in the picture and in its half, every corner
 // detect_board keeps is within a pixel of a true one, and its grid is
 // numbered as a grid. The first two searches fail without the filter (58 px
-// off; not a grid); the sweep adds 28 more, and asks that 8 keep a board.
+// off; not a grid) and come back empty with it; the third keeps a board, so
+// the filter does not drop every hard view. The sweep adds the rest, and asks
+// that 8 keep a board.
 TEST(DetectBoard, KeepsOnlyCornersOnTheBoard) {
   const Scene bottom_left = {
       "bottom-left, turned back", 66.0, 150.6, 0.5, -17.0, 0.0};
+  const Scene top_right = {
+      "top-right, turned back", 66.0, -29.4, 0.5, -17.0, 0.0};
   const Scene views[] = {
       bottom_left,
       {"bottom-right, turned back", 66.0, 29.4, 0.5, 17.0, 0.0},
       {"bottom-right, nearer the edge", 64.0, 29.4, 0.5, 0.0, 0.0},
       {"top-left, nearer the middle", 62.0, -150.6, 0.55, 17.0, 0.0},
-      {"top-right, turned back", 66.0, -29.4, 0.5, -17.0, 0.0},
+      top_right,
       {"whole, turned 45", 5.0, 30.0, 0.6, 45.0, 0.0},
       kTurned0,
   };
-  std::vector<Search> searches = {{bottom_left, 1, false},
-                                  {kTurned180, 1, true}};
+  std::vector<Search> searches = {
+      {bottom_left, 1, false}, {kTurned180, 1, true}, {top_right, 1, true}};
   if (sweep()) {
     for (const Scene& scene : views) {
       for (const std::uint64_t seed : {1, 2}) {
@@ -550,9 +554,7 @@ TEST(DetectBoard, KeepsOnlyCornersOnTheBoard) {
     ++kept;
   }
   std::printf("%zu of %zu searches kept a board\n", kept, searches.size());
-  if (sweep()) {
-    EXPECT_GE(kept, 8u) << "few searches kept a board";
-  }
+  EXPECT_GE(kept, sweep() ? 8u : 1u) << "few searches kept a board";
 }
 
 // On these pictures SB, from the seed detect_board gives it, returns a grid
@@ -611,10 +613,9 @@ TEST(DetectBoard, DropsAGridThatSkipsSquares) {
 
 // SB's grid depends on OpenCV's random numbers: unseeded, the half of this
 // picture is found from state 1 and not from 2 to 6 (OpenCV 5.0). detect_board
-// seeds them
-// for each search and puts them back: one picture gives one detection
-// whatever they were, on any number of OpenCV threads. The sweep adds the
-// picture itself, a board in a corner, and states 3 to 6.
+// seeds them for each search and puts them back: one picture gives one
+// detection whatever they were, on any number of OpenCV threads. The sweep
+// adds the picture itself, a board in a corner, and states 3 to 6.
 TEST(DetectBoard, APictureGivesOneDetection) {
   std::vector<Search> searches = {{kTurned180, 2, true}};
   if (sweep()) {
