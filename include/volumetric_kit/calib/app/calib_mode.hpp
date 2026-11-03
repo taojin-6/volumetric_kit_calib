@@ -276,6 +276,28 @@ bool session_ready(capture::SessionMode mode,
                    const std::vector<quality::LensReadiness>& lenses,
                    const std::vector<LensStatus>& statuses) noexcept;
 
+/// @brief Why a capture is refused in @p mode, in plain words: for poses,
+///        while a camera's lens is missing, as the session's captures could
+///        never be calibrated (a lens file loaded later starts a new
+///        session): `bm-6 has no lens: load a lens file in Setup first`.
+///        The live view still shows each camera through the stand-in.
+/// @param mode      The mode.
+/// @param cameras   Each camera's record, in rig order.
+/// @param statuses  Each camera's @ref lens_status, in rig order.
+/// @return The reason; empty when a capture may be taken. `InvalidArgument`
+///         for @p statuses of another length than @p cameras; or
+///         `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const std::string refused,
+///            capture_refusal(mode, cameras, statuses));
+/// if (refused.empty()) live->arm();
+/// @endcode
+core::Result<std::string> capture_refusal(
+    capture::SessionMode mode,
+    const std::vector<capture::SessionCamera>& cameras,
+    const std::vector<LensStatus>& statuses);
+
 /// @brief One camera that holds Calibrate back, and why, in plain words.
 struct NotReady {
   std::string camera;  ///< Its id; empty for the session as a whole.

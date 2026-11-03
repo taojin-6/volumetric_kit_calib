@@ -144,6 +144,8 @@ struct LensCheck;  // quality/lens_check.hpp
 /// The results directory's calibration file: sensor's, posed.
 inline constexpr const char* kArrayCalibrationFile = "array_calibration.json";
 inline constexpr const char* kReportFile = "report.json";  ///< The report.
+/// The report's `format`, which a reader tells calib's reports by.
+inline constexpr const char* kReportFormat = "volumetric_kit_calib.report";
 /// Every corner's residual.
 inline constexpr const char* kResidualsFile = "residuals.csv";
 

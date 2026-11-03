@@ -724,32 +724,50 @@ core::Status CaptureWorker::drop_last() {
   });
 }
 
+namespace {
+
+// `next` against the session it follows, `now`: the same cameras (ids,
+// sizes, depth) and capacity.
+core::Status same_rig(const CaptureSetup& now, std::size_t capacity,
+                      const CaptureSetup& next) {
+  bool same = now.cameras.size() == next.cameras.size();
+  for (std::size_t i = 0; same && i < now.cameras.size(); ++i) {
+    const capture::SessionCamera& a = now.cameras[i];
+    const capture::SessionCamera& b = next.cameras[i];
+    same = a.id == b.id && a.size.width == b.size.width &&
+           a.size.height == b.size.height &&
+           a.depth.has_value() == b.depth.has_value();
+  }
+  if (!same) {
+    return core::Status::invalid_argument(
+        "CaptureWorker::restart: the next session's cameras are not this "
+        "one's");
+  }
+  if (next.capacity != capacity) {
+    return core::Status::invalid_argument(
+        "CaptureWorker::restart: the capacity is " + std::to_string(capacity) +
+        ", not " + std::to_string(next.capacity));
+  }
+  return {};
+}
+
+}  // namespace
+
+core::Status CaptureWorker::accepts(const CaptureSetup& setup) const {
+  return compute::guarded("CaptureWorker::accepts", [&]() -> core::Status {
+    VKC_TRY(checked_lenses(setup).status());
+    const std::lock_guard<std::mutex> lock(state_->mutex);
+    return same_rig(state_->setup, capacity_, setup);
+  });
+}
+
 core::Status CaptureWorker::restart(CaptureSetup setup) {
   return compute::guarded("CaptureWorker::restart", [&]() -> core::Status {
     VKC_ASSIGN(std::vector<compute::CvCamera> cameras, checked_lenses(setup));
     {
       const std::lock_guard<std::mutex> lock(state_->mutex);
       if (state_->ended) return stopped();
-      const std::vector<capture::SessionCamera>& now = state_->setup.cameras;
-      bool same = now.size() == setup.cameras.size();
-      for (std::size_t i = 0; same && i < now.size(); ++i) {
-        const capture::SessionCamera& a = now[i];
-        const capture::SessionCamera& b = setup.cameras[i];
-        same = a.id == b.id && a.size.width == b.size.width &&
-               a.size.height == b.size.height &&
-               a.depth.has_value() == b.depth.has_value();
-      }
-      if (!same) {
-        return core::Status::invalid_argument(
-            "CaptureWorker::restart: the next session's cameras are not "
-            "this one's");
-      }
-      if (setup.capacity != capacity_) {
-        return core::Status::invalid_argument(
-            "CaptureWorker::restart: the capacity is " +
-            std::to_string(capacity_) + ", not " +
-            std::to_string(setup.capacity));
-      }
+      VKC_TRY(same_rig(state_->setup, capacity_, setup));
       Job job;
       job.kind = Job::Kind::Restart;
       job.setup = std::move(setup);

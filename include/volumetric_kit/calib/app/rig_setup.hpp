@@ -10,9 +10,10 @@
 ///        (@ref switch_session).
 ///
 /// The scenario's `operation` and `source.calibration` are where it starts.
-/// A lens file comes from a lens run's results under `output.path`
-/// (@ref find_lens_results), a typed path (@ref load_lens_file), or the lens
-/// run just shown (@ref passed_lenses, "Use these lenses").
+/// A lens file comes from a lens run, one listed under `output.path`
+/// (@ref find_lens_results) or the one just shown ("Use these lenses"),
+/// through @ref lens_run_file alike; or from a typed path
+/// (@ref load_lens_file).
 
 #include <memory>
 #include <optional>
@@ -35,8 +36,8 @@
 
 namespace volumetric_kit::calib::app {
 
-/// @brief A lens run's results directory under the session root: its lens
-///        file, and what its report says of each camera.
+/// @brief A lens run's results directory: its lens file, and what its report
+///        says of each camera.
 ///
 /// @code
 /// for (const LensResult& found : find_lens_results(root).value()) {
@@ -47,19 +48,27 @@ struct LensResult {
   std::string path;     ///< Its `array_calibration.json`.
   std::string session;  ///< Its session's directory name.
   /// Its results directory's name, `<RRR>_<YYYY-MM-DD_HHMMSS>`: the number
-  /// and when Calibrate was pressed.
+  /// and when Calibrate was pressed (`results_name`).
   std::string results;
   /// Each camera the run fitted and wrote, and whether its lens passed, in
   /// the report's order.
   std::vector<std::pair<std::string, bool>> cameras;
 };
 
+/// @brief Read a lens run's results directory, as Calibrate wrote it.
+/// @param directory  `<session>/results/<RRR>_<stamp>`
+///                   (`CalibrateResult::directory`).
+/// @return The run; `NotFound` without its `array_calibration.json` or
+///         `report.json`; `InvalidArgument` for a name that is not a
+///         results directory's, or a report that is not a lens run's
+///         (calib's `format`, a `lenses` section, each camera's `written`
+///         and `verdict`), naming the file; or what reading it fails with.
+core::Result<LensResult> read_lens_run(const std::string& directory);
+
 /// @brief Every lens run's results under @p root: each
-///        `<root>/<session>/results/<RRR>_<stamp>/` holding
-///        `array_calibration.json` and a `report.json` with a `lenses`
-///        section, newest first (by its stamp, then its session, then its
-///        number). A directory that cannot be read, or whose report does not
-///        parse, is left out.
+///        `<root>/<session>/results/<RRR>_<stamp>/` that @ref read_lens_run
+///        reads, newest first (by its stamp, then its session, then its
+///        number). A directory it refuses is left out.
 /// @param root  The session root (`output.path`).
 /// @return The runs; `NotFound` when @p root is not a directory; or
 ///         `OutOfMemory`.
@@ -86,8 +95,8 @@ struct LensFile {
   /// The file's lenses: those the rig takes.
   std::shared_ptr<const sensor::camera::ArrayCalibration> calibration;
   std::string path;  ///< Where it was read.
-  /// What the window says beside it: each camera it gives no lens, and,
-  /// for @ref passed_lenses, each camera whose lens was not taken, and why.
+  /// What the window says beside it: each camera it gives no lens, and why,
+  /// in rig order.
   std::vector<std::string> notes;
 };
 
@@ -106,18 +115,21 @@ core::Result<LensFile> load_lens_file(
     const std::string& path,
     const std::vector<capture::SessionCamera>& cameras);
 
-/// @brief "Use these lenses": the lens file a lens run wrote, as
-///        @ref load_lens_file checks it, with the lenses of the cameras that
-///        passed alone; the notes say which others were not taken, and why.
-/// @param result   The lens run, written (@ref CalibrateResult::directory).
+/// @brief The lenses a lens run gives the next session, picked in the Setup
+///        list or by "Use these lenses" alike: its lens file, as
+///        @ref load_lens_file checks it, without the lenses that failed in
+///        the run. So each camera takes its lens that passed, or the lens
+///        the run carried from the file its session started from when it did
+///        not fit the camera (`quality::format_lens_results`); a camera
+///        whose lens failed takes none from it (`bm-6's lens failed its gates
+///        in that run: not taken`).
+/// @param run      The run (@ref read_lens_run).
 /// @param cameras  The rig's cameras' records, in rig order.
-/// @return The lenses; `InvalidArgument` for a result that is not a written
-///         lens run, a run that wrote no lens file, or no camera that passed
-///         (each saying so); what @ref load_lens_file refuses; or
-///         `OutOfMemory`.
-core::Result<LensFile> passed_lenses(
-    const CalibrateResult& result,
-    const std::vector<capture::SessionCamera>& cameras);
+/// @return The lenses; `InvalidArgument`, as `lens file <path>: ...`, when no
+///         rig camera's lens passed in it and none is carried; what
+///         @ref load_lens_file refuses; or `OutOfMemory`.
+core::Result<LensFile> lens_run_file(
+    const LensResult& run, const std::vector<capture::SessionCamera>& cameras);
 
 /// @brief The Setup panel's lens lines: `lens file`, the path or `none`;
 ///        then `lens <id>` for each camera, its @ref lens_status, with
@@ -143,9 +155,13 @@ core::Result<std::vector<viz::PanelLine>> setup_lines(
 ///    it hands no capture on until it takes the new board, lenses and rule.
 /// 3. Then the capture worker (`CaptureWorker::restart`): what was queued
 ///    before goes to the session it closes, whose captures stay on disk; the
-///    next capture opens the new session.
+///    next capture opens the new session. It is queued before the caller's
+///    next `LiveWorker::arm`, which a capture of the new session needs.
 ///
-/// Nothing changes when step 1 or 2 is refused.
+/// Nothing changes when step 1, the capture worker's check of the next
+/// setup (`CaptureWorker::accepts`) or step 2 is refused. Step 3 then fails
+/// only once the capture worker's thread has ended, the live worker on the
+/// next session.
 /// @param next          The mode, the lens file (`calibration`,
 ///                      `calibration_path`) and the pairs.
 /// @param board         The board to search for, as the mode last had it,
@@ -157,8 +173,9 @@ core::Result<std::vector<viz::PanelLine>> setup_lines(
 /// @param live          The live worker.
 /// @param captures      The capture worker.
 /// @return The Board window's editor, unlocked; what @ref take_lens,
-///         `viz::BoardEditor::edit`, `LiveWorker::restart` or
-///         `CaptureWorker::restart` refuses; or `OutOfMemory`.
+///         `viz::BoardEditor::edit`, `CaptureWorker::accepts`,
+///         `LiveWorker::restart` or `CaptureWorker::restart` refuses; or
+///         `OutOfMemory`.
 ///
 /// @code
 /// RigScenario next = now;

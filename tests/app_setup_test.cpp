@@ -10,12 +10,13 @@
 // pose session, whose ChArUco pictures solve the pair with its rows passing
 // and each lens checked good, in report.json, the lens session left on disk.
 // Then, from host data: the lens runs listed under a root newest first with
-// each camera's verdict, a lens file checked against the rig's ids and sizes,
-// "Use these lenses" taking the cameras that passed alone and saying why not
-// the others, a pose session refusing Calibrate while a lens is missing or
-// failed, naming the camera, and the Setup panel's lens lines. The device
-// part runs under the validation layer when the environment asks
-// (VKC_TEST_VALIDATION) and skips without a device.
+// each camera's verdict, a report not a lens run's left out alone; a lens
+// file checked against the rig's ids and sizes; a lens run giving the next
+// session, picked or used alike, its lenses that passed and those it carried,
+// never one that failed, saying so; a pose session refusing captures and
+// Calibrate while a lens is missing, naming the camera; and the Setup panel's
+// lens lines. The device part runs under the validation layer when the
+// environment asks (VKC_TEST_VALIDATION) and skips without a device.
 
 #include "volumetric_kit/calib/app/rig_setup.hpp"
 
@@ -178,7 +179,9 @@ TEST_F(AppSetup, LensesThenPosesInOneApp) {
   }
 
   // "Use these lenses": a new lens session with the lenses that passed.
-  const core::Result<LensFile> used = passed_lenses(*lenses, setup.cameras);
+  const core::Result<LensResult> written = read_lens_run(lenses->directory);
+  ASSERT_TRUE(written.ok()) << written.status().message();
+  const core::Result<LensFile> used = lens_run_file(*written, setup.cameras);
   ASSERT_TRUE(used.ok()) << used.status().message();
   EXPECT_TRUE(used->notes.empty());
   EXPECT_EQ(used->path,
@@ -291,15 +294,17 @@ quality::LensVerdict verdict(const std::string& id, double f, bool pass) {
   return v;
 }
 
-// A lens run's results directory under `root`, as Calibrate writes it.
+// A lens run's results directory under `root`, as Calibrate writes it, over
+// the file its session started from, `base`.
 fs::path lens_run(const fs::path& root, const std::string& session,
                   const std::string& results,
                   const std::vector<quality::LensVerdict>& lenses,
-                  const std::vector<std::string>& unsolved = {}) {
+                  const std::vector<std::string>& unsolved = {},
+                  const camera::ArrayCalibration* base = nullptr) {
   const fs::path dir = root / session / "results" / results;
   fs::create_directories(dir);
   const quality::ResultFiles files =
-      quality::format_lens_results(lenses, unsolved, nullptr).value();
+      quality::format_lens_results(lenses, unsolved, base).value();
   EXPECT_TRUE(core::write_file((dir / "report.json").string(), files.report,
                                core::WriteMode::CreateNew)
                   .ok());
@@ -318,7 +323,8 @@ std::vector<capture::SessionCamera> lab_pair_records() {
 
 // The picker's list: each lens run under the root, newest first by when
 // Calibrate was pressed, with each camera's verdict; a pose run, a report
-// that does not parse and a directory without a lens file are left out.
+// that does not parse or holds a field of another type, and a directory
+// without a lens file are left out, each alone.
 TEST(AppSetupHost, ListsTheLensRunsNewestFirstWithEachVerdict) {
   const ScratchDir root;
   lens_run(root.path(), "2026-11-01_090000", "000_2026-11-01_100000",
@@ -348,6 +354,29 @@ TEST(AppSetupHost, ListsTheLensRunsNewestFirstWithEachVerdict) {
                   .ok());
   lens_run(root.path(), "2026-11-03_080000", "002_2026-11-03_092000", {},
            {"bm-5"});  // no lens written: no file
+  // A report whose fields are of other types, each beside a lens file.
+  const char* odd[] = {
+      R"({"format": 5})",
+      R"({"format": "volumetric_kit_calib.report", "lenses": {"cameras":
+          {"bm-5": {"written": "yes", "verdict": "pass"}}}})",
+      R"({"format": "volumetric_kit_calib.report", "lenses": {"cameras":
+          {"bm-5": {"written": true, "verdict": 1}}}})"};
+  for (int i = 0; i < 3; ++i) {
+    const fs::path dir = lens_run(
+        root.path(), "2026-11-04_080000",
+        "00" + std::to_string(i) + "_2026-11-04_0900" + std::to_string(10 + i),
+        {verdict("bm-5", 906.0, true)});
+    fs::remove(dir / "report.json");
+    ASSERT_TRUE(core::write_file((dir / "report.json").string(), odd[i],
+                                 core::WriteMode::CreateNew)
+                    .ok());
+    const core::Status refused = read_lens_run(dir.string()).status();
+    EXPECT_EQ(refused.domain(), Code::InvalidArgument) << odd[i];
+    EXPECT_NE(refused.message().find((dir / "report.json").string() +
+                                     ": not a lens run's"),
+              std::string::npos)
+        << refused.message();
+  }
 
   const std::vector<LensResult> found =
       find_lens_results(root.path().string()).value();
@@ -370,6 +399,18 @@ TEST(AppSetupHost, ListsTheLensRunsNewestFirstWithEachVerdict) {
   test::expect_refused(
       find_lens_results((root.path() / "none").string()).status(),
       Code::NotFound, "is not a directory");
+  // One run read alone, as "Use these lenses" reads the run it shows.
+  const LensResult one = read_lens_run((root.path() / "2026-11-02_215407" /
+                                        "results" / "000_2026-11-02_235712")
+                                           .string())
+                             .value();
+  EXPECT_EQ(one.path, found[0].path);
+  EXPECT_EQ(one.cameras, found[0].cameras);
+  test::expect_refused(read_lens_run((root.path() / "2026-11-03_080000" /
+                                      "results" / "002_2026-11-03_092000")
+                                         .string())
+                           .status(),
+                       Code::NotFound, "has no array_calibration.json");
 }
 
 // A lens file is checked against the rig: each camera's lens at its
@@ -427,30 +468,35 @@ TEST(AppSetupHost, ALensFileIsCheckedAgainstTheRig) {
       << gone.message();
 }
 
-// "Use these lenses" takes the cameras whose lens passed alone, saying why
-// not the others; a pose session then holds Calibrate back, naming the camera
-// whose lens failed, or that was not fitted, and the fix.
-TEST(AppSetupHost, UseTheseLensesTakesThoseThatPassedAndPosesWaitForTheRest) {
+// A lens run gives the next session, picked in the list or used alike, its
+// lens file without the lenses that failed in it, saying so; a pose session
+// then refuses captures and holds Calibrate back, naming the camera whose
+// lens failed, and the fix.
+TEST(AppSetupHost, ALensRunGivesItsPassedLensesNeverAFailedOne) {
   const ScratchDir root;
   const std::vector<capture::SessionCamera> rig = lab_pair_records();
-  CalibrateResult result;
-  result.mode = capture::SessionMode::Intrinsics;
-  result.number = 0;
-  result.lenses = {verdict("bm-5", 902.0, true), verdict("bm-6", 903.0, false)};
-  result.directory =
-      lens_run(root.path(), "s", "000_2026-11-02_235712", result.lenses)
-          .string();
-  const LensFile used = passed_lenses(result, rig).value();
-  EXPECT_EQ(used.path, result.directory + "/array_calibration.json");
+  const fs::path dir =
+      lens_run(root.path(), "s", "000_2026-11-02_235712",
+               {verdict("bm-5", 902.0, true), verdict("bm-6", 903.0, false)});
+  const LensResult run = read_lens_run(dir.string()).value();
+  const LensFile used = lens_run_file(run, rig).value();
+  EXPECT_EQ(used.path, (dir / "array_calibration.json").string());
   ASSERT_EQ(used.calibration->sensors.size(), 1u);
   EXPECT_EQ(used.calibration->sensors[0].id, "bm-5");
   EXPECT_EQ(used.notes,
             (std::vector<std::string>{
-                "bm-6 did not pass (the fitted corners reach 0.83 of the way "
-                "toward the top-left corner, short of 0.9): its lens is not "
-                "taken"}));
+                "bm-6's lens failed its gates in that run: not taken"}));
+  // The list's run is the same run: the same lenses.
+  const std::vector<LensResult> listed =
+      find_lens_results(root.path().string()).value();
+  ASSERT_EQ(listed.size(), 1u);
+  const LensFile picked = lens_run_file(listed[0], rig).value();
+  EXPECT_EQ(picked.notes, used.notes);
+  ASSERT_EQ(picked.calibration->sensors.size(), 1u);
+  EXPECT_EQ(picked.calibration->sensors[0].id, "bm-5");
 
-  // Poses with them: bm-6's lens is missing, and Calibrate says so.
+  // Poses with them: bm-6's lens is missing, so a capture is refused and
+  // Calibrate says why.
   std::vector<capture::SessionCamera> cameras = rig;
   for (capture::SessionCamera& camera : cameras) {
     ASSERT_TRUE(take_lens(capture::SessionMode::Extrinsics,
@@ -463,6 +509,9 @@ TEST(AppSetupHost, UseTheseLensesTakesThoseThatPassedAndPosesWaitForTheRest) {
           .value();
   EXPECT_EQ(statuses, (std::vector<LensStatus>{LensStatus::Calibrated,
                                                LensStatus::Missing}));
+  EXPECT_EQ(capture_refusal(capture::SessionMode::Extrinsics, cameras, statuses)
+                .value(),
+            "bm-6 has no lens: load a lens file in Setup first");
   quality::SessionSummary linked;
   linked.ready = true;
   linked.cameras.resize(2);
@@ -478,30 +527,83 @@ TEST(AppSetupHost, UseTheseLensesTakesThoseThatPassedAndPosesWaitForTheRest) {
                             ": load a lens file in Setup, or fit it in Lenses "
                             "mode");
 
-  // A camera not fitted is said, and takes nothing.
-  CalibrateResult short_of = result;
-  short_of.lenses = {verdict("bm-5", 902.0, true)};
-  short_of.unsolved = {{"bm-6", "not ready: 22 views of 30"}};
-  const LensFile partly = passed_lenses(short_of, rig).value();
-  EXPECT_EQ(partly.notes, (std::vector<std::string>{
-                              "bm-6 was not fitted (not ready: 22 views of "
-                              "30): no lens is taken for it"}));
+  // None passed and none carried: nothing to take.
+  const fs::path failed = lens_run(root.path(), "s", "001_2026-11-02_235800",
+                                   {verdict("bm-5", 902.0, false)});
+  test::expect_refused(
+      lens_run_file(read_lens_run(failed.string()).value(), rig).status(),
+      Code::InvalidArgument,
+      "no lens for bm-5 or bm-6 passed in that run, and none is carried");
+}
 
-  // Nothing to take: none passed, not a lens run, or no file written.
-  CalibrateResult failed = result;
-  failed.lenses = {verdict("bm-5", 902.0, false)};
-  test::expect_refused(passed_lenses(failed, rig).status(),
-                       Code::InvalidArgument,
-                       "no lens of calibration 0 passed: none is taken");
-  CalibrateResult posed = result;
-  posed.mode = capture::SessionMode::Extrinsics;
-  test::expect_refused(passed_lenses(posed, rig).status(),
-                       Code::InvalidArgument, "not a lens run's");
-  CalibrateResult unwritten = result;
-  unwritten.directory = (root.path() / "nothing").string();
-  test::expect_refused(passed_lenses(unwritten, rig).status(),
-                       Code::InvalidArgument,
-                       "calibration 0 wrote no lens file");
+// A run that fitted some cameras alone gives the others the lenses it
+// carried from the file its session started from, so the next session keeps
+// a camera's good lens; a camera whose refit failed takes neither.
+TEST(AppSetupHost, ALensRunKeepsTheLensesItCarried) {
+  const ScratchDir root;
+  const std::vector<capture::SessionCamera> rig = lab_pair_records();
+  camera::ArrayCalibration base;
+  for (const char* id : {"bm-5", "bm-6"}) {
+    camera::SensorCalibration& entry = base.sensors.emplace_back();
+    entry.id = id;
+    entry.color = camera::CameraCalibration{
+        lens_at(kSize, 880.0), camera::IntrinsicsSource::Calibrated};
+  }
+  // bm-6 was not ready: the run fitted bm-5 alone.
+  const fs::path dir =
+      lens_run(root.path(), "s", "000_2026-11-03_100000",
+               {verdict("bm-5", 902.0, true)}, {"bm-6"}, &base);
+  const LensFile used =
+      lens_run_file(read_lens_run(dir.string()).value(), rig).value();
+  EXPECT_TRUE(used.notes.empty());
+  ASSERT_EQ(used.calibration->sensors.size(), 2u);
+  const camera::SensorCalibration* fresh =
+      camera::find_sensor(*used.calibration, "bm-5");
+  const camera::SensorCalibration* carried =
+      camera::find_sensor(*used.calibration, "bm-6");
+  ASSERT_NE(fresh, nullptr);
+  ASSERT_NE(carried, nullptr);
+  EXPECT_EQ(fresh->color->model.intrinsics.fx, 902.0);
+  EXPECT_EQ(carried->color->model.intrinsics.fx, 880.0);
+  std::vector<capture::SessionCamera> cameras = rig;
+  for (capture::SessionCamera& camera : cameras) {
+    ASSERT_TRUE(take_lens(capture::SessionMode::Extrinsics,
+                          used.calibration.get(), used.path, camera)
+                    .ok());
+  }
+  const std::vector<LensStatus> statuses =
+      lens_statuses(capture::SessionMode::Extrinsics, cameras,
+                    used.calibration.get())
+          .value();
+  EXPECT_EQ(statuses, (std::vector<LensStatus>{LensStatus::Calibrated,
+                                               LensStatus::Calibrated}));
+  EXPECT_EQ(capture_refusal(capture::SessionMode::Extrinsics, cameras, statuses)
+                .value(),
+            "");
+
+  // bm-6 refitted and failed: its fit replaced the carried lens in the
+  // run's file, so it takes none.
+  const fs::path refit = lens_run(
+      root.path(), "s", "001_2026-11-03_100500",
+      {verdict("bm-5", 902.0, true), verdict("bm-6", 903.0, false)}, {}, &base);
+  const LensFile partly =
+      lens_run_file(read_lens_run(refit.string()).value(), rig).value();
+  EXPECT_EQ(partly.calibration->sensors.size(), 1u);
+  EXPECT_EQ(camera::find_sensor(*partly.calibration, "bm-6"), nullptr);
+
+  // Both missing: one line names both; a lens session refuses nothing.
+  const std::vector<LensStatus> none = {LensStatus::Missing,
+                                        LensStatus::Missing};
+  EXPECT_EQ(
+      capture_refusal(capture::SessionMode::Extrinsics, rig, none).value(),
+      "bm-5 and bm-6 have no lens: load a lens file in Setup first");
+  EXPECT_EQ(capture_refusal(capture::SessionMode::Intrinsics, rig,
+                            {LensStatus::StandIn, LensStatus::StandIn})
+                .value(),
+            "");
+  test::expect_refused(
+      capture_refusal(capture::SessionMode::Extrinsics, rig, {}).status(),
+      Code::InvalidArgument, "2 cameras, 0 lens statuses");
 }
 
 // The Setup panel's lens lines: the file, then each camera's lens, a file's

@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <utility>
 
+#include "size_text.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/quality/results.hpp"
@@ -21,10 +22,6 @@ using Operation = core::config::Operation;
 
 bool same_size(camera::ImageSize a, camera::ImageSize b) noexcept {
   return a.width == b.width && a.height == b.height;
-}
-
-std::string size_text(camera::ImageSize size) {
-  return std::to_string(size.width) + "x" + std::to_string(size.height);
 }
 
 // @p file's colour lens for @p id, at any size.
@@ -260,6 +257,35 @@ bool session_ready(capture::SessionMode mode,
         return status == LensStatus::Missing || status == LensStatus::StandIn;
       });
   return real_lenses && summary && summary->ready;
+}
+
+core::Result<std::string> capture_refusal(
+    capture::SessionMode mode,
+    const std::vector<capture::SessionCamera>& cameras,
+    const std::vector<LensStatus>& statuses) {
+  return compute::guarded(
+      "capture_refusal", [&]() -> core::Result<std::string> {
+        if (statuses.size() != cameras.size()) {
+          return core::Status::invalid_argument(
+              "capture_refusal: " + std::to_string(cameras.size()) +
+              " cameras, " + std::to_string(statuses.size()) +
+              " lens statuses");
+        }
+        if (mode != capture::SessionMode::Extrinsics) return std::string();
+        std::vector<std::string> missing;
+        for (std::size_t c = 0; c < cameras.size(); ++c) {
+          if (statuses[c] == LensStatus::Missing)
+            missing.push_back(cameras[c].id);
+        }
+        if (missing.empty()) return std::string();
+        std::string ids;
+        for (std::size_t i = 0; i < missing.size(); ++i) {
+          if (i > 0) ids += i + 1 == missing.size() ? " and " : ", ";
+          ids += missing[i];
+        }
+        return ids + (missing.size() == 1 ? " has" : " have") +
+               " no lens: load a lens file in Setup first";
+      });
 }
 
 core::Result<std::vector<NotReady>> calibrate_blockers(

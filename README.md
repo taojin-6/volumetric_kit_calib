@@ -285,7 +285,7 @@ Its keys, on a press (none while a text field has the keyboard):
 | Space, →, Page Down, S | capture | to the images, "press again" |
 | Backspace, ←, Page Up | drop the last capture | to the images |
 | C, F5 | Calibrate | Calibrate |
-| V, B, `.` | to the 3D view, once calibrated (extrinsic mode) | to the images |
+| V, B, `.` | to the 3D view, once calibrated (Poses) | to the images |
 | Escape | cancel Calibrate | cancel Calibrate |
 
 ### Lenses and Poses
@@ -298,7 +298,7 @@ lens file it starts from:
 | | Lenses (`calibrate_intrinsics`) | Poses (`calibrate`) |
 | --- | --- | --- |
 | Board | the checkerboard, its squares and size edited | the rig's ChArUco board |
-| Each camera's live lens | the lens file's at the stream's size, else the driver's, else a stand-in | the same, the stand-in `missing`: Calibrate waits; a factory camera with a calibrated lens in the file is refused |
+| Each camera's live lens | the lens file's at the stream's size, else the driver's, else a stand-in | the same, the stand-in `missing`: captures and Calibrate wait; a factory camera with a calibrated lens in the file is refused |
 | A capture | a still board, one view enough | a still board |
 | Calibrate | once a camera is ready (the Lenses panel) | once the session's links are and every camera has a lens, the file's or the driver's |
 | Its result | each ready camera's lens, in a lens-only `array_calibration.json`; a factory lens is reported, never written | the rig's poses, and the 3D view; each of `source.pairs`' rectified rows (Δy) at the scenario's depth size, FFS's; each lens checked on the solve, a warning (the Lenses panel); both in `report.json` |
@@ -307,14 +307,17 @@ The Setup panel shows the lens file and where each camera's lens comes from
 (`calibrated`, `factory`, `stand-in` or `missing`). Its list holds every lens
 run's `array_calibration.json` under `output.path`, newest first, with each
 camera's pass or fail; a path may be typed instead, and a file is checked
-against the rig's camera ids and sizes. After a lens run, "Use these lenses"
-in the Calibration window takes the lenses that passed. A switch of mode or
-lens file after the first capture closes the session, its captures kept on
+against the rig's camera ids and sizes. A lens run, picked there or by "Use
+these lenses" in the Calibration window after it, gives the next session its
+lenses that passed and those it carried for cameras it did not fit, never
+one that failed. A switch of mode or lens file after the first capture
+closes the session, the Setup panel asking first, its captures kept on
 disk, and the next capture opens a new one; the board follows the mode.
 Calibrate pressed with nothing ready says why, camera by camera, in the
-Calibration window. While it runs the live view stops searching for the
-board, its pictures still shown, and a lens run fits every ready camera at
-once.
+Calibration window, as does a run that ends with no result. A press first
+pauses the live view's search for the board, its pictures still shown,
+waiting out the set being searched, so a lens run fits every ready camera
+at once.
 
 The checkerboard is the Lenses board: the rig's 5 x 3 ChArUco board has 8
 inner corners, fewer than a lens view takes (12), and is refused there.

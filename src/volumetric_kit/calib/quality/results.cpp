@@ -27,7 +27,6 @@ namespace {
 namespace camera = sensor::camera;
 using Writer = detail::JsonWriter;
 
-constexpr const char* kReportFormat = "volumetric_kit_calib.report";
 constexpr int kReportVersion = 2;
 
 // Refuses a solution or metrics that index cameras the rig does not have,

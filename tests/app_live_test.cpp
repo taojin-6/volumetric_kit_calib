@@ -12,20 +12,23 @@
 // out. The window takes the newest snapshot, once, and the set sink every set
 // read back; while the window shows no image, every set, with nothing read
 // back or searched unless a capture is armed; while the search is paused,
-// every picture, nothing searched unless armed. A restart's next session on
-// the same source: its board, unlocked, and its rule. Then the thread's end: a
-// sensor
-// that throws, or a camera disconnected, ends it, saying why, and stopping
-// releases every frame. Runs under the validation layer when the environment
-// asks (VKC_TEST_VALIDATION); skips without a Vulkan device.
+// every picture, nothing searched unless armed, and a pause waits out the set
+// being searched. A restart's next session on the same source: its board,
+// unlocked, and its rule; a capture its set completes as the restart comes is
+// not handed on. Then the thread's end: a sensor that throws, or a camera
+// disconnected, ends it, saying why, and stopping releases every frame. Runs
+// under the validation layer when the environment asks (VKC_TEST_VALIDATION);
+// skips without a Vulkan device.
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -1075,6 +1078,173 @@ TEST_F(AppLive, ARestartStartsTheNextSessionOnTheSameSource) {
       Code::InvalidArgument, "");
   EXPECT_EQ(live->board(), bigger);
   EXPECT_EQ(live->captures(), 1u);
+}
+
+// Holds the live thread in the offer of its first set, inside that set's
+// search, until let go; then keeps every set, as KeepSets does.
+class HoldFirstSet final : public SetSink {
+ public:
+  void offer(std::shared_ptr<const sensor::FrameSet> set) override {
+    std::unique_lock<std::mutex> lock(mutex_);
+    sets_.push_back(std::move(set));
+    if (sets_.size() != 1) return;
+    held_ = true;
+    changed_.notify_all();
+    changed_.wait(lock, [&] { return released_; });
+  }
+  // Whether the live thread is held, within kPatience.
+  bool wait_held() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return changed_.wait_for(lock, kPatience, [&] { return held_; });
+  }
+  void release() {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    released_ = true;
+    changed_.notify_all();
+  }
+  void clear() {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    sets_.clear();
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable changed_;
+  std::vector<std::shared_ptr<const sensor::FrameSet>> sets_;
+  bool held_ = false;
+  bool released_ = false;
+};
+
+// A pause waits out the set being searched, as calib_rig's Calibrate needs
+// OpenCV's loops to itself: held inside a set it searches, the live thread
+// keeps the pause from returning until that set's search ends; the set after
+// is not searched.
+TEST_F(AppLive, APauseWaitsOutTheSetBeingSearched) {
+  const auto detected = [](const LiveSnapshot& s) {
+    const std::vector<core::StageRow> rows = s.stages.rows();
+    return std::any_of(rows.begin(), rows.end(), [](const core::StageRow& r) {
+      return std::string(r.name) == "detect";
+    });
+  };
+  make_rig(2);
+  HoldFirstSet sets;
+  std::unique_ptr<LiveWorker> live = start(nullptr, &sets);
+  ASSERT_NE(live, nullptr);
+  std::future<void> pausing;
+  // Destroyed first on every way out, so neither the pause nor the thread
+  // waits for ever.
+  struct LetGo {
+    HoldFirstSet& sets;
+    ~LetGo() { sets.release(); }
+  } let_go{sets};
+  push(1);
+  ASSERT_TRUE(sets.wait_held());
+  pausing = std::async(std::launch::async, [&] { live->pause_search(true); });
+  EXPECT_EQ(pausing.wait_for(std::chrono::milliseconds(200)),
+            std::future_status::timeout)
+      << "the pause returned while a set was being searched";
+  sets.release();
+  ASSERT_EQ(pausing.wait_for(kPatience), std::future_status::ready);
+  const std::shared_ptr<const LiveSnapshot> held = next_snapshot(*live, 0);
+  ASSERT_NE(held, nullptr);
+  EXPECT_TRUE(detected(*held));
+  EXPECT_EQ(held->detections[0].observation.points.size(), 8u);
+  push(2);
+  const std::shared_ptr<const LiveSnapshot> paused =
+      next_snapshot(*live, held->number);
+  ASSERT_NE(paused, nullptr);
+  EXPECT_FALSE(detected(*paused));
+  live->stop();
+  sets.clear();
+}
+
+// Runs a call on the live thread inside the offer of the next set after it
+// is given, as a switch the window makes while that set completes a capture;
+// keeps every set, as KeepSets does.
+class CallInNextOffer final : public SetSink {
+ public:
+  void offer(std::shared_ptr<const sensor::FrameSet> set) override {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    sets_.push_back(std::move(set));
+    if (!call_) return;
+    called_ = call_();
+    call_ = nullptr;
+  }
+  void next(std::function<core::Status()> call) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    call_ = std::move(call);
+  }
+  core::Status called() {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return called_;
+  }
+  void clear() {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    sets_.clear();
+  }
+
+ private:
+  std::mutex mutex_;
+  std::function<core::Status()> call_;
+  core::Status called_ = core::Status::unsupported("not called");
+  std::vector<std::shared_ptr<const sensor::FrameSet>> sets_;
+};
+
+// A restart that comes while a set completes an armed capture: that capture,
+// the closing session's, is not handed on, and the worker says why; the next
+// session's first capture carries the next board.
+TEST_F(AppLive, NoCaptureOfTheClosingSessionReachesTheNext) {
+  make_rig(2);
+  CollectSink sink;
+  CallInNextOffer sets;
+  std::unique_ptr<LiveWorker> live = start(&sink, &sets);
+  ASSERT_NE(live, nullptr);
+  push(1);
+  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live, 0);
+  ASSERT_NE(first, nullptr);
+  ASSERT_TRUE(live->arm());
+  wait_armed(*live);
+  Target bigger = legacy_femto_board();  // the same board, measured larger
+  bigger.square_size_m *= 2.0;
+  bigger.marker_size_m *= 2.0;
+  sets.next([&] {
+    return live->restart(std::vector<camera::CameraModel>(2, live_lens()),
+                         bigger, true, quality::CaptureRuleOptions{});
+  });
+  push(2);
+  std::vector<core::Status> errors;
+  const std::shared_ptr<const LiveSnapshot> s =
+      next_snapshot(*live, first->number, &errors);
+  ASSERT_NE(s, nullptr);
+  for (core::Status& error : live->take_errors()) {
+    errors.push_back(std::move(error));
+  }
+  EXPECT_TRUE(sets.called().ok()) << sets.called().message();
+  EXPECT_EQ(s->decision.state, quality::CaptureState::Failed);
+  EXPECT_EQ(s->decision.message, "a new session is starting: capture again");
+  ASSERT_EQ(errors.size(), 1u);
+  EXPECT_EQ(errors[0].message(),
+            "capture: a new session is starting: capture again");
+  EXPECT_TRUE(sink.taken().empty());
+  EXPECT_EQ(live->captures(), 0u);
+
+  push(3);
+  const std::shared_ptr<const LiveSnapshot> next =
+      next_snapshot(*live, s->number);
+  ASSERT_NE(next, nullptr);
+  ASSERT_TRUE(live->arm());
+  wait_armed(*live);
+  push(4);
+  const std::shared_ptr<const LiveSnapshot> taken =
+      next_snapshot(*live, next->number);
+  ASSERT_NE(taken, nullptr);
+  EXPECT_EQ(taken->decision.state, quality::CaptureState::Take)
+      << taken->decision.message;
+  ASSERT_EQ(sink.taken().size(), 1u);
+  EXPECT_EQ(sink.taken()[0].board, bigger);
+  EXPECT_TRUE(sink.taken()[0].square_measured);
+  live->stop();
+  sets.clear();
 }
 
 // A pair whose board moved since the pair before is not taken, its skew

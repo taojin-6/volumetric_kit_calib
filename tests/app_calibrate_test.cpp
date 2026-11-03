@@ -5,8 +5,9 @@
 // for 2 to 5 cameras whose ids sort in another order than the rig's, in the
 // reference camera's gauge, and its world at the origin tag when the cameras
 // see it; the same snapshot gives the same files, and a recalibration owes
-// nothing to the last; each results directory numbered once, its calibration
-// file written last; and the worker's runs, refusals, cancels and stops.
+// nothing to the last; each results directory numbered once, each session's
+// from 0, its calibration file written last, its name read back; and the
+// worker's runs, refusals, cancels and stops.
 // Synthetic detections, no device, so no depth checks
 // (app_calibrate_depth_test has them).
 
@@ -546,6 +547,20 @@ TEST(WriteResults, NumbersEachDirectoryOnce) {
   EXPECT_EQ(out_of_range.status().domain(), Code::InvalidArgument);
 }
 
+// A results directory's name reads back as it was made: its number and the
+// press's stamp; any other name is none.
+TEST(WriteResults, ReadsADirectorysNameBack) {
+  const std::string made = *results_directory("s", 7, kPressed);
+  const std::optional<ResultsName> name =
+      results_name(fs::path(made).filename().string());
+  ASSERT_TRUE(name.has_value());
+  EXPECT_EQ(name->number, 7);
+  EXPECT_EQ(name->stamp, *capture::session_stamp(kPressed));
+  for (const char* other : {"", "007", "007_", "07_x", "a07_x", "0070_x"}) {
+    EXPECT_FALSE(results_name(other).has_value()) << other;
+  }
+}
+
 // The residuals, then the report, then the calibration file last: a failure
 // at the report leaves a directory with no calibration file in it.
 TEST(WriteResults, WritesTheCalibrationFileLast) {
@@ -655,6 +670,18 @@ TEST(CalibrateWorker, PublishesEachResultOnceItsFilesAreWritten) {
     EXPECT_TRUE(camera::validate_array_calibration(*file).ok());
     EXPECT_EQ(file->world.sensor, scene.cameras[1].id);
   }
+
+  // The next session's numbers start from 0 again, as calib_rig's one
+  // worker serves every session of its run.
+  const ScratchDir next;
+  ASSERT_TRUE(*worker->request(
+      shared(test::kept_captures(scene, 1, next.path().string())), kPressed));
+  ASSERT_TRUE(idle(*worker));
+  const std::shared_ptr<const CalibrateResult> first = worker->take_result();
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->number, 0);
+  EXPECT_EQ(first->directory,
+            *results_directory(next.path().string(), 0, kPressed));
 }
 
 // A recalibration with more captures writes the next directory, and equals a

@@ -319,13 +319,16 @@ class LiveWorker {
   void set_detecting(bool on) noexcept;
 
   /// @brief Pause the board search while the images are shown (calib_rig
-  ///        does while Calibrate runs, so its fits have the CPU).
+  ///        does before and while Calibrate runs, so its fits have the CPU
+  ///        and OpenCV's loops to themselves).
   ///
   /// Paused, each set's luma is still made and read back, so its pictures
   /// keep showing, but nothing is detected or ruled on -- unless a capture
-  /// is armed, which goes on being searched for.
+  /// is armed, which goes on being searched for. A pause waits out the set
+  /// being searched, if any: once it returns, no search runs, its OpenCV
+  /// loops among it, but an armed capture's.
   /// @param paused  Whether to pause.
-  void pause_search(bool paused) noexcept;
+  void pause_search(bool paused);
 
   /// @brief Start the next session's live view, the source left running:
   ///        each view checked through @p lenses, @p board searched for and
@@ -333,6 +336,10 @@ class LiveWorker {
   ///        @p rule, unarmed. The thread takes them before it searches its
   ///        next set; from this call until then, no capture is handed to the
   ///        sink, so none taken for the last session reaches the next.
+  ///
+  /// The sink's own restart (`CaptureWorker::restart`) is queued after this
+  /// call and before the next @ref arm: a capture of the next session needs
+  /// a press, so none reaches the sink before it.
   /// @param lenses           Each camera's lens, as @ref create takes them.
   /// @param board            The board to find, as @ref create takes it.
   /// @param square_measured  Whether its square size was measured.

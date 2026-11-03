@@ -132,9 +132,9 @@ struct CalibrateGate {
 ///                    now would not reflect.
 /// @return Enabled; or not, the reason the first of "already running", "a
 ///         capture, a drop or a session switch is under way" and "the
-///         session is not ready: the Calibration window says why", in
-///         intrinsic mode "no camera is ready: the Calibration window says
-///         why", that holds.
+///         session is not ready: press C to see why", in intrinsic mode "no
+///         camera is ready: press C to see why", that holds: a press held
+///         back opens the Calibration window, which says why per camera.
 ///
 /// @code
 /// const std::size_t unresolved = captures->unresolved();  // first

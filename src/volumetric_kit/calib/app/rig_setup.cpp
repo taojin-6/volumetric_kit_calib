@@ -11,6 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "size_text.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
@@ -20,10 +21,6 @@ namespace {
 
 namespace camera = sensor::camera;
 namespace fs = std::filesystem;
-
-std::string size_text(camera::ImageSize size) {
-  return std::to_string(size.width) + "x" + std::to_string(size.height);
-}
 
 // `items` as "a, b and c"; `last` joins the last two.
 std::string listed(const std::vector<std::string>& items, const char* last) {
@@ -36,31 +33,141 @@ std::string listed(const std::vector<std::string>& items, const char* last) {
 }
 
 // What a lens run's report says of each camera it fitted and wrote, in its
-// order; empty when `report` is not a lens run's.
-std::optional<std::vector<std::pair<std::string, bool>>> lens_report(
+// order; why not, for a report that is not a lens run's.
+core::Result<std::vector<std::pair<std::string, bool>>> lens_report(
     const std::string& report) {
+  const auto refused = [](const char* why) {
+    return core::Status::invalid_argument(std::string("not a lens run's: ") +
+                                          why);
+  };
   const nlohmann::ordered_json json =
       nlohmann::ordered_json::parse(report, nullptr, false);
-  if (json.is_discarded() || !json.is_object() ||
-      json.value("format", std::string()) != "volumetric_kit_calib.report") {
-    return std::nullopt;
+  if (json.is_discarded() || !json.is_object()) return refused("no JSON");
+  const auto format = json.find("format");
+  if (format == json.end() || !format->is_string() ||
+      format->get<std::string>() != quality::kReportFormat) {
+    return refused("not calib's report");
   }
   const auto lenses = json.find("lenses");
-  if (lenses == json.end() || !lenses->is_object()) return std::nullopt;
+  if (lenses == json.end() || !lenses->is_object()) {
+    return refused("no lenses section");
+  }
   const auto cameras = lenses->find("cameras");
-  if (cameras == lenses->end() || !cameras->is_object()) return std::nullopt;
+  if (cameras == lenses->end() || !cameras->is_object()) {
+    return refused("no cameras in its lenses section");
+  }
   std::vector<std::pair<std::string, bool>> out;
   for (auto it = cameras->begin(); it != cameras->end(); ++it) {
-    if (!it.value().is_object() || !it.value().value("written", false)) {
-      continue;
+    const nlohmann::ordered_json& camera = it.value();
+    if (!camera.is_object()) return refused("a camera that is not an object");
+    const auto written = camera.find("written");
+    const auto verdict = camera.find("verdict");
+    if (written == camera.end() || !written->is_boolean() ||
+        verdict == camera.end() || !verdict->is_string()) {
+      return refused("a camera without its written or verdict");
     }
-    out.emplace_back(it.key(),
-                     it.value().value("verdict", std::string()) == "pass");
+    if (written->get<bool>()) {
+      out.emplace_back(it.key(), verdict->get<std::string>() == "pass");
+    }
   }
   return out;
 }
 
+// `path` read as a lens file for the rig's `cameras`, without the lenses of
+// `failed` (a lens run's that failed its gates). Its notes name each camera
+// it gives no lens, in rig order.
+core::Result<LensFile> lenses_for_rig(
+    const std::string& path, const std::vector<capture::SessionCamera>& cameras,
+    const std::set<std::string>& failed) {
+  const std::string what = "lens file " + path + ": ";
+  core::Result<camera::ArrayCalibration> read =
+      camera::read_array_calibration(path);
+  if (!read.ok()) return read.status().with_context("lens file " + path);
+  std::vector<std::string> wrong;
+  std::vector<std::string> rig;
+  std::vector<std::string> notes;
+  bool any = false;
+  bool any_failed = false;
+  for (const capture::SessionCamera& cam : cameras) {
+    rig.push_back(cam.id);
+    if (failed.count(cam.id) != 0) {
+      notes.push_back(cam.id +
+                      "'s lens failed its gates in that run: not taken");
+      any_failed = true;
+      continue;
+    }
+    const camera::SensorCalibration* entry = camera::find_sensor(*read, cam.id);
+    if (entry == nullptr || !entry->color) {
+      notes.push_back(cam.id + " has no lens in " + path);
+      continue;
+    }
+    any = true;
+    const camera::ImageSize size = entry->color->model.size;
+    if (size.width != cam.size.width || size.height != cam.size.height) {
+      wrong.push_back(cam.id + "'s lens is " + size_text(size) +
+                      ", its pictures " + size_text(cam.size));
+    }
+  }
+  if (!wrong.empty()) {
+    return core::Status::invalid_argument(what + listed(wrong, "; "));
+  }
+  if (!any && any_failed) {
+    return core::Status::invalid_argument(
+        what + "no lens for " + listed(rig, " or ") +
+        " passed in that run, and none is carried");
+  }
+  if (!any) {
+    std::vector<std::string> held;
+    for (const camera::SensorCalibration& entry : read->sensors) {
+      if (entry.color) held.push_back(entry.id);
+    }
+    return core::Status::invalid_argument(
+        what + "no lens for " + listed(rig, " or ") + ": it holds " +
+        (held.empty() ? std::string("none") : listed(held, ", ")));
+  }
+  std::vector<camera::SensorCalibration>& sensors = read->sensors;
+  sensors.erase(std::remove_if(sensors.begin(), sensors.end(),
+                               [&](const camera::SensorCalibration& entry) {
+                                 return failed.count(entry.id) != 0;
+                               }),
+                sensors.end());
+  LensFile out;
+  out.path = path;
+  out.notes = std::move(notes);
+  out.calibration =
+      std::make_shared<const camera::ArrayCalibration>(*std::move(read));
+  return out;
+}
+
 }  // namespace
+
+core::Result<LensResult> read_lens_run(const std::string& directory) {
+  return compute::guarded("read_lens_run", [&]() -> core::Result<LensResult> {
+    const fs::path run(directory);
+    const fs::path file = run / quality::kArrayCalibrationFile;
+    const fs::path report = run / quality::kReportFile;
+    if (!results_name(run.filename().string())) {
+      return core::Status::invalid_argument("read_lens_run: " + directory +
+                                            " is not a results directory");
+    }
+    std::error_code ec;
+    for (const fs::path& needed : {file, report}) {
+      if (!fs::is_regular_file(needed, ec)) {
+        return core::Status::not_found("read_lens_run: " + directory +
+                                       " has no " + needed.filename().string());
+      }
+    }
+    VKC_ASSIGN(const std::string text, core::read_file(report.string()));
+    core::Result<std::vector<std::pair<std::string, bool>>> cameras =
+        lens_report(text);
+    if (!cameras.ok()) {
+      return cameras.status().with_context("read_lens_run: " + report.string());
+    }
+    return LensResult{file.string(),
+                      run.parent_path().parent_path().filename().string(),
+                      run.filename().string(), *std::move(cameras)};
+  });
+}
 
 core::Result<std::vector<LensResult>> find_lens_results(
     const std::string& root) {
@@ -79,29 +186,14 @@ core::Result<std::vector<LensResult>> find_lens_results(
           if (!fs::is_directory(results, inner)) continue;
           for (fs::directory_iterator run(results, inner); !inner && run != end;
                run.increment(inner)) {
-            const fs::path file = run->path() / quality::kArrayCalibrationFile;
-            const fs::path report = run->path() / quality::kReportFile;
-            std::error_code exists;
-            if (!fs::is_regular_file(file, exists) ||
-                !fs::is_regular_file(report, exists)) {
-              continue;
-            }
-            const core::Result<std::string> text =
-                core::read_file(report.string());
-            if (!text.ok()) continue;
-            std::optional<std::vector<std::pair<std::string, bool>>> cameras =
-                lens_report(*text);
-            if (!cameras) continue;
-            found.push_back({file.string(), session->path().filename().string(),
-                             run->path().filename().string(),
-                             std::move(*cameras)});
+            core::Result<LensResult> read = read_lens_run(run->path().string());
+            if (read.ok()) found.push_back(*std::move(read));
           }
         }
         // Newest first: the stamp after `RRR_`, then the session, then RRR.
         const auto key = [](const LensResult& r) {
-          const std::string stamp =
-              r.results.size() > 4 ? r.results.substr(4) : r.results;
-          return std::make_tuple(stamp, r.session, r.results);
+          const ResultsName name = *results_name(r.results);
+          return std::make_tuple(name.stamp, r.session, name.number);
         };
         std::sort(found.begin(), found.end(),
                   [&](const LensResult& a, const LensResult& b) {
@@ -114,13 +206,22 @@ core::Result<std::vector<LensResult>> find_lens_results(
 core::Result<std::string> lens_result_label(const LensResult& result) {
   return compute::guarded(
       "lens_result_label", [&]() -> core::Result<std::string> {
-        // `RRR_YYYY-MM-DD_HHMMSS` as "YYYY-MM-DD HH:MM:SS".
-        const std::string& name = result.results;
-        std::string when = name;
-        if (name.size() == 21 && name[3] == '_' && name[14] == '_') {
-          when = name.substr(4, 10) + " " + name.substr(15, 2) + ":" +
-                 name.substr(17, 2) + ":" + name.substr(19, 2);
+        const std::optional<ResultsName> name = results_name(result.results);
+        if (!name) {
+          return core::Status::invalid_argument(
+              "lens_result_label: " + result.results +
+              " is not a results directory's name");
         }
+        // The stamp, `YYYY-MM-DD_HHMMSS` (capture::session_stamp), as
+        // "YYYY-MM-DD HH:MM:SS".
+        const std::string& stamp = name->stamp;
+        std::string when = stamp;
+        if (stamp.size() == 17 && stamp[10] == '_') {
+          when = stamp.substr(0, 10) + " " + stamp.substr(11, 2) + ":" +
+                 stamp.substr(13, 2) + ":" + stamp.substr(15, 2);
+        }
+        std::string number = std::to_string(name->number);
+        number.insert(0, 3 - number.size(), '0');
         std::vector<std::string> verdicts;
         for (const auto& [id, pass] : result.cameras) {
           verdicts.push_back(id + (pass ? " pass" : " fail"));
@@ -128,7 +229,7 @@ core::Result<std::string> lens_result_label(const LensResult& result) {
         return when + "  " +
                (verdicts.empty() ? std::string("no lens written")
                                  : listed(verdicts, ", ")) +
-               "  (" + result.session + "/" + name.substr(0, 3) + ")";
+               "  (" + result.session + "/" + number + ")";
       });
 }
 
@@ -136,103 +237,18 @@ core::Result<LensFile> load_lens_file(
     const std::string& path,
     const std::vector<capture::SessionCamera>& cameras) {
   return compute::guarded("load_lens_file", [&]() -> core::Result<LensFile> {
-    const std::string what = "lens file " + path + ": ";
-    core::Result<camera::ArrayCalibration> read =
-        camera::read_array_calibration(path);
-    if (!read.ok()) return read.status().with_context("lens file " + path);
-    std::vector<std::string> wrong;
-    std::vector<std::string> without;
-    std::vector<std::string> rig;
-    for (const capture::SessionCamera& cam : cameras) {
-      rig.push_back(cam.id);
-      const camera::SensorCalibration* entry =
-          camera::find_sensor(*read, cam.id);
-      if (entry == nullptr || !entry->color) {
-        without.push_back(cam.id);
-        continue;
-      }
-      const camera::ImageSize size = entry->color->model.size;
-      if (size.width != cam.size.width || size.height != cam.size.height) {
-        wrong.push_back(cam.id + "'s lens is " + size_text(size) +
-                        ", its pictures " + size_text(cam.size));
-      }
-    }
-    if (!wrong.empty()) {
-      return core::Status::invalid_argument(what + listed(wrong, "; "));
-    }
-    if (without.size() == cameras.size()) {
-      std::vector<std::string> held;
-      for (const camera::SensorCalibration& entry : read->sensors) {
-        if (entry.color) held.push_back(entry.id);
-      }
-      return core::Status::invalid_argument(
-          what + "no lens for " + listed(rig, " or ") + ": it holds " +
-          (held.empty() ? std::string("none") : listed(held, ", ")));
-    }
-    LensFile out;
-    out.path = path;
-    for (const std::string& id : without) {
-      out.notes.push_back(id + " has no lens in " + path);
-    }
-    out.calibration =
-        std::make_shared<const camera::ArrayCalibration>(*std::move(read));
-    return out;
+    return lenses_for_rig(path, cameras, {});
   });
 }
 
-core::Result<LensFile> passed_lenses(
-    const CalibrateResult& result,
-    const std::vector<capture::SessionCamera>& cameras) {
-  return compute::guarded("passed_lenses", [&]() -> core::Result<LensFile> {
-    if (result.mode != capture::SessionMode::Intrinsics ||
-        result.directory.empty()) {
-      return core::Status::invalid_argument(
-          "use these lenses: the result shown is not a lens run's");
+core::Result<LensFile> lens_run_file(
+    const LensResult& run, const std::vector<capture::SessionCamera>& cameras) {
+  return compute::guarded("lens_run_file", [&]() -> core::Result<LensFile> {
+    std::set<std::string> failed;
+    for (const auto& [id, pass] : run.cameras) {
+      if (!pass) failed.insert(id);
     }
-    const std::string path =
-        (fs::path(result.directory) / quality::kArrayCalibrationFile).string();
-    std::error_code ec;
-    if (!fs::is_regular_file(path, ec)) {
-      return core::Status::invalid_argument("use these lenses: calibration " +
-                                            std::to_string(result.number) +
-                                            " wrote no lens file");
-    }
-    std::set<std::string> passed;
-    std::vector<std::string> notes;
-    for (const quality::LensVerdict& lens : result.lenses) {
-      const std::string& id = lens.fit.camera.id;
-      if (std::find(result.report_only.begin(), result.report_only.end(), id) !=
-          result.report_only.end()) {
-        notes.push_back(id +
-                        "'s fit was for the report: its factory lens "
-                        "stays");
-      } else if (lens.pass) {
-        passed.insert(id);
-      } else {
-        notes.push_back(id + " did not pass (" +
-                        (lens.failed.empty() ? std::string("a gate")
-                                             : lens.failed.front()) +
-                        "): its lens is not taken");
-      }
-    }
-    for (const UnsolvedLens& lens : result.unsolved) {
-      notes.push_back(lens.id + " was not fitted (" + lens.reason +
-                      "): no lens is taken for it");
-    }
-    if (passed.empty()) {
-      return core::Status::invalid_argument(
-          "use these lenses: no lens of calibration " +
-          std::to_string(result.number) + " passed: none is taken");
-    }
-    VKC_ASSIGN(LensFile file, load_lens_file(path, cameras));
-    camera::ArrayCalibration kept;
-    for (const camera::SensorCalibration& entry : file.calibration->sensors) {
-      if (passed.count(entry.id) != 0) kept.sensors.push_back(entry);
-    }
-    file.calibration =
-        std::make_shared<const camera::ArrayCalibration>(std::move(kept));
-    file.notes = std::move(notes);
-    return file;
+    return lenses_for_rig(run.path, cameras, failed);
   });
 }
 
@@ -281,9 +297,11 @@ core::Result<viz::BoardEditor> switch_session(
                      take_lens(next.mode, next.calibration.get(),
                                next.calibration_path, next_setup.cameras[i]));
         }
-        // The live worker first: from here it hands on no capture of the
-        // session closing, so the capture worker's restart, queued after,
+        // Checked before anything changes; then the live worker first: from
+        // here it hands on no capture of the session closing, so the capture
+        // worker's restart, queued after and before the window's next press,
         // comes after all of them.
+        VKC_TRY(captures.accepts(next_setup));
         VKC_TRY(live.restart(next_setup.lenses, editor.board(),
                              editor.square_measured(), next_live.rule));
         VKC_TRY(captures.restart(next_setup));

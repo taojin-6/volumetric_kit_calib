@@ -42,9 +42,8 @@ CalibrateGate calibrate_gate(const RigMode& mode, bool ready,
   }
   if (!ready) {
     return {false, mode.intrinsic
-                       ? "no camera is ready: the Calibration window says why"
-                       : "the session is not ready: the Calibration window "
-                         "says why"};
+                       ? "no camera is ready: press C to see why"
+                       : "the session is not ready: press C to see why"};
   }
   return {true, {}};
 }

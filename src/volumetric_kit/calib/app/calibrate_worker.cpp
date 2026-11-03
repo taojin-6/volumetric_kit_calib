@@ -257,11 +257,13 @@ struct LensRun {
 
 // A lens session's Calibrate: each ready camera's lens fitted and judged,
 // and the lens results' files. The ready cameras are fitted at once, one
-// OpenCV loop over them: OpenCV runs a loop inside another on its caller's
-// thread, so each fit's own loops run there, as on one thread, whatever the
-// cores and whichever camera starts first, and the result is the one fitting
-// them in turn on one thread gives. `step` is called with the cameras
-// fitted: none, then all.
+// OpenCV loop over them. OpenCV runs a loop started while another runs, in
+// any thread, in turn on its caller's thread. So when no other loop runs as
+// this one starts, each fit's own loops run on its thread, and the result is
+// the one fitting them in turn on one thread gives, whatever the cores;
+// otherwise this loop runs in turn, and each fit's loops on OpenCV's threads
+// once the other ends. `step` is called with the cameras fitted: none, then
+// all.
 core::Result<CalibrateResult> calibrate_lenses(
     const KeptCaptures& kept, const std::function<void(std::size_t)>& step) {
   VKC_ASSIGN(const std::vector<Observation> views, solve_views(kept));
@@ -442,11 +444,22 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
     out.reference = kept.reference;
     out.captures = kept.captures.size();
     // Each lens on the solve's residuals, the boards' poses shared: it warns,
-    // and stops nothing.
+    // and stops nothing; a check refused is insufficient, saying why. What
+    // else fails it (an allocation) fails the run.
     for (const solve::RigCamera& cam : kept.cameras) {
       core::Result<quality::LensCheck> check =
           quality::check_rig_lens(cam.id, kept.cameras, *solution);
-      if (!check.ok()) return in(check.status());
+      if (!check.ok()) {
+        const core::Status::Code code = check.status().domain();
+        if (code != core::Status::Code::InvalidArgument &&
+            code != core::Status::Code::Numerical) {
+          return in(check.status());
+        }
+        quality::LensCheck refused;
+        refused.camera = cam.id;
+        refused.reason = "not checked: " + check.status().message();
+        check = std::move(refused);
+      }
       out.lens_checks.push_back(*std::move(check));
     }
     // The poses in the reference's gauge, which the depth checks take.
@@ -546,6 +559,15 @@ core::Result<std::string> results_directory(
   });
 }
 
+std::optional<ResultsName> results_name(const std::string& name) {
+  if (name.size() < 5 || name[3] != '_' ||
+      !std::all_of(name.begin(), name.begin() + 3,
+                   [](char c) { return c >= '0' && c <= '9'; })) {
+    return std::nullopt;
+  }
+  return ResultsName{std::stoi(name.substr(0, 3)), name.substr(4)};
+}
+
 core::Result<WrittenResults> write_results(
     const std::string& session, int first_number,
     std::chrono::system_clock::time_point stamp,
@@ -579,12 +601,9 @@ core::Result<WrittenResults> write_results(
     fs::directory_iterator entry(results, error);
     for (; !error && entry != fs::directory_iterator();
          entry.increment(error)) {
-      const std::string name = entry->path().filename().string();
-      if (name.size() > 4 && name[3] == '_' &&
-          std::all_of(name.begin(), name.begin() + 3,
-                      [](char c) { return c >= '0' && c <= '9'; })) {
-        number = std::max(number, std::stoi(name.substr(0, 3)) + 1);
-      }
+      const std::optional<ResultsName> taken =
+          results_name(entry->path().filename().string());
+      if (taken) number = std::max(number, taken->number + 1);
     }
     if (error) {
       return core::Status::io_error(std::string(kWhat) + ": " +
@@ -634,7 +653,8 @@ struct CalibrateWorker::State {
 
   // The worker's thread's alone.
   std::unique_ptr<CalibrateDepth> depth;  // null checks no depth
-  int next_number = 0;  // the lowest results number not yet written
+  std::string numbered;                   // the session the last run wrote in
+  int next_number = 0;  // its lowest results number not yet written
 
   // Shared.
   mutable std::mutex mutex;
@@ -679,6 +699,12 @@ struct CalibrateWorker::State {
       }
     }
     if (!made.ok()) return made.status().with_context("Calibrate");
+    // Each session's numbers go up from 0: one worker serves every session
+    // of calib_rig's run.
+    if (kept.directory != numbered) {
+      numbered = kept.directory;
+      next_number = 0;
+    }
     core::Result<WrittenResults> written =
         write_results(kept.directory, next_number, when, made->files, sink);
     if (!written.ok()) return written.status().with_context("Calibrate");

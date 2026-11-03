@@ -474,17 +474,26 @@ TEST(AppCapture, ARestartClosesTheSessionAndOpensTheNext) {
   worker->flush();
   EXPECT_EQ(test::entries(root.path()).size(), 3u);  // two sessions, rig.json
 
+  // What a restart refuses, its check refuses first, queuing nothing.
+  EXPECT_TRUE(worker->accepts(poses).ok());
   CaptureSetup other = setup(root.path(), 3);
+  test::expect_refused(worker->accepts(other), Code::InvalidArgument,
+                       "the next session's cameras are not this one's");
   test::expect_refused(worker->restart(other), Code::InvalidArgument,
                        "the next session's cameras are not this one's");
   other = poses;
   other.capacity = 7;
+  test::expect_refused(worker->accepts(other), Code::InvalidArgument,
+                       "the capacity is 4, not 7");
   test::expect_refused(worker->restart(other), Code::InvalidArgument,
                        "the capacity is 4, not 7");
   other = poses;
   other.lenses.pop_back();
+  test::expect_refused(worker->accepts(other), Code::InvalidArgument,
+                       "1 lenses for 2 cameras");
   test::expect_refused(worker->restart(other), Code::InvalidArgument,
                        "1 lenses for 2 cameras");
+  EXPECT_EQ(worker->unresolved(), 0u);
 }
 
 // Live corners where the full ones are: not flagged. A camera that sees no

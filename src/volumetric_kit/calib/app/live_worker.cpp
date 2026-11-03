@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <cstring>
 #include <mutex>
 #include <system_error>
@@ -13,6 +14,7 @@
 
 #include <opencv2/core/utility.hpp>
 
+#include "size_text.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
@@ -57,9 +59,7 @@ core::Result<std::vector<compute::CvCamera>> live_lenses(
         lenses[i].size.height != size.height) {
       return core::Status::invalid_argument(
           "LiveWorker: camera " + cameras[i].id + "'s lens is " +
-          std::to_string(lenses[i].size.width) + "x" +
-          std::to_string(lenses[i].size.height) + ", its pictures " +
-          std::to_string(size.width) + "x" + std::to_string(size.height));
+          size_text(lenses[i].size) + ", its pictures " + size_text(size));
     }
     VKC_ASSIGN(compute::CvCamera cv, compute::cv_camera(lenses[i]));
     out.push_back(std::move(cv));
@@ -113,8 +113,11 @@ struct LiveWorker::State {
   bool square_measured = false;
   quality::CaptureDecision decision;  // the latest that was not Idle
   std::vector<core::Status> errors;
+  bool paused = false;         // the search paused (pause_search)
+  bool searching = false;      // a set's search under way (begin_search)
+  std::uint64_t searched = 0;  // the searches ended so far
+  std::condition_variable search_ended;
   std::atomic<bool> detecting{true};
-  std::atomic<bool> paused{false};
   std::atomic<bool> stopping{false};
   std::atomic<bool> running{false};
   std::atomic<std::uint64_t> captures{0};
@@ -156,6 +159,27 @@ struct LiveWorker::State {
     }
     if (pressed && sink != nullptr) rule->arm(*pressed);
     return {};
+  }
+
+  // Whether to search a set's pictures: while the window searches and the
+  // search is not paused, or for an armed capture. Decided under the lock
+  // pause_search() takes, so once a pause returns no search starts but an
+  // armed capture's; one started is under way until end_search().
+  bool begin_search() {
+    const std::lock_guard<std::mutex> lock(mutex);
+    searching = (detecting.load() && !paused) || rule->armed();
+    return searching;
+  }
+
+  // The search under way, if any, ended: a pause waiting for it returns.
+  void end_search() {
+    {
+      const std::lock_guard<std::mutex> lock(mutex);
+      if (!searching) return;
+      searching = false;
+      ++searched;
+    }
+    search_ended.notify_all();
   }
 
   void publish_decision(const quality::CaptureDecision& latest) {
@@ -269,13 +293,16 @@ struct LiveWorker::State {
 
   // One set: offered to the set sink, detected, checked, ruled on,
   // published. A set taken without luma -- the worker not detecting and no
-  // capture armed -- is offered and published alone.
+  // capture armed -- or whose search is paused is offered and published
+  // alone.
   core::Status process(source::PictureSet taken, core::StageMetrics stages,
-                       bool searched, const std::vector<std::string>& ids) {
+                       bool pictures, const std::vector<std::string>& ids) {
     auto out = std::make_shared<LiveSnapshot>();
     out->stages = std::move(stages);
     out->set = std::make_shared<const source::PictureSet>(std::move(taken));
     const source::PictureSet& set = *out->set;
+    // Decided before the offer, so a pause waits the offer out too.
+    const bool searched = pictures && begin_search();
     if (sets != nullptr && set.rgbd != nullptr) sets->offer(set.rgbd);
     if (!searched) {
       out->detections.assign(ids.size(), Detection{});
@@ -291,6 +318,7 @@ struct LiveWorker::State {
       core::StageScope scope(out->stages, "detect");
       detect(set, host, *out);
     }
+    end_search();
     for (std::size_t i = 0; i < out->errors.size(); ++i) {
       if (!out->errors[i].ok()) {
         out->errors[i] = with_camera(ids[i], out->errors[i]);
@@ -391,11 +419,10 @@ struct LiveWorker::State {
     while (!stopping.load()) {
       VKC_TRY(apply_requests());
       core::StageMetrics stages;
-      // Pictures while they are shown; the board searched for there unless
-      // paused, and wherever a capture is armed.
-      const bool armed = rule->armed();
-      const bool pictures = detecting.load() || armed;
-      const bool search = (detecting.load() && !paused.load()) || armed;
+      // Pictures while they are shown, or a capture is armed; whether the
+      // board is searched for in them is decided as each set comes
+      // (begin_search).
+      const bool pictures = detecting.load() || rule->armed();
       core::Result<std::optional<source::PictureSet>> taken =
           source->take(&stages, pictures);
       if (!taken.ok()) {
@@ -405,8 +432,8 @@ struct LiveWorker::State {
         continue;
       }
       if (taken.value()) {
-        VKC_TRY(
-            process(std::move(*taken.value()), std::move(stages), search, ids));
+        VKC_TRY(process(std::move(*taken.value()), std::move(stages), pictures,
+                        ids));
         continue;
       }
       if (rule->armed()) {
@@ -480,6 +507,7 @@ LiveWorker::~LiveWorker() { stop(); }
 void LiveWorker::run() noexcept {
   const core::Status ended = compute::guarded(
       "live view", [this]() -> core::Status { return state_->loop(ids_); });
+  state_->end_search();  // a failure's search ends with the thread
   state_->source->stop();
   if (!ended.ok()) state_->post(ended);
   state_->running.store(false);
@@ -501,8 +529,16 @@ void LiveWorker::set_detecting(bool on) noexcept {
   state_->detecting.store(on);
 }
 
-void LiveWorker::pause_search(bool paused) noexcept {
-  state_->paused.store(paused);
+void LiveWorker::pause_search(bool paused) {
+  std::unique_lock<std::mutex> lock(state_->mutex);
+  const bool pausing = paused && !state_->paused;
+  state_->paused = paused;
+  if (!pausing || !state_->searching) return;
+  // The search under way ends first; one an armed capture starts after it
+  // is not waited for.
+  const std::uint64_t under_way = state_->searched;
+  state_->search_ended.wait(lock,
+                            [&] { return state_->searched != under_way; });
 }
 
 core::Status LiveWorker::restart(

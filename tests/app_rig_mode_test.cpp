@@ -140,8 +140,7 @@ TEST(AppRigMode, CalibrateRunsOnceReadyIdleAndNothingUnresolved) {
 
       gate = calibrate_gate(idle, false, 0);
       EXPECT_FALSE(gate.enabled);
-      EXPECT_EQ(gate.reason,
-                "the session is not ready: the Calibration window says why");
+      EXPECT_EQ(gate.reason, "the session is not ready: press C to see why");
     }
   }
 }
@@ -205,7 +204,7 @@ TEST(AppRigMode, IntrinsicModeStaysOnTheImages) {
   EXPECT_EQ(scene_placement(after), ScenePlacement::Hidden);
   const CalibrateGate gate = calibrate_gate(mode, false, 0);
   EXPECT_FALSE(gate.enabled);
-  EXPECT_EQ(gate.reason, "no camera is ready: the Calibration window says why");
+  EXPECT_EQ(gate.reason, "no camera is ready: press C to see why");
   EXPECT_TRUE(calibrate_gate(mode, true, 0).enabled);
 }
 

@@ -74,7 +74,8 @@ capture::Software app_software();
 /// @endcode
 struct CaptureSetup {
   /// The existing directory each session's own directory
-  /// (`YYYY-MM-DD_HHMMSS`, `capture::session_stamp`) is created in.
+  /// (`YYYY-MM-DD_HHMMSS`, `capture::session_stamp`, with `_2`, `_3`, ...
+  /// after it when a session of that second is there) is created in.
   std::string root;
   capture::Software software;  ///< What the session was captured with.
   /// What the session calibrates: each camera's lens, or the rig's poses.
@@ -292,8 +293,16 @@ class CaptureWorker final : public CaptureSink {
   /// @param setup  The next session's, as @ref create checks it, with the
   ///               same cameras (ids, sizes, depth) and capacity.
   /// @return OK once queued; `InvalidArgument` naming what @p setup gets
-  ///         wrong; `IoError` once the thread has ended; or `OutOfMemory`.
+  ///         wrong (@ref accepts); `IoError` once the thread has ended; or
+  ///         `OutOfMemory`.
   core::Status restart(CaptureSetup setup);
+
+  /// @brief Whether @ref restart would take @p setup, checked as it checks
+  ///        it, so a caller can check before it changes anything else.
+  /// @param setup  The next session's.
+  /// @return OK; `InvalidArgument` naming what @p setup gets wrong; or
+  ///         `OutOfMemory`.
+  core::Status accepts(const CaptureSetup& setup) const;
 
   /// @brief Take the outcome of every capture and drop since the last call.
   /// @return One event per capture or drop, in the order they were made.
