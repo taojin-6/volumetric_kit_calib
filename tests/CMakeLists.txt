@@ -198,9 +198,13 @@ if(VC_WITH_RIG)
     PRIVATE
       VC_SESSION_GOLDENS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/goldens/session_files"
   )
+  # The capture tier's API swept, and its private formatters, called directly,
+  # on the test's thread.
   vc_add_test(capture_oom volumetric_kit::calib_capture vc_test_support
               Threads::Threads)
   target_sources(vc_capture_oom_test PRIVATE support/allocation_failure.cpp)
+  target_include_directories(vc_capture_oom_test
+                             PRIVATE "${_vc_capture_private}")
 
   # source: fake cameras in an array and a fake stereo pair, each set's luma and
   # half made and read back on a device, through the core's Vulkan test fixtures

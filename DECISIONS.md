@@ -902,13 +902,13 @@ definitions and the schemas).
 - **Everything left out is listed:** the views `initialise` excluded, with
   what it measured, beside the adjustment's rejections, so each can be
   recaptured.
-- **calib's JSON files are written by hand**, as recon writes its
+- **calib's JSON files are written by hand**, as sensor writes its
   calibration file, with the one private writer,
   `src/volumetric_kit/calib/core/json_text.hpp`:
   nlohmann/json makes each number (the shortest form that reads back, `null`
   when not finite) and string, but none of its containers, whose destructors
-  allocate and so terminate when memory runs out. The capture tier's session
-  files are still to be moved onto it (a `TODO:` in `session_files.cpp`).
+  allocate and so terminate when memory runs out. The report and the capture
+  tier's session files both use it.
 
 ## 2026-10-16 — The live view on gfx
 

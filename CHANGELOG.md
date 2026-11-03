@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.7.0] - 2026-11-03
+
+### Fixed
+
+- The capture tier writes `session.json` and `captures/<NNN>.json` with
+  calib's one JSON writer (`core/json_text.hpp`), as the report is
+  (DECISIONS.md, 2026-10-16). It built nlohmann/json containers on the
+  writer's thread, whose destructors allocate, so running out of memory
+  there terminated calib_rig rather than failing the capture with
+  `OutOfMemory`. The files are byte for byte what they were, which goldens
+  now pin (`tests/goldens/session_files/`); no API changes, so nothing to
+  migrate.
+
+### Changed
+
+- calib's version is 0.7.0, where it was 0.6.0.
+
 ## [0.6.0] - 2026-11-02
 
 ### Added

@@ -72,6 +72,12 @@ class JsonWriter {
     before_value();
     text_ += std::to_string(v);
   }
+  // A std::uint64_t on macOS, where std::size_t is unsigned long; on Linux
+  // both are unsigned long, and value(std::size_t) takes it.
+  void value(unsigned long long v) {
+    before_value();
+    text_ += std::to_string(v);
+  }
   void value(bool v) {
     before_value();
     text_ += v ? "true" : "false";
