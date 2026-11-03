@@ -550,7 +550,9 @@ TEST(DetectBoard, KeepsOnlyCornersOnTheBoard) {
     ++kept;
   }
   std::printf("%zu of %zu searches kept a board\n", kept, searches.size());
-  if (sweep()) EXPECT_GE(kept, 8u) << "few searches kept a board";
+  if (sweep()) {
+    EXPECT_GE(kept, 8u) << "few searches kept a board";
+  }
 }
 
 // On these pictures SB, from the seed detect_board gives it, returns a grid
