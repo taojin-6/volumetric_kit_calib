@@ -63,8 +63,8 @@ on:
         description: >-
           Linux only: also build calib_rig with the opener's DeckLink arm
           (sensor's VS_WITH_DECKLINK), in a tree of its own, on the DeckLink
-          SDK headers the core keeps, and run the arm's host test. No card:
-          nothing opens one.
+          SDK headers the core keeps, and run the host tests on the arm's
+          path. No card: nothing opens one.
         required: false
         type: boolean
         default: false
@@ -315,6 +315,8 @@ jobs:
       # checked out at calib's core pin and held to its SHA256SUMS, as
       # sensor's _build.yml takes it. Keep the ref at the core pin in
       # third_party/CMakeLists.txt; the next step refuses another.
+      # TODO: take this checkout and the next step's check from a core action,
+      # as they copy sensor's _build.yml steps, once the core has one.
       - name: DeckLink SDK headers
         if: inputs.decklink
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -350,7 +352,9 @@ jobs:
       # calib_rig with the opener's DeckLink arm alone (the Orbbec arm needs
       # FFmpeg and CUDA here), on the rig tiers' Vulkan SDK and GLFW, built by
       # clang as the sanitizer job builds the rig tiers on Linux; then the
-      # arm's host test, which opens no card.
+      # host tests that take the arm's path, which open no card: the arm's
+      # options, the scenario check that accepts a DeckLink pair and reads its
+      # file, and the mode table.
       - name: Build the DeckLink arm
         if: inputs.decklink
         run: |
@@ -360,5 +364,8 @@ jobs:
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
             -DVC_WITH_RIG=ON -DVS_WITH_DECKLINK=ON
           cmake --build build-decklink --target calib_rig vc_app_decklink_test \
+            vc_app_preset_test vc_app_calib_mode_test \
             --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN)}"
-          build-decklink/tests/vc_app_decklink_test
+          for t in decklink preset calib_mode; do
+            "build-decklink/tests/vc_app_${t}_test"
+          done
