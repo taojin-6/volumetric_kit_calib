@@ -18,10 +18,11 @@ release may break it, and each such entry says how to migrate
   view showed had no luma pass to wait for it, so the first frame back on
   the images could copy its pictures unwaited. `app::record_snapshot` now
   returns each copied picture's ready value, already reached, for the frame
-  to wait for at `VK_PIPELINE_STAGE_TRANSFER_BIT`, and leaves out a picture
-  whose value is not reached yet, its tile keeping its last picture: gfx's
-  frame loop takes only reached values, and nothing waits on the host. It
-  returned a `Status`; its header is internal, outside the stable API.
+  to wait for at `VK_PIPELINE_STAGE_TRANSFER_BIT`, or nothing, with nothing
+  recorded, while a value is not reached yet, and calib_rig records that
+  snapshot at a later frame: gfx's frame loop takes only reached values,
+  and nothing waits on the host. It returned a `Status`; its header is
+  internal, outside the stable API.
 
 ### Changed
 

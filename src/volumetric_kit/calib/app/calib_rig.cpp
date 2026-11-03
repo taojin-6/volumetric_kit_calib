@@ -1414,19 +1414,22 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     if (fresh && latest && mosaic_shown) {
       core::StageScope scope(recorded, "tiles");
       VKC_ASSIGN(
-          const std::vector<core::TimelinePoint> ready,
+          const std::optional<std::vector<core::TimelinePoint>> ready,
           record_snapshot(*mosaic, retire, frame.cmd, latest, frame.number));
-      // The decoders' ready values, reached: the copies see their writes.
-      for (const core::TimelinePoint& point : ready) {
-        frame.waits.push_back({point, VK_PIPELINE_STAGE_TRANSFER_BIT});
+      // Not yet: a decoder's ready value is not reached. It stays fresh.
+      if (ready) {
+        // The decoders' values, reached: the copies see their writes.
+        for (const core::TimelinePoint& point : *ready) {
+          frame.waits.push_back({point, VK_PIPELINE_STAGE_TRANSFER_BIT});
+        }
+        VKC_ASSIGN(const std::vector<viz::TileRefusal> unsaid,
+                   refusals_to_say(mosaic->refused(), refusals_said));
+        for (const viz::TileRefusal& refusal : unsaid) {
+          notices.note("camera " + ids[refusal.camera] + ": " +
+                       refusal.status.message());
+        }
+        fresh = false;
       }
-      VKC_ASSIGN(const std::vector<viz::TileRefusal> unsaid,
-                 refusals_to_say(mosaic->refused(), refusals_said));
-      for (const viz::TileRefusal& refusal : unsaid) {
-        notices.note("camera " + ids[refusal.camera] + ": " +
-                     refusal.status.message());
-      }
-      fresh = false;
     }
     VKC_TRY(viz::hold_stages(recorded, mosaic_shown, tiles, in.stages));
     steer(window, input, pointer, io.WantCaptureMouse, split, view,

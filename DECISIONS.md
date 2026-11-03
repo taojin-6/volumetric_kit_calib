@@ -1207,9 +1207,9 @@ The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
   set was taken in: one taken while the 3D view showed had no luma pass to
   wait for it. gfx's frame loop takes only values already reached, and no
   host waits on one (a host wait on a value CUDA sets wakes about 10 ms
-  late), so the window reads the value, never waits on it, and leaves out a
-  picture whose value is not reached yet, its tile keeping its last picture
-  until the next set. The live worker's luma pass and the 3D view's
+  late), so the window reads the value, never waits on it, and records a
+  set with a value not reached yet at a later frame, every tile keeping its
+  last picture meanwhile. The live worker's luma pass and the 3D view's
   preparation wait for it in their own batches (sensor's `LumaPass` and
   `GpuFramePrep`); a capture copies host data alone.
 - **Marks in the detector's pixels.** Corners keep OpenCV's integer pixel

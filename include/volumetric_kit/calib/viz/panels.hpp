@@ -590,6 +590,7 @@ core::Result<gfx::FrameMetrics> stage_frame_metrics(
 ///   core::StageScope scope(ran, "tiles");
 ///   VKC_ASSIGN(const auto ready, record_snapshot(mosaic, retire, cmd, latest,
 ///                                                frame_number));
+///   // ... the frame waits for `ready`, as record_snapshot says ...
 /// }
 /// VKC_TRY(hold_stages(ran, mosaic_shown, tiles, frame_stages));
 /// @endcode

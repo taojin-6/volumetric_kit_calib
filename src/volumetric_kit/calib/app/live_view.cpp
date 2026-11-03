@@ -14,11 +14,11 @@
 
 namespace volumetric_kit::calib::app {
 
-core::Result<std::vector<core::TimelinePoint>> record_snapshot(
+core::Result<std::optional<std::vector<core::TimelinePoint>>> record_snapshot(
     viz::RigMosaic& mosaic, gfx::RetireQueue& retire, VkCommandBuffer cmd,
     const std::shared_ptr<const LiveSnapshot>& snapshot,
     std::uint64_t frame_number) {
-  using Waits = std::vector<core::TimelinePoint>;
+  using Waits = std::optional<std::vector<core::TimelinePoint>>;
   return compute::guarded("record_snapshot", [&]() -> core::Result<Waits> {
     if (snapshot == nullptr || snapshot->set == nullptr) {
       return core::Status::invalid_argument("record_snapshot: no snapshot");
@@ -31,7 +31,7 @@ core::Result<std::vector<core::TimelinePoint>> record_snapshot(
           " tiles");
     }
     std::vector<const sensor::YuvImage*> pictures(set.cameras.size(), nullptr);
-    Waits waits;
+    std::vector<core::TimelinePoint> waits;
     for (std::size_t i = 0; i < pictures.size(); ++i) {
       if (!set.cameras[i].present) continue;
       // Its grey tile; else the decoder's picture, in colour.
@@ -46,11 +46,11 @@ core::Result<std::vector<core::TimelinePoint>> record_snapshot(
       // decoders') is copied only in a frame that waits for its ready value
       // on the device, whatever view the set was taken in. The frame loop
       // takes only a value already reached, and the host never waits for
-      // one, so a picture whose value is not reached yet is left out: its
-      // tile keeps its last picture.
+      // one, so a set with a value not reached yet waits for a later frame,
+      // with nothing recorded or held.
       if (picture->ready != nullptr) {
         VKC_ASSIGN(const std::uint64_t reached, picture->ready->value());
-        if (reached < picture->ready_value) continue;
+        if (reached < picture->ready_value) return Waits();
         sensor::add_ready_point(*picture, waits);
       }
       pictures[i] = picture;
@@ -61,7 +61,7 @@ core::Result<std::vector<core::TimelinePoint>> record_snapshot(
     // OutOfMemory may follow copies already recorded.
     retire.push(frame_number, [held = snapshot->set] { (void)held; });
     VKC_TRY(mosaic.record(cmd, pictures));
-    return waits;
+    return Waits(std::move(waits));
   });
 }
 

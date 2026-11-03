@@ -129,11 +129,15 @@ struct SetOnExit {
   }
 };
 
+// What record_snapshot returns: the frame's waits, or nothing while a
+// picture's ready value is not reached.
+using FrameWaits = std::optional<std::vector<core::TimelinePoint>>;
+
 // Whether @p waits are one wait, for @p value on @p semaphore.
-bool waits_for(const std::vector<core::TimelinePoint>& waits,
+bool waits_for(const FrameWaits& waits,
                const core::TimelineSemaphore* semaphore, std::uint64_t value) {
-  return waits.size() == 1 && waits[0].semaphore == semaphore &&
-         waits[0].value == value;
+  return waits && waits->size() == 1 && (*waits)[0].semaphore == semaphore &&
+         (*waits)[0].value == value;
 }
 
 // Submits @p cmd, ended, to @p device's queue as gfx's frame loop submits a
@@ -237,13 +241,15 @@ std::unique_ptr<viz::RigMosaic> make_mosaic(const core::Device& device,
 
 // Records the snapshot into the mosaic as frame `number` on `device`, draws
 // the mosaic, submits the frame after the waits the record returns
-// (submit_frame), and returns the target's pixels; `waits`, when given, gets
-// those waits.
-std::vector<std::uint8_t> render(
-    const core::Device& device, core::Allocator& allocator,
-    viz::RigMosaic& mosaic, gfx::RetireQueue& retire,
-    const std::shared_ptr<const LiveSnapshot>& s, std::uint64_t number,
-    std::vector<core::TimelinePoint>* waits = nullptr) {
+// (submit_frame), and returns the target's pixels. `waits`, when given, gets
+// what the record returned; without it, the record must have recorded.
+std::vector<std::uint8_t> render(const core::Device& device,
+                                 core::Allocator& allocator,
+                                 viz::RigMosaic& mosaic,
+                                 gfx::RetireQueue& retire,
+                                 const std::shared_ptr<const LiveSnapshot>& s,
+                                 std::uint64_t number,
+                                 FrameWaits* waits = nullptr) {
   gfx::OffscreenTargetDesc desc;
   desc.extent = kExtent;
   desc.color_format = kFormat;
@@ -259,11 +265,15 @@ std::vector<std::uint8_t> render(
   EXPECT_TRUE(
       cmd.value().begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT).ok());
   const VkCommandBuffer raw = cmd.value().handle();
-  core::Result<std::vector<core::TimelinePoint>> recorded =
+  core::Result<FrameWaits> recorded =
       record_snapshot(mosaic, retire, raw, s, number);
   EXPECT_TRUE(recorded.ok()) << recorded.status().message();
   if (!recorded.ok()) return {};
-  if (waits != nullptr) *waits = recorded.value();
+  if (waits != nullptr) {
+    *waits = recorded.value();
+  } else {
+    EXPECT_TRUE(recorded->has_value()) << "not recorded";
+  }
   target.value().prepare(raw);
   const gfx::RenderTarget rt = target.value().target();
   rt.begin(raw, gfx::RenderTargetBeginInfo{});
@@ -271,7 +281,8 @@ std::vector<std::uint8_t> render(
   rt.end(raw);
   target.value().record_readback(raw);
   EXPECT_TRUE(cmd.value().end().ok());
-  const core::Status submitted = submit_frame(device, raw, recorded.value());
+  const core::Status submitted = submit_frame(
+      device, raw, recorded->value_or(std::vector<core::TimelinePoint>()));
   EXPECT_TRUE(submitted.ok()) << submitted.message();
   if (!submitted.ok()) return {};
   const auto* px = static_cast<const std::uint8_t*>(target.value().pixels());
@@ -325,10 +336,11 @@ class AppLiveView : public core::test::VulkanDeviceTest {
     return out;
   }
 
-  std::vector<std::uint8_t> render(
-      viz::RigMosaic& mosaic, gfx::RetireQueue& retire,
-      const std::shared_ptr<const LiveSnapshot>& s, std::uint64_t number,
-      std::vector<core::TimelinePoint>* waits = nullptr) {
+  std::vector<std::uint8_t> render(viz::RigMosaic& mosaic,
+                                   gfx::RetireQueue& retire,
+                                   const std::shared_ptr<const LiveSnapshot>& s,
+                                   std::uint64_t number,
+                                   FrameWaits* waits = nullptr) {
     return app::render(device(), allocator(), mosaic, retire, s, number, waits);
   }
 
@@ -400,10 +412,11 @@ TEST_F(AppLiveView, RefusesASnapshotThatDoesNotFitTheMosaic) {
 
 // A decoder's picture that carries a ready value, as NVIDIA's do, is copied
 // only once the value is reached, in a frame that waits for it on the device
-// at the copy's stage, as gfx's frame loop takes it: before, its tile keeps
-// its last picture and the frame waits for nothing, so the tile shows what
-// the decoder wrote before setting the value, never what the picture held
-// before. A picture without one is copied as ever.
+// at the copy's stage, as gfx's frame loop takes it: before, the snapshot is
+// not recorded, nothing is held, and every tile keeps its last picture, so
+// the window records it at a later frame and the tile shows what the decoder
+// wrote before setting the value, never what the picture held before. A
+// picture without one is copied with it.
 TEST_F(AppLiveView, CopiesADecodersPictureInAFrameThatWaitsForItsReadyValue) {
   std::unique_ptr<viz::RigMosaic> mosaic = make_mosaic(2);
   ASSERT_NE(mosaic, nullptr);
@@ -432,14 +445,16 @@ TEST_F(AppLiveView, CopiesADecodersPictureInAFrameThatWaitsForItsReadyValue) {
   decoded->ready_value = 1;
   const Set second = make_set({90, 200}, decoded.value());
   const std::shared_ptr<const LiveSnapshot> snapshot = snapshot_of(second);
-  std::vector<core::TimelinePoint> waits;
+  FrameWaits waits;
   pixels = render(*mosaic, retire, snapshot, 2, &waits);
   ASSERT_FALSE(pixels.empty());
-  EXPECT_TRUE(waits.empty());
-  EXPECT_NEAR(tile_grey(*mosaic, pixels, 0), 40, 3);  // its last picture
-  EXPECT_NEAR(tile_grey(*mosaic, pixels, 1), 200, 3);
-  EXPECT_EQ(mosaic->sets_since_picture(0), std::optional<std::uint64_t>(1));
-  EXPECT_TRUE(mosaic->refused().empty());
+  EXPECT_FALSE(waits.has_value());  // not yet
+  EXPECT_NEAR(tile_grey(*mosaic, pixels, 0), 40, 3);
+  EXPECT_NEAR(tile_grey(*mosaic, pixels, 1), 120, 3);
+  EXPECT_EQ(mosaic->sets_since_picture(0), std::optional<std::uint64_t>(0));
+  ASSERT_TRUE(timeline.value().signal(2).ok());
+  retire.poll();
+  EXPECT_EQ(retire.pending(), 0u);  // frame 2 holds nothing
 
   // The copy lands, then the decoder sets the value.
   const sensor::testing::HostNv12 written = flat_grey(150);
@@ -557,10 +572,11 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
   ASSERT_TRUE(
       cmd.value().begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT).ok());
   const VkCommandBuffer raw = cmd.value().handle();
-  const core::Result<std::vector<core::TimelinePoint>> recorded =
+  const core::Result<FrameWaits> recorded =
       record_snapshot(tiles, retire, raw, snapshot, 1);
   ASSERT_TRUE(recorded.ok()) << recorded.status().message();
-  EXPECT_TRUE(recorded->empty());  // a picture with no ready value
+  ASSERT_TRUE(recorded->has_value());
+  EXPECT_TRUE(recorded.value()->empty());  // a picture with no ready value
   target.value().prepare(raw);
   const gfx::RenderTarget rt = target.value().target();
   rt.begin(raw, gfx::RenderTargetBeginInfo{});
@@ -594,9 +610,9 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
 // worker, not detecting, takes the set with no luma pass and publishes it at
 // once, reading nothing; the 3D view's worker, offered the set, prepares it
 // on the compute family only once the value is set, its batch waiting on
-// the device; and the window, back on the images before then, leaves the
-// picture out, waiting for nothing, and copies it on the graphics family
-// after, in a frame that waits for the value.
+// the device; and the window, back on the images before then, records
+// nothing of the set, and copies it on the graphics family after, in a frame
+// that waits for the value.
 TEST_F(AppLiveCrossFamily, ASetTakenWhileThe3DViewShowedIsReadAfterItsValue) {
   core::test::TwoFamilyDevice& two = two_family();
   const std::vector<std::uint32_t> families(two.families().begin(),
@@ -653,61 +669,83 @@ TEST_F(AppLiveCrossFamily, ASetTakenWhileThe3DViewShowedIsReadAfterItsValue) {
   const SetOnExit retired{timeline.value(), 2};
   const SetOnExit decoded_by_then{*ready, 1};  // before the workers stop
 
-  // The window shows the 3D view alone: the board is not searched for.
-  live.value()->set_detecting(false);
-  std::this_thread::sleep_for(std::chrono::milliseconds(20));
   auto depth = std::make_shared<std::vector<std::uint16_t>>(16 * 12, 1500);
-  sensor::RgbdFrame frame;
-  frame.color = decoded.value();
-  frame.color_camera = lens;
-  frame.depth = depth->data();
-  frame.depth_camera = depth_lens;
-  frame.metres_per_unit = 0.001f;
-  frame.min_depth = 0.5f;
-  frame.max_depth = 3.86f;
-  frame.timestamp_ns = 1'760'000'000'000'000'000ull;
-  frame.pixels = depth;
-  camera.push(std::move(frame));
+  const auto push = [&](const sensor::YuvImage& picture, std::uint64_t tick) {
+    sensor::RgbdFrame frame;
+    frame.color = picture;
+    frame.color_camera = lens;
+    frame.depth = depth->data();
+    frame.depth_camera = depth_lens;
+    frame.metres_per_unit = 0.001f;
+    frame.min_depth = 0.5f;
+    frame.max_depth = 3.86f;
+    frame.timestamp_ns = 1'760'000'000'000'000'000ull + tick * 40'000'000;
+    frame.sequence = tick;
+    frame.pixels = depth;
+    camera.push(std::move(frame));
+  };
+  const auto give_up =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  const auto next_snapshot = [&](std::uint64_t after) {
+    std::shared_ptr<const LiveSnapshot> s;
+    while (std::chrono::steady_clock::now() < give_up) {
+      s = live.value()->take_snapshot();
+      if (s != nullptr && s->number > after) return s;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return std::shared_ptr<const LiveSnapshot>();
+  };
+  const auto prepared = [&](std::uint64_t count) {
+    while (cloud.value()->prepared() < count &&
+           std::chrono::steady_clock::now() < give_up) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return cloud.value()->prepared() >= count;
+  };
+
+  // The window shows the 3D view alone: the board is not searched for. A
+  // first set, with no ready value, is taken after that, whatever take was
+  // under way, so the next is taken with no luma pass.
+  live.value()->set_detecting(false);
+  core::Result<sensor::YuvImage> earlier = concurrent_picture(
+      two.compute(), two.compute_allocator(), flat_grey(40), families);
+  ASSERT_TRUE(earlier.ok()) << earlier.status().message();
+  push(earlier.value(), 1);
+  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(0);
+  ASSERT_NE(first, nullptr);
+  ASSERT_TRUE(prepared(1));
+  (void)cloud.value()->take_snapshot();
+  push(decoded.value(), 2);
 
   // Every check before the value is set is an EXPECT, so a failing one
   // leaves no batch waiting for it.
-  std::shared_ptr<const LiveSnapshot> snapshot;
-  const auto give_up =
-      std::chrono::steady_clock::now() + std::chrono::seconds(30);
-  while (!snapshot && std::chrono::steady_clock::now() < give_up) {
-    snapshot = live.value()->take_snapshot();
-    if (!snapshot) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
+  std::shared_ptr<const LiveSnapshot> snapshot = next_snapshot(first->number);
   EXPECT_NE(snapshot, nullptr);
   if (snapshot != nullptr) {
     EXPECT_EQ(snapshot->set->cameras[0].tile, nullptr);  // no luma made
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
-    EXPECT_EQ(cloud.value()->prepared(), 0u);
-    std::vector<core::TimelinePoint> waits;
+    EXPECT_EQ(cloud.value()->prepared(), 1u);
+    FrameWaits waits;
     const std::vector<std::uint8_t> before =
         render(two.graphics(), two.graphics_allocator(), *mosaic, retire,
                snapshot, 1, &waits);
     EXPECT_FALSE(before.empty());
-    EXPECT_TRUE(waits.empty());
+    EXPECT_FALSE(waits.has_value());                          // not yet
     EXPECT_FALSE(mosaic->sets_since_picture(0).has_value());  // never copied
   }
 
   // The decoder sets the value: both readers read the picture.
   ASSERT_TRUE(ready->signal(1).ok());
   ASSERT_NE(snapshot, nullptr);
-  const auto prepared_by =
-      std::chrono::steady_clock::now() + std::chrono::seconds(30);
-  while (cloud.value()->prepared() < 1) {
-    ASSERT_LT(std::chrono::steady_clock::now(), prepared_by);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
+  ASSERT_TRUE(prepared(2));
   EXPECT_TRUE(cloud.value()->take_errors().empty());
   std::shared_ptr<const CloudSnapshot> points = cloud.value()->take_snapshot();
   ASSERT_NE(points, nullptr);
+  EXPECT_EQ(points->number, 2u);
   EXPECT_TRUE(points->color);
   ASSERT_TRUE(points->frames[0].has_value());
   EXPECT_NE(points->frames[0]->color, nullptr);
-  std::vector<core::TimelinePoint> waits;
+  FrameWaits waits;
   const std::vector<std::uint8_t> after =
       render(two.graphics(), two.graphics_allocator(), *mosaic, retire,
              snapshot, 2, &waits);
