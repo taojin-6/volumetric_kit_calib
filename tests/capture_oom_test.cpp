@@ -23,7 +23,7 @@
 #include <gtest/gtest.h>
 
 #include "allocation_failure.hpp"
-#include "session_files.hpp"
+#include "volumetric_kit/calib/capture/session_files.hpp"
 #include "volumetric_kit/calib/capture/session_writer.hpp"
 #include "volumetric_kit/core/base/check.hpp"
 
@@ -175,6 +175,7 @@ TEST(CaptureOom, SubmitRefusingAnotherTag) {
 template <class Format>
 void expect_bad_alloc_when_formatting(const Format& format) {
   const std::string original = format();
+  std::size_t oom = 0;
   test::sweep_allocations([&](std::size_t after) {
     SCOPED_TRACE(after);
     std::optional<std::string> text;
@@ -191,10 +192,13 @@ void expect_bad_alloc_when_formatting(const Format& format) {
       return;
     }
     EXPECT_TRUE(threw);
+    if (threw) ++oom;
   });
+  EXPECT_GT(oom, 0u) << "the sweep must fail an allocation";
 }
 
-// make_info's rig with every key session.json can have.
+// make_info's rig with every key session.json can have, each on one camera or
+// the other.
 TEST(CaptureOom, FormatSession) {
   SessionInfo info = make_info();
   info.software = {"calib", "sensor", "gfx", "core", "5.0.0", "2.10.6"};
@@ -202,6 +206,7 @@ TEST(CaptureOom, FormatSession) {
   info.board.square_size_tolerance_m = 0.0002;
   info.cameras[0].lens = LensOrigin::File;
   info.cameras[0].lens_file = "/vc_capture_oom_no_such_parent/lens.json";
+  info.cameras[0].input = "SDI 1";
   info.cameras[1].role = "primary";
   info.cameras[1].orbbec.emplace();
   info.cameras[1].orbbec->firmware = "1.2.9";
@@ -215,9 +220,15 @@ TEST(CaptureOom, FormatSession) {
       [&] { return detail::format_session(info, facts, captures); });
 }
 
+// make_job's capture with every key a capture file can have, and the second
+// camera's picture a PGM with no depth.
 TEST(CaptureOom, FormatCapture) {
-  const SessionInfo info = make_info();
+  SessionInfo info = make_info();
+  info.cameras[1].depth.reset();
   CaptureJob job = make_job();
+  job.cameras[1].depth.reset();
+  job.cameras[1].jpeg.clear();
+  job.cameras[1].luma.assign(std::size_t{64} * 48, std::uint8_t{7});
   job.meta.live_vs_full_px = 0.12;
   job.cameras[0].detection.markers = {*job.cameras[1].origin_tag};
   job.cameras[0].check.distance_m = 2.8;

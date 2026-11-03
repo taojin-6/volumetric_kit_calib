@@ -52,14 +52,6 @@ double shortest(float value) {
 
 // Each writes one value, after its key: `write_check(w.key("check"), check)`.
 
-void write_number(JsonWriter& w, const std::optional<double>& value) {
-  if (value) {
-    w.value(*value);
-  } else {
-    w.null();
-  }
-}
-
 // [width, height].
 void write_size(JsonWriter& w, sensor::camera::ImageSize size) {
   w.open_array();
@@ -110,14 +102,10 @@ void write_check(JsonWriter& w, const ViewCheck& check) {
   w.key("corners").value(check.corners);
   w.key("markers").value(check.markers);
   w.key("collinear").value(check.collinear);
-  write_number(w.key("distance_m"), check.distance_m);
-  write_number(w.key("tilt_deg"), check.tilt_deg);
-  write_number(w.key("pnp_rms_px"), check.pnp_rms_px);
-  if (check.cell) {
-    w.key("cell").value(*check.cell);
-  } else {
-    w.key("cell").null();
-  }
+  w.key("distance_m").value_or_null(check.distance_m);
+  w.key("tilt_deg").value_or_null(check.tilt_deg);
+  w.key("pnp_rms_px").value_or_null(check.pnp_rms_px);
+  w.key("cell").value_or_null(check.cell);
   w.key("verdict").value(to_string(check.verdict));
   w.close_object();
 }
@@ -246,8 +234,8 @@ std::string format_session(const SessionInfo& info, const SessionFacts& facts,
     w.key("legacy_pattern").value(board.legacy_pattern);
   }
   w.key("square_measured").value(info.square_measured);
-  write_number(w.key("square_tolerance_m"), board.square_size_tolerance_m);
-  write_number(w.key("planarity_bow_m"), board.planarity_bow_m);
+  w.key("square_tolerance_m").value_or_null(board.square_size_tolerance_m);
+  w.key("planarity_bow_m").value_or_null(board.planarity_bow_m);
   w.close_object();
 
   w.key("origin_tag").open_object();
@@ -340,7 +328,7 @@ std::string format_capture(const SessionInfo& info, const CaptureJob& job) {
   w.key("sequence").value(meta.sequence);
   w.key("spread_ms").value(meta.spread_ms);
   w.key("stillness_px").value(meta.stillness_px);
-  write_number(w.key("live_vs_full_px"), meta.live_vs_full_px);
+  w.key("live_vs_full_px").value_or_null(meta.live_vs_full_px);
 
   // Keyed by id, which no two cameras share (SessionWriter::create).
   w.key("cameras").open_object();

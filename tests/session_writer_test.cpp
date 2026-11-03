@@ -36,7 +36,7 @@
 #include <nlohmann/json.hpp>
 
 #include "scratch_dir.hpp"
-#include "session_files.hpp"
+#include "volumetric_kit/calib/capture/session_files.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
 #include "volumetric_kit/sensor/camera/array_calibration.hpp"
 #include "volumetric_kit/sensor/camera/geometry.hpp"

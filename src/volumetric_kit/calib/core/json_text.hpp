@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -72,8 +73,9 @@ class JsonWriter {
     before_value();
     text_ += std::to_string(v);
   }
-  // A std::uint64_t on macOS, where std::size_t is unsigned long; on Linux
-  // both are unsigned long, and value(std::size_t) takes it.
+  // A std::uint64_t where it is unsigned long long (macOS, iOS, 32-bit
+  // Android); where it is unsigned long, as std::size_t is (64-bit Linux and
+  // Android), value(std::size_t) takes it.
   void value(unsigned long long v) {
     before_value();
     text_ += std::to_string(v);
@@ -87,6 +89,15 @@ class JsonWriter {
     text_ += json_quoted(v);
   }
   void value(const char* v) { value(std::string_view(v)); }
+  // The value `v` holds, as value() writes it; `null` for none.
+  template <class T>
+  void value_or_null(const std::optional<T>& v) {
+    if (v) {
+      value(*v);
+    } else {
+      null();
+    }
+  }
   // A time in seconds to the microsecond, with six decimals, so its text is
   // as long for any time under 10 s and a document's allocations do not
   // depend on how long what it records took; `null` for one negative, not
