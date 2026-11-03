@@ -17,8 +17,9 @@ release may break it, and each such entry says how to migrate
   recorded poses: the tilt from the tracking's gravity, the yaw and the
   translation fitted to a square of the edge the rig measured. Its misses
   are `TagMiss` values: `NotSeen`, `CameraBelowTag`, `Numerical`, and
-  `PoorFit` above `kMaxTrackedRmsPx`. `register_tracked` turns the fit into
-  sensor's `TrackedRegistration`, which the caller writes.
+  `PoorFit` above `kMaxTrackedRmsPx` or `kMaxTrackedSeedGapM`.
+  `register_tracked` turns the fit of a session's stills into sensor's
+  `TrackedRegistration`, which the caller writes.
 - `examples/03_register_tracked`: a registration file from a calibration, a
   stills file and the rig's measured edge, optionally from one hold's window.
 

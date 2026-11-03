@@ -82,15 +82,35 @@ struct TrackedWorldOptions {
 ///
 /// Above the rig's @ref kMaxTagWorldRmsPx, whose cameras are solved together
 /// to a fraction of a pixel: each still carries its tracker's own pose
-/// error. On synthetic holds, a tracker off by 0.1 degrees and 2 mm per
-/// still fits at up to 9.2 px RMS from 1.2 m (5.7 px at p95), and 11.7 px
-/// from 0.8 m; one still moved 10 cm fits at 18.9 px or more from as far as
-/// 3 m, and 48 px from 1.2 m.
+/// error. On synthetic holds of an ARKit still (fx 1600 at 1920 x 1440; a
+/// lens of longer focal length sees the same error in more pixels), a
+/// tracker off by 0.1 degrees and 2 mm per still fits at up to 9.2 px RMS
+/// from 1.2 m (5.7 px at p95), and 11.7 px from 0.8 m. One still moved
+/// 10 cm fits at 48 px or more from 1.2 m, but from afar the pixels barely
+/// see it: @ref kMaxTrackedSeedGapM catches those.
 ///
 /// @code
 /// if (found.miss == TagMiss::PoorFit) warn(found.reason);  // names the RMS
 /// @endcode
 inline constexpr double kMaxTrackedRmsPx = 12.0;
+
+/// @brief The farthest a fit found by @ref tracked_world_from_tag may place
+///        a still's camera from where its seed, the median of the stills
+///        alone, places it (metres); farther, it is a @ref TagMiss::PoorFit.
+///
+/// A camera's range along its line of sight shows only in the tag's
+/// apparent size, about 0.5 px per cm from 2.2 m, so one still whose pose
+/// is off can pull every camera far along its line of sight at a low RMS:
+/// on exact corners, 4 stills from 2.2 m, one moved 3 cm, fit at 8.0 px RMS
+/// with every camera 14 cm off. The median of the stills alone stays with
+/// the good ones. On synthetic holds (the noise of @ref kMaxTrackedRmsPx's),
+/// the gap stays near 1 cm from 1.2 m; from 2.2 m up to 1 % of holds are
+/// refused (4 % at 75 degrees off the tag's normal), and 3 % from 3 m.
+///
+/// @code
+/// if (found.miss == TagMiss::PoorFit) warn(found.reason);  // names the gap
+/// @endcode
+inline constexpr double kMaxTrackedSeedGapM = 0.03;
 
 /// @brief One still's fit at the transform found.
 ///
@@ -138,7 +158,11 @@ struct TrackedWorld {
   OriginTag sought;
   std::optional<TrackedTagFit> fit;  ///< Empty on a miss.
   /// Why there is no fit; set only when @ref fit is empty: `NotSeen` (no
-  /// still), `CameraBelowTag`, `Numerical` or `PoorFit`.
+  /// still); `CameraBelowTag` (a still's camera below the tag's plane:
+  /// poses in another camera convention, such as ARKit's not through
+  /// `cv_from_gl_camera`, or an `options.up` that is not the tracking
+  /// world's); `Numerical`; or `PoorFit` (either gate of step 4). Mirrored
+  /// corners fit poorly: gravity fixes which face is up.
   TagMiss miss = TagMiss::NotSeen;
   std::string still;   ///< The still a `CameraBelowTag` miss names.
   std::string reason;  ///< The miss in words; empty with a fit.
@@ -163,7 +187,9 @@ struct TrackedWorld {
 ///    lens, from the seed. No still is dropped: a hold's stills share one
 ///    pose, and a bad one shows in its @ref TrackedStillFit.
 /// 3. **Guard.** Each still's camera must be above the tag's plane.
-/// 4. **Fit.** The corners must fit at @ref kMaxTrackedRmsPx or better.
+/// 4. **Gate.** The corners must fit at @ref kMaxTrackedRmsPx or better,
+///    and no still's camera may be farther than @ref kMaxTrackedSeedGapM
+///    from where the seed places it.
 ///
 /// @param views    Every still the tag was found in; none when it was not.
 /// @param tag      The tag sought, as `check_origin_tag` accepts it: its id
@@ -196,9 +222,10 @@ VC_SOLVE_API core::Result<TrackedWorld> tracked_world_from_tag(
 /// @param found   @ref tracked_world_from_tag's placement from those stills.
 /// @return The registration, which `validate_tracked_registration` accepts;
 ///         or `InvalidArgument` for a miss (giving its reason), a world that
-///         is not the tag sought (naming what differs), or @p stills that
-///         `validate_tracked_stills` refuses; or `OutOfMemory`. Each message
-///         starts `register_tracked: `.
+///         is not the tag sought (naming what differs), @p stills that
+///         `validate_tracked_stills` refuses, or a fit of a still that is
+///         none of @p stills' images (naming it); or `OutOfMemory`. Each
+///         message starts `register_tracked: `.
 ///
 /// @code
 /// VKC_ASSIGN(const sensor::camera::TrackedRegistration reg,

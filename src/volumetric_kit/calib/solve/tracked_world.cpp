@@ -64,10 +64,18 @@ cv::Matx33d rz(double yaw) noexcept {
   return {c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0};
 }
 
+// The largest of `v`'s components' magnitudes.
+double largest(const camera::Vec3d& v) noexcept {
+  return std::max({std::abs(v.x), std::abs(v.y), std::abs(v.z)});
+}
+
 // The rotation that turns `up` (finite, not zero) onto +z the shortest way:
-// a half turn about x for -z.
+// a half turn about x for -z. Scaled by its largest component first, so its
+// length neither overflows nor underflows.
 cv::Matx33d alignment(const camera::Vec3d& up) {
-  const cv::Vec3d u = cv::normalize(cv::Vec3d(up.x, up.y, up.z));
+  const double scale = largest(up);
+  const cv::Vec3d u =
+      cv::normalize(cv::Vec3d(up.x / scale, up.y / scale, up.z / scale));
   const cv::Vec3d axis = u.cross(cv::Vec3d(0.0, 0.0, 1.0));
   const double s = cv::norm(axis);
   if (!(s > 0.0)) {
@@ -104,7 +112,7 @@ core::Result<Problem> read_problem(const std::vector<TrackedTagView>& views,
                                    const TrackedWorldOptions& options) {
   const camera::Vec3d& up = options.up;
   if (!std::isfinite(up.x) || !std::isfinite(up.y) || !std::isfinite(up.z) ||
-      !(glm::length(up) > 0.0)) {
+      !(largest(up) > 0.0)) {
     return core::Status::invalid_argument(
         std::string(kWhat) + "options.up must be finite and not zero");
   }
@@ -324,6 +332,8 @@ Outcome evaluate(const Problem& p, const Parameters& x, double& energy,
 
 // The yaw and t by least squares on cv::LevMarq, from `x`. Empty, or why it
 // failed (a Numerical miss).
+// TODO: one home for this cv::LevMarq normal-equations driver, shared with
+// bundle_adjust.cpp's and world_tag.cpp's.
 std::string solve(const Problem& p, Parameters& x) {
   double energy = 0.0;
   if (evaluate(p, x, energy, nullptr, nullptr) != Outcome::Ok) {
@@ -432,8 +442,9 @@ core::Result<TrackedWorld> place(const std::vector<TrackedTagView>& views,
   if (p.stills.empty()) {
     return miss(TagMiss::NotSeen, {}, "no still saw the tag");
   }
-  Parameters x;
-  std::string why = seed_all(p, x);
+  Parameters seed;
+  std::string why = seed_all(p, seed);
+  Parameters x = seed;
   if (why.empty()) why = solve(p, x);
   if (!why.empty()) return miss(TagMiss::Numerical, {}, why);
 
@@ -444,8 +455,10 @@ core::Result<TrackedWorld> place(const std::vector<TrackedTagView>& views,
     return miss(TagMiss::CameraBelowTag, s.name,
                 "still " + still_name(s.name) + "'s camera is " +
                     number(0.0 - height) +
-                    " m below the tag's plane: the tag lies face down, or "
-                    "its corners are mirrored");
+                    " m below the tag's plane: are the stills' poses in "
+                    "sensor's camera axes (+z forward, +y down; "
+                    "cv_from_gl_camera for ARKit's), and is options.up the "
+                    "tracking world's up?");
   }
 
   TrackedTagFit fit;
@@ -463,6 +476,25 @@ core::Result<TrackedWorld> place(const std::vector<TrackedTagView>& views,
                 "the tag's corners fit the stills at " + number(fit.rms_px) +
                     " px RMS, above the " + number(kMaxTrackedRmsPx) +
                     " px a fit takes: a still's pose is off, or the tag "
+                    "moved between stills");
+  }
+  // The gate in metres: the pixels barely see a camera moved along its line
+  // of sight, which a still whose pose is off can pull the fit to.
+  double gap = 0.0;
+  const Still* farthest = nullptr;
+  for (const Still& s : p.stills) {
+    const double d = cv::norm(centre_at(s, x) - centre_at(s, seed));
+    if (farthest != nullptr && !(d > gap)) continue;
+    gap = d;
+    farthest = &s;
+  }
+  if (!(gap <= kMaxTrackedSeedGapM)) {
+    return miss(TagMiss::PoorFit, {},
+                "the fit places still " + still_name(farthest->name) +
+                    "'s camera " + number(gap) +
+                    " m from where the stills' median puts it, above the " +
+                    number(kMaxTrackedSeedGapM) +
+                    " m a fit takes: a still's pose is off, or the tag "
                     "moved between stills");
   }
   TrackedWorld found;
@@ -534,6 +566,17 @@ core::Result<camera::TrackedRegistration> register_tracked(
         }
         VKC_TRY(camera::validate_tracked_stills(stills).with_context(
             "register_tracked"));
+        std::set<std::string> images;
+        for (const camera::TrackedStill& s : stills.stills) {
+          images.insert(s.image);
+        }
+        for (const TrackedStillFit& s : found.fit->stills) {
+          if (images.count(s.still) == 0) {
+            return core::Status::invalid_argument(
+                kRegister + std::string("the fit's still ") +
+                still_name(s.still) + " is none of the stills' images");
+          }
+        }
         camera::TrackedRegistration reg;
         reg.sensor = stills.sensor;
         reg.session = stills.session;

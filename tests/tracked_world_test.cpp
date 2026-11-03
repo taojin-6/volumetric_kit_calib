@@ -125,11 +125,12 @@ double yaw_error_deg(const camera::Mat4d& fit, const camera::Mat4d& truth) {
 }
 
 // Noise-free corners through known poses: a camera 1.2 m out at 40 degrees,
-// one 2.2 m out at 55, and one face-on, the tracking world's up +y, +z or
-// +y three times over.
+// one 2.2 m out at 55, and one face-on, the tracking world's up +y, +z, or
+// either of a length whose square overflows or underflows.
 TEST(TrackedWorld, IsExactWithoutNoise) {
-  for (const camera::Vec3d& up : {kYUp, kZUp, camera::Vec3d(0.0, 3.0, 0.0)}) {
-    SCOPED_TRACE("up " + std::to_string(up.y) + ", " + std::to_string(up.z));
+  for (const camera::Vec3d& up : {kYUp, kZUp, camera::Vec3d(0.0, 1e300, 0.0),
+                                  camera::Vec3d(0.0, 0.0, 1e-170)}) {
+    SCOPED_TRACE(testing::Message() << "up " << up.y << ", " << up.z);
     const camera::Mat4d t = truth(up, 37.0, {0.4, -1.1, 0.8});
     const camera::Mat4d at[3] = {test::camera_over_tag(1.2, 40.0, 20.0, 15.0),
                                  test::camera_over_tag(2.2, 55.0, 200.0, -70.0),
@@ -148,10 +149,10 @@ TEST(TrackedWorld, IsExactWithoutNoise) {
     EXPECT_LT(yaw_error_deg(f.tracking_to_world, t), 1e-7);
     EXPECT_LT(glm::length(centre_of(f.tracking_to_world) - centre_of(t)), 1e-7);
     // The tracking world's up goes to +z.
-    EXPECT_LT(
-        glm::length(camera::Mat3d(f.tracking_to_world) * glm::normalize(up) -
-                    kZUp),
-        1e-12);
+    EXPECT_LT(glm::length(camera::Mat3d(f.tracking_to_world) *
+                              glm::normalize(up / (up.y + up.z)) -
+                          kZUp),
+              1e-12);
     EXPECT_LT(f.rms_px, 1e-6);
     EXPECT_LT(f.worst_px, 1e-6);
     EXPECT_EQ(f.edge_m, kEdge);
@@ -238,6 +239,7 @@ struct Errors {
   std::vector<double> rotation_deg;
   std::vector<double> camera_m;
   std::vector<double> rms_px;
+  int refused = 0;  // holds the seed-gap gate refused
 };
 
 // 300 holds of `c`: fx 1600 at 1920 x 1440, edge kEdge, corner noise 0.5 px,
@@ -294,7 +296,12 @@ Errors holds(const Case& c, std::uint64_t seed) {
     const core::Result<TrackedWorld> found = place(views);
     const TrackedWorld& w = test::value_of(found);
     if (!w.fit) {
-      ADD_FAILURE() << c.name << ", trial " << trial << ": " << w.reason;
+      if (w.miss == TagMiss::PoorFit &&
+          w.reason.find("stills' median") != std::string::npos) {
+        ++e.refused;
+      } else {
+        ADD_FAILURE() << c.name << ", trial " << trial << ": " << w.reason;
+      }
       continue;
     }
     const camera::Mat4d& fit = w.fit->tracking_to_world;
@@ -310,10 +317,11 @@ Errors holds(const Case& c, std::uint64_t seed) {
   return e;
 }
 
-// The pass bars: every hold fits (within kMaxTrackedRmsPx), yaw p95 within
-// 0.5 degrees, and the stills' own camera centres within 2 cm, or 5 cm from
-// 2 stills at 2.2 m or with gravity 0.65 degrees off the tag's z (the
-// tracker's basin), whose rotation is then that tilt, 0.65 +- 0.15 degrees.
+// The pass bars: every hold fits, but for at most 1 % the seed-gap gate
+// refuses; yaw p95 within 0.5 degrees, and the stills' own camera centres
+// within 2 cm, or 5 cm from 2 stills at 2.2 m or with gravity 0.65 degrees
+// off the tag's z (the tracker's basin), whose rotation is then that tilt,
+// 0.65 +- 0.15 degrees.
 TEST(TrackedWorld, MeetsThePassBarsOnNoisyHolds) {
   const Case cases[] = {
       {"1.2 m, 40 deg, 2 stills", 2, 1.2, 40.0, 0.0, 0.02},
@@ -327,16 +335,18 @@ TEST(TrackedWorld, MeetsThePassBarsOnNoisyHolds) {
   std::uint64_t seed = 0x5eed;
   for (const Case& c : cases) {
     const Errors e = holds(c, seed++);
-    ASSERT_EQ(e.yaw_deg.size(), 300u) << c.name;
+    EXPECT_LE(e.refused, 3) << c.name;
+    ASSERT_EQ(e.yaw_deg.size() + e.refused, 300u) << c.name;
     const double yaw = compute::quantile(e.yaw_deg, 0.95);
     const double cam = compute::quantile(e.camera_m, 0.95);
     const double rot_lo = compute::quantile(e.rotation_deg, 0.05);
     const double rot_hi = compute::quantile(e.rotation_deg, 0.95);
     std::printf(
         "%-26s yaw p95 %.3f deg, camera p95 %.1f mm, rotation "
-        "p5-p95 %.3f-%.3f deg, RMS p95 %.2f max %.2f px\n",
+        "p5-p95 %.3f-%.3f deg, RMS p95 %.2f max %.2f px, %d refused\n",
         c.name, yaw, 1000.0 * cam, rot_lo, rot_hi,
-        compute::quantile(e.rms_px, 0.95), compute::quantile(e.rms_px, 1.0));
+        compute::quantile(e.rms_px, 0.95), compute::quantile(e.rms_px, 1.0),
+        e.refused);
     EXPECT_LE(yaw, 0.5) << c.name;
     EXPECT_LE(cam, c.camera_bar_m) << c.name;
     if (c.tilt_deg > 0.0) {
@@ -367,8 +377,9 @@ TEST(TrackedWorld, SeesNoTagWithoutAStill) {
   EXPECT_EQ(w.sought.dictionary, kOriginTag.dictionary);
 }
 
-// A camera below the tag's plane, looking up at it, sees its corners
-// mirrored, as a tag lying face down shows them: the still is named.
+// A still's camera below the tag's plane is named: one looking up at the
+// tag, and ARKit's camera poses (+y up, -z forward) passed without
+// cv_from_gl_camera, which the reason asks about.
 TEST(TrackedWorld, NamesAStillBelowTheTag) {
   std::vector<TrackedTagView> views = hold(1, kTruth);
   views.push_back(posed("still_9.png",
@@ -379,10 +390,22 @@ TEST(TrackedWorld, NamesAStillBelowTheTag) {
   EXPECT_EQ(w.still, "still_9.png");
   EXPECT_NE(w.reason.find("still_9.png"), std::string::npos) << w.reason;
   EXPECT_NE(w.reason.find("below the tag's plane"), std::string::npos);
+
+  std::vector<TrackedTagView> gl = hold(2, kTruth);
+  for (TrackedTagView& v : gl) {
+    v.cam_to_tracking =
+        v.cam_to_tracking * camera::Mat4d(camera::Mat3d(
+                                1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0));
+  }
+  const TrackedWorld g = test::value_of(place(gl));
+  EXPECT_EQ(g.miss, TagMiss::CameraBelowTag) << g.reason;
+  EXPECT_NE(g.reason.find("cv_from_gl_camera"), std::string::npos) << g.reason;
 }
 
-// One still's pose moved 10 cm: no still is dropped, and the fit is refused
-// for its RMS.
+// No still is dropped: a fit is refused for its RMS (one still's pose moved
+// 10 cm from 1.2 m, or one still's corners mirrored), or for a camera the
+// fit puts far from where the stills' median does (one of 4 stills from
+// 2.2 m moved 3 cm, which fits at 8.0 px RMS with every camera 14 cm off).
 TEST(TrackedWorld, RefusesAPoorFit) {
   std::vector<TrackedTagView> views = hold(2, kTruth);
   views[1].cam_to_tracking[3].x += 0.10;
@@ -391,8 +414,31 @@ TEST(TrackedWorld, RefusesAPoorFit) {
   EXPECT_EQ(w.miss, TagMiss::PoorFit);
   EXPECT_NE(w.reason.find("px RMS"), std::string::npos) << w.reason;
   EXPECT_TRUE(w.still.empty());
+
+  views = hold(2, kTruth);
+  std::swap(views[1].marker.corners[1], views[1].marker.corners[3]);
+  const TrackedWorld mirrored = test::value_of(place(views));
+  EXPECT_EQ(mirrored.miss, TagMiss::PoorFit) << mirrored.reason;
+  EXPECT_NE(mirrored.reason.find("px RMS"), std::string::npos);
+
+  views.clear();
+  for (int i = 0; i < 4; ++i) {
+    views.push_back(
+        posed("still_" + std::to_string(i) + ".png",
+              test::camera_over_tag(2.2, 45.0, 25.0 + 2.0 * i, 10.0 - 1.0 * i),
+              kTruth));
+  }
+  views[3].cam_to_tracking[3].x += 0.03;
+  const TrackedWorld far = test::value_of(place(views));
+  EXPECT_FALSE(far.fit);
+  EXPECT_EQ(far.miss, TagMiss::PoorFit);
+  EXPECT_NE(far.reason.find("from where the stills' median puts it"),
+            std::string::npos)
+      << far.reason;
 }
 
+// What the seed cannot take is Numerical, naming the still: corners on a
+// line, and rays that meet the tag's plane on both sides of its camera.
 TEST(TrackedWorld, MissesCornersOnALine) {
   std::vector<TrackedTagView> views = hold(2, kTruth);
   std::array<camera::Vec2d, 4>& c = views[1].marker.corners;
@@ -401,6 +447,14 @@ TEST(TrackedWorld, MissesCornersOnALine) {
   EXPECT_FALSE(w.fit);
   EXPECT_EQ(w.miss, TagMiss::Numerical);
   EXPECT_NE(w.reason.find("still_1.png"), std::string::npos) << w.reason;
+
+  views = hold(2, kTruth);
+  views[1].marker.corners[0].x = -1e4;  // past its camera's horizon
+  views[1].marker.corners[1].x = -1e4;
+  const TrackedWorld sides = test::value_of(place(views));
+  EXPECT_EQ(sides.miss, TagMiss::Numerical) << sides.reason;
+  EXPECT_NE(sides.reason.find("still_1.png"), std::string::npos);
+  EXPECT_NE(sides.reason.find("both sides"), std::string::npos) << sides.reason;
 }
 
 TEST(TrackedWorld, RefusesWhatItCannotTake) {
@@ -515,6 +569,10 @@ TEST(RegisterTracked, RefusesAMissAndAnotherWorld) {
   camera::TrackedStills zero = stills;
   zero.session = {};
   refused(zero, kTagWorld, found, "session");
+  // A fit of another take's stills.
+  camera::TrackedStills other_take = stills;
+  other_take.stills[1].image = "other_take_7.png";
+  refused(other_take, kTagWorld, found, "\"still_1.png\"");
 }
 
 }  // namespace

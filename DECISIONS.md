@@ -131,6 +131,14 @@ sensor's registration file of it (`solve/tracked_world.hpp` has the method).
   why): each still carries the tracker's own pose error, which at 0.1° and
   2 mm a still fits a hold at up to about 9 px RMS from 1.2 m, where one
   still 10 cm off fits at 48 px or more.
+- **And a poor fit moves a camera over 3 cm from the stills' median**
+  (`kMaxTrackedSeedGapM`): from 2.2 m a still whose pose is a few cm off
+  pulls every camera 6–19 cm along its line of sight at under 12 px, since
+  range shows only in the tag's apparent size. On the bars' noise with
+  one still 3 cm off, the RMS gate alone let 28–41 % of holds from 2.2 m
+  out of the basin; with this gate 0–1 %, or 3 % with the tag 0.65° off
+  level, an error neither gate sees. Clean holds lose up to 1 % from
+  2.2 m, 3 % from 3 m.
 - **Misses are `TagMiss` values,** as the rig's tag world's are, with no
   `TagWorld`: the fit locates no corners.
 
