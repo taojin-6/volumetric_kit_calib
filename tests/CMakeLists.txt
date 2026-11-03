@@ -110,7 +110,7 @@ vc_add_test(detect_tag volumetric_kit::calib_detect vc_synthetic_rig)
 # at 4K through a fisheye truth, whole, cut and still, and the rig's ChArUco
 # board, full and half -- with the stillness and capture rule of a still
 # checkerboard; and, labelled slow, every scene, seed and state of its cases
-# (`detect_board.sweeps`, SB at 4K some 70 times) and its search times on 20
+# (`detect_board.sweeps`, about 20 s on an M5 Max) and its search times on 20
 # pictures (U1, `detect_board.timing`).
 vc_add_test(detect_board volumetric_kit::calib_quality
             volumetric_kit::calib_detect vc_synthetic_rig)
