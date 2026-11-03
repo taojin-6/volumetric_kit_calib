@@ -108,8 +108,8 @@ sensor::camera::CameraModel stand_in_lens(
 ///        3. for lenses, @ref stand_in_lens.
 ///
 /// For poses there is no stand-in, and a factory camera with a calibrated
-/// lens in @p file is refused: the runtime would read its factory lens and
-/// leave the file's unused.
+/// lens in @p file, at any size, is refused: the runtime would read its
+/// factory lens and leave the file's unused.
 /// @param mode       The mode.
 /// @param id         The camera's id, its key in @p file.
 /// @param size       Its pictures' size.
@@ -126,6 +126,41 @@ core::Result<RigLens> rig_lens(
     sensor::camera::ImageSize size,
     const std::optional<sensor::camera::CameraModel>& factory,
     const sensor::camera::ArrayCalibration* file, const std::string& file_path);
+
+/// @brief How a calibration file marks a camera's lens, from where it came
+///        from: what the solve carries into the file it writes
+///        (`solve::RigCamera::source`). A lens from @p file keeps @p file's
+///        mark (a pair's lenses from intrinsic mode stay `Calibrated`); any
+///        other is `Factory` (no pose session takes a stand-in).
+/// @param camera  The camera's record: its id, size and lens origin.
+/// @param file    The scenario's calibration file, which `rig_lens` took
+///                the lens from; null for none.
+/// @return The mark.
+///
+/// @code
+/// const auto mark = lens_source(camera, setup.calibration.get());
+/// rig.push_back({camera.id, lens, mark});
+/// @endcode
+sensor::camera::IntrinsicsSource lens_source(
+    const capture::SessionCamera& camera,
+    const sensor::camera::ArrayCalibration* file);
+
+/// @brief A camera's `lens` line in its panel (`viz::CameraLive::lens`): for
+///        poses, its lens's mark (@ref lens_source), then ` (file)` when the
+///        lens is @p file's, as `calibrated (file)`; for lenses none, as the
+///        Lenses panel says where each came from.
+/// @param mode    The mode.
+/// @param camera  The camera's record: its id, size and lens origin.
+/// @param file    The scenario's calibration file; null for none.
+/// @return The line's text, empty for none; or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(cameras[i].lens,
+///            lens_line(mode, setup.cameras[i], setup.calibration.get()));
+/// @endcode
+core::Result<std::string> lens_line(
+    capture::SessionMode mode, const capture::SessionCamera& camera,
+    const sensor::camera::ArrayCalibration* file);
 
 /// @brief Where a camera's lens fit starts besides OpenCV's own
 ///        (`solve::solve_lens`'s `start`): a real lens at @p size, the first
@@ -181,13 +216,15 @@ bool session_ready(capture::SessionMode mode,
                    const std::vector<quality::LensReadiness>& lenses) noexcept;
 
 /// @brief Sets calib_rig's parts to @p scenario's mode, the one place the
-///        window does: the capture worker's session (`setup.mode`, and the
-///        scenario's file as `setup.calibration`), the live view's capture
-///        rule (@ref capture_rule), the window's mode (`RigMode::intrinsic`),
-///        and the Board window's board and the boards it takes
-///        (@ref board_seed, @ref board_rule).
+///        window does: the capture worker's session (`setup.mode`, the
+///        scenario's file as `setup.calibration`, and its pairs and how their
+///        rows are checked, `setup.pairs` and `setup.pair_rows`), the live
+///        view's capture rule (@ref capture_rule), the window's mode
+///        (`RigMode::intrinsic`), and the Board window's board and the boards
+///        it takes (@ref board_seed, @ref board_rule).
 /// @param scenario  The scenario, checked (`check_scenario`).
-/// @param setup     The capture worker's setup: its mode and file are set.
+/// @param setup     The capture worker's setup: its mode, file and pairs are
+///                  set.
 /// @param live      The live worker's options: its rule is set.
 /// @param window    The window's mode: `intrinsic` is set.
 /// @return The Board window's editor; or `OutOfMemory`.

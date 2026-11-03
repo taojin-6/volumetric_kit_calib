@@ -61,12 +61,12 @@ core::Result<RigScenario> check_scenario(const core::config::Config& config) {
           "source.driver: \"" + scenario.driver +
           "\" is not one calib_rig opens (orbbec, decklink)");
     }
-    // TODO: a DeckLink pair's poses, with its rectified rows (A6).
-    if (scenario.driver == kDecklink &&
-        scenario.mode != capture::SessionMode::Intrinsics) {
-      return core::Status::invalid_argument(
-          "source.driver: decklink with operation calibrate: calib_rig fits a "
-          "DeckLink pair's lenses alone (operation calibrate_intrinsics)");
+    // A pair's rows at the size its runtime rectifies to, as core resolves
+    // it: FFS's for a DeckLink pair.
+    scenario.pairs = config.source.pairs;
+    if (!scenario.pairs.empty()) {
+      scenario.pair_rows.rectified = {config.source.depth_width,
+                                      config.source.depth_height};
     }
     std::error_code ec;
     if (!std::filesystem::is_directory(config.output.path, ec)) {

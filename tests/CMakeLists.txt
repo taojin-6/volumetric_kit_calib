@@ -303,13 +303,13 @@ if(TARGET calib_app)
   endif()
   if(TARGET volumetric_kit::sensor_decklink)
     # The DeckLink arm's options from a scenario: host-only, no card.
-    vc_add_test(app_decklink volumetric_kit::calib_app)
+    vc_add_test(app_decklink volumetric_kit::calib_app vc_test_support)
     vc_with_arm(app_decklink volumetric_kit::sensor_decklink)
   endif()
   # app: each mode's table -- the lens rule, a fit's start, the board, the
   # capture rule, Calibrate's gate, the window's parts -- and a stereo pair's
   # camera records, from host data.
-  vc_add_test(app_calib_mode volumetric_kit::calib_app)
+  vc_add_test(app_calib_mode volumetric_kit::calib_app vc_test_support)
   # app: intrinsic mode end to end, through a fake stereo pair of 960 x 540
   # pictures of the lab's checkerboard rendered through its fisheye (scaled), on
   # a device: the live view, the captures, the session, Calibrate's lens file;
@@ -320,6 +320,16 @@ if(TARGET calib_app)
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
   # About 15 s on an M5 Max: 400 renders and searches, 60 captures, one fit.
   set_tests_properties(app_intrinsic PROPERTIES TIMEOUT 300)
+  # app: extrinsic mode for a stereo pair end to end, on a device: a lens file
+  # as intrinsic mode writes it, then a fake pair's 960 x 540 pictures of the
+  # ChArUco board rendered through the lab's fisheye (scaled): the live view,
+  # the captures, the session, Calibrate's poses and the pair's rows; and the
+  # file's lenses a pose session takes or refuses.
+  vc_add_test(app_extrinsic volumetric_kit::calib_app vc_synthetic_rig
+              volumetric_kit::core_test_support)
+  target_include_directories(vc_app_extrinsic_test SYSTEM
+                             PRIVATE "${VC_JSON_INCLUDE_DIR}")
+  set_tests_properties(app_extrinsic PROPERTIES TIMEOUT 300)
   # app: Calibrate on the synthetic rig's detections, its results directories
   # read back with sensor's reader and nlohmann; its out-of-memory sweep.
   vc_add_test(app_calibrate volumetric_kit::calib_app vc_synthetic_rig)

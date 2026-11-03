@@ -122,6 +122,17 @@ struct PairRowCheck {
 /// @return `"pass"`, `"fail"`, `"insufficient"`, `"swapped"` or `"refused"`.
 VC_QUALITY_API const char* to_string(PairRowCheck::Verdict verdict) noexcept;
 
+/// @brief A cell's name, as the reasons write it.
+/// @param cell  The cell, row-major from the top left (0 to 8).
+/// @return `"top-left"`, `"top"`, `"top-right"`, `"left"`, `"centre"`,
+///         `"right"`, `"bottom-left"`, `"bottom"` or `"bottom-right"`;
+///         `"none"` for another number.
+///
+/// @code
+/// std::printf("worst in the view's %s\n", pair_row_cell_name(worst));
+/// @endcode
+VC_QUALITY_API const char* pair_row_cell_name(std::size_t cell) noexcept;
+
 /// @brief A pair's rows: every board corner both cameras saw in one capture,
 ///        through the pair's rectification, as Δy.
 ///

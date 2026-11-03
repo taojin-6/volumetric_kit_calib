@@ -421,7 +421,11 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
       out.ids.push_back(cam.id);
       gauge.push_back(*sensor->color_to_world);
     }
-    if (depth != nullptr) {
+    // The depth of the cameras with depth; a stereo pair has none to check.
+    const bool any_depth = std::any_of(
+        kept.sensors.begin(), kept.sensors.end(),
+        [](const capture::SessionCamera& s) { return s.depth.has_value(); });
+    if (depth != nullptr && any_depth) {
       // A throw from the progress (a stop) stops the run; what the checks
       // throw is their failure.
       std::exception_ptr stopped;
@@ -458,10 +462,18 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
       out.world.floor_boards = *std::move(floor);
     }
     out.world.origin = *std::move(origin);
+    // Each pair's rows through the file as the runtime reads it, named as
+    // the scenario names it.
+    for (const core::config::StereoPairConfig& pair : kept.pairs) {
+      core::Result<quality::PairRowCheck> rows = quality::check_pair_rows(
+          rig->calibration, pair.left, pair.right, *views, kept.pair_rows);
+      if (!rows.ok()) return in(rows.status());
+      out.pairs.push_back(*std::move(rows));
+    }
     core::Result<quality::ResultFiles> files = quality::format_results(
         kept.cameras, *solution, *metrics, out.depth ? &*out.depth : nullptr,
         out.depth_failure.ok() ? std::string() : out.depth_failure.message(),
-        out.world);
+        out.world, out.pairs);
     if (!files.ok()) return in(files.status());
     out.color_to_world = std::move(rig->color_to_world);
     out.boards_to_world = std::move(rig->boards_to_world);

@@ -34,10 +34,12 @@
 #include "volumetric_kit/calib/core/target.hpp"
 #include "volumetric_kit/calib/quality/lens_readiness.hpp"
 #include "volumetric_kit/calib/quality/live_checks.hpp"
+#include "volumetric_kit/calib/quality/pair_row_check.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/core/base/result.hpp"
+#include "volumetric_kit/core/config/config.hpp"
 #include "volumetric_kit/sensor/camera/array_calibration.hpp"
 #include "volumetric_kit/sensor/camera/camera_model.hpp"
 
@@ -79,6 +81,11 @@ struct CaptureSetup {
   /// none. A lens run's file carries its other cameras' lenses
   /// (`quality::format_lens_results`), and its lenses are fits' starts.
   std::shared_ptr<const sensor::camera::ArrayCalibration> calibration;
+  /// The stereo pairs whose rectified rows a pose session's Calibrate checks
+  /// (`RigScenario::pairs`); empty for none.
+  std::vector<core::config::StereoPairConfig> pairs;
+  /// How their rows are checked (`RigScenario::pair_rows`).
+  quality::PairRowCheckOptions pair_rows;
   std::string driver;  ///< What opened the cameras (`"orbbec"`).
   /// The rig's sync configuration file; empty for a rig without one.
   std::string sync_path;
@@ -159,9 +166,14 @@ struct KeptCaptures {
   /// The scenario's calibration file (`CaptureSetup::calibration`); null for
   /// none.
   std::shared_ptr<const sensor::camera::ArrayCalibration> calibration;
+  /// The stereo pairs whose rows Calibrate checks (`CaptureSetup::pairs`).
+  std::vector<core::config::StereoPairConfig> pairs;
+  /// How their rows are checked (`CaptureSetup::pair_rows`).
+  quality::PairRowCheckOptions pair_rows;
   Target board;  ///< The session's board, locked at its first capture.
   /// The rig's cameras, in rig order, as the session's checks take them:
-  /// each one's id and lens (`CaptureSetup::lenses`).
+  /// each one's id and lens (`CaptureSetup::lenses`), and how a calibration
+  /// file marks the lens (`lens_source`).
   std::vector<solve::RigCamera> cameras;
   /// Each camera's record, in rig order (`CaptureSetup::cameras`): its
   /// depth model and `depth_to_color` among them.

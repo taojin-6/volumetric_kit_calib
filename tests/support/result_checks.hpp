@@ -51,4 +51,17 @@ inline void expect_refused(const core::Status& status,
   EXPECT_NE(status.message().find(says), std::string::npos) << status.message();
 }
 
+/// @brief Expects @p status to be an error of @p code whose message says
+///        @p says, wherever in it.
+/// @param status  The status checked.
+/// @param code    The domain it must have.
+/// @param says    Text its message must contain.
+inline void expect_refused(const core::Status& status, core::Status::Code code,
+                           const std::string& says) {
+  EXPECT_FALSE(status.ok());
+  EXPECT_EQ(status.domain(), code) << status.message();
+  EXPECT_NE(status.message().find(says), std::string::npos)
+      << status.message() << " lacks " << says;
+}
+
 }  // namespace volumetric_kit::calib::test

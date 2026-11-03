@@ -106,6 +106,33 @@ solve, the second camera pair) assemble the brain, and a rule that shows in
 review costs little. Freezing everything would stall the app; an ABI promise
 means nothing for a library nobody installs.
 
+## 2026-11-02 — A DeckLink pair's poses
+
+calib_rig solves a DeckLink pair's poses (`operation` `calibrate`) as it
+solves the Femto rig's, the same solve and tag world, with what a stereo
+source adds:
+
+- **Lenses by `rig_lens`'s rule for poses** (the entry below), so a pair's
+  come from the scenario's file alone. A factory camera's calibrated lens
+  there is refused at any size, not only the stream's: the runtime reads the
+  factory lens whatever the file holds. Each lens keeps its file's mark
+  (`lens_source`, carried as `RigCamera::source`), so the pair's file still
+  says `calibrated`.
+- **Each of `source.pairs` checked** (`check_pair_rows`) on the anchored
+  file, named as the scenario names it, at `source.depth_width` x
+  `depth_height`, which core resolves to FFS's 960 x 544 for a DeckLink
+  pair: the size has one home. The verdict goes to `report.json`'s `pairs`
+  and the Calibration window; the file is written whatever it is, as a lens
+  that misses a gate is. `swapped` judges no rows. It says to name the left
+  camera first in `source.pairs`, here and in FuseDecklink's scenario, and
+  run the session again, when the cables are as in the lens session: lenses
+  and poses are keyed by id, so swapping the inputs would hand each id the
+  other camera's lens. If the cables moved since, each id's pictures already
+  come from the camera whose lens it does not hold, so the cables go back.
+  `insufficient` names where to capture.
+- **Depth is checked only for cameras with depth;** a pair has none, so its
+  report has no depth section.
+
 ## 2026-11-02 — Intrinsic mode
 
 calib_rig's mode is its scenario's `operation`: `calibrate_intrinsics` fits
@@ -115,11 +142,10 @@ the driver. `calib_app` needs core 0.40.0 (`VC_APP_CORE_MIN_VERSION`), the
 rest of calib still 0.29.0.
 
 - **Only what calib runs.** `check_scenario` takes those two operations, and
-  the drivers `orbbec` and, for lenses alone, `decklink`, each where the
-  build has its arm; anything else is refused, naming the field and its
-  value. Why: the core's config carries both from 0.40.0, and no scenario
-  may run another solve than it asks for. A DeckLink pair's poses wait for
-  the app to check its rectified rows.
+  the drivers `orbbec` and `decklink` (its poses from the entry above), each
+  where the build has its arm; anything else is refused, naming the field
+  and its value. Why: the core's config carries both from 0.40.0, and no
+  scenario may run another solve than it asks for.
 - **Each camera's live lens** (`rig_lens`): the scenario's file's
   (`source.calibration`) at exactly the stream's size, else the driver's
   factory lens, else, for lenses alone, a stand-in (fx = fy = width / 2,

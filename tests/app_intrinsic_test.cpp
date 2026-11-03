@@ -24,7 +24,6 @@
 #include <optional>
 #include <set>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -35,6 +34,7 @@
 #include "calibrate_worker_support.hpp"
 #include "detect_helpers.hpp"
 #include "fake_stereo.hpp"
+#include "live_pair.hpp"
 #include "scratch_dir.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/app/calib_mode.hpp"
@@ -58,21 +58,7 @@ using json = nlohmann::json;
 using Code = core::Status::Code;
 using test::ScratchDir;
 
-constexpr camera::ImageSize kSize{960, 540};
-constexpr std::uint64_t kStartNs = 1'760'000'000'000'000'000ull;
-constexpr std::uint64_t kPeriodNs = 33'333'333;  // 30 fps
-constexpr auto kPatience = std::chrono::seconds(30);
-
-// The lab's fisheye (test::FisheyeTruth's 4K defaults) at a quarter of its
-// size, pixel centres at integers.
-test::FisheyeTruth scaled_truth() {
-  test::FisheyeTruth truth;
-  truth.size = kSize;
-  truth.f /= 4.0;
-  truth.cx = (truth.cx + 0.5) / 4.0 - 0.5;
-  truth.cy = (truth.cy + 0.5) / 4.0 - 0.5;
-  return truth;
-}
+constexpr camera::ImageSize kSize{960, 540};  // test::quarter_fisheye()'s
 
 // The lab's checkerboard with 40 mm squares: at a quarter of 4K, half a 4K
 // picture's pixels a square, as near as the 20 mm board at half the distance.
@@ -168,39 +154,15 @@ class AppIntrinsic : public core::test::VulkanDeviceTest {
   core::DeviceRequirements requirements() const override {
     return sensor::device_requirements();
   }
-
-  // The next snapshot after number `after`; what the worker reports on the
-  // way fails the test.
-  static std::shared_ptr<const LiveSnapshot> next(LiveWorker& live,
-                                                  std::uint64_t after) {
-    const auto give_up = std::chrono::steady_clock::now() + kPatience;
-    while (std::chrono::steady_clock::now() < give_up) {
-      for (const core::Status& error : live.take_errors()) {
-        ADD_FAILURE() << error.message();
-      }
-      std::shared_ptr<const LiveSnapshot> s = live.take_snapshot();
-      if (s && s->number > after) return s;
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    ADD_FAILURE() << "no snapshot after " << after;
-    return nullptr;
-  }
-
-  // Waits until the rule is armed (it answers a set-less poll with Waiting).
-  static void wait_armed(const LiveWorker& live) {
-    const auto give_up = std::chrono::steady_clock::now() + kPatience;
-    while (live.decision().state != quality::CaptureState::Waiting) {
-      ASSERT_LT(std::chrono::steady_clock::now(), give_up);
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-  }
 };
 
 // The design's end to end: an intrinsic session through a stereo source gives
 // a lens file whose lens passes the gates; the camera short of views is
 // listed, not written.
 TEST_F(AppIntrinsic, ASessionGivesALensFileThatPassesItsGates) {
-  const test::FisheyeTruth truth = scaled_truth();
+  const test::FisheyeTruth truth = test::quarter_fisheye();
+  ASSERT_EQ(truth.size.width, kSize.width);
+  ASSERT_EQ(truth.size.height, kSize.height);
   const Target target = board_target();
   const compute::Board board = compute::Board::create(target).value();
   const std::vector<std::vector<std::uint8_t>> pictures =
@@ -265,22 +227,10 @@ TEST_F(AppIntrinsic, ASessionGivesALensFileThatPassesItsGates) {
 
   // The right camera sees the board in the first few captures alone.
   constexpr std::size_t kRightSees = 6;
-  std::uint64_t tick = 0;
-  std::uint64_t seen = 0;
-  const auto show = [&](std::size_t k) {
-    ++tick;
-    pair.push(test::host_pair(kSize.width, kSize.height, pictures[k],
-                              k < kRightSees ? pictures[k] : blank,
-                              kStartNs + tick * kPeriodNs, 2'400'000, tick));
-    std::shared_ptr<const LiveSnapshot> s = next(*live, seen);
-    if (s) seen = s->number;
-    return s;
-  };
+  test::StillPairs shown(pair, *live, kSize);
   for (std::size_t k = 0; k < pictures.size(); ++k) {
-    ASSERT_NE(show(k), nullptr);  // the board moved to its next place
-    ASSERT_TRUE(live->arm());
-    wait_armed(*live);
-    const std::shared_ptr<const LiveSnapshot> taken = show(k);  // held still
+    const std::shared_ptr<const LiveSnapshot> taken =
+        shown.capture(pictures[k], k < kRightSees ? pictures[k] : blank);
     ASSERT_NE(taken, nullptr);
     ASSERT_EQ(taken->decision.state, quality::CaptureState::Take)
         << "placement " << k << ": " << taken->decision.message;

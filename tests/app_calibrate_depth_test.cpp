@@ -463,6 +463,20 @@ TEST_F(CalibrateDepthTest, ACameraWithoutDepthIsInsufficient) {
   }
 }
 
+// A rig with no camera with depth -- a stereo pair -- has none checked, even
+// given the checks: no depth section, and no failure to name.
+TEST_F(CalibrateDepthTest, ARigWithoutDepthChecksNone) {
+  DepthCase scene;
+  scene.cameras = 2;
+  scene.placements = 8;
+  KeptCaptures kept = depth_captures(scene, "unwritten");
+  for (capture::SessionCamera& camera : kept.sensors) camera.depth.reset();
+  const CalibrateResult r = calibrated(kept);
+  EXPECT_FALSE(r.depth.has_value());
+  EXPECT_TRUE(r.depth_failure.ok()) << r.depth_failure.message();
+  EXPECT_TRUE(json::parse(r.files.report)["depth"].is_null());
+}
+
 // Each capture's frames are let go before the next is prepared, so the
 // preparations reuse their outputs: from the first capture checked to the
 // last, the device memory grows by less than one camera's prepared depth.

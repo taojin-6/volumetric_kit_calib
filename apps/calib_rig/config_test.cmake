@@ -89,8 +89,10 @@ expect_run(
   empty_sync "--config;empty_sync.json" FALSE stderr
   "source\\.sync_config: .*empty_rig\\.json: sync config: no \"devices\"")
 
-# What calib_rig runs, of what the core's config takes: a DeckLink pair's
-# lenses, not yet its poses; and a calibration file it can read.
+# What calib_rig runs, of what the core's config takes: a DeckLink pair's lenses
+# and poses, which a calib_rig without the DeckLink arm refuses, saying how to
+# build it (one with the arm would open the pair, so the case is not run there);
+# and a calibration file it can read.
 file(
   WRITE "${WORK_DIR}/decklink_poses.json"
   "{\"version\":1,\"operation\":\"calibrate\",\"source\":{\"kind\":\"live\","
@@ -98,8 +100,10 @@ file(
   "{\"id\":\"bm-2\",\"input\":\"SDI 1\"}],"
   "\"pairs\":[{\"left\":\"bm-1\",\"right\":\"bm-2\"}]},"
   "\"output\":{\"path\":\"sessions\"}}\n")
-expect_run(decklink_poses "--config;decklink_poses.json" FALSE stderr
-           "source\\.driver: decklink with operation calibrate")
+if(NOT DECKLINK_ARM)
+  expect_run(decklink_poses "--config;decklink_poses.json" FALSE stderr
+             "source\\.driver: decklink: this calib_rig was built without")
+endif()
 file(
   WRITE "${WORK_DIR}/missing_lenses.json"
   "{\"version\":1,\"operation\":\"calibrate_intrinsics\",\"source\":{"

@@ -13,8 +13,8 @@
 /// - `orbbec` (`VS_WITH_ORBBEC`): the rig's sync file, the Femto preset and
 ///   its check, and each camera's Orbbec facts;
 /// - `decklink` (`VS_WITH_DECKLINK`, Linux x86-64): the scenario's one pair
-///   of SDI inputs as sensor's `DecklinkStereo`, opened with no calibration,
-///   for its lenses (intrinsic mode).
+///   of SDI inputs as sensor's `DecklinkStereo`, opened with no calibration
+///   in either mode: calib picks the lenses itself.
 ///
 /// Each camera's lens is the mode's (`rig_lens`, calib_mode.hpp). Everything
 /// after the opener -- the workers, the session, the views -- reads the
@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "volumetric_kit/calib/capture/session_writer.hpp"
+#include "volumetric_kit/calib/quality/pair_row_check.hpp"
 #include "volumetric_kit/calib/source/rig_source.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/config/config.hpp"
@@ -57,6 +58,15 @@ struct RigScenario {
   /// `source.calibration`, read: the lenses the cameras start from; null
   /// for none.
   std::shared_ptr<const sensor::camera::ArrayCalibration> calibration;
+  /// The stereo pairs whose rectified rows a pose session's Calibrate
+  /// checks (`source.pairs`), each left then right as the runtime names
+  /// them; empty for a rig without.
+  std::vector<core::config::StereoPairConfig> pairs;
+  /// How their rows are checked (`quality::check_pair_rows`): at the size
+  /// the runtime rectifies them to, its stereo matcher's
+  /// (`source.depth_width` x `source.depth_height`, FFS's for a DeckLink
+  /// pair), with the gate's defaults; 0 x 0 with no pair.
+  quality::PairRowCheckOptions pair_rows;
 };
 
 /// @brief What calib_rig checks of its scenario before it opens a window or
@@ -64,8 +74,7 @@ struct RigScenario {
 ///        another solve than it asks for.
 ///
 /// 1. `operation` is `calibrate` or `calibrate_intrinsics`.
-/// 2. `source.driver` is `orbbec`, or `decklink` with `calibrate_intrinsics`
-///    (a DeckLink pair's poses are not solved yet), and this build has the
+/// 2. `source.driver` is `orbbec` or `decklink`, and this build has the
 ///    driver's arm.
 /// 3. `output.path` is an existing directory.
 /// 4. `source.calibration`, when given, reads as sensor's calibration file.
@@ -74,7 +83,8 @@ struct RigScenario {
 ///    cameras (`source.pairs`, `source.cameras`) as its driver takes them.
 /// @param config  The scenario, as `core::config::load` resolved it for
 ///                `Application::CalibRig`.
-/// @return The mode, the driver and the calibration file; `InvalidArgument`
+/// @return The mode, the driver, the calibration file and the pairs to
+///         check with their rectified size; `InvalidArgument`
 ///         naming the field and its value for an operation or a driver
 ///         calib_rig does not run, or a driver this build lacks, saying how
 ///         to build it; `NotFound` when `output.path` is not an existing

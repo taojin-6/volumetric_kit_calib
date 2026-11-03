@@ -800,6 +800,15 @@ camera::CameraModel FisheyeTruth::frame() const {
   return {size, {f, f, cx, cy}, {}};
 }
 
+FisheyeTruth quarter_fisheye() {
+  FisheyeTruth truth;
+  truth.size = {truth.size.width / 4, truth.size.height / 4};
+  truth.f /= 4.0;
+  truth.cx = (truth.cx + 0.5) / 4.0 - 0.5;
+  truth.cy = (truth.cy + 0.5) / 4.0 - 0.5;
+  return truth;
+}
+
 double curve_error_px(const camera::CameraModel& fit, const FisheyeTruth& truth,
                       double band_deg) {
   const compute::CvCamera cam = cv_lens(fit);

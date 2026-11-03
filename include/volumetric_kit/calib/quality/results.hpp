@@ -201,4 +201,15 @@ VC_QUALITY_API core::Result<ResultFiles> format_results(
     const std::string& depth_unchecked = {}, const ResultWorld& world = {},
     const std::vector<PairRowCheck>& pairs = {});
 
+/// @brief A lens's mark as the report's `lens_source` and calib_rig's camera
+///        panel name it.
+/// @param source  The mark.
+/// @return `"calibrated"` or `"factory"`.
+///
+/// @code
+/// show(to_string(rig_camera.source));
+/// @endcode
+VC_QUALITY_API const char* to_string(
+    sensor::camera::IntrinsicsSource source) noexcept;
+
 }  // namespace volumetric_kit::calib::quality

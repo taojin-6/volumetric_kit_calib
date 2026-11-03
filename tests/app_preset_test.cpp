@@ -15,6 +15,7 @@
 
 #include <gtest/gtest.h>
 
+#include "result_checks.hpp"
 #include "scratch_dir.hpp"
 #include "volumetric_kit/calib/app/calib_rig.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
@@ -25,6 +26,7 @@ namespace {
 
 namespace camera = sensor::camera;
 using Code = core::Status::Code;
+using test::expect_refused;
 using test::ScratchDir;
 
 camera::CameraModel model(std::uint32_t width, std::uint32_t height) {
@@ -63,13 +65,6 @@ std::vector<sensor::SensorInfo> rig(std::size_t cameras) {
   return infos;
 }
 
-void refused(const core::Status& status, Code code, const std::string& text) {
-  EXPECT_FALSE(status.ok());
-  EXPECT_EQ(status.domain(), code) << status.message();
-  EXPECT_NE(status.message().find(text), std::string::npos)
-      << status.message() << " lacks " << text;
-}
-
 TEST(AppPreset, NamesEachFemtoDepthModeAndItsRange) {
   struct Mode {
     std::uint32_t width, height;
@@ -88,10 +83,10 @@ TEST(AppPreset, NamesEachFemtoDepthModeAndItsRange) {
     EXPECT_EQ(mode->min_m, m.min_m) << m.name;
     EXPECT_EQ(mode->max_m, m.max_m) << m.name;
   }
-  refused(depth_mode({640, 480}).status(), Code::InvalidArgument,
-          "640x480 is not a depth mode");
-  refused(depth_mode({576, 640}).status(), Code::InvalidArgument,
-          "576x640 is not a depth mode");
+  expect_refused(depth_mode({640, 480}).status(), Code::InvalidArgument,
+                 "640x480 is not a depth mode");
+  expect_refused(depth_mode({576, 640}).status(), Code::InvalidArgument,
+                 "576x640 is not a depth mode");
 }
 
 TEST(AppPreset, TakesTheScenariosModes) {
@@ -132,8 +127,8 @@ TEST(AppPreset, RefusesADepthSizeWithNoMode) {
   core::config::Source source;
   source.depth_width = 800;
   source.depth_height = 600;
-  refused(rig_preset(source).status(), Code::InvalidArgument,
-          "source.depth_width/depth_height: 800x600");
+  expect_refused(rig_preset(source).status(), Code::InvalidArgument,
+                 "source.depth_width/depth_height: 800x600");
 }
 
 // `text` written to `name` in `dir`: its path.
@@ -192,39 +187,49 @@ TEST(AppPreset, RunsOnlyTheOperationsAndDriversItSupports) {
        {Operation::Fuse, Operation::Stream, Operation::Codec, Operation::View,
         Operation::Project}) {
     for (const char* driver : {"orbbec", "decklink"}) {
-      refused(check_scenario(scenario(dir, operation, driver)).status(),
-              Code::InvalidArgument,
-              "operation: " + std::to_string(static_cast<int>(operation)) +
-                  " is not one calib_rig runs (calibrate, "
-                  "calibrate_intrinsics)");
+      expect_refused(
+          check_scenario(scenario(dir, operation, driver)).status(),
+          Code::InvalidArgument,
+          "operation: " + std::to_string(static_cast<int>(operation)) +
+              " is not one calib_rig runs (calibrate, "
+              "calibrate_intrinsics)");
     }
   }
   for (const char* driver : {"", "realsense", "arkit", "Orbbec"}) {
     for (const Operation operation :
          {Operation::Calibrate, Operation::CalibrateIntrinsics}) {
-      refused(check_scenario(scenario(dir, operation, driver)).status(),
-              Code::InvalidArgument,
-              std::string("source.driver: \"") + driver +
-                  "\" is not one calib_rig opens (orbbec, decklink)");
+      expect_refused(check_scenario(scenario(dir, operation, driver)).status(),
+                     Code::InvalidArgument,
+                     std::string("source.driver: \"") + driver +
+                         "\" is not one calib_rig opens (orbbec, decklink)");
     }
   }
-  // A DeckLink pair's lenses, not yet its poses.
-  refused(
-      check_scenario(scenario(dir, Operation::Calibrate, "decklink")).status(),
-      Code::InvalidArgument,
-      "source.driver: decklink with operation calibrate: calib_rig fits "
-      "a DeckLink pair's lenses alone (operation calibrate_intrinsics)");
-  const core::Result<RigScenario> pair =
-      check_scenario(scenario(dir, Operation::CalibrateIntrinsics, "decklink"));
+  // A DeckLink pair's lenses and its poses, its pair's rows checked at the
+  // size its runtime rectifies to, the scenario's depth size (FFS's).
+  for (const Operation operation :
+       {Operation::Calibrate, Operation::CalibrateIntrinsics}) {
+    core::config::Config config = scenario(dir, operation, "decklink");
+    config.source.depth_width = 1024;  // not FFS's own, read as given
+    config.source.depth_height = 576;
+    const core::Result<RigScenario> pair = check_scenario(config);
 #if defined(VC_WITH_DECKLINK)
-  ASSERT_TRUE(pair.ok()) << pair.status().message();
-  EXPECT_EQ(pair->mode, capture::SessionMode::Intrinsics);
-  EXPECT_EQ(pair->driver, "decklink");
+    ASSERT_TRUE(pair.ok()) << pair.status().message();
+    EXPECT_EQ(pair->mode, operation == Operation::Calibrate
+                              ? capture::SessionMode::Extrinsics
+                              : capture::SessionMode::Intrinsics);
+    EXPECT_EQ(pair->driver, "decklink");
+    ASSERT_EQ(pair->pairs.size(), 1u);
+    EXPECT_EQ(pair->pairs[0].left, "bm-1");
+    EXPECT_EQ(pair->pairs[0].right, "bm-2");
+    EXPECT_EQ(pair->pair_rows.rectified.width, 1024u);
+    EXPECT_EQ(pair->pair_rows.rectified.height, 576u);
 #else
-  refused(pair.status(), Code::InvalidArgument,
-          "source.driver: decklink: this calib_rig was built without "
-          "sensor's DeckLink driver (configure with -DVS_WITH_DECKLINK=ON");
+    expect_refused(
+        pair.status(), Code::InvalidArgument,
+        "source.driver: decklink: this calib_rig was built without "
+        "sensor's DeckLink driver (configure with -DVS_WITH_DECKLINK=ON");
 #endif
+  }
   for (const Operation operation :
        {Operation::Calibrate, Operation::CalibrateIntrinsics}) {
     const core::Result<RigScenario> rig =
@@ -235,10 +240,13 @@ TEST(AppPreset, RunsOnlyTheOperationsAndDriversItSupports) {
                              ? capture::SessionMode::Extrinsics
                              : capture::SessionMode::Intrinsics);
     EXPECT_EQ(rig->driver, "orbbec");
+    // The Femto rig has no pair whose rows to check.
+    EXPECT_TRUE(rig->pairs.empty());
+    EXPECT_EQ(rig->pair_rows.rectified.width, 0u);
 #else
-    refused(rig.status(), Code::InvalidArgument,
-            "source.driver: orbbec: this calib_rig was built without "
-            "sensor's Orbbec driver");
+    expect_refused(rig.status(), Code::InvalidArgument,
+                   "source.driver: orbbec: this calib_rig was built without "
+                   "sensor's Orbbec driver");
 #endif
   }
 }
@@ -259,11 +267,11 @@ TEST(AppPreset, ReadsTheScenariosCalibrationFile) {
   ASSERT_TRUE(without.ok()) << without.status().message();
   EXPECT_EQ(without->calibration, nullptr);
   config.source.calibration = dir / "missing.json";
-  refused(check_scenario(config).status(), Code::NotFound,
-          "source.calibration: ");
+  expect_refused(check_scenario(config).status(), Code::NotFound,
+                 "source.calibration: ");
   config.source.calibration = write(dir, "bad.json", "{\"format\": 1}");
-  refused(check_scenario(config).status(), Code::InvalidArgument,
-          "source.calibration: ");
+  expect_refused(check_scenario(config).status(), Code::InvalidArgument,
+                 "source.calibration: ");
   sensor::camera::ArrayCalibration file;
   sensor::camera::SensorCalibration& bm1 = file.sensors.emplace_back();
   bm1.id = "bm-1";
@@ -288,7 +296,7 @@ TEST(AppPreset, ChecksTheScenarioBeforeOpeningAnything) {
   core::config::Config config =
       scenario(dir, core::config::Operation::Calibrate, "orbbec");
   config.output.path = dir / "no_such_directory";
-  refused(
+  expect_refused(
       check_scenario(config).status(), Code::NotFound,
       "output.path: " + config.output.path + " is not an existing directory");
 
@@ -301,21 +309,21 @@ TEST(AppPreset, ChecksTheScenarioBeforeOpeningAnything) {
 
   const std::string good = config.source.sync_config;
   config.source.sync_config = dir / "missing.json";
-  refused(check_scenario(config).status(), Code::NotFound,
-          "source.sync_config: ");
+  expect_refused(check_scenario(config).status(), Code::NotFound,
+                 "source.sync_config: ");
   config.source.sync_config =
       write(dir, "bad.json", R"({"devices": [{"sn": 1}]})");
-  refused(check_scenario(config).status(), Code::InvalidArgument,
-          "source.sync_config: ");
+  expect_refused(check_scenario(config).status(), Code::InvalidArgument,
+                 "source.sync_config: ");
   config.source.sync_config = write(dir, "empty.json", R"({"devices": []})");
-  refused(check_scenario(config).status(), Code::InvalidArgument,
-          "source.sync_config: " + config.source.sync_config +
-              ": sync config: no \"devices\" array");
+  expect_refused(check_scenario(config).status(), Code::InvalidArgument,
+                 "source.sync_config: " + config.source.sync_config +
+                     ": sync config: no \"devices\" array");
   config.source.sync_config = good;
   config.source.depth_width = 800;
   config.source.depth_height = 600;
-  refused(check_scenario(config).status(), Code::InvalidArgument,
-          "800x600 is not a depth mode");
+  expect_refused(check_scenario(config).status(), Code::InvalidArgument,
+                 "800x600 is not a depth mode");
 }
 #endif  // VC_WITH_ORBBEC
 
@@ -329,45 +337,46 @@ TEST(AppPreset, AcceptsARigOfAnySizeAtThePreset) {
 
 TEST(AppPreset, RefusesTheFirstCameraAtAnotherMode) {
   const RigPreset preset = femto_preset();
-  refused(check_preset({}, preset), Code::InvalidArgument, "no cameras");
+  expect_refused(check_preset({}, preset), Code::InvalidArgument, "no cameras");
 
   std::vector<sensor::SensorInfo> cameras = rig(3);
   cameras[1].color = model(1920, 1080);
-  refused(check_preset(cameras, preset), Code::Unsupported,
-          "camera CL2A141001 streams colour at 1920x1080, not the "
-          "scenario's 3840x2160");
+  expect_refused(check_preset(cameras, preset), Code::Unsupported,
+                 "camera CL2A141001 streams colour at 1920x1080, not the "
+                 "scenario's 3840x2160");
 
   cameras = rig(3);
   cameras[2].depth = model(320, 288);
-  refused(check_preset(cameras, preset), Code::Unsupported,
-          "camera CL2A141002 streams depth at 320x288, not the scenario's "
-          "640x576");
+  expect_refused(
+      check_preset(cameras, preset), Code::Unsupported,
+      "camera CL2A141002 streams depth at 320x288, not the scenario's "
+      "640x576");
 
   cameras = rig(4);
   cameras[3].fps = 15;
-  refused(check_preset(cameras, preset), Code::Unsupported,
-          "camera CL2A141003 streams at 15 fps, not the scenario's 25");
+  expect_refused(check_preset(cameras, preset), Code::Unsupported,
+                 "camera CL2A141003 streams at 15 fps, not the scenario's 25");
 
   cameras = rig(1);
   cameras[0].color.reset();
-  refused(check_preset(cameras, preset), Code::Unsupported,
-          "camera CL2A141000 has no colour camera");
+  expect_refused(check_preset(cameras, preset), Code::Unsupported,
+                 "camera CL2A141000 has no colour camera");
   cameras = rig(1);
   cameras[0].depth.reset();
-  refused(check_preset(cameras, preset), Code::Unsupported,
-          "camera CL2A141000 has no depth camera");
+  expect_refused(check_preset(cameras, preset), Code::Unsupported,
+                 "camera CL2A141000 has no depth camera");
   cameras = rig(2);
   cameras[1].id.clear();
   cameras[1].fps = 30;
-  refused(check_preset(cameras, preset), Code::Unsupported,
-          "camera 1 streams at 30 fps");
+  expect_refused(check_preset(cameras, preset), Code::Unsupported,
+                 "camera 1 streams at 30 fps");
 
   // The first fault is the one named.
   cameras = rig(3);
   cameras[0].fps = 30;
   cameras[2].color = model(1280, 720);
-  refused(check_preset(cameras, preset), Code::Unsupported,
-          "camera CL2A141000 streams at 30 fps");
+  expect_refused(check_preset(cameras, preset), Code::Unsupported,
+                 "camera CL2A141000 streams at 30 fps");
 }
 
 TEST(AppPreset, HoldsEachCameraToAScenariosOtherModes) {
@@ -376,9 +385,9 @@ TEST(AppPreset, HoldsEachCameraToAScenariosOtherModes) {
   preset.depth = {320, 288};
   preset.fps = 15;
   std::vector<sensor::SensorInfo> cameras = rig(2);
-  refused(check_preset(cameras, preset), Code::Unsupported,
-          "camera CL2A141000 streams colour at 3840x2160, not the "
-          "scenario's 1920x1080");
+  expect_refused(check_preset(cameras, preset), Code::Unsupported,
+                 "camera CL2A141000 streams colour at 3840x2160, not the "
+                 "scenario's 1920x1080");
   for (sensor::SensorInfo& info : cameras) {
     info.color = model(1920, 1080);
     info.depth = model(320, 288);

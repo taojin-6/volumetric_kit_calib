@@ -7,6 +7,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.6.0] - 2026-11-02
+
+### Added
+
+- **A DeckLink pair's poses** (DECISIONS.md, 2026-11-02): calib_rig's
+  extrinsic mode opens a DeckLink pair too. Calibrate checks each of the
+  scenario's pairs' rectified rows (`quality::check_pair_rows`) at its depth
+  size, FFS's, into `report.json`'s `pairs` and `CalibrateResult::pairs`;
+  `RigScenario`, `CaptureSetup` and `KeptCaptures` carry the pairs and
+  their options (`pairs`, `pair_rows`).
+- `viz::pair_rows_panel`: each pair's line in the Calibration window, its
+  verdict, the worst cell and the 95th percentile, and what to do when it
+  does not pass; `calibration_notices` posts the amber ones.
+- `app::lens_source`: how a calibration file marks a camera's lens.
+- In extrinsic mode each camera's panel ends with its lens, its mark and
+  whether the scenario's file gave it (`calibrated (file)`):
+  `app::lens_line`, `viz::CameraLive::lens`.
+- `quality::pair_row_cell_name`: a cell of a pair's rows by name.
+- `quality::to_string(sensor::camera::IntrinsicsSource)`: a lens's mark as
+  the report names it.
+
+### Changed
+
+- `check_scenario` runs `decklink` with `calibrate` as well as
+  `calibrate_intrinsics`.
+- Each camera's `RigCamera::source` is its lens's mark, so a lens from the
+  scenario's file stays `calibrated` in the file the solve writes; it was
+  `factory` for every camera.
+- For poses, a factory camera with a calibrated lens in the scenario's file
+  is refused at any size, not only at the stream's.
+- Calibrate checks depth only when some camera has depth.
+- calib's version is 0.6.0, where it was 0.5.0.
+
 ## [0.5.0] - 2026-11-02
 
 ### Added

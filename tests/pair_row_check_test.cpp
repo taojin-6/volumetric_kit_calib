@@ -766,5 +766,14 @@ TEST(PairRowCheck, NamesEachVerdict) {
   EXPECT_STREQ(to_string(Verdict::Refused), "refused");
 }
 
+// Each cell by the name the reasons give it, row-major from the top left.
+TEST(PairRowCheck, NamesEachCell) {
+  EXPECT_STREQ(pair_row_cell_name(0), "top-left");
+  EXPECT_STREQ(pair_row_cell_name(4), "centre");
+  EXPECT_STREQ(pair_row_cell_name(5), "right");
+  EXPECT_STREQ(pair_row_cell_name(8), "bottom-right");
+  EXPECT_STREQ(pair_row_cell_name(9), "none");
+}
+
 }  // namespace
 }  // namespace volumetric_kit::calib::quality

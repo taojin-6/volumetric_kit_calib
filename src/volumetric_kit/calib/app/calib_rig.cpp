@@ -272,7 +272,8 @@ capture::SessionMode session_of(const RigMode& mode) {
 // Everything a frame's UI reads.
 struct FrameInputs {
   const std::vector<std::string>* ids = nullptr;
-  const std::vector<std::string>* origins = nullptr;  // each lens's
+  const std::vector<std::string>* origins = nullptr;     // each lens's
+  const std::vector<std::string>* lens_lines = nullptr;  // each camera panel's
   capture::SessionMode session = capture::SessionMode::Extrinsics;
   viz::PanelOptions panel;  // the rule's thresholds as the source sets them
   std::optional<quality::SessionSummary> summary;
@@ -431,8 +432,7 @@ void rig_windows(const LiveSnapshot& snapshot, const viz::BoardEditor& editor,
 
   ImGui::SetNextWindowPos(ImVec2(10, 420), ImGuiCond_FirstUseEver);
   ImGui::Begin("Cameras");
-  const core::Result<std::vector<viz::CameraLive>> cameras =
-      camera_lives(snapshot);
+  core::Result<std::vector<viz::CameraLive>> cameras = camera_lives(snapshot);
   for (std::size_t i = 0; cameras.ok() && i < ids.size(); ++i) {
     if (!ImGui::CollapsingHeader(ids[i].c_str(),
                                  ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -441,8 +441,10 @@ void rig_windows(const LiveSnapshot& snapshot, const viz::BoardEditor& editor,
     const quality::CameraSummary none;
     const quality::CameraSummary& session =
         in.summary ? in.summary->cameras[i] : none;
-    const core::Result<std::vector<viz::PanelLine>> lines = viz::camera_panel(
-        cameras.value()[i], session, editor.board(), in.panel);
+    viz::CameraLive& camera = (*cameras)[i];
+    camera.lens = (*in.lens_lines)[i];
+    const core::Result<std::vector<viz::PanelLine>> lines =
+        viz::camera_panel(camera, session, editor.board(), in.panel);
     ImGui::PushID(static_cast<int>(i));
     if (lines.ok()) viz::draw_panel_lines("camera", lines.value());
     if (!snapshot.errors[i].ok()) {
@@ -794,8 +796,11 @@ core::Status show_result(const CalibrateResult& result,
       const std::vector<viz::PanelLine> depth,
       viz::depth_panel(result.ids, result.depth ? &*result.depth : nullptr,
                        result.depth_failure));
-  VKC_ASSIGN(const std::vector<viz::PanelLine> world,
+  VKC_ASSIGN(std::vector<viz::PanelLine> world,
              viz::world_panel(result.ids, result.reference, result.world));
+  VKC_ASSIGN(const std::vector<viz::PanelLine> rows,
+             viz::pair_rows_panel(result.pairs));
+  world.insert(world.end(), rows.begin(), rows.end());
   lines.insert(lines.end(), depth.begin(), depth.end());
   lines.insert(lines.end(), world.begin(), world.end());
   VKC_ASSIGN(const std::vector<std::string> said,
@@ -932,6 +937,11 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   RigMode mode;
   VKC_ASSIGN(viz::BoardEditor editor,
              apply_mode(scenario, setup, live_options, mode));
+  std::vector<std::string> lens_lines(camera_count);  // each camera panel's
+  for (std::size_t i = 0; i < camera_count; ++i) {
+    VKC_ASSIGN(lens_lines[i], lens_line(scenario.mode, setup.cameras[i],
+                                        setup.calibration.get()));
+  }
   // TODO: cap cv::setNumThreads once H4 measures the contention between
   // OpenCV, the SDK and the decode threads.
   VKC_ASSIGN(std::unique_ptr<CaptureWorker> captures,
@@ -1042,6 +1052,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     FrameInputs in;
     in.ids = &ids;
     in.origins = &origins;
+    in.lens_lines = &lens_lines;
     in.session = scenario.mode;
     in.panel.rule = live->rule_options();
     in.unresolved = captures->unresolved();
