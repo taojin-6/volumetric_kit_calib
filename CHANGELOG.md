@@ -25,9 +25,9 @@ release may break it, and each such entry says how to migrate
   fixed, ChArUco views of 8 corners as well as a checkerboard's;
   `quality::check_lens_residuals` takes any solve's residuals, and
   `quality::check_rig_lens` a camera's in a rig solve, whose shared board
-  poses show a lens error a view's own pose takes up: only its corners of
-  captures another camera kept corners of, and suspect too when a camera
-  sharing its boards reads suspect. `to_string(LensCheck::Verdict)`.
+  poses show a lens error a view's own pose takes up: the boards it alone
+  kept corners of left out, and suspect too when a camera sharing its boards
+  reads suspect. `to_string(LensCheck::Verdict)`.
 - `solve::pose_lens_views` (`solve/lens_poses.hpp`, outside the stable
   table): a camera's views posed through a lens held fixed, as `solve_lens`
   poses a held-out view, and each corner's residual.

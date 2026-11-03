@@ -935,6 +935,32 @@ TEST(CheckRigLens, BoardsOneCameraSawAloneAreLeftOut) {
   }
 }
 
+// Boards the solve dropped in every camera were posed by no camera alone:
+// their drops count against the share. Crafted: both cameras keep corners in
+// every part (captures 100 to 108), and the solve dropped captures 7 and 8 in
+// both.
+TEST(CheckRigLens, BoardsDroppedInEveryCameraCount) {
+  const std::vector<solve::RigCamera> cameras = {{"bm-1", lab_lens()},
+                                                 {"bm-2", lab_lens()}};
+  solve::RigSolution solution;
+  solution.world_to_camera.resize(2);
+  std::vector<solve::CornerResidual> seen = every_part();  // 54
+  for (const std::int64_t capture : {7, 8}) {
+    seen.push_back(corner(capture, 3700.0, 1000.0, 9.0, 0.0, true));
+  }
+  add_as(0, seen, solution);
+  add_as(1, seen, solution);
+  const LensCheck check = value_of(check_rig_lens("bm-1", cameras, solution));
+  EXPECT_EQ(check.unshared, 0u);
+  EXPECT_EQ(check.views, 11u);
+  EXPECT_EQ(check.dropped, 2u);
+  EXPECT_EQ(check.verdict, Verdict::Suspect);
+  EXPECT_TRUE(says(check,
+                   "2 of 56 corners were dropped by the solve or behind the "
+                   "camera, above 1%, from 2 views"))
+      << check.reason;
+}
+
 // Each camera judged at its own image's size: bm-2's half-size image bins its
 // corners on its own 8 x 6 grid and refuses one outside it.
 TEST(CheckRigLens, JudgesEachCameraAtItsOwnSize) {

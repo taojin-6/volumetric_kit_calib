@@ -151,8 +151,8 @@ struct LensCheck {
   /// solve, or behind the camera.
   std::size_t dropped = 0;
   /// @ref check_rig_lens alone: the camera's corners left out, kept or not,
-  /// of captures in which no other camera kept a corner, their board posed
-  /// by this camera alone; 0 otherwise.
+  /// of captures in which it kept corners and no other camera did, their
+  /// board posed by this camera alone; 0 otherwise.
   std::size_t unshared = 0;
   /// The corner bound (@ref solve::PosedLensViews::bound_px); not a number
   /// for a solve's residuals, whose own rule dropped its corners.
@@ -224,9 +224,10 @@ VC_QUALITY_API core::Result<LensCheck> check_lens_residuals(
 ///
 /// 1. **Shared captures.** The solve's cameras share each capture's board
 ///    pose, so a lens off shows in its residuals where a view's own pose
-///    would take it up. Only the camera's corners of captures in which
-///    another camera kept a corner are judged; the rest, their board posed
-///    by this camera alone, are counted in `unshared`.
+///    would take it up. The camera's corners of a capture in which it kept
+///    corners and no other camera did, its board posed by this camera alone,
+///    are left out and counted in `unshared`; a capture in which no camera
+///    kept a corner still counts its drops.
 /// 2. **Its own residuals,** as @ref check_lens_residuals judges them,
 ///    `Insufficient` asking for boards another camera sees too.
 /// 3. **Boards shared.** Two cameras that both kept corners of a capture

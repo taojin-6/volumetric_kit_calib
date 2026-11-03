@@ -274,9 +274,8 @@ core::Result<LensCheck> check_residuals(
 }
 
 // Each camera of a rig `cameras` checked on its own residuals in `solution`,
-// those of captures another camera kept a corner of, and which cameras it
-// shares boards with (both kept corners of a capture), each in the rig's
-// order.
+// but those of boards it alone kept corners of, and which cameras it shares
+// boards with (both kept corners of a capture), each in the rig's order.
 struct OwnChecks {
   std::vector<LensCheck> checks;
   std::vector<std::vector<bool>> shares;
@@ -318,7 +317,9 @@ core::Result<OwnChecks> own_checks(const std::vector<solve::RigCamera>& cameras,
       if (at != keepers.end()) {
         for (std::size_t b = 0; b < n; ++b) another |= b != c && at->second[b];
       }
-      if (another) {
+      // Kept by this camera alone: its board posed by it alone. Kept by none:
+      // the solve dropped it in every camera, and its drops count.
+      if (another || at == keepers.end()) {
         shared.push_back(r);
       } else {
         ++alone;
