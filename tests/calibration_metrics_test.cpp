@@ -842,8 +842,8 @@ TEST(LeaveOneOut, ReturnsWhatProgressThrows) {
 
 // The A/B tests' plans and draws: make_scene's 60 placements at 0.3 px of
 // noise, the rig's own level, each seed both the plan's and the noise's;
-// seeds 1 to 4, or to 16 in the sweep, DECISIONS.md's (test::sweep_size).
-std::uint32_t ab_seeds() { return test::sweep_size(4, 16); }
+// seeds 1 and 2, or 1 to 16 in the sweep, DECISIONS.md's (test::sweep_size).
+std::uint32_t ab_seeds() { return test::sweep_size(2, 16); }
 
 Scene ab_scene(std::uint32_t seed) { return make_scene(60, 0.3, seed, seed); }
 
