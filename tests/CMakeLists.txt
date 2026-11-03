@@ -338,6 +338,17 @@ if(TARGET calib_app)
   target_include_directories(vc_app_extrinsic_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
   set_tests_properties(app_extrinsic PROPERTIES TIMEOUT 300)
+  # app: one calib_rig, the mode chosen in it: a fake pair's lens session, its
+  # lenses taken, and the switch to a pose session with the cameras open, on a
+  # device; the lens runs listed, a lens file checked against the rig, the
+  # lenses that passed taken, and the Setup panel's lines, from host data.
+  vc_add_test(app_setup volumetric_kit::calib_app vc_synthetic_rig
+              volumetric_kit::core_test_support)
+  target_include_directories(vc_app_setup_test SYSTEM
+                             PRIVATE "${VC_JSON_INCLUDE_DIR}")
+  # About 25 s on an M5 Max: two sessions' renders and searches, two fits and a
+  # rig solve.
+  set_tests_properties(app_setup PROPERTIES TIMEOUT 300)
   # app: Calibrate on the synthetic rig's detections, its results directories
   # read back with sensor's reader and nlohmann; its out-of-memory sweep.
   vc_add_test(app_calibrate volumetric_kit::calib_app vc_synthetic_rig)

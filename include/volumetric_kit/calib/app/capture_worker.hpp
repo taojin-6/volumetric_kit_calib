@@ -15,10 +15,12 @@
 /// luma (`detect::detect_tag`, `kOriginTag`), and the capture queued on the
 /// capture tier's `SessionWriter`, which writes it on a thread of its own. The
 /// session's directory is created at the first capture, under the scenario's
-/// `output.path`. Captures and drops are carried out in the order they come,
-/// and each one's outcome is reported (@ref take_events), with the session's
-/// checks once it is written (@ref summary) and the captures kept for
-/// Calibrate (@ref kept).
+/// `output.path`, named for its time (`capture::session_stamp`), with `_2`,
+/// `_3`, ... after it when a session of that second is there. Captures, drops
+/// and restarts (the next session, @ref CaptureWorker::restart) are carried
+/// out in the order they come, and each capture's and drop's outcome is
+/// reported (@ref take_events), with the session's checks once it is written
+/// (@ref summary) and the captures kept for Calibrate (@ref kept).
 
 #include <cstddef>
 #include <cstdint>
@@ -72,7 +74,8 @@ capture::Software app_software();
 /// @endcode
 struct CaptureSetup {
   /// The existing directory each session's own directory
-  /// (`YYYY-MM-DD_HHMMSS`, `capture::session_stamp`) is created in.
+  /// (`YYYY-MM-DD_HHMMSS`, `capture::session_stamp`, with `_2`, `_3`, ...
+  /// after it when a session of that second is there) is created in.
   std::string root;
   capture::Software software;  ///< What the session was captured with.
   /// What the session calibrates: each camera's lens, or the rig's poses.
@@ -278,6 +281,29 @@ class CaptureWorker final : public CaptureSink {
   ///         `OutOfMemory`.
   core::Status drop_last();
 
+  /// @brief Close this session and start the next with @p setup, the cameras
+  ///        as they are: carried out in turn, after every capture and drop
+  ///        queued before it, which go to this session.
+  ///
+  /// The writer is flushed and closed, its captures staying on disk; the
+  /// summary, the lens readiness and the captures kept go empty; and the next
+  /// capture opens a new session directory under @p setup's root, in its
+  /// mode, with its lenses. Before the first capture there is nothing to
+  /// close.
+  /// @param setup  The next session's, as @ref create checks it, with the
+  ///               same cameras (ids, sizes, depth) and capacity.
+  /// @return OK once queued; `InvalidArgument` naming what @p setup gets
+  ///         wrong (@ref accepts); `IoError` once the thread has ended; or
+  ///         `OutOfMemory`.
+  core::Status restart(CaptureSetup setup);
+
+  /// @brief Whether @ref restart would take @p setup, checked as it checks
+  ///        it, so a caller can check before it changes anything else.
+  /// @param setup  The next session's.
+  /// @return OK; `InvalidArgument` naming what @p setup gets wrong; or
+  ///         `OutOfMemory`.
+  core::Status accepts(const CaptureSetup& setup) const;
+
   /// @brief Take the outcome of every capture and drop since the last call.
   /// @return One event per capture or drop, in the order they were made.
   std::vector<CaptureEvent> take_events();
@@ -304,8 +330,9 @@ class CaptureWorker final : public CaptureSink {
 
   /// @return The captures queued, being detected, or queued on the writer.
   std::size_t pending() const;
-  /// @brief The captures and drops not yet resolved: @ref pending, and each
-  ///        drop queued until its event.
+  /// @brief The captures, drops and restarts not yet resolved: @ref pending,
+  ///        each drop queued until its event, and each @ref restart until it
+  ///        is carried out.
   ///
   /// Read before @ref kept: once it is 0, a snapshot read after reflects
   /// every capture and drop made before.

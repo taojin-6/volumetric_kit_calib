@@ -22,6 +22,11 @@ inline std::string number(double v) {
   return text;
 }
 
+// Each direction of a solve::LensReach, as a message names it.
+inline constexpr const char* kReachToward[] = {
+    "top-left corner",     "top-right corner", "bottom-left corner",
+    "bottom-right corner", "left side",        "right side"};
+
 // The standard errors in a cell's limit for its `n` corners, at least 2:
 // Student's t for n - 1 degrees of freedom at the two-sided tail a normal's 3
 // leaves, 0.27%. Its distribution for whole degrees of freedom (Abramowitz and

@@ -80,6 +80,7 @@ core::Result<RigScenario> check_scenario(const core::config::Config& config) {
       scenario.calibration =
           std::make_shared<const sensor::camera::ArrayCalibration>(
               std::move(file).value());
+      scenario.calibration_path = config.source.calibration;
     }
     VKC_TRY(check_driver(config));
     return scenario;
@@ -113,13 +114,11 @@ core::Status add_stereo_camera(capture::SessionCamera camera,
                                const RigScenario& scenario,
                                const std::string& path, OpenedSource& opened) {
   return compute::guarded("add_stereo_camera", [&]() -> core::Status {
-    VKC_ASSIGN(const RigLens lens,
-               rig_lens(scenario.mode, camera.id, camera.size, std::nullopt,
-                        scenario.calibration.get(), path));
-    camera.lens = lens.origin;
-    if (lens.origin == capture::LensOrigin::File) camera.lens_file = path;
+    VKC_ASSIGN(
+        const sensor::camera::CameraModel lens,
+        take_lens(scenario.mode, scenario.calibration.get(), path, camera));
     opened.cameras.push_back(std::move(camera));
-    opened.lenses.push_back(lens.model);
+    opened.lenses.push_back(lens);
     return {};
   });
 }

@@ -26,6 +26,7 @@
 
 #include "result_checks.hpp"
 #include "synthetic_scene.hpp"
+#include "volumetric_kit/calib/quality/lens_check.hpp"
 #include "volumetric_kit/sensor/camera/array_calibration.hpp"
 
 namespace volumetric_kit::calib::quality {
@@ -210,7 +211,8 @@ TEST(Results, TheReportHasItsSchema) {
                 "format", "version", "settings", "solver", "tree",
                 "reprojection", "rejections", "transfer", "leave_one_out",
                 "covariance", "sensitivity", "principal_point_ab", "geometry",
-                "world", "depth", "depth_unchecked", "pairs"}));
+                "world", "depth", "depth_unchecked", "pairs", "lens_checks"}));
+  EXPECT_TRUE(doc["lens_checks"].is_null());  // no lens checked
   EXPECT_EQ(doc["format"], "volumetric_kit_calib.report");
   EXPECT_EQ(doc["version"], 2);
   EXPECT_TRUE(doc["depth"].is_null());  // not checked, nor asked to be
@@ -801,6 +803,59 @@ TEST(Results, RefusesAPairOfACameraTheRigDoesNotHave) {
             "format_results: the pair of \"" + p.left +
                 "\" and \"bm-9\" names camera \"bm-9\", which the rig does "
                 "not have");
+}
+
+// Each camera's lens checked on the solve, by id, in the report's
+// `lens_checks`; a check of a camera the rig lacks, or of one twice, refused.
+TEST(Results, TheReportHasItsLensChecksSection) {
+  const Solved& s = solved();
+  const std::vector<solve::RigCamera>& cams = s.scene.cameras;
+  std::vector<LensCheck> checks;
+  for (const solve::RigCamera& cam : cams) {
+    checks.push_back(value_of(check_rig_lens(cam.id, cams, s.solution)));
+  }
+  checks[0].reason = "";
+  checks[1].reason = "the RMS is 0.66 px, above 0.5 px";
+  core::Result<ResultFiles> files = ResultFiles{};
+  EXPECT_NO_THROW(files = format_results(cams, s.solution, s.metrics, nullptr,
+                                         {}, {}, {}, &checks));
+  const nlohmann::ordered_json doc =
+      nlohmann::ordered_json::parse(value_of(std::move(files)).report);
+  const nlohmann::ordered_json& written = doc["lens_checks"];
+  ASSERT_EQ(written.size(), cams.size());
+  for (std::size_t c = 0; c < cams.size(); ++c) {
+    SCOPED_TRACE(cams[c].id);
+    const nlohmann::ordered_json& one = written[cams[c].id];
+    EXPECT_EQ(keys_of(one),
+              (std::vector<std::string>{"verdict", "reason", "rms_px", "p95_px",
+                                        "views", "corners", "dropped",
+                                        "unshared", "reach"}));
+    EXPECT_EQ(one["verdict"], to_string(checks[c].verdict));
+    EXPECT_EQ(one["rms_px"].get<double>(), checks[c].rms_px);
+    EXPECT_EQ(one["corners"], checks[c].corners);
+    EXPECT_EQ(one["views"], checks[c].views);
+    EXPECT_EQ(keys_of(one["reach"]),
+              (std::vector<std::string>{"top_left", "top_right", "bottom_left",
+                                        "bottom_right", "left", "right"}));
+    EXPECT_EQ(one["reach"]["right"].get<double>(), checks[c].reach[5]);
+  }
+  EXPECT_TRUE(written[cams[0].id]["reason"].is_null());
+  EXPECT_EQ(written[cams[1].id]["reason"], "the RMS is 0.66 px, above 0.5 px");
+
+  std::vector<LensCheck> stranger = checks;
+  stranger[0].camera = "bm-9";
+  EXPECT_NO_THROW(files = format_results(cams, s.solution, s.metrics, nullptr,
+                                         {}, {}, {}, &stranger));
+  EXPECT_EQ(files.status().message(),
+            "format_results: the lens check of camera \"bm-9\", which the rig "
+            "does not have");
+  std::vector<LensCheck> twice = checks;
+  twice[1].camera = twice[0].camera;
+  EXPECT_NO_THROW(files = format_results(cams, s.solution, s.metrics, nullptr,
+                                         {}, {}, {}, &twice));
+  EXPECT_EQ(files.status().message(), "format_results: camera \"" +
+                                          checks[0].camera +
+                                          "\"'s lens is checked twice");
 }
 
 // A number not finite is null; a refused re-solve says why.

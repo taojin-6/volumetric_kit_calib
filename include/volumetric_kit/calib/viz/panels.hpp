@@ -9,8 +9,8 @@
 ///        origin tag they hold, how far each lens's views are, where a
 ///        capture stands, and the stage timings; and Calibrate's: how far it
 ///        has got, what its result and its depth checks are worth, where its
-///        world is, what each stereo pair's rows and each lens fitted are
-///        worth, and the notices it posts.
+///        world is, what each stereo pair's rows, each lens fitted and each
+///        lens checked on a pose solve are worth, and the notices it posts.
 ///
 /// Each panel is a model -- lines of text, each in a @ref Tone -- built from
 /// host data alone (the quality tier's checks and metrics, sensor's counters,
@@ -32,6 +32,7 @@
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
+#include "volumetric_kit/calib/quality/lens_check.hpp"
 #include "volumetric_kit/calib/quality/lens_gate.hpp"
 #include "volumetric_kit/calib/quality/lens_readiness.hpp"
 #include "volumetric_kit/calib/quality/pair_row_check.hpp"
@@ -529,6 +530,27 @@ core::Result<std::vector<PanelLine>> lens_results_panel(
     const std::vector<std::pair<std::string, std::string>>& unsolved,
     int number, const std::string& directory, std::size_t captures,
     double seconds);
+
+/// @brief The Lenses panel after a pose Calibrate: each camera's lens
+///        checked on the rig solve (`quality::check_rig_lens`), a warning
+///        that stops nothing (the pair rows stay the gate for depth).
+///
+/// One line per camera, `lens <id>`, `<verdict>: RMS <rms> px, p95 <p95>
+/// px`, a figure that is not a number shown as `-`, then:
+/// - `good` (green): nothing more;
+/// - `suspect` (amber): `: <the check's reason>; the lenses disagree: a lens
+///   session says which is off`, as a rig solve's residuals cannot;
+/// - `insufficient` (muted): `: <the check's reason>`, where to capture.
+/// @param checks  Each camera's check, in rig order.
+/// @return The lines; or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const std::vector<PanelLine> lines,
+///            lens_check_panel(result.lens_checks));
+/// draw_panel_lines("lens checks", lines);
+/// @endcode
+core::Result<std::vector<PanelLine>> lens_check_panel(
+    const std::vector<quality::LensCheck>& checks);
 
 /// @brief The live stages' timings as gfx's metrics panel takes them.
 /// @param stages  The stages timed (poll, readback, detect, tiles, ...).

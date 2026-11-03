@@ -14,9 +14,10 @@
 // other way round, the pair is Swapped, the panel saying how to name it, and
 // the file the same; from the centre's captures alone it is Insufficient, the
 // panel saying where to capture; a pair naming a camera the rig lacks fails
-// the run. And what the pose session refuses of the
-// file: a camera with no lens at the pictures' size, naming the file, never a
-// stand-in. The device part runs under the validation layer when the
+// the run; each lens is checked on the solve, in report.json. And what the
+// pose session makes of the file: a camera with no lens at the pictures' size
+// opens through the stand-in, its lens missing, and Calibrate waits for one,
+// naming the file. The device part runs under the validation layer when the
 // environment asks (VKC_TEST_VALIDATION) and skips without a device.
 
 #include <algorithm>
@@ -34,8 +35,8 @@
 #include <nlohmann/json.hpp>
 #include <opencv2/core.hpp>
 
-#include "detect_helpers.hpp"
 #include "fake_stereo.hpp"
+#include "lab_sessions.hpp"
 #include "live_pair.hpp"
 #include "result_checks.hpp"
 #include "scratch_dir.hpp"
@@ -98,70 +99,9 @@ std::string lens_file(const test::FisheyeTruth& truth, const fs::path& dir) {
   return path;
 }
 
-// The rig's ChArUco board at twice its size: at a quarter of 4K, its markers
-// as many pixels as the lab's board's at 4K from twice as far.
-Target pair_board() {
-  Target board = legacy_femto_board();
-  board.square_size_m *= 2.0;
-  board.marker_size_m *= 2.0;
-  return board;
-}
-
-// One placement of the board as both cameras of the pair picture it.
-struct Shown {
-  std::vector<std::uint8_t> left;
-  std::vector<std::uint8_t> right;
-};
-
-// A pose session's pictures, as a person covers the pair's shared view by
-// the runbook: the board's centre toward the middle of each of the 9 parts
-// of the left camera's view the rows are judged in -- the centre first, then
-// 35 degrees across and 22 up and down -- at 2.0 and 2.6 m, tilted 15 degrees
-// one way and the other about its x axis; kept where the live view finds the
-// board in both cameras' halves, and the capture in both full pictures.
-std::vector<Shown> pair_session_pictures(
-    const test::FisheyeTruth& truth,
-    const std::vector<test::SyntheticCamera>& pair,
-    const compute::Board& board) {
-  test::RenderOptions options;
-  options.ray = truth.pixel_to_ray();
-  const camera::Mat4d left_to_world =
-      camera::rigid_inverse(pair[0].world_to_camera);
-  std::vector<Shown> shown;
-  for (const double down : {0.0, -22.0, 22.0}) {
-    for (const double across : {0.0, -35.0, 35.0}) {
-      for (const double distance : {2.0, 2.6}) {
-        for (const double tilt : {-15.0, 15.0}) {
-          const double tx = std::tan(across * kDeg);
-          const double ty = std::tan(down * kDeg);
-          const camera::Mat4d board_to_world =
-              left_to_world *
-              test::facing(board, std::atan(std::hypot(tx, ty)) / kDeg,
-                           std::atan2(ty, tx) / kDeg, distance, 0.0, tilt);
-          Shown placed;
-          bool seen = true;
-          for (std::size_t c = 0; c < 2 && seen; ++c) {
-            const cv::Mat picture = test::render_board(
-                truth.frame(), pair[c].world_to_camera * board_to_world, board,
-                options);
-            const cv::Mat half = test::halved(picture);
-            const detect::LumaView half_view = test::luma(half);
-            const core::Result<Detection> live =
-                detect::detect_board(test::luma(picture), board, {&half_view});
-            const core::Result<Detection> full =
-                detect::detect_board(test::luma(picture), board);
-            seen = live.ok() && full.ok() && live->observation.size() >= 6 &&
-                   full->observation.size() >= 6;
-            (c == 0 ? placed.left : placed.right)
-                .assign(picture.data, picture.data + picture.total());
-          }
-          if (seen) shown.push_back(std::move(placed));
-        }
-      }
-    }
-  }
-  return shown;
-}
+using test::pair_session_pictures;
+using Shown = test::ShownPair;
+Target pair_board() { return test::lab_pose_board(); }
 
 // How far a solved pose is from the truth: the translation (mm) and the
 // rotation (degrees) of the one to the other.
@@ -345,6 +285,18 @@ TEST_F(AppExtrinsic, APairsSessionGivesItsPosesAndRows) {
   ASSERT_EQ(report["pairs"].size(), 1u);
   EXPECT_EQ(report["pairs"][0]["verdict"], "pass");
   EXPECT_TRUE(report["depth"].is_null());
+  // Each lens checked on the solve, in rig order and in the report.
+  ASSERT_EQ(result->lens_checks.size(), 2u);
+  for (std::size_t c = 0; c < 2; ++c) {
+    const quality::LensCheck& check = result->lens_checks[c];
+    EXPECT_EQ(check.camera, pair[c].id);
+    std::printf("lens check %s: %s, RMS %.3f px: %s\n", check.camera.c_str(),
+                quality::to_string(check.verdict), check.rms_px,
+                check.reason.c_str());
+    const json& written = report["lens_checks"][check.camera];
+    EXPECT_EQ(written["verdict"], quality::to_string(check.verdict));
+    EXPECT_EQ(written["corners"], check.corners);
+  }
   const json session =
       json::parse(test::read(fs::path(kept->directory) / "session.json"));
   EXPECT_EQ(session["mode"], "extrinsics");
@@ -411,8 +363,8 @@ TEST_F(AppExtrinsic, APairsSessionGivesItsPosesAndRows) {
 
 // A pose session's lenses come from the scenario's file alone: at the
 // pictures' size, each keeps the file's mark; a camera the file lacks, or
-// has at another size only, stops the run, naming the file, for there is no
-// stand-in for poses.
+// has at another size only, opens through the stand-in, its lens missing,
+// and Calibrate waits for one, naming the file.
 TEST(AppExtrinsicLenses, ComeFromTheScenariosFileAlone) {
   const ScratchDir dir;
   camera::ArrayCalibration lenses;
@@ -449,13 +401,32 @@ TEST(AppExtrinsicLenses, ComeFromTheScenariosFileAlone) {
             camera::IntrinsicsSource::Calibrated);
   for (const char* id : {"bm-2", "bm-3"}) {
     SCOPED_TRACE(id);
-    test::expect_refused(
-        add_stereo_camera(camera_of(id), scenario, path, opened),
-        Code::InvalidArgument,
-        std::string(id) + " has no lens at 960x540 in " + path +
-            ": run intrinsic mode");
+    ASSERT_TRUE(add_stereo_camera(camera_of(id), scenario, path, opened).ok());
+    EXPECT_EQ(opened.cameras.back().lens, capture::LensOrigin::StandIn);
+    EXPECT_EQ(lens_status(capture::SessionMode::Extrinsics,
+                          opened.cameras.back(), scenario.calibration.get()),
+              LensStatus::Missing);
   }
-  EXPECT_EQ(opened.cameras.size(), 1u);
+  ASSERT_EQ(opened.cameras.size(), 3u);
+  const std::vector<LensStatus> statuses =
+      lens_statuses(capture::SessionMode::Extrinsics, opened.cameras,
+                    scenario.calibration.get())
+          .value();
+  quality::SessionSummary linked;
+  linked.ready = true;
+  linked.cameras.resize(3);
+  EXPECT_FALSE(
+      session_ready(capture::SessionMode::Extrinsics, linked, {}, statuses));
+  const std::vector<NotReady> why =
+      calibrate_blockers(capture::SessionMode::Extrinsics, opened.cameras,
+                         statuses, path, linked, {}, {})
+          .value();
+  ASSERT_EQ(why.size(), 2u);
+  EXPECT_EQ(why[0].camera, "bm-2");
+  EXPECT_EQ(why[1].camera, "bm-3");
+  EXPECT_EQ(why[1].why, "no lens at 960x540 in " + path +
+                            ": load a lens file in Setup, or fit it in Lenses "
+                            "mode");
 }
 
 }  // namespace

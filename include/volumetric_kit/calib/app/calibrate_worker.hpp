@@ -35,6 +35,7 @@
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
+#include "volumetric_kit/calib/quality/lens_check.hpp"
 #include "volumetric_kit/calib/quality/lens_gate.hpp"
 #include "volumetric_kit/calib/quality/pair_row_check.hpp"
 #include "volumetric_kit/calib/quality/results.hpp"
@@ -156,6 +157,10 @@ struct CalibrateResult {
   /// Each stereo pair's rectified rows (`quality::check_pair_rows`), in
   /// `KeptCaptures::pairs`' order; empty for a rig without pairs.
   std::vector<quality::PairRowCheck> pairs;
+  /// Each camera's lens checked on the adjustment's residuals
+  /// (`quality::check_rig_lens`), in rig order: a warning, which stops
+  /// nothing.
+  std::vector<quality::LensCheck> lens_checks;
   quality::ResultFiles files;  ///< The results files' text.
   /// How long the solve, the metrics and the depth checks took.
   double seconds = 0.0;
@@ -171,26 +176,36 @@ class CalibrateDepth;
 /// `solve::bundle_adjust` (its defaults) and `quality::calibration_metrics`
 /// (both options, so the report records them); every camera's origin tag in
 /// every kept capture to `solve::origin_tag_frame` (`kOriginTag`, its
-/// defaults); then, given @p depth and a camera with depth, the depth checks
-/// of every kept capture's raw depth (@ref CalibrateDepth); then
-/// `solve::anchor_rig` and, in a tag world, `quality::floor_boards`; then
-/// each of `kept.pairs` through `quality::check_pair_rows` on the anchored
-/// file, with `kept.pair_rows`; and `quality::format_results`, the pairs
-/// among it. A failure of the depth checks fails nothing else: the result is
-/// formatted without them, naming it (@ref CalibrateResult::depth_failure).
-/// A pair's verdict, whatever it is, fails nothing either: the file is
-/// written, and the report and the panel say what the rows did.
+/// defaults); each camera's lens is checked on the adjustment's residuals
+/// (`quality::check_rig_lens`, its defaults; a check it refuses for its
+/// inputs is insufficient, its reason `not checked: ` and why); then, given
+/// @p depth and a
+/// camera with depth, the depth checks of every kept capture's raw depth
+/// (@ref CalibrateDepth); then `solve::anchor_rig` and, in a tag world,
+/// `quality::floor_boards`; then each of `kept.pairs` through
+/// `quality::check_pair_rows` on the anchored file, with `kept.pair_rows`;
+/// and `quality::format_results`, the pairs and the lens checks among it. A
+/// failure of the depth checks fails nothing else: the result is formatted
+/// without them, naming it (@ref CalibrateResult::depth_failure). A pair's
+/// verdict or a lens check's, whatever it is, fails nothing either: the file
+/// is written, and the report and the panels say what they found.
 ///
 /// An intrinsic session (`kept.mode`) fits lenses instead, with no depth:
 /// each camera ready by `lens_states` is fitted by `solve::solve_lens`
 /// (its defaults), from OpenCV's own start and `lens_start`'s, and judged by
-/// `quality::judge_lens`; a camera not ready, or whose fit fails for too few
-/// views or no finite fit, is listed unsolved, with why; a camera with a
-/// factory lens is fitted for the report alone. Then
+/// `quality::judge_lens`, every ready camera at once in one OpenCV loop over
+/// them (progress says none, then all). When no other OpenCV loop runs as
+/// they start (calib_rig pauses its live search first,
+/// `LiveWorker::pause_search`), each fit's own loops run on its thread, and
+/// the result is the one fitting them in turn on one thread gives, whatever
+/// the cores; otherwise they run in turn, each fit's loops on OpenCV's
+/// threads. A camera not ready, or whose fit fails for too few views or no
+/// finite fit, is listed unsolved, with why; a camera with a factory lens is
+/// fitted for the report alone. Then
 /// `quality::format_lens_results`, over the scenario's file
-/// (`kept.calibration`). Thread-free: it runs on the calling thread and holds
-/// no state between calls, so the same snapshot gives the same result, but
-/// for the times.
+/// (`kept.calibration`). It runs on the calling thread, but for the lens fits,
+/// and holds no state between calls, so the same snapshot gives the same
+/// result, but for the times.
 /// @param kept      The captures and what they were taken with.
 /// @param progress  Called as the run moves on (@ref CalibrateCallback); may
 ///                  be empty. To stop the run it throws: the run then returns
@@ -298,6 +313,25 @@ core::Result<std::string> results_directory(
     const std::string& session, int number,
     std::chrono::system_clock::time_point stamp);
 
+/// @brief A results directory's name read back: what @ref results_directory
+///        makes it of.
+struct ResultsName {
+  int number = -1;    ///< `RRR`.
+  std::string stamp;  ///< What follows `RRR_`: when Calibrate was pressed.
+};
+
+/// @brief @p name's parts, as @ref results_directory names a directory.
+/// @param name  A directory's name.
+/// @return Its number and stamp; empty for a name that is not three digits,
+///         `_` and a stamp.
+///
+/// @code
+/// if (const std::optional<ResultsName> run = results_name(entry)) {
+///   next = std::max(next, run->number + 1);
+/// }
+/// @endcode
+std::optional<ResultsName> results_name(const std::string& name);
+
 /// @brief Writes one whole results file; by default the core's
 ///        `write_file(path, bytes, WriteMode::CreateNew)`.
 using ResultSink = std::function<core::Status(const std::string& path,
@@ -355,8 +389,8 @@ core::Result<WrittenResults> write_results(
 /// without them (@ref CalibrateResult::depth_failure). A refusal, a solve
 /// failure or a cancel writes nothing; a write failure may leave its
 /// numbered directory without a calibration file (@ref write_results), and
-/// that number is not used again. The numbers go up from 0, one per
-/// directory made.
+/// that number is not used again. Each session's numbers go up from 0, one
+/// per directory made.
 ///
 /// @warning The device and allocator of its depth checks, which it owns,
 ///          must outlive the worker.

@@ -239,13 +239,10 @@ core::Status measure_reach(
 
 // The reach gate: fills `failed` for each direction short of `min_reach`.
 void judge_reach(const LensGateOptions& options, LensVerdict& out) {
-  static constexpr std::array<const char*, 6> kToward = {
-      "top-left corner",     "top-right corner", "bottom-left corner",
-      "bottom-right corner", "left side",        "right side"};
-  for (std::size_t d = 0; d < kToward.size(); ++d) {
+  for (std::size_t d = 0; d < out.reach.size(); ++d) {
     if (out.reach[d] >= options.min_reach) continue;
     out.failed.push_back("the fitted corners reach " + number(out.reach[d]) +
-                         " of the way toward the " + kToward[d] +
+                         " of the way toward the " + detail::kReachToward[d] +
                          ", short of " + number(options.min_reach));
   }
 }

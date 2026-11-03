@@ -7,6 +7,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.8.0] - 2026-11-03
+
+### Added
+
+- **One calib_rig, the mode chosen in it** (DECISIONS.md, 2026-11-03): a
+  Setup panel picks Lenses or Poses and the lens file, from the lens runs
+  under `output.path` (newest first, each camera's pass or fail) or a typed
+  path; a switch after captures closes the session, asking first, its
+  captures on disk, and the next capture opens a new one, the cameras left
+  open (`app/rig_setup.hpp`: `switch_session`, `read_lens_run`,
+  `find_lens_results`, `lens_result_label`, `load_lens_file`,
+  `lens_run_file`, `setup_lines`, `LensResult`, `LensFile`). A lens run,
+  picked or by "Use these lenses", gives the next session its lenses that
+  passed and those it carried, never one that failed.
+- `LiveWorker::restart`, `CaptureWorker::restart` and
+  `CaptureWorker::accepts`: the next session on the same source;
+  `LiveWorker::pause_search`, the live search paused while Calibrate runs
+  (`search_paused`), its pictures still shown, a pause waiting out the set
+  being searched.
+- `app::LensStatus`, `lens_status`, `lens_statuses` and `take_lens`: where
+  each camera's lens comes from (calibrated, factory, stand-in, missing).
+- `app::calibrate_blockers` and `NotReady`: why Calibrate is held back, per
+  camera, which the Calibration window says when it is pressed so; a run
+  that ends with no result says why there too.
+- `app::capture_refusal`: a pose capture is refused while a camera's lens is
+  missing, naming it.
+- A pose Calibrate checks each lens on its solve (`quality::check_rig_lens`):
+  `CalibrateResult::lens_checks`, the Lenses panel (`viz::lens_check_panel`)
+  and `report.json`'s `lens_checks`, from `quality::format_results`' new
+  trailing `lens_checks` (null, the default, for none); a check refused for
+  its inputs reads insufficient, `not checked: ...`.
+- `quality::kReportFormat`, the report's `format`; `app::results_name` and
+  `ResultsName`, a results directory's name read back.
+- `RigScenario::calibration_path`.
+
+### Changed
+
+- For poses a camera with no lens takes the stand-in and Calibrate waits
+  for a real lens; it stopped the run (`rig_lens`, `session_ready` with each
+  camera's `LensStatus`).
+- A lens Calibrate fits the ready cameras at once, calib_rig pausing its
+  live search first: when no other OpenCV loop runs as they start, each
+  fit's own loops run on its thread, and the files are fitting them in turn
+  on one thread's, whatever the cores.
+- Calibrate's button is pressable while held back; the gate's reasons say
+  to press C to see why, and a capture, drop or switch under way holds it
+  back.
+- `CalibrateWorker` numbers each session's results from 0.
+- `LensReadiness::unmet` names each direction short of the reach, with its
+  reach: `reach 0.83 toward the top-left corner, needs 0.9: capture there`.
+- `LiveWorker::rule_options` returns a copy.
+- A session directory made within the same second as another takes `_2`,
+  `_3`, ... after its stamp.
+- calib's version is 0.8.0, where it was 0.7.0.
+
 ## [0.7.0] - 2026-11-02
 
 ### Added

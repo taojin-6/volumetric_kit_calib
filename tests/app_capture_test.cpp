@@ -44,7 +44,9 @@
 #include <opencv2/core/parallel/parallel_backend.hpp>
 
 #include "allocation_failure.hpp"
+#include "calibrate_worker_support.hpp"
 #include "fake_sensor.hpp"
+#include "result_checks.hpp"
 #include "scratch_dir.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/app/live_view.hpp"
@@ -404,6 +406,94 @@ TEST(AppCapture, WritesEachCaptureDetectedAtFullResolution) {
   for (const quality::CameraSummary& cam : summary->cameras) {
     EXPECT_EQ(cam.usable_views, 1);
   }
+}
+
+// A restart closes the session after what was queued before it, its captures
+// on disk, and the next capture opens a new session in the next setup's mode:
+// another directory, beside it even within the same second. The next session
+// keeps the cameras; one of other cameras or capacity is refused.
+TEST(AppCapture, ARestartClosesTheSessionAndOpensTheNext) {
+  ScratchDir root;
+  const CaptureSetup poses = setup(root.path(), 2);
+  std::unique_ptr<CaptureWorker> worker = make(poses);
+  ASSERT_NE(worker, nullptr);
+  ASSERT_TRUE(submit(*worker, request(2, 0.0, 0)));
+  worker->flush();
+  const fs::path first = worker->directory();
+  ASSERT_FALSE(first.empty());
+
+  // Queued after a capture and before another: the first goes to this
+  // session, the second to the next.
+  CaptureSetup lenses = poses;
+  lenses.mode = capture::SessionMode::Intrinsics;
+  ASSERT_TRUE(submit(*worker, request(2, 0.0, 1)));
+  ASSERT_TRUE(worker->restart(lenses).ok());
+  EXPECT_GE(worker->unresolved(), 2u);  // the capture and the restart
+  ASSERT_TRUE(submit(*worker, request(2, 0.0, 2)));
+  worker->flush();
+  EXPECT_TRUE(worker->take_errors().empty());
+  const std::vector<CaptureEvent> events = worker->take_events();
+  ASSERT_EQ(events.size(), 3u);
+  for (const CaptureEvent& event : events) {
+    EXPECT_EQ(event.kind, CaptureEvent::Kind::Saved) << event.status.message();
+  }
+  EXPECT_EQ(events[1].meta.index, 1);
+  EXPECT_EQ(events[2].meta.index, 0);  // the next session's first
+
+  const fs::path next = worker->directory();
+  ASSERT_FALSE(next.empty());
+  EXPECT_NE(next, first);
+  EXPECT_EQ(next.parent_path(), root.path());
+  EXPECT_TRUE(
+      std::regex_match(next.filename().string(),
+                       std::regex(R"(\d{4}-\d{2}-\d{2}_\d{6}(_\d+)?)")));
+  const json closed = json::parse(read(first / "session.json"));
+  EXPECT_EQ(closed["mode"], "extrinsics");
+  EXPECT_EQ(closed["captures"].size(), 2u);
+  const json opened = json::parse(read(next / "session.json"));
+  EXPECT_EQ(opened["mode"], "intrinsics");
+  EXPECT_EQ(opened["captures"].size(), 1u);
+  // What Calibrate takes is the next session's alone.
+  const std::shared_ptr<const KeptCaptures> kept = worker->kept();
+  ASSERT_NE(kept, nullptr);
+  EXPECT_EQ(kept->mode, capture::SessionMode::Intrinsics);
+  EXPECT_EQ(kept->directory, next.string());
+  ASSERT_EQ(kept->captures.size(), 1u);
+  ASSERT_TRUE(worker->summary().has_value());
+  EXPECT_EQ(worker->summary()->kept, 1);
+
+  // Before its first capture, a restart closes nothing: the summary and the
+  // snapshot go, and no directory is made.
+  ASSERT_TRUE(worker->restart(poses).ok());
+  worker->flush();
+  EXPECT_EQ(worker->kept(), nullptr);
+  EXPECT_FALSE(worker->summary().has_value());
+  EXPECT_TRUE(worker->lenses().empty());
+  EXPECT_TRUE(worker->directory().empty());
+  ASSERT_TRUE(worker->restart(lenses).ok());
+  worker->flush();
+  EXPECT_EQ(test::entries(root.path()).size(), 3u);  // two sessions, rig.json
+
+  // What a restart refuses, its check refuses first, queuing nothing.
+  EXPECT_TRUE(worker->accepts(poses).ok());
+  CaptureSetup other = setup(root.path(), 3);
+  test::expect_refused(worker->accepts(other), Code::InvalidArgument,
+                       "the next session's cameras are not this one's");
+  test::expect_refused(worker->restart(other), Code::InvalidArgument,
+                       "the next session's cameras are not this one's");
+  other = poses;
+  other.capacity = 7;
+  test::expect_refused(worker->accepts(other), Code::InvalidArgument,
+                       "the capacity is 4, not 7");
+  test::expect_refused(worker->restart(other), Code::InvalidArgument,
+                       "the capacity is 4, not 7");
+  other = poses;
+  other.lenses.pop_back();
+  test::expect_refused(worker->accepts(other), Code::InvalidArgument,
+                       "1 lenses for 2 cameras");
+  test::expect_refused(worker->restart(other), Code::InvalidArgument,
+                       "1 lenses for 2 cameras");
+  EXPECT_EQ(worker->unresolved(), 0u);
 }
 
 // Live corners where the full ones are: not flagged. A camera that sees no

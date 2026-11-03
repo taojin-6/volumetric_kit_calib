@@ -4,6 +4,7 @@
 #include "volumetric_kit/calib/app/calib_rig.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -31,6 +32,7 @@
 #include "volumetric_kit/calib/app/live_view.hpp"
 #include "volumetric_kit/calib/app/live_worker.hpp"
 #include "volumetric_kit/calib/app/rig_mode.hpp"
+#include "volumetric_kit/calib/app/rig_setup.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/depth/depth_checks.hpp"
@@ -206,6 +208,16 @@ struct View3d {
   }
 };
 
+// Each camera in the 3D view, through its lens, unplaced.
+std::vector<viz::SceneCamera> scene_cameras(const CaptureSetup& setup) {
+  std::vector<viz::SceneCamera> cameras;
+  for (std::size_t i = 0; i < setup.cameras.size(); ++i) {
+    cameras.push_back(scene_camera(setup.cameras[i], setup.lenses[i], i,
+                                   i == setup.reference));
+  }
+  return cameras;
+}
+
 // Which view a drag began in, and how it moves it.
 enum class Drag : std::uint8_t { None, Elsewhere, Mosaic, Orbit, Pan };
 
@@ -253,9 +265,47 @@ void report_view(View3d& v, const core::Status& status, Notices& notices) {
   notices.note("3D view: " + v.last_error);
 }
 
-// A press of Capture: refused, and said, once the live view has stopped.
-void arm(LiveWorker& live, Notices& notices) {
-  if (!live.arm()) notices.note("capture: the live view has stopped");
+// The session the window runs, as the Setup panel last chose it: what a
+// switch starts from (switch_session), and what the panels say of each lens.
+struct RigNow {
+  RigScenario scenario;                   // its mode and lens file
+  CaptureSetup setup;                     // the capture worker's, as last given
+  LiveOptions live;                       // the live worker's, as last given
+  std::vector<LensStatus> statuses;       // each camera's lens
+  std::vector<std::string> origins;       // each lens's, for the Lenses panel
+  std::vector<std::string> lens_lines;    // each camera panel's
+  std::vector<viz::PanelLine> lens_file;  // the Setup panel's lens lines
+
+  // The panels' views of each lens, after the setup changed.
+  core::Status refresh() {
+    const capture::SessionMode mode = setup.mode;
+    const sensor::camera::ArrayCalibration* file = setup.calibration.get();
+    VKC_ASSIGN(statuses, lens_statuses(mode, setup.cameras, file));
+    origins.clear();
+    lens_lines.clear();
+    for (std::size_t i = 0; i < setup.cameras.size(); ++i) {
+      origins.emplace_back(to_string(statuses[i]));
+      VKC_ASSIGN(std::string line, lens_line(mode, setup.cameras[i], file));
+      lens_lines.push_back(std::move(line));
+    }
+    VKC_ASSIGN(lens_file, setup_lines(mode, setup.cameras, file,
+                                      scenario.calibration_path));
+    return {};
+  }
+};
+
+// A press of Capture: refused, and said, while the mode refuses a capture
+// (capture_refusal) or once the live view has stopped.
+void arm(LiveWorker& live, const RigNow& now, Notices& notices) {
+  const core::Result<std::string> refused =
+      capture_refusal(now.setup.mode, now.setup.cameras, now.statuses);
+  if (!refused.ok()) {
+    notices.note(refused.status().message());
+  } else if (!refused->empty()) {
+    notices.note("capture: " + *refused);
+  } else if (!live.arm()) {
+    notices.note("capture: the live view has stopped");
+  }
 }
 
 void drop_last(CaptureWorker& captures, Notices& notices) {
@@ -263,28 +313,36 @@ void drop_last(CaptureWorker& captures, Notices& notices) {
   if (!dropped.ok()) notices.note(dropped.message());
 }
 
-// The session's mode, as the window's mode says it.
-capture::SessionMode session_of(const RigMode& mode) {
-  return mode.intrinsic ? capture::SessionMode::Intrinsics
-                        : capture::SessionMode::Extrinsics;
-}
+// What the Calibration and Lenses windows show of Calibrate: of the last run
+// started, its result, or how it ended without one.
+struct CalibrationShown {
+  std::vector<viz::PanelLine> result;       // the result's panel
+  std::vector<viz::PanelLine> lens_checks;  // a pose result's lens checks
+  // A lens run that wrote a lens file, for "Use these lenses".
+  std::shared_ptr<const CalibrateResult> lens_run;
+  bool explain = false;   // a press found Calibrate held back: say why
+  bool awaiting = false;  // a run started, its outcome not yet shown
+  std::string run_error;  // the run's latest failure posted
+  std::optional<viz::PanelLine> ended;  // a run ended with no result: why
+};
 
 // Everything a frame's UI reads.
 struct FrameInputs {
   const std::vector<std::string>* ids = nullptr;
-  const std::vector<std::string>* origins = nullptr;     // each lens's
-  const std::vector<std::string>* lens_lines = nullptr;  // each camera panel's
-  capture::SessionMode session = capture::SessionMode::Extrinsics;
+  const RigNow* now = nullptr;
   viz::PanelOptions panel;  // the rule's thresholds as the source sets them
   std::optional<quality::SessionSummary> summary;
   std::vector<quality::LensReadiness> lenses;  // a lens session's
   std::shared_ptr<const KeptCaptures> kept;
-  std::size_t unresolved = 0;  // captures and drops; read before all above
+  std::size_t unresolved = 0;  // captures, drops, switches; read first
   viz::SaverQueue saver;
   std::string directory;
   core::StageMetrics stages;
 
-  bool ready() const { return session_ready(session, summary, lenses); }
+  capture::SessionMode session() const { return now->setup.mode; }
+  bool ready() const {
+    return session_ready(session(), summary, lenses, now->statuses);
+  }
 };
 
 // What the window's requests reach.
@@ -295,22 +353,29 @@ struct Workers {
 };
 
 // A press of Calibrate, its key's or a button's: the captures kept go to T4
-// once the gate lets them; otherwise why not is said. What the gate takes is
-// read at the press, the captures and drops unresolved first, so a drop
-// pressed earlier in the frame holds it back, and the snapshot sent reflects
-// every capture and drop made before.
-void press_calibrate(const Workers& workers, RigMode& mode, Notices& notices) {
+// once the gate lets them; otherwise why not is said, and the Calibration
+// window says it per camera. What the gate takes is read at the press, the
+// captures, drops and switches unresolved first, so a drop pressed earlier
+// in the frame holds it back, and the snapshot sent reflects every capture
+// and drop made before.
+void press_calibrate(const Workers& workers, const RigNow& now, RigMode& mode,
+                     CalibrationShown& shown, Notices& notices) {
   const CaptureWorker& captures = workers.captures;
   const std::size_t unresolved = captures.unresolved();
   const std::optional<quality::SessionSummary> summary = captures.summary();
   const std::vector<quality::LensReadiness> lenses = captures.lenses();
   std::shared_ptr<const KeptCaptures> kept = captures.kept();
   const CalibrateGate gate = calibrate_gate(
-      mode, session_ready(session_of(mode), summary, lenses), unresolved);
+      mode, session_ready(now.setup.mode, summary, lenses, now.statuses),
+      unresolved);
   if (!gate.enabled) {
     notices.note("calibrate: " + std::string(gate.reason));
+    shown.explain = true;
     return;
   }
+  // The live search out of the way first, its set in flight waited out: a
+  // lens run's fits then run at once, each on one thread (calibrate).
+  workers.live.pause_search(true);
   const core::Result<bool> started = workers.calibrate.request(std::move(kept));
   if (!started.ok()) {
     notices.note(started.status().message());
@@ -318,6 +383,9 @@ void press_calibrate(const Workers& workers, RigMode& mode, Notices& notices) {
     notices.note("calibrate: already running");
   } else {
     mode.calibrating = true;
+    // The last run's result is not this one's.
+    shown = CalibrationShown{};
+    shown.awaiting = true;
   }
 }
 
@@ -340,7 +408,8 @@ void show_images(RigMode& mode, View3d& v) {
 // The keys polled before this frame, mapped with its WantTextInput, each
 // done as the window's mode has it (rig_action).
 void act_on_keys(KeyQueue& keys, bool want_text_input, const Workers& workers,
-                 RigMode& mode, View3d& v, Notices& notices) {
+                 const RigNow& now, RigMode& mode, CalibrationShown& shown,
+                 View3d& v, Notices& notices) {
   const core::Result<std::vector<KeyRequest>> requests =
       keys.take(want_text_input);
   if (!requests.ok()) {
@@ -352,13 +421,13 @@ void act_on_keys(KeyQueue& keys, bool want_text_input, const Workers& workers,
     if (!step.hint.empty()) notices.note(std::string(step.hint));
     switch (step.action) {
       case RigAction::Arm:
-        arm(workers.live, notices);
+        arm(workers.live, now, notices);
         break;
       case RigAction::DropLast:
         drop_last(workers.captures, notices);
         break;
       case RigAction::Calibrate:
-        press_calibrate(workers, mode, notices);
+        press_calibrate(workers, now, mode, shown, notices);
         break;
       case RigAction::Cancel:
         cancel_calibrate(workers.calibrate, notices);
@@ -375,10 +444,12 @@ void act_on_keys(KeyQueue& keys, bool want_text_input, const Workers& workers,
   }
 }
 
-// Calibrate's controls: its button, held back with the gate's reason; or,
-// while it runs, its progress and Cancel.
+// Calibrate's controls: its button, the gate's reason beside it while it is
+// held back (a press then says why, per camera, in the Calibration window);
+// or, while it runs, its progress and Cancel.
 void calibrate_controls(const Workers& workers, RigMode& mode,
-                        const FrameInputs& in, Notices& notices) {
+                        CalibrationShown& shown, const FrameInputs& in,
+                        Notices& notices) {
   CalibrateWorker& calibrate = workers.calibrate;
   if (const std::optional<CalibrateProgress> at = calibrate.progress()) {
     const core::Result<viz::PanelLine> line = viz::calibrate_progress_line(
@@ -388,9 +459,9 @@ void calibrate_controls(const Workers& workers, RigMode& mode,
     return;
   }
   const CalibrateGate gate = calibrate_gate(mode, in.ready(), in.unresolved);
-  ImGui::BeginDisabled(!gate.enabled);
-  if (ImGui::Button("Calibrate")) press_calibrate(workers, mode, notices);
-  ImGui::EndDisabled();
+  if (ImGui::Button("Calibrate")) {
+    press_calibrate(workers, *in.now, mode, shown, notices);
+  }
   if (!gate.enabled) {
     ImGui::SameLine();
     ImGui::TextDisabled("%.*s", static_cast<int>(gate.reason.size()),
@@ -399,15 +470,16 @@ void calibrate_controls(const Workers& workers, RigMode& mode,
 }
 
 // The capture's window: its buttons and Calibrate's, then where it stands.
-void capture_window(const Workers& workers, RigMode& mode, Notices& notices,
+void capture_window(const Workers& workers, RigMode& mode,
+                    CalibrationShown& shown, Notices& notices,
                     const FrameInputs& in) {
   LiveWorker& live = workers.live;
   ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
   ImGui::Begin("Capture");
-  if (ImGui::Button("Capture")) arm(live, notices);
+  if (ImGui::Button("Capture")) arm(live, *in.now, notices);
   ImGui::SameLine();
   if (ImGui::Button("Drop last")) drop_last(workers.captures, notices);
-  calibrate_controls(workers, mode, in, notices);
+  calibrate_controls(workers, mode, shown, in, notices);
   notices.capture.decision = live.decision();
   const core::Result<std::vector<viz::PanelLine>> lines =
       viz::capture_panel(notices.capture);
@@ -418,7 +490,7 @@ void capture_window(const Workers& workers, RigMode& mode, Notices& notices,
 }
 
 void rig_windows(const LiveSnapshot& snapshot, const viz::BoardEditor& editor,
-                 const FrameInputs& in) {
+                 const CalibrationShown& shown, const FrameInputs& in) {
   const std::vector<std::string>& ids = *in.ids;
   ImGui::SetNextWindowPos(ImVec2(10, 200), ImGuiCond_FirstUseEver);
   ImGui::Begin("Rig");
@@ -442,7 +514,7 @@ void rig_windows(const LiveSnapshot& snapshot, const viz::BoardEditor& editor,
     const quality::CameraSummary& session =
         in.summary ? in.summary->cameras[i] : none;
     viz::CameraLive& camera = (*cameras)[i];
-    camera.lens = (*in.lens_lines)[i];
+    camera.lens = in.now->lens_lines[i];
     const core::Result<std::vector<viz::PanelLine>> lines =
         viz::camera_panel(camera, session, editor.board(), in.panel);
     ImGui::PushID(static_cast<int>(i));
@@ -454,14 +526,20 @@ void rig_windows(const LiveSnapshot& snapshot, const viz::BoardEditor& editor,
   }
   ImGui::End();
 
-  // A lens session's panel: how far each camera's views are.
-  if (in.session == capture::SessionMode::Intrinsics) {
+  // A lens session's panel: how far each camera's views are; a pose
+  // session's, once calibrated: each lens checked on the solve.
+  if (in.session() == capture::SessionMode::Intrinsics) {
     const core::Result<std::vector<viz::PanelLine>> lenses =
-        viz::lens_panel(ids, in.lenses, *in.origins);
+        viz::lens_panel(ids, in.lenses, in.now->origins);
     ImGui::Begin("Lenses");
     if (lenses.ok()) viz::draw_panel_lines("lenses", lenses.value());
     ImGui::End();
-  } else if (in.summary) {
+  } else if (!shown.lens_checks.empty()) {
+    ImGui::Begin("Lenses");
+    viz::draw_panel_lines("lens checks", shown.lens_checks);
+    ImGui::End();
+  }
+  if (in.session() == capture::SessionMode::Extrinsics && in.summary) {
     core::Result<viz::SessionPanel> panel =
         viz::session_panel(*in.summary, ids);
     if (panel.ok()) {
@@ -500,24 +578,183 @@ void stages_window(const LiveSnapshot& snapshot, const FrameInputs& in) {
   if (metrics.ok()) gfx::ui::draw_metrics_panel(metrics.value(), "Stages");
 }
 
-// The Calibration window, once a result is shown: Calibrate's controls and
-// what the result is worth; collapsed as the images come back, open as the
-// 3D view does.
-void calibration_window(const Workers& workers, RigMode& mode,
-                        bool view_changed,
-                        const std::vector<viz::PanelLine>& lines,
+// Why Calibrate is held back, per camera, in plain words: what the
+// Calibration window says after a press found it so; or that it may run.
+std::vector<viz::PanelLine> held_back(const RigMode& mode,
+                                      const FrameInputs& in) {
+  const CalibrateGate gate = calibrate_gate(mode, in.ready(), in.unresolved);
+  if (gate.enabled) return {{"calibrate", "ready: press C", viz::Tone::Good}};
+  std::vector<viz::PanelLine> lines{
+      {"not calibrated", std::string(gate.reason), viz::Tone::Warn}};
+  const RigNow& now = *in.now;
+  const core::Result<std::vector<NotReady>> why = calibrate_blockers(
+      now.setup.mode, now.setup.cameras, now.statuses,
+      now.scenario.calibration_path, in.summary, in.lenses, now.setup.session);
+  if (!why.ok()) {
+    lines.push_back({"why", why.status().message(), viz::Tone::Bad});
+    return lines;
+  }
+  for (const NotReady& camera : why.value()) {
+    lines.push_back(
+        {camera.camera.empty() ? std::string("session") : camera.camera,
+         camera.why, viz::Tone::Warn});
+  }
+  return lines;
+}
+
+// The Calibration window, while Calibrate runs, once a press found it held
+// back, and once a run ended: Calibrate's controls, why it is held back, and
+// what the result is worth, with "Use these lenses" under a lens run's, or
+// why the run ended without one; collapsed as the images come back, open as
+// the 3D view does. Returns whether "Use these lenses" was pressed.
+bool calibration_window(const Workers& workers, RigMode& mode,
+                        bool view_changed, CalibrationShown& shown,
                         const FrameInputs& in, Notices& notices) {
-  if (!mode.calibrated) return;
+  if (!mode.calibrating && !shown.explain && shown.result.empty() &&
+      !shown.ended) {
+    return false;
+  }
   if (view_changed) {
     ImGui::SetNextWindowCollapsed(mode.view == RigView::Images,
                                   ImGuiCond_Always);
   }
+  bool use = false;
   ImGui::SetNextWindowPos(ImVec2(430, 10), ImGuiCond_FirstUseEver);
   if (ImGui::Begin("Calibration")) {
-    calibrate_controls(workers, mode, in, notices);
-    viz::draw_panel_lines("calibration", lines);
+    calibrate_controls(workers, mode, shown, in, notices);
+    if (shown.explain && !mode.calibrating) {
+      viz::draw_panel_lines("held back", held_back(mode, in));
+    }
+    if (shown.ended) viz::draw_panel_lines("ended", {*shown.ended});
+    viz::draw_panel_lines("calibration", shown.result);
+    if (shown.lens_run != nullptr) {
+      ImGui::BeginDisabled(mode.calibrating);
+      use = ImGui::Button("Use these lenses");
+      ImGui::EndDisabled();
+      ImGui::SameLine();
+      ImGui::TextDisabled("for the next session, but those that failed");
+    }
   }
   ImGui::End();
+  return use;
+}
+
+// A change the Setup panel or "Use these lenses" asks for: the mode, or a
+// lens file.
+struct SetupRequest {
+  std::optional<capture::SessionMode> mode;
+  std::optional<LensFile> lenses;
+  bool confirmed = false;  // closing a session with captures, confirmed
+};
+
+// What the Setup panel keeps between frames: the lens runs listed when its
+// list opened, the path typed, and a switch waiting for its confirm.
+struct SetupPanel {
+  std::vector<LensResult> listed;
+  bool list_open = false;
+  std::array<char, 1024> typed{};
+  std::optional<SetupRequest> confirm;
+};
+
+// A lens file for the rig, or why not, said.
+std::optional<LensFile> or_note(core::Result<LensFile> file, Notices& notices) {
+  if (!file.ok()) {
+    notices.note(file.status().message());
+    return std::nullopt;
+  }
+  return std::move(file).value();
+}
+
+// "Use these lenses": the lens run shown, as the Setup list takes a run.
+std::optional<LensFile> use_lens_run(const CalibrateResult& run,
+                                     const RigNow& now, Notices& notices) {
+  core::Result<LensResult> read = read_lens_run(run.directory);
+  if (!read.ok()) return or_note(read.status(), notices);
+  return or_note(lens_run_file(*read, now.setup.cameras), notices);
+}
+
+// The Setup window: the mode, and where each camera's lens comes from, with
+// a lens run's file to pick or a path to type; held while Calibrate runs. A
+// switch that would close a session with captures asks first.
+SetupRequest setup_window(SetupPanel& panel, const RigNow& now,
+                          const RigMode& mode, const FrameInputs& in,
+                          const std::string& root, Notices& notices) {
+  SetupRequest request;
+  ImGui::SetNextWindowPos(ImVec2(10, 900), ImGuiCond_FirstUseEver);
+  ImGui::Begin("Setup");
+  ImGui::BeginDisabled(mode.calibrating);
+  if (panel.confirm) {
+    ImGui::TextWrapped(
+        "Start a new session? This one's %zu captures stay in %s, but "
+        "Calibrate can no longer take them.",
+        in.kept != nullptr ? in.kept->captures.size() : 0,
+        in.directory.c_str());
+    if (ImGui::Button("Start it")) {
+      request = *std::move(panel.confirm);
+      request.confirmed = true;
+      panel.confirm.reset();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Keep this one")) panel.confirm.reset();
+  }
+  const bool lenses = now.setup.mode == capture::SessionMode::Intrinsics;
+  if (ImGui::RadioButton("Lenses", lenses) && !lenses) {
+    request.mode = capture::SessionMode::Intrinsics;
+  }
+  ImGui::SameLine();
+  if (ImGui::RadioButton("Poses", !lenses) && lenses) {
+    request.mode = capture::SessionMode::Extrinsics;
+  }
+  if (mode.calibrating) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("Calibrate is running");
+  }
+  viz::draw_panel_lines("setup", now.lens_file);
+  const bool open = ImGui::BeginCombo("lens runs", "pick a lens run's file");
+  if (open) {
+    if (!panel.list_open) {
+      core::Result<std::vector<LensResult>> found = find_lens_results(root);
+      panel.listed =
+          found.ok() ? std::move(found).value() : std::vector<LensResult>{};
+      if (!found.ok()) notices.note(found.status().message());
+    }
+    for (std::size_t i = 0; i < panel.listed.size(); ++i) {
+      const core::Result<std::string> label =
+          lens_result_label(panel.listed[i]);
+      ImGui::PushID(static_cast<int>(i));
+      if (label.ok() && ImGui::Selectable(label.value().c_str())) {
+        request.lenses =
+            or_note(lens_run_file(panel.listed[i], now.setup.cameras), notices);
+      }
+      ImGui::PopID();
+    }
+    if (panel.listed.empty())
+      ImGui::TextDisabled("none under %s", root.c_str());
+    ImGui::EndCombo();
+  }
+  panel.list_open = open;
+  ImGui::InputText("path", panel.typed.data(), panel.typed.size());
+  ImGui::SameLine();
+  if (ImGui::Button("Load") && panel.typed[0] != '\0') {
+    request.lenses =
+        or_note(load_lens_file(panel.typed.data(), now.setup.cameras), notices);
+  }
+  ImGui::EndDisabled();
+  ImGui::End();
+  return request;
+}
+
+// A switch asked for this frame, once confirmed where it would close a
+// session with captures: else held for the Setup window's confirm.
+SetupRequest confirmed(SetupRequest request, SetupPanel& panel,
+                       const FrameInputs& in, Notices& notices) {
+  if ((!request.mode && !request.lenses) || request.confirmed ||
+      in.kept == nullptr || in.kept->captures.empty()) {
+    return request;
+  }
+  notices.note("switch: confirm it in the Setup window");
+  panel.confirm = std::move(request);
+  return {};
 }
 
 // Each tile's marks, behind every ImGui window.
@@ -551,16 +788,14 @@ void flash(const Notices& notices) {
                 IM_COL32(0, 200, 0, 255), text.c_str());
 }
 
-// What the workers reported since the last frame.
+// What the workers but Calibrate's (take_calibrate) reported since the last
+// frame.
 void take_reports(const Workers& workers, CloudWorker& cloud,
                   Notices& notices) {
   for (const core::Status& error : workers.live.take_errors()) {
     notices.note(error.message());
   }
   for (const core::Status& error : cloud.take_errors()) {
-    notices.note(error.message());
-  }
-  for (const core::Status& error : workers.calibrate.take_errors()) {
     notices.note(error.message());
   }
   CaptureWorker& captures = workers.captures;
@@ -764,12 +999,14 @@ core::Status draw_scene(View3d& v, gfx::pipelines::DepthCloudPipeline& clouds,
 // A Calibrate result in the 3D view: every camera at its pose in the result's
 // world, the solved boards and the origin tag drawn, the view framed on the
 // world's origin when it is new (frame_on_result), up as world_up has it, its
-// panel's lines, its notices (calibration_notices), and the 3D view in the
-// window. Nothing changes when the result cannot be shown.
-core::Status show_result(const CalibrateResult& result,
+// panel's lines and its lens checks', its notices (calibration_notices), and
+// the 3D view in the window. Nothing changes when the result cannot be shown.
+core::Status show_result(const std::shared_ptr<const CalibrateResult>& run,
                          const KeptCaptures& kept, RigMode& mode, View3d& v,
                          std::optional<RigOrigin>& framed,
-                         std::vector<viz::PanelLine>& panel, Notices& notices) {
+                         CalibrationShown& shown, Notices& notices) {
+  const CalibrateResult& result = *run;
+  std::vector<viz::PanelLine>& panel = shown.result;
   // A lens run: its panel and where it was written; no 3D view.
   if (result.mode == capture::SessionMode::Intrinsics) {
     std::vector<std::pair<std::string, std::string>> unsolved;
@@ -783,6 +1020,9 @@ core::Status show_result(const CalibrateResult& result,
     VKC_ASSIGN(const std::vector<std::string> said,
                viz::calibration_notices(result.number, result.directory, {}));
     panel = std::move(lines);
+    // "Use these lenses" once there is a file to take: a run of factory
+    // lenses alone writes none.
+    shown.lens_run = result.files.array_calibration.empty() ? nullptr : run;
     mode = on_result(mode);
     for (const std::string& notice : said) notices.note(notice);
     return {};
@@ -800,11 +1040,16 @@ core::Status show_result(const CalibrateResult& result,
              viz::world_panel(result.ids, result.reference, result.world));
   VKC_ASSIGN(const std::vector<viz::PanelLine> rows,
              viz::pair_rows_panel(result.pairs));
+  VKC_ASSIGN(std::vector<viz::PanelLine> lens_checks,
+             viz::lens_check_panel(result.lens_checks));
   world.insert(world.end(), rows.begin(), rows.end());
   lines.insert(lines.end(), depth.begin(), depth.end());
   lines.insert(lines.end(), world.begin(), world.end());
+  // The notices: the world's, the pairs' and the lens checks' warnings.
+  std::vector<viz::PanelLine> warned = world;
+  warned.insert(warned.end(), lens_checks.begin(), lens_checks.end());
   VKC_ASSIGN(const std::vector<std::string> said,
-             viz::calibration_notices(result.number, result.directory, world));
+             viz::calibration_notices(result.number, result.directory, warned));
   std::vector<sensor::camera::Mat4d> boards = result.boards_to_world;
   VKC_TRY(placed_cameras(v.cameras, result.color_to_world));
   const std::optional<solve::TagWorld>& tag = result.world.origin.tag;
@@ -815,6 +1060,8 @@ core::Status show_result(const CalibrateResult& result,
   v.options.tag_edge_m = tag ? tag->edge_m : 0.0;
   v.lines_stale = true;
   panel = std::move(lines);
+  shown.lens_checks = std::move(lens_checks);
+  shown.lens_run = nullptr;
   if (frame_on_result(framed, origin)) {
     const core::Status aimed = v.view.frame(v.placed(), v.up);
     if (aimed.ok()) {
@@ -826,6 +1073,42 @@ core::Status show_result(const CalibrateResult& result,
   mode = on_result(mode);
   for (const std::string& notice : said) notices.note(notice);
   return {};
+}
+
+// Calibrate's outcome since the last frame: each failure said; a result
+// shown; or, once the run started ended without one, why kept for the
+// Calibration window: its failure, else its cancel. busy() is read first, as
+// a run's result and failure are posted before it ends.
+void take_calibrate(CalibrateWorker& calibrate, const CaptureWorker& captures,
+                    RigMode& mode, View3d& v, std::optional<RigOrigin>& framed,
+                    CalibrationShown& shown, Notices& notices) {
+  const bool running = calibrate.busy();
+  for (const core::Status& error : calibrate.take_errors()) {
+    notices.note(error.message());
+    shown.run_error = error.message();
+  }
+  if (std::shared_ptr<const CalibrateResult> result = calibrate.take_result()) {
+    shown.awaiting = false;
+    const std::shared_ptr<const KeptCaptures> kept = captures.kept();
+    const core::Status placed =
+        kept != nullptr
+            ? show_result(result, *kept, mode, v, framed, shown, notices)
+            : core::Status::not_found("no captures kept");
+    if (!placed.ok()) {
+      notices.note("calibrate: " + placed.message());
+      shown.ended =
+          viz::PanelLine{"calibrate", "written, not shown: " + placed.message(),
+                         viz::Tone::Bad};
+    }
+  } else if (shown.awaiting && !running) {
+    shown.awaiting = false;
+    shown.ended =
+        shown.run_error.empty()
+            ? viz::PanelLine{"calibrate", "cancelled", viz::Tone::Muted}
+            : viz::PanelLine{"calibrate", "failed: " + shown.run_error,
+                             viz::Tone::Bad};
+  }
+  mode.calibrating = running;
 }
 
 // Stops the workers, waits for the renderer, and frees what the frames held,
@@ -921,31 +1204,25 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   setup.color_codec = opened.color_codec;
   setup.lenses = opened.lenses;
   std::vector<sensor::camera::ImageSize> sizes;
-  std::vector<viz::SceneCamera> scene_cameras;
-  std::vector<std::string> origins;  // each lens's, for the Lenses panel
-  for (std::size_t i = 0; i < camera_count; ++i) {
-    const capture::SessionCamera& camera = opened.cameras[i];
+  for (const capture::SessionCamera& camera : opened.cameras) {
     sizes.push_back(camera.size);
-    scene_cameras.push_back(
-        scene_camera(camera, opened.lenses[i], i, i == opened.reference));
-    origins.emplace_back(capture::to_string(camera.lens));
   }
   setup.cameras = opened.cameras;
   // The mode's parts: the session's mode and file, the capture rule, the
-  // window's mode, and the Board window's board and the boards it takes.
-  LiveOptions live_options;
+  // window's mode, and the Board window's board and the boards it takes;
+  // kept, as a switch starts from them (switch_session).
+  RigNow now;
+  now.scenario = scenario;
   RigMode mode;
   VKC_ASSIGN(viz::BoardEditor editor,
-             apply_mode(scenario, setup, live_options, mode));
-  std::vector<std::string> lens_lines(camera_count);  // each camera panel's
-  for (std::size_t i = 0; i < camera_count; ++i) {
-    VKC_ASSIGN(lens_lines[i], lens_line(scenario.mode, setup.cameras[i],
-                                        setup.calibration.get()));
-  }
-  // TODO: cap cv::setNumThreads once H4 measures the contention between
-  // OpenCV, the SDK and the decode threads.
+             apply_mode(scenario, setup, now.live, mode));
+  now.setup = std::move(setup);
+  VKC_TRY(now.refresh());
+  // OpenCV's threads are not capped: a cap made neither the fits nor the
+  // live search faster, and one thread halved the search's rate
+  // (DECISIONS.md, 2026-11-03).
   VKC_ASSIGN(std::unique_ptr<CaptureWorker> captures,
-             CaptureWorker::create(std::move(setup)));
+             CaptureWorker::create(now.setup));
   // The 3D view's worker, prepared frames shared with the renderer's family.
   VKC_ASSIGN(std::unique_ptr<CloudWorker> cloud,
              CloudWorker::create(
@@ -964,7 +1241,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
              viz::RigMosaic::create(app.device(), app.allocator(),
                                     app.swapchain().layout(), sizes));
   gfx::pipelines::DepthCloudPipelineDesc cloud_desc;
-  cloud_desc.max_draws = static_cast<std::uint32_t>(scene_cameras.size());
+  cloud_desc.max_draws = static_cast<std::uint32_t>(camera_count);
   VKC_ASSIGN(std::unique_ptr<gfx::pipelines::DepthCloudPipeline> clouds,
              gfx::pipelines::DepthCloudPipeline::create(
                  app.device(), app.allocator(), app.swapchain().layout(),
@@ -974,7 +1251,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
                  app.device(), app.swapchain().layout()));
   gfx::RetireQueue retire(app.frame_loop().timeline());
   View3d view3d;  // its snapshot released before the retire queue and cloud
-  view3d.cameras = std::move(scene_cameras);
+  view3d.cameras = scene_cameras(now.setup);
   view3d.max_point_size = clouds->max_point_size();
   VKC_TRY(view3d.view.frame(view3d.placed()));
 
@@ -996,16 +1273,65 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   // every way out stops Calibrate's worker, then it, then the 3D view's
   // (Teardown), so no set is held when the source closes.
   VKC_ASSIGN(std::unique_ptr<LiveWorker> live,
-             LiveWorker::create(std::move(opened.source), opened.lenses,
+             LiveWorker::create(std::move(opened.source), now.setup.lenses,
                                 editor.board(), editor.square_measured(),
-                                captures.get(), cloud.get(), live_options));
+                                captures.get(), cloud.get(), now.live));
   const std::vector<std::string>& ids = live->ids();
   std::shared_ptr<const LiveSnapshot> latest;  // released before live
   const Teardown teardown(*calibrate, *live, *cloud, app, retire);
   const Workers workers{*live, *captures, *calibrate};
   RigView shown = mode.view;        // the last frame's
   std::optional<RigOrigin> framed;  // the 3D view's, once framed on a result
-  std::vector<viz::PanelLine> calibration;  // the result's panel
+  CalibrationShown calibration;     // the Calibration and Lenses windows'
+  SetupPanel setup_panel;
+  // Each mode's board as it last had it (by capture::SessionMode), so a
+  // switch back finds the board entered there.
+  std::array<std::optional<std::pair<Target, bool>>, 2> boards;
+  // A new session of `next`'s mode and lens file, the cameras left open; said
+  // when refused.
+  const auto start_session = [&](const RigScenario& next) {
+    if (calibrate->busy()) {
+      notices.note(
+          "switch: Calibrate is running: wait for it, or cancel it (Escape)");
+      return;
+    }
+    const std::shared_ptr<const KeptCaptures> closing = captures->kept();
+    const std::string directory = captures->directory();
+    boards[static_cast<std::size_t>(now.setup.mode)] =
+        std::make_pair(editor.board(), editor.square_measured());
+    core::Result<viz::BoardEditor> made =
+        switch_session(next, boards[static_cast<std::size_t>(next.mode)],
+                       now.setup, now.live, mode, *live, *captures);
+    if (!made.ok()) {
+      notices.note("switch: " + made.status().message());
+      return;
+    }
+    editor = std::move(made).value();
+    now.scenario = next;
+    const core::Status refreshed = now.refresh();
+    if (!refreshed.ok()) notices.note(refreshed.message());
+    calibration = CalibrationShown{};
+    view3d.cameras = scene_cameras(now.setup);
+    view3d.lines_stale = true;
+    framed.reset();
+    if (closing != nullptr && !closing->captures.empty()) {
+      notices.note("session " + directory + " closed with " +
+                   std::to_string(closing->captures.size()) +
+                   " captures, kept on disk");
+    }
+    notices.note(std::string(next.mode == capture::SessionMode::Intrinsics
+                                 ? "Lenses"
+                                 : "Poses") +
+                 ": a new session starts at the next capture");
+  };
+  // A lens file for the next session, its notes said.
+  const auto take_lenses = [&](const LensFile& file) {
+    for (const std::string& note : file.notes) notices.note(note);
+    RigScenario next = now.scenario;
+    next.calibration = file.calibration;
+    next.calibration_path = file.path;
+    start_session(next);
+  };
   bool fresh = false;
   core::StageMetrics tiles;  // the last recording's, held between live sets
   std::vector<std::string> refusals_said;  // each tile's, said once
@@ -1022,16 +1348,10 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       if (mode.view == RigView::Scene) view3d.latest = std::move(s);
     }
     take_reports(workers, *cloud, notices);
-    if (std::shared_ptr<const CalibrateResult> result =
-            calibrate->take_result()) {
-      const std::shared_ptr<const KeptCaptures> kept = captures->kept();
-      const core::Status placed =
-          kept != nullptr ? show_result(*result, *kept, mode, view3d, framed,
-                                        calibration, notices)
-                          : core::Status::not_found("no captures kept");
-      if (!placed.ok()) notices.note("calibrate: " + placed.message());
-    }
-    mode.calibrating = calibrate->busy();
+    take_calibrate(*calibrate, *captures, mode, view3d, framed, calibration,
+                   notices);
+    // Calibrate has the CPU while it runs; the pictures keep showing.
+    live->pause_search(search_paused(mode));
     if (live->captures() > 0 && !editor.locked()) {
       (void)editor.edit(live->board(), live->square_measured());
       editor.lock();
@@ -1047,13 +1367,11 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     gfx::windowing::Frame& frame = *next;
     retire.poll();
 
-    // The captures and drops unresolved first, so the snapshot read after
-    // reflects every one made before.
+    // The captures, drops and switches unresolved first, so the snapshot
+    // read after reflects every one made before.
     FrameInputs in;
     in.ids = &ids;
-    in.origins = &origins;
-    in.lens_lines = &lens_lines;
-    in.session = scenario.mode;
+    in.now = &now;
     in.panel.rule = live->rule_options();
     in.unresolved = captures->unresolved();
     in.saver = {captures->pending(), captures->capacity(), captures->full()};
@@ -1068,7 +1386,8 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     platform->new_frame();
     overlay.new_frame();
     const ImGuiIO& io = ImGui::GetIO();
-    act_on_keys(input.keys, io.WantTextInput, workers, mode, view3d, notices);
+    act_on_keys(input.keys, io.WantTextInput, workers, now, mode, calibration,
+                view3d, notices);
     const bool view_changed = mode.view != shown;
     shown = mode.view;
     view3d.placement = scene_placement(mode);
@@ -1108,13 +1427,23 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     steer(window, input, pointer, io.WantCaptureMouse, split, view,
           view3d.view);
 
+    // A switch the Setup panel or "Use these lenses" asks for takes effect
+    // at the next frame's inputs.
+    SetupRequest request;
     if (mode.view == RigView::Images) {
-      capture_window(workers, mode, notices, in);
+      capture_window(workers, mode, calibration, notices, in);
       board_window(editor, *live, notices);
+      request =
+          setup_window(setup_panel, now, mode, in, config.output.path, notices);
     } else {
       view_window(view3d, ids, notices);
     }
-    calibration_window(workers, mode, view_changed, calibration, in, notices);
+    if (calibration_window(workers, mode, view_changed, calibration, in,
+                           notices)) {
+      request = SetupRequest{};
+      request.lenses = use_lens_run(*calibration.lens_run, now, notices);
+    }
+    request = confirmed(std::move(request), setup_panel, in, notices);
     cloud->set_live(cloud_live(view3d.frozen, view3d.placement, false));
     cloud->set_color(view3d.style.mode != gfx::pipelines::CloudColor::Solid);
     if (scene_shown) {
@@ -1134,7 +1463,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
                   notices);
     }
     if (latest && mode.view == RigView::Images) {
-      rig_windows(*latest, editor, in);
+      rig_windows(*latest, editor, calibration, in);
     }
     if (latest) stages_window(*latest, in);
     if (!notices.messages.empty()) {
@@ -1151,6 +1480,14 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     if (!ended.ok() && !gfx::windowing::swapchain_stale(ended)) {
       mosaic->discard();
       return ended;
+    }
+    // After the frame, which drew from the session it ends.
+    if (request.mode) {
+      RigScenario next = now.scenario;
+      next.mode = *request.mode;
+      start_session(next);
+    } else if (request.lenses) {
+      take_lenses(*request.lenses);
     }
   }
   return {};

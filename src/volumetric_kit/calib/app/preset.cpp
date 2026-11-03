@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <string>
 
+#include "size_text.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 
 namespace volumetric_kit::calib::app {
@@ -14,10 +15,6 @@ namespace volumetric_kit::calib::app {
 namespace {
 
 namespace camera = sensor::camera;
-
-std::string size_text(const camera::ImageSize& size) {
-  return std::to_string(size.width) + "x" + std::to_string(size.height);
-}
 
 bool same_size(const camera::ImageSize& a, const camera::ImageSize& b) {
   return a.width == b.width && a.height == b.height;
