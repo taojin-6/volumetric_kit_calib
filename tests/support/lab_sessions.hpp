@@ -85,10 +85,11 @@ inline std::optional<PlacedBoard> place_board(const FisheyeTruth& truth,
 
 /// @brief A lens session's pictures, as a person makes them by the runbook:
 ///        the board tilted 20-35 degrees near the axis and further out, its
-///        tilt's axis turning; then pushed toward each image corner and side,
-///        turned along the line to it, and held where the live view finds it
-///        and its corners reach 0.9 of the way there, as the Lenses panel
-///        asks, four times each.
+///        tilt's axis turning, 13 times each; then pushed toward each image
+///        corner and side, turned along the line to it, and held where the
+///        live view finds it and its corners reach 0.9 of the way there, as
+///        the Lenses panel asks, four times each. About 40 pictures: a lens
+///        is fitted from 30 views, one in five or so held out.
 /// @param truth  The lens.
 /// @param board  The checkerboard (@ref lab_lens_board).
 inline std::vector<std::vector<std::uint8_t>> lens_session_pictures(
@@ -101,13 +102,15 @@ inline std::vector<std::vector<std::uint8_t>> lens_session_pictures(
         place_board(truth, board, pose, 1, min_corners);
     if (placed) pictures.push_back(std::move(placed->picture));
   };
-  for (int i = 0; i < 18; ++i) {
-    keep(facing(board, 8.0 + 6.0 * (i % 3), 20.0 * i, 0.65 + 0.05 * (i % 2),
-                40.0 * i, 25.0 + 5.0 * (i % 3)));
+  constexpr int kTurns = 13;
+  constexpr double kStep = 360.0 / kTurns;
+  for (int i = 0; i < kTurns; ++i) {
+    keep(facing(board, 8.0 + 6.0 * (i % 3), kStep * i, 0.65 + 0.05 * (i % 2),
+                2.0 * kStep * i, 25.0 + 5.0 * (i % 3)));
   }
-  for (int i = 0; i < 18; ++i) {
-    keep(facing(board, 38.0 + 4.0 * (i % 2), 20.0 * i + 10.0, 0.55,
-                40.0 * i + 15.0, 20.0 + 5.0 * (i % 3)));
+  for (int i = 0; i < kTurns; ++i) {
+    keep(facing(board, 38.0 + 4.0 * (i % 2), kStep * (i + 0.5), 0.55,
+                2.0 * kStep * i + 15.0, 20.0 + 5.0 * (i % 3)));
   }
   // Toward each image corner and side, in solve::LensReach's order.
   const struct {
