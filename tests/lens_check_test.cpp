@@ -333,10 +333,13 @@ std::vector<solve::CornerResidual> every_part(std::int64_t first = 100) {
   return out;
 }
 
-// `residuals` as camera `camera`'s of a rig solve, added to `solution`.
-void add_as(std::size_t camera, std::vector<solve::CornerResidual> residuals,
+// `residuals` as camera `camera`'s of a rig solve, added to `solution`. Each is
+// copied alone: GCC 15 at -O3 misreads the free of a copied vector here
+// (-Wfree-nonheap-object).
+void add_as(std::size_t camera,
+            const std::vector<solve::CornerResidual>& residuals,
             solve::RigSolution& solution) {
-  for (solve::CornerResidual& r : residuals) {
+  for (solve::CornerResidual r : residuals) {
     r.camera = camera;
     solution.residuals.push_back(r);
   }
