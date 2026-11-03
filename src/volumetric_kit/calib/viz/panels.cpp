@@ -888,6 +888,31 @@ core::Result<std::vector<PanelLine>> lens_results_panel(
       });
 }
 
+core::Result<std::vector<PanelLine>> lens_check_panel(
+    const std::vector<quality::LensCheck>& checks) {
+  return compute::guarded(
+      "lens_check_panel", [&]() -> core::Result<std::vector<PanelLine>> {
+        using Verdict = quality::LensCheck::Verdict;
+        std::vector<PanelLine> lines;
+        for (const quality::LensCheck& check : checks) {
+          std::string value = std::string(quality::to_string(check.verdict)) +
+                              ": RMS " + figure(check.rms_px, 2, " px") +
+                              ", p95 " + figure(check.p95_px, 2, " px");
+          Tone tone = Tone::Good;
+          if (check.verdict == Verdict::Suspect) {
+            value += ": " + check.reason +
+                     "; the lenses disagree: a lens session says which is off";
+            tone = Tone::Warn;
+          } else if (check.verdict == Verdict::Insufficient) {
+            value += ": " + check.reason;
+            tone = Tone::Muted;
+          }
+          lines.push_back({"lens " + check.camera, value, tone});
+        }
+        return lines;
+      });
+}
+
 core::Result<gfx::FrameMetrics> stage_frame_metrics(
     const core::StageMetrics& stages, double fps) {
   return compute::guarded("stage_frame_metrics",

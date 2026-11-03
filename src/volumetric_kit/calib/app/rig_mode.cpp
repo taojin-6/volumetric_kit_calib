@@ -21,7 +21,7 @@ RigStep rig_action(const RigMode& mode, KeyRequest request) noexcept {
     case KeyRequest::SwitchView:
       if (scene) return {RigAction::ShowImages, {}};
       if (mode.intrinsic) {
-        return {RigAction::Ignore, "intrinsic mode has no 3D view"};
+        return {RigAction::Ignore, "Lenses mode has no 3D view"};
       }
       if (mode.calibrated) return {RigAction::ShowScene, {}};
       return {RigAction::Ignore, "calibrate first"};
@@ -38,15 +38,18 @@ CalibrateGate calibrate_gate(const RigMode& mode, bool ready,
                              std::size_t unresolved) noexcept {
   if (mode.calibrating) return {false, "already running"};
   if (unresolved > 0) {
-    return {false, "a capture or a drop is still being written"};
+    return {false, "a capture, a drop or a session switch is under way"};
   }
   if (!ready) {
     return {false, mode.intrinsic
-                       ? "no camera is ready (see the Lenses panel)"
-                       : "the session is not ready (see the Session panel)"};
+                       ? "no camera is ready: the Calibration window says why"
+                       : "the session is not ready: the Calibration window "
+                         "says why"};
   }
   return {true, {}};
 }
+
+bool search_paused(const RigMode& mode) noexcept { return mode.calibrating; }
 
 viz::ScenePlacement scene_placement(const RigMode& mode) noexcept {
   return mode.view == RigView::Scene ? viz::ScenePlacement::FullWindow

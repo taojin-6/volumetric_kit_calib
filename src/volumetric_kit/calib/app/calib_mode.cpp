@@ -110,15 +110,63 @@ core::Result<RigLens> rig_lens(
     if (filed != nullptr)
       return RigLens{filed->model, capture::LensOrigin::File};
     if (factory) return RigLens{*factory, capture::LensOrigin::Factory};
-    if (poses) {
-      return core::Status::invalid_argument(
-          id + " has no lens at " + size_text(size) +
-          (file != nullptr ? " in " + file_path
-                           : std::string(" (no source.calibration)")) +
-          ": run intrinsic mode");
-    }
     return RigLens{stand_in_lens(size), capture::LensOrigin::StandIn};
   });
+}
+
+core::Result<camera::CameraModel> take_lens(
+    capture::SessionMode mode, const camera::ArrayCalibration* file,
+    const std::string& path, capture::SessionCamera& camera) {
+  return compute::guarded(
+      "take_lens", [&]() -> core::Result<camera::CameraModel> {
+        VKC_ASSIGN(const RigLens lens, rig_lens(mode, camera.id, camera.size,
+                                                camera.color, file, path));
+        std::string lens_file =
+            lens.origin == capture::LensOrigin::File ? path : std::string();
+        camera.lens = lens.origin;
+        camera.lens_file = std::move(lens_file);
+        return lens.model;
+      });
+}
+
+const char* to_string(LensStatus status) noexcept {
+  switch (status) {
+    case LensStatus::Calibrated:
+      return "calibrated";
+    case LensStatus::Factory:
+      return "factory";
+    case LensStatus::StandIn:
+      return "stand-in";
+    case LensStatus::Missing:
+      return "missing";
+  }
+  return "unknown";
+}
+
+LensStatus lens_status(capture::SessionMode mode,
+                       const capture::SessionCamera& camera,
+                       const camera::ArrayCalibration* file) {
+  if (camera.lens == capture::LensOrigin::StandIn) {
+    return mode == capture::SessionMode::Intrinsics ? LensStatus::StandIn
+                                                    : LensStatus::Missing;
+  }
+  return lens_source(camera, file) == camera::IntrinsicsSource::Calibrated
+             ? LensStatus::Calibrated
+             : LensStatus::Factory;
+}
+
+core::Result<std::vector<LensStatus>> lens_statuses(
+    capture::SessionMode mode,
+    const std::vector<capture::SessionCamera>& cameras,
+    const camera::ArrayCalibration* file) {
+  return compute::guarded(
+      "lens_statuses", [&]() -> core::Result<std::vector<LensStatus>> {
+        std::vector<LensStatus> statuses;
+        for (const capture::SessionCamera& camera : cameras) {
+          statuses.push_back(lens_status(mode, camera, file));
+        }
+        return statuses;
+      });
 }
 
 camera::IntrinsicsSource lens_source(const capture::SessionCamera& camera,
@@ -135,7 +183,7 @@ core::Result<std::string> lens_line(capture::SessionMode mode,
                                     const camera::ArrayCalibration* file) {
   return compute::guarded("lens_line", [&]() -> core::Result<std::string> {
     if (mode == capture::SessionMode::Intrinsics) return std::string();
-    std::string line = quality::to_string(lens_source(camera, file));
+    std::string line = to_string(lens_status(mode, camera, file));
     if (camera.lens == capture::LensOrigin::File) line += " (file)";
     return line;
   });
@@ -200,13 +248,92 @@ core::Result<std::vector<quality::LensReadiness>> lens_states(
 
 bool session_ready(capture::SessionMode mode,
                    const std::optional<quality::SessionSummary>& summary,
-                   const std::vector<quality::LensReadiness>& lenses) noexcept {
+                   const std::vector<quality::LensReadiness>& lenses,
+                   const std::vector<LensStatus>& statuses) noexcept {
   if (mode == capture::SessionMode::Intrinsics) {
     return std::any_of(
         lenses.begin(), lenses.end(),
         [](const quality::LensReadiness& lens) { return lens.ready; });
   }
-  return summary && summary->ready;
+  const bool real_lenses =
+      std::none_of(statuses.begin(), statuses.end(), [](LensStatus status) {
+        return status == LensStatus::Missing || status == LensStatus::StandIn;
+      });
+  return real_lenses && summary && summary->ready;
+}
+
+core::Result<std::vector<NotReady>> calibrate_blockers(
+    capture::SessionMode mode,
+    const std::vector<capture::SessionCamera>& cameras,
+    const std::vector<LensStatus>& statuses, const std::string& path,
+    const std::optional<quality::SessionSummary>& summary,
+    const std::vector<quality::LensReadiness>& lenses,
+    const quality::SessionOptions& options) {
+  return compute::guarded(
+      "calibrate_blockers", [&]() -> core::Result<std::vector<NotReady>> {
+        const std::size_t n = cameras.size();
+        if (statuses.size() != n || (!lenses.empty() && lenses.size() != n) ||
+            (summary && summary->cameras.size() != n)) {
+          return core::Status::invalid_argument(
+              "calibrate_blockers: " + std::to_string(n) + " cameras, " +
+              std::to_string(statuses.size()) + " lens statuses, " +
+              std::to_string(lenses.size()) + " readinesses");
+        }
+        std::vector<NotReady> out;
+        const NotReady none_yet{std::string(), "no captures yet"};
+        if (mode == capture::SessionMode::Intrinsics) {
+          if (session_ready(mode, summary, lenses, statuses)) return out;
+          if (lenses.empty()) return std::vector<NotReady>{none_yet};
+          for (std::size_t c = 0; c < n; ++c) {
+            out.push_back({cameras[c].id, lenses[c].unmet});
+          }
+          return out;
+        }
+        for (std::size_t c = 0; c < n; ++c) {
+          if (statuses[c] != LensStatus::Missing &&
+              statuses[c] != LensStatus::StandIn) {
+            continue;
+          }
+          out.push_back(
+              {cameras[c].id,
+               "no lens at " + size_text(cameras[c].size) +
+                   (path.empty() ? std::string(" (no lens file)")
+                                 : " in " + path) +
+                   ": load a lens file in Setup, or fit it in Lenses mode"});
+        }
+        if (!summary) {
+          out.push_back(none_yet);
+          return out;
+        }
+        if (summary->ready) return out;
+        if (n < 2) {
+          out.push_back({std::string(), "a pose session needs two cameras"});
+          return out;
+        }
+        const int need = options.ready_from;
+        for (std::size_t c = 0; c < n; ++c) {
+          const quality::CameraSummary& camera = summary->cameras[c];
+          if (camera.linked && !camera.link) continue;  // the reference
+          if (!camera.link) {
+            out.push_back({cameras[c].id,
+                           "no captures it shares with another camera: "
+                           "capture boards it and another see"});
+            continue;
+          }
+          const std::size_t parent = camera.link->parent;
+          if (camera.link->shared >= need || parent >= n) continue;
+          out.push_back(
+              {cameras[c].id, "shares " + std::to_string(camera.link->shared) +
+                                  " captures with " + cameras[parent].id +
+                                  ", needs " + std::to_string(need) +
+                                  ": capture boards both see"});
+        }
+        if (out.empty()) {
+          out.push_back(
+              {std::string(), "the Session panel says what is short"});
+        }
+        return out;
+      });
 }
 
 core::Result<viz::BoardEditor> apply_mode(const RigScenario& scenario,

@@ -67,8 +67,10 @@ core::Result<RigRequirements> rig_requirements(bool large_points = true);
 /// After @ref check_scenario it opens a window of `config.window`'s size,
 /// with the validation layer when `window.validation`, the one device gfx and
 /// sensor's tiers share, and the scenario's cameras by its driver
-/// (@ref open_source), in its mode (calib_mode.hpp): intrinsic mode fits each
-/// camera's lens and has no 3D view; extrinsic mode solves the rig. Ctrl+C or
+/// (@ref open_source), starting in its mode (calib_mode.hpp): intrinsic mode
+/// (Lenses) fits each camera's lens and has no 3D view; extrinsic mode
+/// (Poses) solves the rig. The Setup window switches the mode and the lens
+/// file, the cameras left open (@ref switch_session). Ctrl+C or
 /// SIGTERM closes the window while it runs; the handlers it replaced are put
 /// back when it returns. The camera images come first: there the keys
 /// (@ref key_request) or the buttons capture, drop the last capture and run

@@ -2,13 +2,14 @@
 // Copyright (c) 2026 Tao Jin
 
 // calib_rig's per-mode table: the mode an operation asks for; each camera's
-// live lens (the file's at exactly its size, the factory's, the stand-in for
-// lenses alone) and what extrinsic mode refuses; the mark a lens carries into
-// the file the solve writes; where a lens fit starts,
-// never the stand-in; the board each mode seeds and takes, a board too small
-// for a lens view refused, saying why; the capture rule; and when Calibrate
-// may run; a stereo pair's camera records and lenses; and every part of the
-// window a mode sets, set from one place. Host-only.
+// live lens (the file's at exactly its size, the factory's, the stand-in) and
+// what extrinsic mode refuses; where each lens comes from, as the Setup panel
+// says it; the mark a lens carries into the file the solve writes; where a
+// lens fit starts, never the stand-in; the board each mode seeds and takes, a
+// board too small for a lens view refused, saying why; the capture rule; when
+// Calibrate may run, and why not, per camera; a stereo pair's camera records
+// and lenses; and every part of the window a mode sets, set from one place.
+// Host-only.
 
 #include "volumetric_kit/calib/app/calib_mode.hpp"
 
@@ -96,30 +97,23 @@ TEST(AppCalibMode, EachCamerasLensComesFromTheFileTheFactoryOrTheStandIn) {
     EXPECT_EQ(rig_lens(mode, "bm-3", k4K, factory, nullptr, "").value().origin,
               LensOrigin::Factory);
   }
-  // A lens at another size is not the camera's: lenses fall to the
-  // stand-in, poses stop, naming the file.
-  const RigLens other =
-      rig_lens(SessionMode::Intrinsics, "bm-2", k4K, std::nullopt, &file, path)
-          .value();
-  EXPECT_EQ(other.origin, LensOrigin::StandIn);
-  EXPECT_EQ(other.model.size.width, 3840u);
-  EXPECT_EQ(other.model.intrinsics.fx, 1920.0);
-  EXPECT_EQ(other.model.intrinsics.fy, 1920.0);
-  EXPECT_EQ(other.model.intrinsics.cx, 1919.5);
-  EXPECT_EQ(other.model.intrinsics.cy, 1079.5);
-  EXPECT_EQ(other.model.distortion.k1, 0.0);
-  expect_refused(
-      rig_lens(SessionMode::Extrinsics, "bm-2", k4K, std::nullopt, &file, path)
-          .status(),
-      Code::InvalidArgument,
-      "bm-2 has no lens at 3840x2160 in bm_pair/array_calibration.json: "
-      "run intrinsic mode");
-  expect_refused(
-      rig_lens(SessionMode::Extrinsics, "bm-2", k4K, std::nullopt, nullptr, "")
-          .status(),
-      Code::InvalidArgument,
-      "bm-2 has no lens at 3840x2160 (no source.calibration): run intrinsic "
-      "mode");
+  // A lens at another size is not the camera's: it falls to the stand-in, in
+  // either mode (for poses Calibrate then waits for a real one: lens_status).
+  for (const SessionMode mode :
+       {SessionMode::Intrinsics, SessionMode::Extrinsics}) {
+    const RigLens other =
+        rig_lens(mode, "bm-2", k4K, std::nullopt, &file, path).value();
+    EXPECT_EQ(other.origin, LensOrigin::StandIn);
+    EXPECT_EQ(other.model.size.width, 3840u);
+    EXPECT_EQ(other.model.intrinsics.fx, 1920.0);
+    EXPECT_EQ(other.model.intrinsics.fy, 1920.0);
+    EXPECT_EQ(other.model.intrinsics.cx, 1919.5);
+    EXPECT_EQ(other.model.intrinsics.cy, 1079.5);
+    EXPECT_EQ(other.model.distortion.k1, 0.0);
+    EXPECT_EQ(
+        rig_lens(mode, "bm-2", k4K, std::nullopt, nullptr, "").value().origin,
+        LensOrigin::StandIn);
+  }
   // A factory camera with a calibrated lens in the file, for poses: the
   // runtime would read the factory's. A factory-sourced one is the same lens.
   expect_refused(
@@ -192,7 +186,75 @@ TEST(AppCalibMode, ALensKeepsTheMarkOfWhereItCameFrom) {
             "factory (file)");
   EXPECT_EQ(line(SessionMode::Extrinsics, "CL2A141000N", LensOrigin::Factory),
             "factory");
+  EXPECT_EQ(line(SessionMode::Extrinsics, "bm-2", LensOrigin::StandIn),
+            "missing");
   EXPECT_EQ(line(SessionMode::Intrinsics, "bm-1", LensOrigin::File), "");
+}
+
+// Where each camera's lens comes from, as the Setup panel says it: a file's
+// keeps its mark, the driver's is factory, and none is a stand-in for lenses
+// and missing for poses. take_lens records it.
+TEST(AppCalibMode, EachLensSaysWhereItComesFrom) {
+  const std::string path = "lenses.json";
+  const camera::ArrayCalibration file =
+      file_of({{"bm-1", calibrated(k4K, 1702.0)},
+               {"CL2A141000N",
+                {lens(k4K, 2200.0), camera::IntrinsicsSource::Factory}}});
+  const auto record = [](const std::string& id, bool factory) {
+    capture::SessionCamera camera;
+    camera.id = id;
+    camera.size = k4K;
+    if (factory) camera.color = lens(k4K, 2100.0);
+    camera.lens_file = "stale.json";
+    return camera;
+  };
+  struct Case {
+    SessionMode mode;
+    const char* id;
+    bool factory;
+    LensOrigin origin;
+    LensStatus status;
+    double fx;
+  };
+  const Case cases[] = {
+      {SessionMode::Intrinsics, "bm-1", false, LensOrigin::File,
+       LensStatus::Calibrated, 1702.0},
+      {SessionMode::Extrinsics, "bm-1", false, LensOrigin::File,
+       LensStatus::Calibrated, 1702.0},
+      {SessionMode::Extrinsics, "CL2A141000N", true, LensOrigin::File,
+       LensStatus::Factory, 2200.0},
+      {SessionMode::Extrinsics, "CL3", true, LensOrigin::Factory,
+       LensStatus::Factory, 2100.0},
+      {SessionMode::Intrinsics, "bm-2", false, LensOrigin::StandIn,
+       LensStatus::StandIn, 1920.0},
+      {SessionMode::Extrinsics, "bm-2", false, LensOrigin::StandIn,
+       LensStatus::Missing, 1920.0},
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(std::string(c.id) +
+                 (c.mode == SessionMode::Intrinsics ? " lenses" : " poses"));
+    capture::SessionCamera camera = record(c.id, c.factory);
+    const camera::CameraModel taken =
+        take_lens(c.mode, &file, path, camera).value();
+    EXPECT_EQ(taken.intrinsics.fx, c.fx);
+    EXPECT_EQ(camera.lens, c.origin);
+    EXPECT_EQ(camera.lens_file,
+              c.origin == LensOrigin::File ? path : std::string());
+    EXPECT_EQ(lens_status(c.mode, camera, &file), c.status);
+  }
+  EXPECT_STREQ(to_string(LensStatus::Calibrated), "calibrated");
+  EXPECT_STREQ(to_string(LensStatus::Factory), "factory");
+  EXPECT_STREQ(to_string(LensStatus::StandIn), "stand-in");
+  EXPECT_STREQ(to_string(LensStatus::Missing), "missing");
+  EXPECT_STREQ(to_string(static_cast<LensStatus>(9)), "unknown");
+  // Refused, the record is unchanged.
+  capture::SessionCamera refused = record("bm-1", true);
+  expect_refused(
+      take_lens(SessionMode::Extrinsics, &file, path, refused).status(),
+      Code::InvalidArgument,
+      "bm-1 has a factory lens and a calibrated one in " + path);
+  EXPECT_EQ(refused.lens, LensOrigin::Factory);
+  EXPECT_EQ(refused.lens_file, "stale.json");
 }
 
 // A lens fit starts from a real lens or OpenCV's own: the camera's file
@@ -271,27 +333,131 @@ TEST(AppCalibMode, OneViewIsALensCapture) {
 }
 
 // Calibrate may run once a camera's lens is ready, or once the session's
-// links are.
+// links are and every camera has a real lens.
 TEST(AppCalibMode, CalibrateWaitsForItsModesReadiness) {
   quality::LensReadiness ready;
   ready.ready = true;
   const quality::LensReadiness waiting;
   quality::SessionSummary linked;
   linked.ready = true;
-  EXPECT_FALSE(session_ready(SessionMode::Intrinsics, std::nullopt, {}));
+  using S = LensStatus;
+  const std::vector<S> stand_ins{S::StandIn, S::StandIn};
+  EXPECT_FALSE(session_ready(SessionMode::Intrinsics, std::nullopt, {}, {}));
+  EXPECT_FALSE(session_ready(SessionMode::Intrinsics, linked,
+                             {waiting, waiting}, stand_ins));
+  EXPECT_TRUE(session_ready(SessionMode::Intrinsics, std::nullopt,
+                            {waiting, ready}, stand_ins));
+  const std::vector<S> real{S::Calibrated, S::Factory};
   EXPECT_FALSE(
-      session_ready(SessionMode::Intrinsics, linked, {waiting, waiting}));
-  EXPECT_TRUE(
-      session_ready(SessionMode::Intrinsics, std::nullopt, {waiting, ready}));
-  EXPECT_FALSE(session_ready(SessionMode::Extrinsics, std::nullopt, {ready}));
+      session_ready(SessionMode::Extrinsics, std::nullopt, {ready}, real));
   EXPECT_FALSE(session_ready(SessionMode::Extrinsics, quality::SessionSummary{},
-                             {ready}));
-  EXPECT_TRUE(session_ready(SessionMode::Extrinsics, linked, {}));
+                             {ready}, real));
+  EXPECT_TRUE(session_ready(SessionMode::Extrinsics, linked, {}, real));
+  // A camera without a real lens holds poses back, however linked.
+  EXPECT_FALSE(session_ready(SessionMode::Extrinsics, linked, {},
+                             {S::Calibrated, S::Missing}));
+  EXPECT_FALSE(session_ready(SessionMode::Extrinsics, linked, {},
+                             {S::StandIn, S::Calibrated}));
+}
+
+// Calibrate is never silent: pressed with nothing ready, each camera says
+// what it lacks and what to do, in either mode.
+TEST(AppCalibMode, SaysPerCameraWhyCalibrateIsHeldBack) {
+  const auto record = [](const std::string& id) {
+    capture::SessionCamera camera;
+    camera.id = id;
+    camera.size = k4K;
+    return camera;
+  };
+  const std::vector<capture::SessionCamera> pair{record("bm-5"),
+                                                 record("bm-6")};
+  const quality::SessionOptions options;
+  using S = LensStatus;
+  const auto said = [](const std::vector<NotReady>& why) {
+    std::vector<std::string> lines;
+    for (const NotReady& one : why)
+      lines.push_back(one.camera + ": " + one.why);
+    return lines;
+  };
+
+  // Lenses: before the first capture, then each camera's shortfall, as the
+  // owner met it; nothing once a camera is ready.
+  const std::vector<S> stand_ins{S::StandIn, S::StandIn};
+  EXPECT_EQ(said(calibrate_blockers(SessionMode::Intrinsics, pair, stand_ins,
+                                    "", std::nullopt, {}, options)
+                     .value()),
+            (std::vector<std::string>{": no captures yet"}));
+  quality::LensReadiness bm5;
+  bm5.unmet = "reach 0.83 toward the top-left corner, needs 0.9: capture there";
+  quality::LensReadiness bm6;
+  bm6.unmet = "22 views of 30";
+  EXPECT_EQ(said(calibrate_blockers(SessionMode::Intrinsics, pair, stand_ins,
+                                    "", std::nullopt, {bm5, bm6}, options)
+                     .value()),
+            (std::vector<std::string>{
+                "bm-5: reach 0.83 toward the top-left corner, needs 0.9: "
+                "capture there",
+                "bm-6: 22 views of 30"}));
+  quality::LensReadiness ready;
+  ready.ready = true;
+  EXPECT_TRUE(calibrate_blockers(SessionMode::Intrinsics, pair, stand_ins, "",
+                                 std::nullopt, {bm5, ready}, options)
+                  ->empty());
+
+  // Poses: each camera without a lens, naming the file and the fix; no
+  // captures; then each link short of the solve's.
+  const std::string path = "bm_pair/lenses.json";
+  EXPECT_EQ(said(calibrate_blockers(SessionMode::Extrinsics, pair,
+                                    {S::Calibrated, S::Missing}, path,
+                                    std::nullopt, {}, options)
+                     .value()),
+            (std::vector<std::string>{
+                "bm-6: no lens at 3840x2160 in bm_pair/lenses.json: load a "
+                "lens file in Setup, or fit it in Lenses mode",
+                ": no captures yet"}));
+  quality::SessionSummary summary;
+  summary.cameras.resize(2);
+  summary.cameras[0].linked = true;  // the reference
+  summary.cameras[1].linked = true;
+  summary.cameras[1].link = quality::PreviewLink{0, options.ready_from - 1, {}};
+  const std::vector<S> real{S::Calibrated, S::Calibrated};
+  EXPECT_EQ(
+      said(calibrate_blockers(SessionMode::Extrinsics, pair, real, path,
+                              summary, {}, options)
+               .value()),
+      (std::vector<std::string>{
+          "bm-6: shares " + std::to_string(options.ready_from - 1) +
+          " captures with bm-5, needs " + std::to_string(options.ready_from) +
+          ": capture boards both see"}));
+  summary.cameras[1].linked = false;
+  summary.cameras[1].link.reset();
+  EXPECT_EQ(said(calibrate_blockers(SessionMode::Extrinsics, pair, real, "",
+                                    summary, {}, options)
+                     .value()),
+            (std::vector<std::string>{"bm-6: no captures it shares with "
+                                      "another camera: capture boards it and "
+                                      "another see"}));
+  EXPECT_EQ(said(calibrate_blockers(SessionMode::Extrinsics, pair,
+                                    {S::Missing, S::Calibrated}, "", summary,
+                                    {}, options)
+                     .value())
+                .front(),
+            "bm-5: no lens at 3840x2160 (no lens file): load a lens file in "
+            "Setup, or fit it in Lenses mode");
+  summary.ready = true;
+  EXPECT_TRUE(calibrate_blockers(SessionMode::Extrinsics, pair, real, path,
+                                 summary, {}, options)
+                  ->empty());
+  expect_refused(calibrate_blockers(SessionMode::Extrinsics, pair, {S::Missing},
+                                    path, summary, {}, options)
+                     .status(),
+                 Code::InvalidArgument,
+                 "calibrate_blockers: 2 cameras, 1 lens");
 }
 
 // A pair's camera, opened with no calibration, takes its lens from the
-// scenario's file and records the file; one not there takes the stand-in for
-// lenses, and stops a pose session.
+// scenario's file and records the file; one not there takes the stand-in, a
+// pose session's lens missing.
 TEST(AppCalibMode, RecordsEachStereoCameraWithItsLens) {
   const std::string path = "bm_pair/array_calibration.json";
   RigScenario scenario;
@@ -321,10 +487,12 @@ TEST(AppCalibMode, RecordsEachStereoCameraWithItsLens) {
   capture::SessionCamera bm2;
   bm2.id = "bm-2";
   bm2.size = k4K;
-  expect_refused(add_stereo_camera(bm2, scenario, path, opened),
-                 Code::InvalidArgument,
-                 "bm-2 has no lens at 3840x2160 in " + path);
-  EXPECT_EQ(opened.cameras.size(), 2u);
+  ASSERT_TRUE(add_stereo_camera(bm2, scenario, path, opened).ok());
+  ASSERT_EQ(opened.cameras.size(), 3u);
+  EXPECT_EQ(opened.cameras[2].lens, LensOrigin::StandIn);
+  EXPECT_EQ(lens_status(SessionMode::Extrinsics, opened.cameras[2],
+                        scenario.calibration.get()),
+            LensStatus::Missing);
 }
 
 // The window takes every part a mode sets from one place: the session's mode

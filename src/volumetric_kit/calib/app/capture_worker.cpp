@@ -66,10 +66,13 @@ TagSearch search_tag(const CameraFrameCopy& part) {
   return out;
 }
 
-// A capture, or a drop of the last one.
+// A capture, a drop of the last one, or the next session.
 struct Job {
-  bool drop = false;
+  enum class Kind { Capture, Drop, Restart };
+  Kind kind = Kind::Capture;
   CaptureRequest request;
+  std::optional<CaptureSetup> setup;       // the next session's
+  std::vector<compute::CvCamera> cameras;  // its lenses, as setup's
 };
 
 // Work refused once the thread has ended.
@@ -77,13 +80,58 @@ core::Status stopped() {
   return core::Status::io_error("the capture worker has stopped");
 }
 
+// Each camera's lens of `setup`, as compute's bridge takes it, once `setup`
+// is checked: create's rules.
+core::Result<std::vector<compute::CvCamera>> checked_lenses(
+    const CaptureSetup& setup) {
+  if (setup.root.empty()) {
+    return core::Status::invalid_argument(
+        "CaptureWorker: no directory to create sessions in");
+  }
+  if (setup.cameras.empty()) {
+    return core::Status::invalid_argument("CaptureWorker: no cameras");
+  }
+  if (setup.reference >= setup.cameras.size()) {
+    return core::Status::invalid_argument(
+        "CaptureWorker: the reference is not a camera");
+  }
+  if (setup.capacity == 0) {
+    return core::Status::invalid_argument(
+        "CaptureWorker: a capacity of 0 holds no capture");
+  }
+  if (setup.max_kept == 0) {
+    return core::Status::invalid_argument(
+        "CaptureWorker: a max_kept of 0 keeps no capture");
+  }
+  if (setup.lenses.size() != setup.cameras.size()) {
+    return core::Status::invalid_argument(
+        "CaptureWorker: " + std::to_string(setup.lenses.size()) +
+        " lenses for " + std::to_string(setup.cameras.size()) + " cameras");
+  }
+  std::vector<compute::CvCamera> cameras;
+  for (std::size_t i = 0; i < setup.cameras.size(); ++i) {
+    const capture::SessionCamera& camera = setup.cameras[i];
+    const sensor::camera::ImageSize& lens = setup.lenses[i].size;
+    if (lens.width != camera.size.width || lens.height != camera.size.height) {
+      return core::Status::invalid_argument(
+          "CaptureWorker: camera " + camera.id +
+          "'s lens is not its pictures' size");
+    }
+    VKC_ASSIGN(compute::CvCamera cv, compute::cv_camera(setup.lenses[i]));
+    cameras.push_back(std::move(cv));
+  }
+  return cameras;
+}
+
 }  // namespace
 
 struct CaptureWorker::State {
+  // Written by the worker's thread alone, under the lock (a restart), which
+  // submit() takes to read it.
   CaptureSetup setup;
-  std::vector<compute::CvCamera> cameras;  // each camera's lens
 
   // The worker's thread's alone.
+  std::vector<compute::CvCamera> cameras;  // each camera's lens
   std::unique_ptr<capture::SessionWriter> writer;
   std::optional<compute::Board> board;
   std::optional<quality::SessionChecks> checks;
@@ -101,6 +149,7 @@ struct CaptureWorker::State {
   bool busy = false;         // a job is being carried out
   std::size_t captures = 0;  // captures queued and not yet resolved
   std::size_t drops = 0;     // drops queued and not yet resolved
+  std::size_t restarts = 0;  // restarts queued and not yet carried out
   bool releasing = false;    // a snapshot replaced is being let go
   bool stopping = false;
   bool ended = false;  // the thread has returned: no job is carried out
@@ -187,9 +236,17 @@ struct CaptureWorker::State {
     base.solve = setup.session.solve;
     VKC_ASSIGN(const std::string stamp,
                capture::session_stamp(std::chrono::system_clock::now()));
+    // A session of the same second (the one a switch just closed) keeps its
+    // name: this one takes the next free `_<n>`.
+    namespace fs = std::filesystem;
+    fs::path where = fs::path(setup.root) / stamp;
+    std::error_code ec;
+    for (int n = 2; fs::exists(where, ec); ++n) {
+      where = fs::path(setup.root) / (stamp + "_" + std::to_string(n));
+    }
     const float unit = unit_of(request);
     capture::SessionInfo info;
-    info.directory = (std::filesystem::path(setup.root) / stamp).string();
+    info.directory = where.string();
     info.software = setup.software;
     info.mode = setup.mode;
     info.driver = setup.driver;
@@ -374,6 +431,43 @@ struct CaptureWorker::State {
     }
   }
 
+  // This session closed, its captures and drops carried out and its writer
+  // flushed, and the next one's setup taken: nothing is written until its
+  // first capture.
+  void restart_session(CaptureSetup next,
+                       std::vector<compute::CvCamera> next_cameras) {
+    if (writer != nullptr) {
+      writer->flush();
+      collect();
+      writer.reset();
+    }
+    board.reset();
+    checks.reset();
+    metres_per_unit = 0.0f;
+    written.clear();
+    kept_base = KeptCaptures{};
+    kept_captures.clear();
+    cameras = std::move(next_cameras);
+    std::shared_ptr<const KeptCaptures> released;
+    {
+      const std::lock_guard<std::mutex> lock(mutex);
+      setup = std::move(next);
+      summary.reset();
+      lenses.clear();
+      released = std::move(kept);
+      kept.reset();
+      directory.clear();
+      releasing = released != nullptr;
+    }
+    // The last snapshot may hold the session's depth: let go outside the
+    // lock, and before flush() returns.
+    released.reset();
+    const std::lock_guard<std::mutex> lock(mutex);
+    releasing = false;
+    --restarts;
+    idle.notify_all();
+  }
+
   // The writer's outcomes since the last look, the session's checks and the
   // captures kept.
   void collect() {
@@ -481,10 +575,16 @@ struct CaptureWorker::State {
         }
       }
       if (job) {
-        if (job->drop) {
-          drop();
-        } else {
-          capture(std::move(job->request));
+        switch (job->kind) {
+          case Job::Kind::Drop:
+            drop();
+            break;
+          case Job::Kind::Restart:
+            restart_session(std::move(*job->setup), std::move(job->cameras));
+            break;
+          case Job::Kind::Capture:
+            capture(std::move(job->request));
+            break;
         }
         const std::lock_guard<std::mutex> lock(mutex);
         busy = false;
@@ -505,44 +605,8 @@ core::Result<std::unique_ptr<CaptureWorker>> CaptureWorker::create(
   return compute::guarded(
       "CaptureWorker::create",
       [&]() -> core::Result<std::unique_ptr<CaptureWorker>> {
-        if (setup.root.empty()) {
-          return core::Status::invalid_argument(
-              "CaptureWorker: no directory to create sessions in");
-        }
-        if (setup.cameras.empty()) {
-          return core::Status::invalid_argument("CaptureWorker: no cameras");
-        }
-        if (setup.reference >= setup.cameras.size()) {
-          return core::Status::invalid_argument(
-              "CaptureWorker: the reference is not a camera");
-        }
-        if (setup.capacity == 0) {
-          return core::Status::invalid_argument(
-              "CaptureWorker: a capacity of 0 holds no capture");
-        }
-        if (setup.max_kept == 0) {
-          return core::Status::invalid_argument(
-              "CaptureWorker: a max_kept of 0 keeps no capture");
-        }
-        if (setup.lenses.size() != setup.cameras.size()) {
-          return core::Status::invalid_argument(
-              "CaptureWorker: " + std::to_string(setup.lenses.size()) +
-              " lenses for " + std::to_string(setup.cameras.size()) +
-              " cameras");
-        }
         auto state = std::make_unique<State>();
-        for (std::size_t i = 0; i < setup.cameras.size(); ++i) {
-          const capture::SessionCamera& camera = setup.cameras[i];
-          const sensor::camera::ImageSize& lens = setup.lenses[i].size;
-          if (lens.width != camera.size.width ||
-              lens.height != camera.size.height) {
-            return core::Status::invalid_argument(
-                "CaptureWorker: camera " + camera.id +
-                "'s lens is not its pictures' size");
-          }
-          VKC_ASSIGN(compute::CvCamera cv, compute::cv_camera(setup.lenses[i]));
-          state->cameras.push_back(std::move(cv));
-        }
+        VKC_ASSIGN(state->cameras, checked_lenses(setup));
         const std::size_t capacity = setup.capacity;
         state->setup = std::move(setup);
         std::unique_ptr<CaptureWorker> worker(
@@ -584,6 +648,8 @@ bool CaptureWorker::full() const { return pending() >= capacity_; }
 
 core::Result<bool> CaptureWorker::submit(CaptureRequest request) {
   return compute::guarded("CaptureWorker::submit", [&]() -> core::Result<bool> {
+    // The setup is the worker's to replace (a restart), under this lock.
+    std::unique_lock<std::mutex> lock(state_->mutex);
     const std::vector<capture::SessionCamera>& cameras = state_->setup.cameras;
     if (request.cameras.size() != cameras.size()) {
       return core::Status::invalid_argument(
@@ -624,20 +690,20 @@ core::Result<bool> CaptureWorker::submit(CaptureRequest request) {
       }
     }
     const std::size_t max_kept = state_->setup.max_kept;
-    {
-      const std::lock_guard<std::mutex> lock(state_->mutex);
-      if (state_->ended) return stopped();
-      const std::size_t kept =
-          state_->kept != nullptr ? state_->kept->captures.size() : 0;
-      if (kept + state_->captures >= max_kept) {
-        return core::Status::unsupported(
-            "capture: drop a capture first: one Calibrate adjusts at most " +
-            std::to_string(max_kept));
-      }
-      if (state_->captures >= capacity_) return false;
-      state_->jobs.push_back({false, std::move(request)});
-      ++state_->captures;
+    if (state_->ended) return stopped();
+    const std::size_t kept =
+        state_->kept != nullptr ? state_->kept->captures.size() : 0;
+    if (kept + state_->captures >= max_kept) {
+      return core::Status::unsupported(
+          "capture: drop a capture first: one Calibrate adjusts at most " +
+          std::to_string(max_kept));
     }
+    if (state_->captures >= capacity_) return false;
+    Job job;
+    job.request = std::move(request);
+    state_->jobs.push_back(std::move(job));
+    ++state_->captures;
+    lock.unlock();
     state_->wake.notify_all();
     return true;
   });
@@ -648,8 +714,48 @@ core::Status CaptureWorker::drop_last() {
     {
       const std::lock_guard<std::mutex> lock(state_->mutex);
       if (state_->ended) return stopped();
-      state_->jobs.push_back({true, {}});
+      Job job;
+      job.kind = Job::Kind::Drop;
+      state_->jobs.push_back(std::move(job));
       ++state_->drops;
+    }
+    state_->wake.notify_all();
+    return {};
+  });
+}
+
+core::Status CaptureWorker::restart(CaptureSetup setup) {
+  return compute::guarded("CaptureWorker::restart", [&]() -> core::Status {
+    VKC_ASSIGN(std::vector<compute::CvCamera> cameras, checked_lenses(setup));
+    {
+      const std::lock_guard<std::mutex> lock(state_->mutex);
+      if (state_->ended) return stopped();
+      const std::vector<capture::SessionCamera>& now = state_->setup.cameras;
+      bool same = now.size() == setup.cameras.size();
+      for (std::size_t i = 0; same && i < now.size(); ++i) {
+        const capture::SessionCamera& a = now[i];
+        const capture::SessionCamera& b = setup.cameras[i];
+        same = a.id == b.id && a.size.width == b.size.width &&
+               a.size.height == b.size.height &&
+               a.depth.has_value() == b.depth.has_value();
+      }
+      if (!same) {
+        return core::Status::invalid_argument(
+            "CaptureWorker::restart: the next session's cameras are not "
+            "this one's");
+      }
+      if (setup.capacity != capacity_) {
+        return core::Status::invalid_argument(
+            "CaptureWorker::restart: the capacity is " +
+            std::to_string(capacity_) + ", not " +
+            std::to_string(setup.capacity));
+      }
+      Job job;
+      job.kind = Job::Kind::Restart;
+      job.setup = std::move(setup);
+      job.cameras = std::move(cameras);
+      state_->jobs.push_back(std::move(job));
+      ++state_->restarts;
     }
     state_->wake.notify_all();
     return {};
@@ -685,7 +791,7 @@ std::size_t CaptureWorker::pending() const {
 
 std::size_t CaptureWorker::unresolved() const {
   const std::lock_guard<std::mutex> lock(state_->mutex);
-  return state_->captures + state_->drops;
+  return state_->captures + state_->drops + state_->restarts;
 }
 
 std::string CaptureWorker::directory() const {
@@ -705,7 +811,7 @@ void CaptureWorker::flush() {
   state_->idle.wait(lock, [&] {
     return state_->ended ||
            (state_->jobs.empty() && !state_->busy && state_->captures == 0 &&
-            state_->drops == 0 && !state_->releasing);
+            state_->drops == 0 && state_->restarts == 0 && !state_->releasing);
   });
 }
 

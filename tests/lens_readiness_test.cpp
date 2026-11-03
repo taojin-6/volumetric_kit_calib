@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -112,6 +113,18 @@ std::vector<Observation> session(int cells, int more) {
   return views;
 }
 
+// Each reach direction, as the shortfall names it.
+constexpr const char* kToward[] = {"top-left corner",    "top-right corner",
+                                   "bottom-left corner", "bottom-right corner",
+                                   "left side",          "right side"};
+
+// A reach rounded down to two places, as the shortfall writes it.
+std::string two_down(double reach) {
+  char text[16];
+  std::snprintf(text, sizeof text, "%.2f", std::floor(100.0 * reach) / 100.0);
+  return text;
+}
+
 LensReadiness state_of(const std::vector<Observation>& views,
                        const std::vector<std::int64_t>* frontal = nullptr,
                        const LensReadyOptions& options = {}) {
@@ -182,15 +195,28 @@ TEST(LensReadiness, FlipsAtEachCornersAndSidesReach) {
     LensReadiness state = state_of(views);
     EXPECT_FALSE(state.ready) << d;
     EXPECT_LT(state.reach[d], 0.9) << d;
-    EXPECT_EQ(state.unmet,
-              "its corners reach too little of the way to an image corner or "
-              "side")
+    // Named, its reach rounded down so it never reads as the limit.
+    EXPECT_EQ(state.unmet, "reach " + two_down(state.reach[d]) +
+                               " toward the " + kToward[d] +
+                               ", needs 0.9: capture there")
         << d;
     view = reaching(view.frame_id, d, 0.9 + 1e-6);
     state = state_of(views);
     EXPECT_TRUE(state.ready) << d;
     EXPECT_NEAR(state.reach[d], 0.9 + 1e-6, 1e-9) << d;
   }
+  // Every direction short is named, in LensReach's order.
+  std::vector<Observation> views = session(48, 30);
+  views[4] = reaching(views[4].frame_id, 0, 0.884);
+  views[9] = reaching(views[9].frame_id, 5, 0.897);
+  const LensReadiness two = state_of(views);
+  ASSERT_LT(two.reach[0], 0.9);
+  ASSERT_LT(two.reach[5], 0.9);
+  EXPECT_EQ(two.unmet, "reach " + two_down(two.reach[0]) +
+                           " toward the top-left corner, " +
+                           two_down(two.reach[5]) +
+                           " toward the right side, needs 0.9: capture there");
+  EXPECT_EQ(two_down(0.8999999), "0.89");
 }
 
 TEST(LensReadiness, FlipsAtHalfFrontalAndOnlyWithARealLens) {

@@ -21,7 +21,8 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > session writer, the `viz` tier's live and 3D views and the `depth` tier's
 > board-plane fit and pairwise depth agreement; and, with GLFW and a sensor
 > driver too, Orbbec's or DeckLink's, the `app` tier's `calib_rig`, live view,
-> 3D view, capture and Calibrate, of each camera's lens or the rig's poses.
+> 3D view, capture and Calibrate, of each camera's lens or the rig's poses,
+> the mode chosen in the app.
 > The color tier is not yet implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain
 > the reference oracle.
@@ -165,10 +166,11 @@ renderer.
   rows, and writes a results directory in the tag's world, or the reference
   camera's when it cannot be located; each result fills the window with the
   live points at the solved poses, and a key goes back to the images
-  ([DECISIONS.md](DECISIONS.md#2026-10-18--calibrate-t4)). In intrinsic
-  mode it instead fits each ready camera's lens and writes a lens-only
-  results directory ([its modes](#intrinsic-and-extrinsic-mode);
-  [DECISIONS.md](DECISIONS.md#2026-11-02--intrinsic-mode)).
+  ([DECISIONS.md](DECISIONS.md#2026-10-18--calibrate-t4)). In Lenses mode
+  it instead fits each ready camera's lens and writes a lens-only results
+  directory; the mode and the lens file are chosen in the app, the cameras
+  left open ([its modes](#lenses-and-poses);
+  [DECISIONS.md](DECISIONS.md#2026-11-03--one-calib_rig-the-mode-chosen-in-it)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
 
@@ -286,24 +288,40 @@ Its keys, on a press (none while a text field has the keyboard):
 | V, B, `.` | to the 3D view, once calibrated (extrinsic mode) | to the images |
 | Escape | cancel Calibrate | cancel Calibrate |
 
-### Intrinsic and extrinsic mode
+### Lenses and Poses
 
-The scenario's `operation` is calib_rig's mode:
+calib_rig is one app with two modes, chosen in its Setup panel: Lenses
+(intrinsic) fits each camera's lens, Poses (extrinsic) the rig's poses. The
+scenario's `operation` is the mode it starts in, and `source.calibration` the
+lens file it starts from:
 
-| | Intrinsic (`calibrate_intrinsics`) | Extrinsic (`calibrate`) |
+| | Lenses (`calibrate_intrinsics`) | Poses (`calibrate`) |
 | --- | --- | --- |
 | Board | the checkerboard, its squares and size edited | the rig's ChArUco board |
-| Each camera's live lens | `source.calibration`'s at the stream's size, else the driver's, else a stand-in | the file's or the driver's; none stops the run, naming the file; a factory camera with a calibrated lens in the file is refused |
+| Each camera's live lens | the lens file's at the stream's size, else the driver's, else a stand-in | the same, the stand-in `missing`: Calibrate waits; a factory camera with a calibrated lens in the file is refused |
 | A capture | a still board, one view enough | a still board |
-| Calibrate | once a camera is ready (the Lenses panel) | once the session's links are |
-| Its result | each ready camera's lens, in a lens-only `array_calibration.json`; a factory lens is reported, never written | the rig's poses, and the 3D view; each of `source.pairs`' rectified rows (Δy) at the scenario's depth size, FFS's, in `report.json` and the Calibration window |
+| Calibrate | once a camera is ready (the Lenses panel) | once the session's links are and every camera has a lens, the file's or the driver's |
+| Its result | each ready camera's lens, in a lens-only `array_calibration.json`; a factory lens is reported, never written | the rig's poses, and the 3D view; each of `source.pairs`' rectified rows (Δy) at the scenario's depth size, FFS's; each lens checked on the solve, a warning (the Lenses panel); both in `report.json` |
 
-The checkerboard is the intrinsic board: the rig's 5 x 3 ChArUco board has 8
+The Setup panel shows the lens file and where each camera's lens comes from
+(`calibrated`, `factory`, `stand-in` or `missing`). Its list holds every lens
+run's `array_calibration.json` under `output.path`, newest first, with each
+camera's pass or fail; a path may be typed instead, and a file is checked
+against the rig's camera ids and sizes. After a lens run, "Use these lenses"
+in the Calibration window takes the lenses that passed. A switch of mode or
+lens file after the first capture closes the session, its captures kept on
+disk, and the next capture opens a new one; the board follows the mode.
+Calibrate pressed with nothing ready says why, camera by camera, in the
+Calibration window. While it runs the live view stops searching for the
+board, its pictures still shown, and a lens run fits every ready camera at
+once.
+
+The checkerboard is the Lenses board: the rig's 5 x 3 ChArUco board has 8
 inner corners, fewer than a lens view takes (12), and is refused there.
-calib_rig calibrates a DeckLink pair in two sessions, each writing
+calib_rig calibrates a DeckLink pair in two sessions of one run, each writing
 `<session>/results/<RRR>_<stamp>/array_calibration.json`, its report beside
-it: its lenses, from the pair's current file, then its poses, from that
-lens file:
+it: its lenses, from the pair's current file, then its poses, from those
+lenses. The lens scenario:
 
 ```json
 {"version": 1, "operation": "calibrate_intrinsics",
@@ -314,11 +332,10 @@ lens file:
  "output": {"path": "sessions"}}
 ```
 
-The pose session's scenario is the same but for `"operation": "calibrate"`
-and `"calibration"` the lens file. FuseDecklink then reads the pose
-session's file.
+With `"operation": "calibrate"` and `"calibration"` a lens file it starts in
+Poses. FuseDecklink then reads the pose session's file.
 
-A pair, in the lab:
+A pair, in the lab, in one run of calib_rig:
 
 1. **Boards.** Measure the checkerboard's square with calipers over 12
    squares, check the board is flat (note any bow) with about a square of
@@ -328,15 +345,22 @@ A pair, in the lab:
    tag (id 0) at hand.
 2. **Cameras.** Tape focus and iris; fix exposure and white balance over
    PTP.
-3. **Lenses.** Run the lens scenario, `source.calibration` the pair's
-   current file. Capture about 40 still boards, tilted 20-45 degrees, near
-   and far, pushing the board into each corner and along both sides until
-   each camera's line in the Lenses panel turns green; then press C.
-4. **Poses.** Run the pose scenario, `source.calibration` step 3's lens
-   file. Capture about 15-20 still ChArUco boards both cameras see, spread
-   over their shared view (all 9 parts, both sides), with the floor tag in
-   view; then press C. The Calibration window's `rows bm-1 | bm-2` line
-   reads `pass`, and FuseDecklink can take the file. Otherwise:
+3. **Lenses.** Start calib_rig with the lens scenario, `source.calibration`
+   the pair's current file. Capture about 40 still boards, tilted 20-45
+   degrees, near and far, pushing the board into each corner and along both
+   sides until each camera's line in the Lenses panel turns green; then press
+   C. Pressed sooner, the Calibration window says what each camera lacks
+   ("reach 0.83 toward the top-left corner, needs 0.9: capture there"). Once
+   both lenses pass, press "Use these lenses". With lenses from an earlier
+   run, skip this step and pick their file in Setup.
+4. **Poses.** In Setup choose Poses; each camera's lens reads `calibrated`.
+   Enter the ChArUco board. Capture about 15-20 still ChArUco boards both
+   cameras see, spread over their shared view (all 9 parts, both sides),
+   with the floor tag in view; then press C. The Calibration window's
+   `rows bm-1 | bm-2` line reads `pass`, and FuseDecklink can take the file.
+   The Lenses panel's lens check is a warning: `suspect` says the lenses
+   disagree (run step 3 again); `insufficient` names where boards would let
+   it judge. Otherwise:
    - `insufficient`: capture where it names and press C again.
    - `swapped`: the rows were not judged. If the SDI cables are as in step
      3, name the left camera it names first in `source.pairs`, here and in

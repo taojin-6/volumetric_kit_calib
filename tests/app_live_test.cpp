@@ -11,7 +11,10 @@
 // a camera missing, the frames' spread; a taken set the worker cannot copy
 // out. The window takes the newest snapshot, once, and the set sink every set
 // read back; while the window shows no image, every set, with nothing read
-// back or searched unless a capture is armed. Then the thread's end: a sensor
+// back or searched unless a capture is armed; while the search is paused,
+// every picture, nothing searched unless armed. A restart's next session on
+// the same source: its board, unlocked, and its rule. Then the thread's end: a
+// sensor
 // that throws, or a camera disconnected, ends it, saying why, and stopping
 // releases every frame. Runs under the validation layer when the environment
 // asks (VKC_TEST_VALIDATION); skips without a Vulkan device.
@@ -38,6 +41,7 @@
 #include "fake_sensor.hpp"
 #include "fake_stereo.hpp"
 #include "live_pair.hpp"
+#include "result_checks.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/app/live_worker.hpp"
 #include "volumetric_kit/calib/app/preset.hpp"
@@ -951,6 +955,126 @@ TEST_F(AppLive, AStillPairCapturesAtItsSkewBoundWithoutAWarning) {
   }
   EXPECT_EQ(taken[0].cameras[1].timestamp_ns, kStartNs + 2 * kPeriodNs + kSkew);
   EXPECT_TRUE(sets.taken().empty());
+}
+
+// Paused, as calib_rig pauses it while Calibrate runs, the pictures keep
+// coming -- each pair's luma made and read back, its grey tiles there -- but
+// nothing is searched or ruled on, unless a capture is armed; resumed, the
+// board is found again.
+TEST_F(AppLive, APausedSearchKeepsThePicturesComing) {
+  const auto stages_of = [](const LiveSnapshot& s) {
+    std::vector<std::string> names;
+    for (const core::StageRow& row : s.stages.rows()) {
+      names.emplace_back(row.name);
+    }
+    return names;
+  };
+  const auto has = [](const std::vector<std::string>& names, const char* name) {
+    return std::find(names.begin(), names.end(), name) != names.end();
+  };
+  CollectSink sink;
+  test::FakeStereo* fake = nullptr;
+  std::unique_ptr<LiveWorker> live = start_pair(&fake, &sink);
+  ASSERT_NE(live, nullptr);
+  live->pause_search(true);
+  push_pair(*fake, 0, 1, 0);
+  const std::shared_ptr<const LiveSnapshot> paused = next_snapshot(*live, 0);
+  ASSERT_NE(paused, nullptr);
+  EXPECT_TRUE(has(stages_of(*paused), "readback"));
+  EXPECT_FALSE(has(stages_of(*paused), "detect"));
+  ASSERT_EQ(paused->set->cameras.size(), 2u);
+  for (std::size_t i = 0; i < 2; ++i) {
+    EXPECT_NE(paused->set->cameras[i].tile, nullptr) << i;  // shown
+    EXPECT_TRUE(paused->detections[i].observation.points.empty()) << i;
+  }
+  EXPECT_EQ(paused->decision.state, quality::CaptureState::Idle);
+
+  // Armed, the board is searched for and still pairs are taken.
+  ASSERT_TRUE(live->arm());
+  wait_armed(*live);
+  push_pair(*fake, 0, 2, 0);
+  const std::shared_ptr<const LiveSnapshot> armed =
+      next_snapshot(*live, paused->number);
+  ASSERT_NE(armed, nullptr);
+  EXPECT_TRUE(has(stages_of(*armed), "detect"));
+  EXPECT_EQ(armed->detections[0].observation.points.size(), 8u);
+  push_pair(*fake, 0, 3, 0);
+  const std::shared_ptr<const LiveSnapshot> taken =
+      next_snapshot(*live, armed->number);
+  ASSERT_NE(taken, nullptr);
+  EXPECT_EQ(taken->decision.state, quality::CaptureState::Take)
+      << taken->decision.message;
+  EXPECT_EQ(sink.taken().size(), 1u);
+  push_pair(*fake, 0, 4, 0);
+  const std::shared_ptr<const LiveSnapshot> again =
+      next_snapshot(*live, taken->number);
+  ASSERT_NE(again, nullptr);
+  EXPECT_FALSE(has(stages_of(*again), "detect"));
+
+  live->pause_search(false);
+  push_pair(*fake, 0, 5, 0);
+  const std::shared_ptr<const LiveSnapshot> resumed =
+      next_snapshot(*live, again->number);
+  ASSERT_NE(resumed, nullptr);
+  EXPECT_TRUE(has(stages_of(*resumed), "detect"));
+  EXPECT_EQ(resumed->detections[1].observation.points.size(), 8u);
+}
+
+// A restart starts the next session's live view on the same source: the
+// board unlocked and replaced, the next mode's capture rule, its spread
+// warning raised to the pair's bound as at the start; the next capture
+// carries the new board. One refused changes nothing.
+TEST_F(AppLive, ARestartStartsTheNextSessionOnTheSameSource) {
+  CollectSink sink;
+  test::FakeStereo* fake = nullptr;
+  std::unique_ptr<LiveWorker> live = start_pair(&fake, &sink);
+  ASSERT_NE(live, nullptr);
+  const auto capture = [&](std::uint64_t tick) {
+    push_pair(*fake, 0, tick, 0);
+    const std::shared_ptr<const LiveSnapshot> before = next_snapshot(*live, 0);
+    ASSERT_NE(before, nullptr);
+    ASSERT_TRUE(live->arm());
+    wait_armed(*live);
+    push_pair(*fake, 0, tick + 1, 0);
+    const std::shared_ptr<const LiveSnapshot> s =
+        next_snapshot(*live, before->number);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->decision.state, quality::CaptureState::Take)
+        << s->decision.message;
+  };
+  capture(1);
+  ASSERT_EQ(live->captures(), 1u);
+  EXPECT_FALSE(live->set_board(legacy_femto_board(), true).ok());  // locked
+
+  Target bigger = legacy_femto_board();  // the same board, measured larger
+  bigger.square_size_m *= 2.0;
+  bigger.marker_size_m *= 2.0;
+  quality::CaptureRuleOptions rule;
+  rule.min_views = 1;
+  ASSERT_TRUE(
+      live->restart({live_lens(), live_lens()}, bigger, true, rule).ok());
+  EXPECT_EQ(live->captures(), 0u);
+  EXPECT_EQ(live->board(), bigger);
+  EXPECT_TRUE(live->square_measured());
+  EXPECT_EQ(live->rule_options().min_views, 1);
+  EXPECT_NEAR(live->rule_options().spread_warn_ms, 16.666666, 1e-6);
+  capture(10);
+  const std::vector<CaptureRequest> taken = sink.taken();
+  ASSERT_EQ(taken.size(), 2u);
+  EXPECT_EQ(taken[0].board, legacy_femto_board());
+  EXPECT_EQ(taken[1].board, bigger);
+  EXPECT_TRUE(taken[1].square_measured);
+
+  test::expect_refused(
+      live->restart({live_lens()}, legacy_femto_board(), false, rule),
+      Code::InvalidArgument, "1 lenses for 2 cameras");
+  Target broken = legacy_femto_board();
+  broken.square_size_m = -1.0;
+  test::expect_refused(
+      live->restart({live_lens(), live_lens()}, broken, false, rule),
+      Code::InvalidArgument, "");
+  EXPECT_EQ(live->board(), bigger);
+  EXPECT_EQ(live->captures(), 1u);
 }
 
 // A pair whose board moved since the pair before is not taken, its skew

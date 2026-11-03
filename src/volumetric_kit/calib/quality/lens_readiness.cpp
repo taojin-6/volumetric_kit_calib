@@ -7,9 +7,11 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <map>
 #include <string>
 
+#include "checks.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
@@ -50,10 +52,20 @@ std::string shortfall(const LensReadiness& state,
     return percent(state.cells) + " of the cells, of " +
            percent(options.min_cells);
   }
-  if (*std::min_element(state.reach.begin(), state.reach.end()) <
-      options.min_reach) {
-    return "its corners reach too little of the way to an image corner or "
-           "side";
+  // Each direction short, its reach rounded down so it never reads as the
+  // limit: "reach 0.83 toward the top-left corner, needs 0.9".
+  std::string short_of;
+  for (std::size_t d = 0; d < state.reach.size(); ++d) {
+    if (state.reach[d] >= options.min_reach) continue;
+    char reach[16];
+    std::snprintf(reach, sizeof reach, "%.2f",
+                  std::floor(100.0 * state.reach[d]) / 100.0);
+    short_of += (short_of.empty() ? "reach " : ", ") + std::string(reach) +
+                " toward the " + detail::kReachToward[d];
+  }
+  if (!short_of.empty()) {
+    return short_of + ", needs " + detail::number(options.min_reach) +
+           ": capture there";
   }
   if (state.frontal && *state.frontal > options.max_frontal) {
     return percent(*state.frontal) + " of its views frontal, over " +

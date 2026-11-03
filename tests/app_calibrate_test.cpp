@@ -177,6 +177,21 @@ TEST(Calibrate, SolvesTwoToFiveCamerasInTheReferencesGauge) {
     EXPECT_EQ(report["world"]["origin"], "reference");
     EXPECT_EQ(report["world"]["miss"], "not_seen");
     EXPECT_EQ(report["world"]["reason"], "no camera saw the tag");
+    // Each lens checked on the solve, in rig order, as check_rig_lens gives
+    // it, and in the report: the true lenses read good.
+    ASSERT_EQ(r.lens_checks.size(), c.cameras);
+    for (std::size_t k = 0; k < c.cameras; ++k) {
+      SCOPED_TRACE(ids[k]);
+      const quality::LensCheck own =
+          quality::check_rig_lens(ids[k], kept.cameras, r.solution).value();
+      EXPECT_EQ(r.lens_checks[k].camera, ids[k]);
+      EXPECT_EQ(r.lens_checks[k].verdict, own.verdict);
+      EXPECT_EQ(r.lens_checks[k].rms_px, own.rms_px);
+      EXPECT_NE(r.lens_checks[k].verdict, quality::LensCheck::Verdict::Suspect)
+          << r.lens_checks[k].reason;
+      EXPECT_EQ(report["lens_checks"][ids[k]]["verdict"],
+                quality::to_string(own.verdict));
+    }
     EXPECT_EQ(r.files.residuals.rfind(
                   "capture,serial,corner_id,u,v,du,dv,weight,dropped\n", 0),
               0u);

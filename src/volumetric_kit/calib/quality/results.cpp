@@ -17,6 +17,7 @@
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/usable_for_pose.hpp"
 #include "volumetric_kit/calib/detect/tag.hpp"
+#include "volumetric_kit/calib/quality/lens_check.hpp"
 #include "volumetric_kit/calib/quality/lens_gate.hpp"
 #include "volumetric_kit/sensor/camera/array_calibration.hpp"
 
@@ -156,6 +157,25 @@ core::Status check_pairs_fit(const std::vector<std::string>& ids,
       return core::Status::invalid_argument(
           "the pair of \"" + p.left + "\" and \"" + p.right +
           "\" names camera \"" + *id + "\", which the rig does not have");
+    }
+  }
+  return {};
+}
+
+// Refuses a lens check of a camera the rig does not have, or one checked
+// twice.
+core::Status check_lens_checks_fit(const std::vector<std::string>& ids,
+                                   const std::vector<LensCheck>& checks) {
+  std::set<std::string> seen;
+  for (const LensCheck& check : checks) {
+    if (std::find(ids.begin(), ids.end(), check.camera) == ids.end()) {
+      return core::Status::invalid_argument("the lens check of camera \"" +
+                                            check.camera +
+                                            "\", which the rig does not have");
+    }
+    if (!seen.insert(check.camera).second) {
+      return core::Status::invalid_argument("camera \"" + check.camera +
+                                            "\"'s lens is checked twice");
     }
   }
   return {};
@@ -540,6 +560,35 @@ void pairs_section(Writer& w, const std::vector<PairRowCheck>& pairs,
   w.close_array();
 }
 
+void reach_members(Writer& w, const solve::LensReach& reach) {
+  w.key("top_left").value(reach[0]);
+  w.key("top_right").value(reach[1]);
+  w.key("bottom_left").value(reach[2]);
+  w.key("bottom_right").value(reach[3]);
+  w.key("left").value(reach[4]);
+  w.key("right").value(reach[5]);
+}
+
+void lens_checks_section(Writer& w, const std::vector<LensCheck>& checks) {
+  w.open_object();
+  for (const LensCheck& check : checks) {
+    w.key(check.camera).open_object();
+    w.key("verdict").value(to_string(check.verdict));
+    refused(w.key("reason"), check.reason);
+    w.key("rms_px").value(check.rms_px);
+    w.key("p95_px").value(check.p95_px);
+    w.key("views").value(check.views);
+    w.key("corners").value(check.corners);
+    w.key("dropped").value(check.dropped);
+    w.key("unshared").value(check.unshared);
+    w.key("reach").open_object();
+    reach_members(w, check.reach);
+    w.close_object();
+    w.close_object();
+  }
+  w.close_object();
+}
+
 std::string report_text(const std::vector<solve::RigCamera>& cameras,
                         const std::vector<std::string>& ids,
                         const solve::RigSolution& solution,
@@ -547,7 +596,8 @@ std::string report_text(const std::vector<solve::RigCamera>& cameras,
                         const DepthSummary* depth_checks,
                         const std::string& depth_unchecked,
                         const ResultWorld& world,
-                        const std::vector<PairRowCheck>& pairs) {
+                        const std::vector<PairRowCheck>& pairs,
+                        const std::vector<LensCheck>* lens_checks) {
   const std::size_t k = ids.size();
   Writer w;
   w.open_object();
@@ -759,6 +809,11 @@ std::string report_text(const std::vector<solve::RigCamera>& cameras,
     refused(w.key("depth_unchecked"), depth_unchecked);
   }
   pairs_section(w.key("pairs"), pairs, cameras);
+  if (lens_checks) {
+    lens_checks_section(w.key("lens_checks"), *lens_checks);
+  } else {
+    w.key("lens_checks").null();
+  }
   w.close_object();
   return std::move(w).text();
 }
@@ -832,12 +887,7 @@ void lens_section(Writer& w, const LensVerdict& verdict, bool written) {
   w.key("fold_deg").value(verdict.fold_deg);
   w.key("frame_folds").value(verdict.frame_folds);
   w.key("reach").open_object();
-  w.key("top_left").value(verdict.reach[0]);
-  w.key("top_right").value(verdict.reach[1]);
-  w.key("bottom_left").value(verdict.reach[2]);
-  w.key("bottom_right").value(verdict.reach[3]);
-  w.key("left").value(verdict.reach[4]);
-  w.key("right").value(verdict.reach[5]);
+  reach_members(w, verdict.reach);
   w.close_object();
   w.key("corner_reach_deg").open_object();
   w.key("top_left").value(verdict.corner_reach_deg[0]);
@@ -964,7 +1014,8 @@ core::Result<ResultFiles> format_results(
     const std::vector<solve::RigCamera>& cameras,
     const solve::RigSolution& solution, const CalibrationMetrics& metrics,
     const DepthSummary* depth, const std::string& depth_unchecked,
-    const ResultWorld& world, const std::vector<PairRowCheck>& pairs) {
+    const ResultWorld& world, const std::vector<PairRowCheck>& pairs,
+    const std::vector<LensCheck>* lens_checks) {
   constexpr const char* kWhat = "format_results";
   return compute::guarded(kWhat, [&]() -> core::Result<ResultFiles> {
     std::vector<std::string> ids;
@@ -975,6 +1026,9 @@ core::Result<ResultFiles> format_results(
     if (checked.ok() && depth) checked = check_depth_fits(ids.size(), *depth);
     if (checked.ok()) checked = check_world_fits(ids, world.origin);
     if (checked.ok()) checked = check_pairs_fit(ids, pairs);
+    if (checked.ok() && lens_checks) {
+      checked = check_lens_checks_fit(ids, *lens_checks);
+    }
     if (!checked.ok()) return std::move(checked).with_context(kWhat);
     core::Result<solve::AnchoredRig> anchored =
         solve::anchor_rig(solution, world.origin);
@@ -985,7 +1039,7 @@ core::Result<ResultFiles> format_results(
     ResultFiles files;
     files.array_calibration = *std::move(calibration);
     files.report = report_text(cameras, ids, solution, metrics, depth,
-                               depth_unchecked, world, pairs);
+                               depth_unchecked, world, pairs, lens_checks);
     files.residuals = residuals_text(ids, solution);
     return files;
   });

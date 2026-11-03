@@ -106,6 +106,62 @@ solve, the second camera pair) assemble the brain, and a rule that shows in
 review costs little. Freezing everything would stall the app; an ABI promise
 means nothing for a library nobody installs.
 
+## 2026-11-03 — One calib_rig, the mode chosen in it
+
+calib_rig is one app: its Setup panel picks the mode, Lenses or Poses, and
+the lens file, and the scenario's `operation` and `source.calibration` are
+only where it starts (the owner's: "if we already have intrinsics, we just
+need to load it and do extrinsics").
+
+- **A switch is a new session, the cameras left open** (`switch_session`).
+  After the first capture a switch of mode or lens file closes the session,
+  its captures on disk, and the next capture opens a new one; before it,
+  nothing is written. The live worker restarts first (`LiveWorker::restart`:
+  its lenses, the board unlocked, the mode's capture rule): from that call
+  it hands no capture on, under the lock it submits by, until it takes them,
+  so none of the closing session reaches the next; the capture worker's
+  restart, queued after, carries out what came before it first. A session
+  started within the second of the last takes `_2`. Refused while Calibrate
+  runs, which reads its own session. Each mode keeps the board it last had.
+- **A missing lens no longer stops a pose run.** The camera takes the
+  stand-in for the live view (`missing` in Setup), and Calibrate waits until
+  every camera has a lens the runtime reads: the file's, calibrated, or the
+  driver's factory one (a Femto's), naming each camera without and the fix.
+  Why: the lens file is now loaded in the app, after it opens.
+- **The lens file.** The list holds every lens run under `output.path`, a
+  results directory with `array_calibration.json` and a report with a
+  `lenses` section, newest first by its stamp, with each written camera's
+  pass or fail; or a typed path, with no native dialog (no new dependency).
+  A file is refused when a rig camera's lens there is at another size than
+  its pictures, or no rig camera has one, saying which; a camera it lacks is
+  noted. "Use these lenses" takes the file a lens run wrote with the cameras
+  that passed alone (a failed lens is written, for trials), saying why not
+  the others.
+- **Calibrate is never silent.** Its button stays pressable; pressed while
+  held back, the Calibration window opens and says why per camera
+  (`calibrate_blockers`): a lens session's shortfall names each direction
+  short with its reach ("reach 0.83 toward the top-left corner, needs 0.9:
+  capture there"), a pose session's each lens missing and each link short.
+  While it runs, the window shows it running. Why: on 2026-11-02 the owner
+  pressed Calibrate with neither camera at the 0.9 reach, and only a message
+  in another window said so.
+- **Each lens checked on the pose solve** (`check_rig_lens`): in the Lenses
+  panel and `report.json`'s `lens_checks`. A warning: the pair rows stay the
+  gate for depth. Suspect reads "the lenses disagree": a lens session says
+  which is off.
+- **Calibrate has the CPU.** The live view's search pauses while it runs
+  (`LiveWorker::pause_search`; the pictures keep coming, their luma still
+  made), and a lens run fits the ready cameras at once in one OpenCV loop.
+  OpenCV runs a loop inside another on its caller's thread, so each fit's
+  own loops run on one thread whatever the cores, and the result is fitting
+  them in turn on one thread's, bit for bit (it was the machine's thread
+  count's). OpenCV's threads stay uncapped (the TODO from 2026-10-16). On
+  the M5 Max (18 threads, two cameras' 40 views at 4K, Release): the fits
+  took 162 to 178 ms in turn and 117 to 119 ms at once at a cap of 2, 4, 8
+  or none; beside a live search looping, 202 to 205 ms in turn and 118 to
+  120 ms at once; the live search took 87 ms a set at any cap but one
+  thread, which made it 165 ms and the fits 200 ms. A cap gains nothing.
+
 ## 2026-11-02 — A lens checked on views of any board
 
 `quality/lens_check.hpp` says whether a lens holds on one camera's residuals,
@@ -274,7 +330,8 @@ source adds:
 
 ## 2026-11-02 — Intrinsic mode
 
-calib_rig's mode is its scenario's `operation`: `calibrate_intrinsics` fits
+calib_rig's mode is its scenario's `operation` (the one it starts in, since
+2026-11-03): `calibrate_intrinsics` fits
 each camera's lens, `calibrate` solves the rig's poses as before. One table
 holds what differs (`app/calib_mode.hpp`); the workers read the mode, never
 the driver. `calib_app` needs core 0.40.0 (`VC_APP_CORE_MIN_VERSION`), the
@@ -290,9 +347,9 @@ rest of calib still 0.29.0.
   factory lens, else, for lenses alone, a stand-in (fx = fy = width / 2,
   centred). Through it distance and tilt are rough and frontal views are not
   judged; corners, cells and reach need no lens. For poses a camera with no
-  lens stops the run, naming the file, and a factory camera with a
-  calibrated lens in the file is refused: the runtime reads the factory
-  lens.
+  lens takes the stand-in too, and Calibrate waits for a real one (amended
+  2026-11-03; it stopped the run), and a factory camera with a calibrated
+  lens in the file is refused: the runtime reads the factory lens.
 - **A fit's start** (`lens_start`): the camera's file lens, another camera's
   at its size, its factory lens; else OpenCV's own alone. Never the
   stand-in: from a poor start the fit lands in wrong minima.

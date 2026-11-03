@@ -115,16 +115,11 @@ core::Result<OpenedSource> open_orbbec(
       }
       VKC_ASSIGN(capture::SessionCamera camera,
                  orbbec_camera(infos[i], orbbec->device_info(), *sync));
-      VKC_ASSIGN(
-          const RigLens lens,
-          rig_lens(scenario.mode, camera.id, camera.size, camera.color,
-                   scenario.calibration.get(), config.source.calibration));
-      camera.lens = lens.origin;
-      if (lens.origin == capture::LensOrigin::File) {
-        camera.lens_file = config.source.calibration;
-      }
+      VKC_ASSIGN(const sensor::camera::CameraModel lens,
+                 take_lens(scenario.mode, scenario.calibration.get(),
+                           config.source.calibration, camera));
       out.cameras.push_back(std::move(camera));
-      out.lenses.push_back(lens.model);
+      out.lenses.push_back(lens);
     }
     VKC_ASSIGN(sensor::SensorArray array,
                sensor::SensorArray::open(std::move(sensors), {}));

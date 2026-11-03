@@ -105,7 +105,13 @@
 ///   (`rectified` `[width, height]`, `alpha`, `max_cell_mean_px`,
 ///   `min_cell_corners`, `min_cells`), `captures`, `corners`, `baseline_m`,
 ///   `dy_median_px`, `dy_p95_px` and `cells`, row-major from the top left of
-///   the rectified view, each `corners`, `mean_px` and `limit_px`.
+///   the rectified view, each `corners`, `mean_px` and `limit_px`;
+/// - `lens_checks` (@ref LensCheck), each camera's lens checked on the
+///   solve's residuals, by id, `null` when not checked: `verdict`
+///   (@ref to_string(LensCheck::Verdict)'s name), `reason` (`null` when
+///   empty), `rms_px`, `p95_px`, `views`, `corners`, `dropped`, `unshared`
+///   and `reach` (`top_left`, `top_right`, `bottom_left`, `bottom_right`,
+///   `left`, `right`).
 ///
 /// Numbers are written in the shortest form that reads back to the same
 /// double; one that is not finite, or not measured, is `null`, as are a
@@ -132,6 +138,8 @@
 #include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib::quality {
+
+struct LensCheck;  // quality/lens_check.hpp
 
 /// The results directory's calibration file: sensor's, posed.
 inline constexpr const char* kArrayCalibrationFile = "array_calibration.json";
@@ -187,19 +195,24 @@ struct ResultWorld {
 ///                  calibration file is the solution's own.
 /// @param pairs     Its pairs' rows (@ref check_pair_rows), in the report's
 ///                  `pairs`; empty when no pair was checked.
+/// @param lens_checks  Its cameras' lenses checked (@ref check_rig_lens), at
+///                  most one per camera, in the report's `lens_checks`; null
+///                  when the lenses were not checked.
 /// @return The files; `InvalidArgument` for no cameras, a repeated or empty
-///         id, or a @p solution, @p metrics, @p depth, tag world or pair that
-///         names a camera the rig does not have or has another camera count,
-///         or a calibration whose sensors are not the cameras (naming what);
-///         what `solve::anchor_rig` refuses; sensor's error for a calibration
-///         its writer refuses; or `OutOfMemory`. Each message starts
+///         id, or a @p solution, @p metrics, @p depth, tag world, pair or
+///         lens check that names a camera the rig does not have or has
+///         another camera count, a camera checked twice, or a calibration
+///         whose sensors are not the cameras (naming what); what
+///         `solve::anchor_rig` refuses; sensor's error for a calibration its
+///         writer refuses; or `OutOfMemory`. Each message starts
 ///         `format_results: `.
 VC_QUALITY_API core::Result<ResultFiles> format_results(
     const std::vector<solve::RigCamera>& cameras,
     const solve::RigSolution& solution, const CalibrationMetrics& metrics,
     const DepthSummary* depth = nullptr,
     const std::string& depth_unchecked = {}, const ResultWorld& world = {},
-    const std::vector<PairRowCheck>& pairs = {});
+    const std::vector<PairRowCheck>& pairs = {},
+    const std::vector<LensCheck>* lens_checks = nullptr);
 
 /// @brief A lens's mark as the report's `lens_source` and calib_rig's camera
 ///        panel name it.

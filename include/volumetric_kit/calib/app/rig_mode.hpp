@@ -53,8 +53,8 @@ struct RigMode {
   bool calibrated = false;         ///< A Calibrate result has been shown.
   /// A Calibrate is running (`CalibrateWorker::busy`).
   bool calibrating = false;
-  /// The session fits lenses (intrinsic mode): no 3D view, and Calibrate
-  /// waits for a camera's views (the Lenses panel).
+  /// The session fits lenses (intrinsic mode, Lenses in the Setup panel): no
+  /// 3D view, and Calibrate waits for a camera's views (the Lenses panel).
   bool intrinsic = false;
 };
 
@@ -90,7 +90,7 @@ struct RigStep {
 /// - `Calibrate`: `Calibrate` in both.
 /// - `SwitchView`: `ShowScene` in the images once calibrated, else `Ignore`
 ///   with "calibrate first"; `ShowImages` in the 3D view; in intrinsic mode
-///   `Ignore` with "intrinsic mode has no 3D view".
+///   `Ignore` with "Lenses mode has no 3D view".
 /// - `Cancel`: `Cancel` while calibrating, else `Ignore`, in both.
 /// - `None`: `Ignore`.
 ///
@@ -131,9 +131,10 @@ struct CalibrateGate {
 ///                    (`CaptureWorker::unresolved`), which a snapshot taken
 ///                    now would not reflect.
 /// @return Enabled; or not, the reason the first of "already running", "a
-///         capture or a drop is still being written" and "the session is
-///         not ready (see the Session panel)", in intrinsic mode "no camera
-///         is ready (see the Lenses panel)", that holds.
+///         capture, a drop or a session switch is under way" and "the
+///         session is not ready: the Calibration window says why", in
+///         intrinsic mode "no camera is ready: the Calibration window says
+///         why", that holds.
 ///
 /// @code
 /// const std::size_t unresolved = captures->unresolved();  // first
@@ -144,6 +145,17 @@ struct CalibrateGate {
 /// @endcode
 CalibrateGate calibrate_gate(const RigMode& mode, bool ready,
                              std::size_t unresolved) noexcept;
+
+/// @brief Whether the live view's board search pauses
+///        (`LiveWorker::pause_search`): while Calibrate runs, so its fits
+///        have the CPU; the pictures keep showing.
+/// @param mode  Where the window stands.
+/// @return `mode.calibrating`.
+///
+/// @code
+/// live->pause_search(search_paused(mode));
+/// @endcode
+bool search_paused(const RigMode& mode) noexcept;
 
 /// @brief Where the 3D view sits in @p mode.
 /// @param mode  Where the window stands.
