@@ -287,7 +287,7 @@ The scenario's `operation` is calib_rig's mode:
 
 | | Intrinsic (`calibrate_intrinsics`) | Extrinsic (`calibrate`) |
 | --- | --- | --- |
-| Board | the checkerboard first; any with 12 inner corners or more | the rig's ChArUco board |
+| Board | the checkerboard, its squares and size edited | the rig's ChArUco board |
 | Each camera's live lens | `source.calibration`'s at the stream's size, else the driver's, else a stand-in | the file's or the driver's; none stops the run |
 | A capture | a still board, one view enough | a still board |
 | Calibrate | once a camera is ready (the Lenses panel) | once the session's links are |
@@ -309,11 +309,9 @@ yet:
 
 A pair's lenses, in the lab:
 
-1. **Boards.** Measure the checkerboard's square with calipers over 12
+1. **Board.** Measure the checkerboard's square with calipers over 12
    squares, check the board is flat (note any bow) with about a square of
-   white margin around it, and enter it with "square measured" ticked. For
-   the pose session, measure the 5 x 3 ChArUco board end to end with a steel
-   rule (0.75 m), and have the floor tag (tag36h11, id 0) at hand.
+   white margin around it, and enter it with "square measured" ticked.
 2. **Cameras.** Tape focus and iris; fix exposure and white balance over
    PTP.
 3. **Session.** Run the scenario above, `source.calibration` the pair's
@@ -352,9 +350,10 @@ above, and installs nothing: it has no install rules or package config
 
 calib needs `volumetric_kit_core` 0.29.0 or newer, with its vulkan tier for
 `VC_WITH_RIG`, and 0.40.0 or newer with its config tier for `calib_app`; and
-`volumetric_kit_sensor` 0.21.0 or newer. An application that declares either before calib, to share it
-with another sibling, pins at least that: on an older one, calib's configure
-fails at `vkc_require_core` or `vkc_require_sibling`. Without `VC_WITH_RIG`,
+`volumetric_kit_sensor` 0.21.0 or newer. An application that declares either
+before calib, to share it with another sibling, pins at least that: on an
+older one, calib's configure fails at `vkc_require_core` or
+`vkc_require_sibling`. Without `VC_WITH_RIG`,
 calib makes sensor available camera-only (`VS_CAMERA_ONLY`), so an application
 that uses sensor beyond its camera tier makes sensor available, with its
 options, before calib; with it, an application that makes sensor available

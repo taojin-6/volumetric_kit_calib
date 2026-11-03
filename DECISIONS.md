@@ -131,25 +131,26 @@ rest of calib still 0.29.0.
 - **A fit's start** (`lens_start`): the camera's file lens, another camera's
   at its size, its factory lens; else OpenCV's own alone. Never the
   stand-in: from a poor start the fit lands in wrong minima.
-- **The board** is entered in the Board window, seeded per mode: the
-  checkerboard for lenses, where either kind is taken with at least
+- **The board** is entered in the Board window, seeded per mode, its kind
+  the seed's: the checkerboard for lenses, the rig's ChArUco board for
+  poses. A lens session takes a board of at least
   `LensOptions::min_corners` (12) inner corners, so a whole board gives a
-  lens view; the rig's ChArUco board, alone, for poses. The rig's 5 x 3
-  board has 8 and is refused for lenses, saying why; the floor stays 12.
+  lens view: the rig's 5 x 3 board has 8 and is refused, saying why; the
+  floor stays 12. No kind switch: the lab has no ChArUco board that large.
 - **Capture and Calibrate.** One view is a lens capture (`min_views` 1). The
   Lenses panel shows each camera's readiness (`quality::lens_readiness`),
   and C waits for one camera to be ready. Calibrate fits each ready camera
   (`solve_lens`, `judge_lens`, `format_lens_results` over the scenario's
   file), lists the others with why, and fits a factory camera for its report
-  alone; with no lens to write it leaves no calibration file. No 3D view, no
-  depth work.
+  alone; with no lens to write it leaves no calibration file. No origin tag
+  search, no 3D view, no depth work.
 - **The opener's arms are internal,** each built where sensor builds its
   driver: no public header of the app names a driver's type, `calib_app`
   links `sensor_orbbec` privately and builds with either driver. The
   DeckLink arm opens the scenario's pair with no calibration (sensor reports
   its cameras 0 x 0), its ports, mode and rate from the scenario; CI's
-  ubuntu-24.04 leg builds it on the core's copy of the SDK's headers, with
-  no card.
+  ubuntu-24.04 leg builds it on the core's copy of the SDK's headers and
+  runs the host tests on its path, with no card.
 - **One detector.** `detect_charuco` and its header are gone: `detect_board`
   finds both kinds, its ChArUco half the one home of that search.
 
