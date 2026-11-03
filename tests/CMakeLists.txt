@@ -180,6 +180,8 @@ target_include_directories(vc_lens_gate_test SYSTEM
 # over many seeds (`lens_check.sweeps`).
 vc_add_test(lens_check volumetric_kit::calib_quality vc_synthetic_rig)
 vc_add_sweeps(lens_check)
+# About 50 s on an M5 Max: 3,800 checks, most on rig solves of random sessions.
+set_tests_properties(lens_check.sweeps PROPERTIES TIMEOUT 300)
 # quality: a stereo pair's rectified rows on a pair like the lab's, corners
 # placed in its view and seen through the true pair, against sensor's own
 # rectification; and calib's undistortion against OpenCV's default.
