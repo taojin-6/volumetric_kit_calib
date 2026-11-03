@@ -799,9 +799,11 @@ core::Result<std::vector<PanelLine>> lens_results_panel(
                          Tone::Normal});
         for (const quality::LensVerdict& lens : lenses) {
           const std::string& id = lens.fit.camera.id;
-          std::string value = lens.pass || lens.failed.empty()
-                                  ? std::string("pass")
-                                  : "fail: " + lens.failed.front();
+          std::string value =
+              lens.pass
+                  ? std::string("pass")
+                  : "fail: " + (lens.failed.empty() ? std::string("a gate")
+                                                    : lens.failed.front());
           value += ", hold-out " + figure(lens.fit.holdout_rms_px, 2, " px");
           value += lens.fold_deg >= 90.0
                        ? std::string(", no fold")

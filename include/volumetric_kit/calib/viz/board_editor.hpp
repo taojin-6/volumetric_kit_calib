@@ -92,19 +92,6 @@ class BoardEditor {
   BoardRule rule_;
 };
 
-/// @brief @p board as @p kind: itself when it is that kind already; else the
-///        lab's board of that kind (`legacy_checkerboard`,
-///        `legacy_femto_board`), which the editor's kind switch starts from.
-/// @param board  The board.
-/// @param kind   A checkerboard or ChArUco.
-/// @return The board; @p board itself for any other kind.
-///
-/// @code
-/// VKC_TRY(editor.edit(with_kind(editor.board(), TargetKind::Checkerboard),
-///                     false));
-/// @endcode
-Target with_kind(const Target& board, TargetKind kind) noexcept;
-
 /// @brief A board's fields as @ref draw_board_editor shows them: squares, as
 ///        OpenCV and the print count them, rather than corners, and
 ///        millimetres rather than metres.
@@ -145,13 +132,13 @@ BoardFields board_fields(const Target& board) noexcept;
 /// @endcode
 Target apply_fields(const Target& board, const BoardFields& fields) noexcept;
 
-/// @brief Draw @p editor's fields as ImGui widgets -- the kind, where its
-///        rule takes a checkerboard (@ref with_kind); the squares across and
+/// @brief Draw @p editor's fields as ImGui widgets -- the squares across and
 ///        down; the square size (millimetres); for a ChArUco board, the
 ///        marker size, the dictionary, the first marker's id and the legacy
 ///        layout; for a checkerboard, its inner corners as a hint; and
 ///        whether the square was measured -- and apply what the user changes
-///        through @ref BoardEditor::edit. Once locked, the widgets are
+///        through @ref BoardEditor::edit. The board's kind is its seed's
+///        (a session's mode seeds it). Once locked, the widgets are
 ///        disabled. The widgets' ImGui ids are scoped to @p editor, so two
 ///        editors can share a window.
 /// @param editor  The editor.

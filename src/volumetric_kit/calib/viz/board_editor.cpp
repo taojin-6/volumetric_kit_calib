@@ -94,13 +94,6 @@ core::Status BoardEditor::edit(const Target& board, bool square_measured) {
   });
 }
 
-Target with_kind(const Target& board, TargetKind kind) noexcept {
-  if (board.kind == kind) return board;
-  if (kind == TargetKind::Checkerboard) return legacy_checkerboard();
-  if (kind == TargetKind::ChArUco) return legacy_femto_board();
-  return board;
-}
-
 core::Status draw_board_editor(BoardEditor& editor) {
   const bool locked = editor.locked();
   ImGui::PushID(&editor);
@@ -110,25 +103,7 @@ core::Status draw_board_editor(BoardEditor& editor) {
   bool changed = false;
   constexpr ImGuiInputTextFlags kOnEnter = ImGuiInputTextFlags_EnterReturnsTrue;
 
-  // The board as shown: another kind, once picked, starts from its seed,
-  // its square nominal.
-  Target shown = editor.board();
-  if (editor.rule().checkerboard) {
-    constexpr TargetKind kKinds[] = {TargetKind::ChArUco,
-                                     TargetKind::Checkerboard};
-    if (ImGui::BeginCombo("kind", to_string(shown.kind))) {
-      for (const TargetKind kind : kKinds) {
-        const bool selected = kind == shown.kind;
-        if (ImGui::Selectable(to_string(kind), selected) && !selected) {
-          shown = with_kind(shown, kind);
-          measured = false;
-          changed = true;
-        }
-        if (selected) ImGui::SetItemDefaultFocus();
-      }
-      ImGui::EndCombo();
-    }
-  }
+  const Target& shown = editor.board();
   BoardFields fields = board_fields(shown);
   int squares[2] = {fields.squares_across, fields.squares_down};
   if (ImGui::InputInt2("squares across, down", squares, kOnEnter)) {

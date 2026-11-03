@@ -466,7 +466,8 @@ core::Result<std::vector<PanelLine>> lens_panel(
 ///
 /// Lines, in order: `calibration` (its results number, captures and
 /// seconds); `lens <id>` for each camera fitted, `pass` (green) or `fail:
-/// <first gate missed>` (red), its held-out RMS and fold, and `report only`
+/// <first gate missed>` (red; `a gate` where none is named), its held-out
+/// RMS and fold, and `report only`
 /// for a camera fitted for the report alone; `lens <id>` for each camera not
 /// fitted, why (amber); and `results`, the directory.
 /// @param lenses       The cameras fitted, judged.

@@ -966,6 +966,14 @@ TEST(LensResultsPanel, SaysWhatEachLensIsWorth) {
   EXPECT_EQ(lines[3].tone, Tone::Warn);
   EXPECT_EQ(lines[4].label, "results");
   EXPECT_EQ(lines[4].value, "results/003_a");
+  // A failed lens says so, even with no gate named.
+  fail.failed.clear();
+  const std::vector<PanelLine> unnamed =
+      lens_results_panel({fail}, {}, {}, 3, "results/003_a", 40, 2.04).value();
+  ASSERT_EQ(unnamed.size(), 3u);
+  EXPECT_EQ(unnamed[1].value.rfind("fail: a gate, ", 0), 0u)
+      << unnamed[1].value;
+  EXPECT_EQ(unnamed[1].tone, Tone::Bad);
 }
 
 // The stages' rows go to gfx's panel as they are; the frame's time is their

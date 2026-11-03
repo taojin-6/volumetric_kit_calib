@@ -3,8 +3,8 @@
 
 // The board editor: edits checked as the detector checks a board and as the
 // session's rule takes one (a lens session's checkerboard, and a lens view's
-// corners), the fields as the editor shows them, the kind switch, and the
-// board locked after the session's first capture.
+// corners), the fields as the editor shows them, and the board locked after
+// the session's first capture.
 
 #include "volumetric_kit/calib/viz/board_editor.hpp"
 
@@ -163,8 +163,8 @@ TEST(BoardFields, HoldCountsToIntsRange) {
 }
 
 // A lens session's editor takes a checkerboard, its fields squares and a
-// square with no markers, and a ChArUco board large enough; the kind switch
-// starts from the lab's board of that kind.
+// square with no markers; the rig's ChArUco board, of fewer inner corners than
+// a lens view takes, is refused, saying why.
 TEST(BoardEditor, ALensSessionTakesACheckerboard) {
   BoardRule lenses;
   lenses.checkerboard = true;
@@ -195,13 +195,6 @@ TEST(BoardEditor, ALensSessionTakesACheckerboard) {
       << refused.message();
   EXPECT_EQ(editor.board().kind, TargetKind::Checkerboard);
   EXPECT_EQ(editor.board().cols, 13);
-  // The kind switch: the lab's board of the other kind, or the board itself.
-  EXPECT_EQ(with_kind(editor.board(), TargetKind::Checkerboard),
-            editor.board());
-  EXPECT_EQ(with_kind(editor.board(), TargetKind::ChArUco),
-            legacy_femto_board());
-  EXPECT_EQ(with_kind(legacy_femto_board(), TargetKind::Checkerboard),
-            legacy_checkerboard());
   // Another kind is refused, naming the two a lens session takes.
   Target circles;
   circles.kind = TargetKind::SymmetricCircleGrid;
