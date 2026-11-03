@@ -25,10 +25,10 @@ release may break it, and each such entry says how to migrate
 
 ### Changed
 
-- build: **calib pins sensor at its tracked stills** (dfe6111, 0.40.0), where
-  it was at #47's merge (881f42b, 0.36.0), as is sensor's Orbbec SDK action
-  in CI; calib needs sensor 0.40.0 (`VC_SENSOR_MIN_VERSION`), for
-  `camera/tracked_stills.hpp`.
+- build: **calib pins sensor at its tracked stills** (#48's merge, dfe601f,
+  0.41.0), where it was at #47's merge (881f42b, 0.36.0), as is sensor's
+  Orbbec SDK action in CI; calib needs sensor 0.41.0
+  (`VC_SENSOR_MIN_VERSION`), for `camera/tracked_stills.hpp`.
 - calib's version is 0.9.0, where it was 0.8.0.
 
 ## [0.8.0] - 2026-11-03

@@ -63,11 +63,11 @@ include(vc_sanitizers)
 # --- Dependencies + library --------------------------------------------------
 # The oldest volumetric_kit_core and volumetric_kit_sensor calib builds with
 # (DECISIONS.md, 2026-10-29), checked in the ones that arrive (third_party/):
-# sensor 0.40.0 has the tracked stills the solve tier's register_tracked reads
+# sensor 0.41.0 has the tracked stills the solve tier's register_tracked reads
 # (camera/tracked_stills.hpp), past 0.21.0's LumaPass and list read
 # (DECISIONS.md, 2026-11-02) and 0.23.0's NV12 test pictures.
 set(VC_CORE_MIN_VERSION 0.29.0)
-set(VC_SENSOR_MIN_VERSION 0.40.0)
+set(VC_SENSOR_MIN_VERSION 0.41.0)
 # calib_app's: CalibRig's operation and DeckLink cameras (DECISIONS.md,
 # 2026-11-02, intrinsic mode).
 set(VC_APP_CORE_MIN_VERSION 0.40.0)
