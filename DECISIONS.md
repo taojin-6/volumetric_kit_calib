@@ -123,10 +123,13 @@ source adds:
   `depth_height`, which core resolves to FFS's 960 x 544 for a DeckLink
   pair: the size has one home. The verdict goes to `report.json`'s `pairs`
   and the Calibration window; the file is written whatever it is, as a lens
-  that misses a gate is. `swapped` says to name the left camera first in
-  `source.pairs`, here and in FuseDecklink's scenario, not to swap the
-  inputs: lenses and poses are keyed by id, so swapped inputs would hand
-  each id the other camera's lens. `insufficient` names where to capture.
+  that misses a gate is. `swapped` judges no rows. It says to name the left
+  camera first in `source.pairs`, here and in FuseDecklink's scenario, and
+  run the session again, when the cables are as in the lens session: lenses
+  and poses are keyed by id, so swapping the inputs would hand each id the
+  other camera's lens. If the cables moved since, each id's pictures already
+  come from the camera whose lens it does not hold, so the cables go back.
+  `insufficient` names where to capture.
 - **Depth is checked only for cameras with depth;** a pair has none, so its
   report has no depth section.
 

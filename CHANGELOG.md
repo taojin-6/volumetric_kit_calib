@@ -21,7 +21,12 @@ release may break it, and each such entry says how to migrate
   verdict, the worst cell and the 95th percentile, and what to do when it
   does not pass; `calibration_notices` posts the amber ones.
 - `app::lens_source`: how a calibration file marks a camera's lens.
+- In extrinsic mode each camera's panel ends with its lens, its mark and
+  whether the scenario's file gave it (`calibrated (file)`):
+  `app::lens_line`, `viz::CameraLive::lens`.
 - `quality::pair_row_cell_name`: a cell of a pair's rows by name.
+- `quality::to_string(sensor::camera::IntrinsicsSource)`: a lens's mark as
+  the report names it.
 
 ### Changed
 

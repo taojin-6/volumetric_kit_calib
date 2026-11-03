@@ -12,10 +12,13 @@
 
 #include <gtest/gtest.h>
 
+#include "result_checks.hpp"
+
 namespace volumetric_kit::calib::app {
 namespace {
 
 using Code = core::Status::Code;
+using test::expect_refused;
 
 // The lab's pair as core's config resolves it: bm-1 on SDI 2 left, bm-2 on
 // SDI 1 right, at 2160p25.
@@ -28,13 +31,6 @@ core::config::Source pair_source() {
   source.color_height = 2160;
   source.fps = 25;
   return source;
-}
-
-void refused(const core::Status& status, const std::string& text) {
-  EXPECT_FALSE(status.ok());
-  EXPECT_EQ(status.domain(), Code::InvalidArgument) << status.message();
-  EXPECT_NE(status.message().find(text), std::string::npos)
-      << status.message() << " lacks " << text;
 }
 
 TEST(AppDecklink, OpensThePairByItsNamesWithNoCalibration) {
@@ -69,18 +65,21 @@ TEST(AppDecklink, OpensThePairByItsNamesWithNoCalibration) {
 TEST(AppDecklink, RefusesAPairItCannotName) {
   core::config::Source source = pair_source();
   source.pairs.clear();
-  refused(decklink_options(source).status(),
-          "source.pairs: 0 pairs; calib_rig opens exactly one");
+  expect_refused(decklink_options(source).status(), Code::InvalidArgument,
+                 "source.pairs: 0 pairs; calib_rig opens exactly one");
   source = pair_source();
   source.pairs.push_back({"bm-2", "bm-1"});
-  refused(decklink_options(source).status(), "source.pairs: 2 pairs");
+  expect_refused(decklink_options(source).status(), Code::InvalidArgument,
+                 "source.pairs: 2 pairs");
   source = pair_source();
   source.pairs = {{"bm-3", "bm-2"}};
-  refused(decklink_options(source).status(),
-          "source.pairs[0].left: bm-3 is not a camera of source.cameras");
+  expect_refused(
+      decklink_options(source).status(), Code::InvalidArgument,
+      "source.pairs[0].left: bm-3 is not a camera of source.cameras");
   source.pairs = {{"bm-1", "bm-4"}};
-  refused(decklink_options(source).status(),
-          "source.pairs[0].right: bm-4 is not a camera of source.cameras");
+  expect_refused(
+      decklink_options(source).status(), Code::InvalidArgument,
+      "source.pairs[0].right: bm-4 is not a camera of source.cameras");
 }
 
 }  // namespace

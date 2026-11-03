@@ -19,6 +19,7 @@
 
 #include <gtest/gtest.h>
 
+#include "result_checks.hpp"
 #include "volumetric_kit/calib/solve/lens.hpp"
 
 namespace volumetric_kit::calib::app {
@@ -27,16 +28,10 @@ namespace {
 namespace camera = sensor::camera;
 using capture::LensOrigin;
 using capture::SessionMode;
+using test::expect_refused;
 using Code = core::Status::Code;
 
 constexpr camera::ImageSize k4K{3840, 2160};
-
-void refused(const core::Status& status, Code code, const std::string& text) {
-  EXPECT_FALSE(status.ok());
-  EXPECT_EQ(status.domain(), code) << status.message();
-  EXPECT_NE(status.message().find(text), std::string::npos)
-      << status.message() << " lacks " << text;
-}
 
 // A lens of `size`, its focal length `f`, told apart by it.
 camera::CameraModel lens(camera::ImageSize size, double f) {
@@ -69,11 +64,13 @@ TEST(AppCalibMode, TheOperationIsTheMode) {
             SessionMode::Intrinsics);
   EXPECT_EQ(session_mode(Operation::Calibrate).value(),
             SessionMode::Extrinsics);
-  refused(session_mode(Operation::Fuse).status(), Code::InvalidArgument,
-          "operation: " + std::to_string(static_cast<int>(Operation::Fuse)) +
-              " is not one calib_rig runs (calibrate, calibrate_intrinsics)");
-  refused(session_mode(static_cast<Operation>(99)).status(),
-          Code::InvalidArgument, "operation: 99 is not one calib_rig runs");
+  expect_refused(
+      session_mode(Operation::Fuse).status(), Code::InvalidArgument,
+      "operation: " + std::to_string(static_cast<int>(Operation::Fuse)) +
+          " is not one calib_rig runs (calibrate, calibrate_intrinsics)");
+  expect_refused(session_mode(static_cast<Operation>(99)).status(),
+                 Code::InvalidArgument,
+                 "operation: 99 is not one calib_rig runs");
 }
 
 // The live lens, by mode: the file's at exactly the pictures' size first,
@@ -111,22 +108,25 @@ TEST(AppCalibMode, EachCamerasLensComesFromTheFileTheFactoryOrTheStandIn) {
   EXPECT_EQ(other.model.intrinsics.cx, 1919.5);
   EXPECT_EQ(other.model.intrinsics.cy, 1079.5);
   EXPECT_EQ(other.model.distortion.k1, 0.0);
-  refused(
+  expect_refused(
       rig_lens(SessionMode::Extrinsics, "bm-2", k4K, std::nullopt, &file, path)
           .status(),
       Code::InvalidArgument,
       "bm-2 has no lens at 3840x2160 in bm_pair/array_calibration.json: "
       "run intrinsic mode");
-  refused(
+  expect_refused(
       rig_lens(SessionMode::Extrinsics, "bm-2", k4K, std::nullopt, nullptr, "")
           .status(),
-      Code::InvalidArgument, "bm-2 has no lens at 3840x2160 (no file)");
+      Code::InvalidArgument,
+      "bm-2 has no lens at 3840x2160 (no source.calibration): run intrinsic "
+      "mode");
   // A factory camera with a calibrated lens in the file, for poses: the
   // runtime would read the factory's. A factory-sourced one is the same lens.
-  refused(rig_lens(SessionMode::Extrinsics, "bm-1", k4K, factory, &file, path)
-              .status(),
-          Code::InvalidArgument,
-          "bm-1 has a factory lens and a calibrated one in " + path);
+  expect_refused(
+      rig_lens(SessionMode::Extrinsics, "bm-1", k4K, factory, &file, path)
+          .status(),
+      Code::InvalidArgument,
+      "bm-1 has a factory lens and a calibrated one in " + path);
   EXPECT_EQ(rig_lens(SessionMode::Intrinsics, "bm-1", k4K, factory, &file, path)
                 .value()
                 .origin,
@@ -141,10 +141,11 @@ TEST(AppCalibMode, EachCamerasLensComesFromTheFileTheFactoryOrTheStandIn) {
   // The runtime reads the factory lens at any size, so a calibrated one at
   // another size is refused for poses too; for lenses it is not the
   // camera's, which keeps its factory lens.
-  refused(rig_lens(SessionMode::Extrinsics, "bm-2", k4K, factory, &file, path)
-              .status(),
-          Code::InvalidArgument,
-          "bm-2 has a factory lens and a calibrated one in " + path);
+  expect_refused(
+      rig_lens(SessionMode::Extrinsics, "bm-2", k4K, factory, &file, path)
+          .status(),
+      Code::InvalidArgument,
+      "bm-2 has a factory lens and a calibrated one in " + path);
   EXPECT_EQ(rig_lens(SessionMode::Intrinsics, "bm-2", k4K, factory, &file, path)
                 .value()
                 .origin,
@@ -153,7 +154,7 @@ TEST(AppCalibMode, EachCamerasLensComesFromTheFileTheFactoryOrTheStandIn) {
 
 // The mark a lens carries into the file the solve writes: a file lens keeps
 // the file's, calibrated or factory; a factory lens, or a stand-in, is
-// factory.
+// factory. A pose session's camera panel shows it.
 TEST(AppCalibMode, ALensKeepsTheMarkOfWhereItCameFrom) {
   const camera::ArrayCalibration file = file_of(
       {{"bm-1", calibrated(k4K, 1702.0)},
@@ -179,6 +180,19 @@ TEST(AppCalibMode, ALensKeepsTheMarkOfWhereItCameFrom) {
             Source::Factory);
   EXPECT_EQ(lens_source(record("bm-1", LensOrigin::File), nullptr),
             Source::Factory);
+
+  // The camera panel's lens line says the mark, and a file's lens as such;
+  // in a lens session the Lenses panel says it instead.
+  const auto line = [&](SessionMode mode, const char* id, LensOrigin origin) {
+    return lens_line(mode, record(id, origin), &file).value();
+  };
+  EXPECT_EQ(line(SessionMode::Extrinsics, "bm-1", LensOrigin::File),
+            "calibrated (file)");
+  EXPECT_EQ(line(SessionMode::Extrinsics, "CL2A141000N", LensOrigin::File),
+            "factory (file)");
+  EXPECT_EQ(line(SessionMode::Extrinsics, "CL2A141000N", LensOrigin::Factory),
+            "factory");
+  EXPECT_EQ(line(SessionMode::Intrinsics, "bm-1", LensOrigin::File), "");
 }
 
 // A lens fit starts from a real lens or OpenCV's own: the camera's file
@@ -221,7 +235,7 @@ TEST(AppCalibMode, EachModeSeedsAndTakesItsBoards) {
 
   EXPECT_TRUE(
       viz::BoardEditor::create(legacy_checkerboard(), false, lenses).ok());
-  refused(
+  expect_refused(
       viz::BoardEditor::create(legacy_femto_board(), false, lenses).status(),
       Code::InvalidArgument,
       "a lens view needs 12 corners, and this board has 8 (4 x 2 inner "
@@ -234,7 +248,7 @@ TEST(AppCalibMode, EachModeSeedsAndTakesItsBoards) {
   EXPECT_TRUE(viz::BoardEditor::create(charuco, false, lenses).ok());
   EXPECT_TRUE(
       viz::BoardEditor::create(legacy_femto_board(), false, poses).ok());
-  refused(
+  expect_refused(
       viz::BoardEditor::create(legacy_checkerboard(), false, poses).status(),
       Code::Unsupported, "the board must be ChArUco, not checkerboard");
 }
@@ -307,8 +321,9 @@ TEST(AppCalibMode, RecordsEachStereoCameraWithItsLens) {
   capture::SessionCamera bm2;
   bm2.id = "bm-2";
   bm2.size = k4K;
-  refused(add_stereo_camera(bm2, scenario, path, opened), Code::InvalidArgument,
-          "bm-2 has no lens at 3840x2160 in " + path);
+  expect_refused(add_stereo_camera(bm2, scenario, path, opened),
+                 Code::InvalidArgument,
+                 "bm-2 has no lens at 3840x2160 in " + path);
   EXPECT_EQ(opened.cameras.size(), 2u);
 }
 

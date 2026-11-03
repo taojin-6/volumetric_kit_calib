@@ -92,6 +92,9 @@ struct CameraLive {
   /// Its frame counters, as sensor keeps them: `failed` is a loss; `dropped`,
   /// frames a newer one replaced before a poll, is not.
   sensor::SensorStats frames;
+  /// Its lens, as the `lens` line says it, e.g. `calibrated (file)`; no line
+  /// when empty.
+  std::string lens;
 };
 
 /// @brief One camera's panel.
@@ -101,7 +104,8 @@ struct CameraLive {
 /// `session.view.oblique_deg`, red above `session.solve.oblique_deg`) and
 /// `fit` from the view's own pose; `cell`, where the board's centre is in a
 /// 3 x 3 grid; `stillness` (green below `rule.still_px`); `views` usable and
-/// used by the solve; `coverage` filled; and `frames`, amber once any failed.
+/// used by the solve; `coverage` filled; `frames`, amber once any failed; and
+/// `lens`, when the camera has one to show.
 /// @param camera   The camera in the latest set.
 /// @param session  Its part of the session.
 /// @param board    The board, for its corners and markers.
@@ -428,9 +432,12 @@ core::Result<std::vector<PanelLine>> world_panel(
 /// - `fail: <figures>: <the cells past their limits>` (red);
 /// - `insufficient: <figures>: <where to capture>, then press C again`
 ///   (amber);
-/// - `swapped: <right> is the left camera: put it first in source.pairs,
-///   here and in the runtime's scenario; the file needs no change` (amber):
-///   the file is keyed by id, so the poses are right either way;
+/// - `swapped: <the check's reason>; rows not judged. If the cables are as
+///   in the lens session, do so in source.pairs, here and in the runtime's
+///   scenario, and run the pose session again; if they moved, put them back
+///   and run it again` (amber): the file is keyed by id, so naming the pair
+///   the other way round is right while each id is the camera whose lens
+///   the file holds;
 /// - `refused: <the rectification's refusal>` (red).
 /// @param pairs  Each pair's check, in the scenario's order.
 /// @return The lines; or `OutOfMemory`.

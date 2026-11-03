@@ -13,7 +13,8 @@
 // still calibrated, and whose rows pass in every part of the view. Named the
 // other way round, the pair is Swapped, the panel saying how to name it, and
 // the file the same; from the centre's captures alone it is Insufficient, the
-// panel saying where to capture. And what the pose session refuses of the
+// panel saying where to capture; a pair naming a camera the rig lacks fails
+// the run. And what the pose session refuses of the
 // file: a camera with no lens at the pictures' size, naming the file, never a
 // stand-in. The device part runs under the validation layer when the
 // environment asks (VKC_TEST_VALIDATION) and skips without a device.
@@ -36,6 +37,7 @@
 #include "detect_helpers.hpp"
 #include "fake_stereo.hpp"
 #include "live_pair.hpp"
+#include "result_checks.hpp"
 #include "scratch_dir.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/app/calib_mode.hpp"
@@ -69,13 +71,6 @@ using test::ScratchDir;
 constexpr camera::ImageSize kSize{960, 540};       // test::quarter_fisheye()'s
 constexpr camera::ImageSize kRectified{960, 544};  // FFS's, as core resolves it
 constexpr double kDeg = 3.14159265358979323846 / 180.0;
-
-void refused(const core::Status& status, Code code, const std::string& text) {
-  EXPECT_FALSE(status.ok());
-  EXPECT_EQ(status.domain(), code) << status.message();
-  EXPECT_NE(status.message().find(text), std::string::npos)
-      << status.message() << " lacks " << text;
-}
 
 // A pair's lens file as intrinsic mode writes it (format_lens_results): each
 // camera's lens fitted (solve_lens, judge_lens) to a lens session's views
@@ -363,9 +358,9 @@ TEST_F(AppExtrinsic, APairsSessionGivesItsPosesAndRows) {
       << passed[0].value;
   EXPECT_EQ(passed[0].tone, viz::Tone::Good);
 
-  // Named the other way round, the pair is Swapped, and the panel says how
-  // to name it; the poses do not depend on its naming, so the file is the
-  // same.
+  // Named the other way round, the pair is Swapped, its rows not judged, and
+  // the panel says how to name it and to run the session again; the poses do
+  // not depend on its naming, so the file is the same.
   KeptCaptures reversed = *kept;
   reversed.pairs = {{"bm-2", "bm-1"}};
   const core::Result<CalibrateResult> swapped = calibrate(reversed);
@@ -379,9 +374,20 @@ TEST_F(AppExtrinsic, APairsSessionGivesItsPosesAndRows) {
   ASSERT_EQ(named.size(), 1u);
   EXPECT_EQ(named[0].label, "rows bm-2 | bm-1");
   EXPECT_EQ(named[0].value,
-            "swapped: bm-1 is the left camera: put it first in source.pairs, "
-            "here and in the runtime's scenario; the file needs no change");
+            "swapped: \"bm-1\" is the left camera: name it first, then "
+            "\"bm-2\"; rows not judged. If the cables are as in the lens "
+            "session, do so in source.pairs, here and in the runtime's "
+            "scenario, and run the pose session again; if they moved, put "
+            "them back and run it again");
   EXPECT_EQ(named[0].tone, viz::Tone::Warn);
+
+  // A pair naming a camera the rig lacks fails the run, naming the check.
+  KeptCaptures unknown = *kept;
+  unknown.pairs = {{"bm-1", "bm-9"}};
+  const core::Status lacking = calibrate(unknown).status();
+  test::expect_refused(lacking, Code::InvalidArgument, "bm-9");
+  EXPECT_EQ(lacking.message().rfind("calibrate: check_pair_rows: ", 0), 0u)
+      << lacking.message();
 
   // From the centre's captures alone, too few parts of the view hold
   // corners: Insufficient, and the panel says where to capture.
@@ -443,10 +449,11 @@ TEST(AppExtrinsicLenses, ComeFromTheScenariosFileAlone) {
             camera::IntrinsicsSource::Calibrated);
   for (const char* id : {"bm-2", "bm-3"}) {
     SCOPED_TRACE(id);
-    refused(add_stereo_camera(camera_of(id), scenario, path, opened),
-            Code::InvalidArgument,
-            std::string(id) + " has no lens at 960x540 in " + path +
-                ": run intrinsic mode");
+    test::expect_refused(
+        add_stereo_camera(camera_of(id), scenario, path, opened),
+        Code::InvalidArgument,
+        std::string(id) + " has no lens at 960x540 in " + path +
+            ": run intrinsic mode");
   }
   EXPECT_EQ(opened.cameras.size(), 1u);
 }

@@ -492,13 +492,8 @@ void world_section(Writer& w, const ResultWorld& world,
   w.close_object();
 }
 
-const char* source_name(camera::IntrinsicsSource source) {
-  return source == camera::IntrinsicsSource::Calibrated ? "calibrated"
-                                                        : "factory";
-}
-
-// TODO: each camera's lens file (its path and SHA-256) beside its lens source,
-// when calib_rig checks pairs and can give them.
+// Each camera's lens file, its path and SHA-256, is in the session's
+// session.json, its one home.
 void pairs_section(Writer& w, const std::vector<PairRowCheck>& pairs,
                    const std::vector<solve::RigCamera>& cameras) {
   w.open_array();
@@ -511,7 +506,7 @@ void pairs_section(Writer& w, const std::vector<PairRowCheck>& pairs,
     w.key("lens_source").open_object();
     for (const std::string* id : {&p.left, &p.right}) {
       for (const solve::RigCamera& cam : cameras) {
-        if (cam.id == *id) w.key(cam.id).value(source_name(cam.source));
+        if (cam.id == *id) w.key(cam.id).value(quality::to_string(cam.source));
       }
     }
     w.close_object();
@@ -1040,6 +1035,11 @@ core::Result<ResultFiles> format_lens_results(
     }
     return files;
   });
+}
+
+const char* to_string(camera::IntrinsicsSource source) noexcept {
+  return source == camera::IntrinsicsSource::Calibrated ? "calibrated"
+                                                        : "factory";
 }
 
 }  // namespace volumetric_kit::calib::quality

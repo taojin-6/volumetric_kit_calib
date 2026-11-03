@@ -331,9 +331,17 @@ A pair, in the lab:
    file. Capture about 15-20 still ChArUco boards both cameras see, spread
    over their shared view (all 9 parts, both sides), with the floor tag in
    view; then press C. The Calibration window's `rows bm-1 | bm-2` line
-   reads `pass`; when it reads `insufficient`, capture where it names and
-   press C again; when it reads `swapped`, name the left camera it names
-   first in `source.pairs`, here and in FuseDecklink's scenario.
+   reads `pass`, and FuseDecklink can take the file. Otherwise:
+   - `insufficient`: capture where it names and press C again.
+   - `swapped`: the rows were not judged. If the SDI cables are as in step
+     3, name the left camera it names first in `source.pairs`, here and in
+     FuseDecklink's scenario, and run this step again; if they moved, put
+     them back and run it again.
+   - `fail`: run step 3 again, then this step. If it still fails with
+     lenses that passed, keep both reports: the lenses and poses then need
+     refining together, which calib does not do yet.
+   - `refused` (one camera above the other, or both at one place): check
+     the cameras and the scenario's pair.
 
 ## Use it in your project
 

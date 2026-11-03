@@ -145,6 +145,23 @@ sensor::camera::IntrinsicsSource lens_source(
     const capture::SessionCamera& camera,
     const sensor::camera::ArrayCalibration* file);
 
+/// @brief A camera's `lens` line in its panel (`viz::CameraLive::lens`): for
+///        poses, its lens's mark (@ref lens_source), then ` (file)` when the
+///        lens is @p file's, as `calibrated (file)`; for lenses none, as the
+///        Lenses panel says where each came from.
+/// @param mode    The mode.
+/// @param camera  The camera's record: its id, size and lens origin.
+/// @param file    The scenario's calibration file; null for none.
+/// @return The line's text, empty for none; or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(cameras[i].lens,
+///            lens_line(mode, setup.cameras[i], setup.calibration.get()));
+/// @endcode
+core::Result<std::string> lens_line(
+    capture::SessionMode mode, const capture::SessionCamera& camera,
+    const sensor::camera::ArrayCalibration* file);
+
 /// @brief Where a camera's lens fit starts besides OpenCV's own
 ///        (`solve::solve_lens`'s `start`): a real lens at @p size, the first
 ///        of @p file's lens for @p id, another camera's lens in @p file (as

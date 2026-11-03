@@ -183,6 +183,9 @@ core::Result<std::vector<PanelLine>> camera_panel(
                              std::to_string(frames.failed) + " failed";
         lines.push_back({"frames", std::move(counts),
                          frames.failed > 0 ? Tone::Warn : Tone::Normal});
+        if (!camera.lens.empty()) {
+          lines.push_back({"lens", camera.lens, Tone::Normal});
+        }
         return lines;
       });
 }
@@ -760,11 +763,13 @@ core::Result<std::vector<PanelLine>> pair_rows_panel(
               tone = Tone::Warn;
               break;
             case Verdict::Swapped:
-              // The file is keyed by id: only the scenario's order is wrong.
-              value += p.right +
-                       " is the left camera: put it first in source.pairs, "
-                       "here and in the runtime's scenario; the file needs no "
-                       "change";
+              // The file is keyed by id: renaming is right only while each id
+              // is the camera it was in the lens session.
+              value += p.reason +
+                       "; rows not judged. If the cables are as in the lens "
+                       "session, do so in source.pairs, here and in the "
+                       "runtime's scenario, and run the pose session again; if "
+                       "they moved, put them back and run it again";
               tone = Tone::Warn;
               break;
             case Verdict::Refused:

@@ -303,13 +303,13 @@ if(TARGET calib_app)
   endif()
   if(TARGET volumetric_kit::sensor_decklink)
     # The DeckLink arm's options from a scenario: host-only, no card.
-    vc_add_test(app_decklink volumetric_kit::calib_app)
+    vc_add_test(app_decklink volumetric_kit::calib_app vc_test_support)
     vc_with_arm(app_decklink volumetric_kit::sensor_decklink)
   endif()
   # app: each mode's table -- the lens rule, a fit's start, the board, the
   # capture rule, Calibrate's gate, the window's parts -- and a stereo pair's
   # camera records, from host data.
-  vc_add_test(app_calib_mode volumetric_kit::calib_app)
+  vc_add_test(app_calib_mode volumetric_kit::calib_app vc_test_support)
   # app: intrinsic mode end to end, through a fake stereo pair of 960 x 540
   # pictures of the lab's checkerboard rendered through its fisheye (scaled), on
   # a device: the live view, the captures, the session, Calibrate's lens file;

@@ -10,6 +10,7 @@
 
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
+#include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/solve/lens.hpp"
 
 namespace volumetric_kit::calib::app {
@@ -112,7 +113,8 @@ core::Result<RigLens> rig_lens(
     if (poses) {
       return core::Status::invalid_argument(
           id + " has no lens at " + size_text(size) +
-          (file != nullptr ? " in " + file_path : std::string(" (no file)")) +
+          (file != nullptr ? " in " + file_path
+                           : std::string(" (no source.calibration)")) +
           ": run intrinsic mode");
     }
     return RigLens{stand_in_lens(size), capture::LensOrigin::StandIn};
@@ -126,6 +128,17 @@ camera::IntrinsicsSource lens_source(const capture::SessionCamera& camera,
           ? file_lens(file, camera.id, camera.size)
           : nullptr;
   return filed != nullptr ? filed->source : camera::IntrinsicsSource::Factory;
+}
+
+core::Result<std::string> lens_line(capture::SessionMode mode,
+                                    const capture::SessionCamera& camera,
+                                    const camera::ArrayCalibration* file) {
+  return compute::guarded("lens_line", [&]() -> core::Result<std::string> {
+    if (mode == capture::SessionMode::Intrinsics) return std::string();
+    std::string line = quality::to_string(lens_source(camera, file));
+    if (camera.lens == capture::LensOrigin::File) line += " (file)";
+    return line;
+  });
 }
 
 std::optional<camera::CameraModel> lens_start(

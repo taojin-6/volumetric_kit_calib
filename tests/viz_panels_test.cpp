@@ -124,6 +124,17 @@ TEST(CameraPanel, ShowsWhatTheCameraSees) {
   EXPECT_EQ(line(l, "frames").value,
             "1234 received, 1200 delivered, 30 dropped, 0 failed");
   EXPECT_EQ(line(l, "frames").tone, Tone::Normal);
+
+  // A pose session's camera says its lens, last.
+  CameraLive posed = good_camera();
+  posed.lens = "calibrated (file)";
+  const std::vector<PanelLine> with_lens =
+      camera_panel(posed, summary_of(12, 10, 0.39), legacy_femto_board())
+          .value();
+  ASSERT_EQ(with_lens.size(), order.size() + 1);
+  EXPECT_EQ(with_lens.back().label, "lens");
+  EXPECT_EQ(with_lens.back().value, "calibrated (file)");
+  EXPECT_EQ(with_lens.back().tone, Tone::Normal);
 }
 
 // Tilt is amber past the view check's limit and red past the solve's; the
@@ -978,8 +989,9 @@ TEST(LensResultsPanel, SaysWhatEachLensIsWorth) {
 
 // Each stereo pair's rows: its verdict with the cells judged, the worst
 // cell's mean and the 95th percentile; then a fail's cells, where to capture
-// for too few, how to name a pair named the wrong way round, a refusal's
-// reason. A swapped pair and too few cells are posted as notices.
+// for too few, how to name a pair named the wrong way round and that its rows
+// wait for a run so named, a refusal's reason. A swapped pair and too few
+// cells are posted as notices.
 TEST(PairRowsPanel, SaysEachPairsRowsAndWhatToDo) {
   using Verdict = quality::PairRowCheck::Verdict;
   quality::PairRowCheck pass;
@@ -1030,8 +1042,11 @@ TEST(PairRowsPanel, SaysEachPairsRowsAndWhatToDo) {
   EXPECT_EQ(lines[2].tone, Tone::Warn);
   EXPECT_EQ(lines[3].label, "rows bm-2 | bm-1");
   EXPECT_EQ(lines[3].value,
-            "swapped: bm-1 is the left camera: put it first in source.pairs, "
-            "here and in the runtime's scenario; the file needs no change");
+            "swapped: " + swapped.reason +
+                "; rows not judged. If the cables are as in the lens session, "
+                "do so in source.pairs, here and in the runtime's scenario, "
+                "and run the pose session again; if they moved, put them back "
+                "and run it again");
   EXPECT_EQ(lines[3].tone, Tone::Warn);
   EXPECT_EQ(lines[4].value,
             "refused: rectify_stereo: the cameras are one above the other");
