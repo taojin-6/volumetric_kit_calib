@@ -800,6 +800,53 @@ camera::CameraModel FisheyeTruth::frame() const {
   return {size, {f, f, cx, cy}, {}};
 }
 
+double curve_error_px(const camera::CameraModel& fit, const FisheyeTruth& truth,
+                      double band_deg) {
+  const compute::CvCamera cam = cv_lens(fit);
+  const auto ray = [](double off_axis, double around) {
+    return cv::Point3d(std::sin(off_axis) * std::cos(around),
+                       std::sin(off_axis) * std::sin(around),
+                       std::cos(off_axis));
+  };
+  std::vector<cv::Point3d> rays;
+  std::vector<cv::Point2d> pixels;
+  for (double deg = 0.5; deg <= 68.0; deg += 1.0) {
+    for (double around = 0.0; around < 360.0; around += 10.0) {
+      rays.push_back(ray(deg * kDeg, around * kDeg));
+      pixels.push_back(truth.project(rays.back()));
+    }
+  }
+  const std::vector<cv::Point2d> fitted =
+      compute::undistort_points(cam, pixels).value();
+  cv::Matx33d moment = cv::Matx33d::zeros();
+  for (std::size_t i = 0; i < rays.size(); ++i) {
+    cv::Vec3d q(fitted[i].x, fitted[i].y, 1.0);
+    q /= cv::norm(q);
+    moment += q * cv::Vec3d(rays[i].x, rays[i].y, rays[i].z).t();
+  }
+  cv::Mat w;
+  cv::Mat u;
+  cv::Mat vt;
+  cv::SVD::compute(cv::Mat(moment), w, u, vt);
+  cv::Mat flip = cv::Mat::eye(3, 3, CV_64F);
+  flip.at<double>(2, 2) = cv::determinant(cv::Mat(u * vt));
+  const cv::Matx33d turn = cv::Mat(u * flip * vt);
+
+  double worst = 0.0;
+  for (double deg = 0.5; deg <= band_deg; deg += 0.5) {
+    for (double around = 0.0; around < 360.0; around += 15.0) {
+      const cv::Point3d r = ray(deg * kDeg, around * kDeg);
+      const cv::Vec3d q = turn * cv::Vec3d(r.x, r.y, r.z);
+      const std::optional<camera::Vec2d> pixel =
+          compute::project(cam, {q[0], q[1], q[2]});
+      if (!pixel) return std::numeric_limits<double>::infinity();
+      const cv::Point2d want = truth.project(r);
+      worst = std::max(worst, std::hypot(pixel->x - want.x, pixel->y - want.y));
+    }
+  }
+  return worst;
+}
+
 std::vector<Observation> fisheye_views(const compute::Board& board,
                                        const FisheyeTruth& truth,
                                        const FisheyeCapture& capture) {

@@ -245,6 +245,18 @@ struct FisheyeTruth {
   sensor::camera::CameraModel frame() const;
 };
 
+/// @brief How far a fitted lens is from @p truth: the most pixels its image
+///        of a ray differs from the truth's, over rays up to @p band_deg off
+///        axis in every direction, once the fit is turned by the rotation
+///        that best maps rays to 68 degrees onto it, as the views' poses
+///        absorb any turn of the camera's frame.
+/// @param fit       The fitted lens, at @p truth's size.
+/// @param truth     The lens the views were made through.
+/// @param band_deg  The rays compared, this far off axis at most (degrees).
+/// @return The error (pixels); infinity where the fit images a ray nowhere.
+double curve_error_px(const sensor::camera::CameraModel& fit,
+                      const FisheyeTruth& truth, double band_deg);
+
 /// @brief What @ref fisheye_views captures.
 struct FisheyeCapture {
   std::uint32_t seed = 1;   ///< The placements' and the noise's seed.
