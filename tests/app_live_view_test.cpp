@@ -9,14 +9,15 @@
 // reached, in a frame that waits for it. Then the app's device split: the
 // live worker reads a camera's picture back on the compute library's queue
 // family while the window copies the same images into the mosaic on the
-// renderer's; and a set taken while the 3D view showed, its picture's ready
-// value set later, read by neither the 3D view's worker nor the window
-// before it. Then each camera's tile refusal, said once, the marks and panels
-// a snapshot gives each camera, the origin tag's coverage of the captures
-// kept, and the 3D view's cameras before and at Calibrate's result. The GPU
-// cases run under the validation layer when the environment asks
-// (VKC_TEST_VALIDATION) and skip without a Vulkan device, the cross-family
-// cases also with one family.
+// renderer's; and, on the compute and graphics queues, a set taken while the
+// 3D view showed, its picture's ready value set later, read by neither the
+// 3D view's worker nor the window before it. Then each camera's tile
+// refusal, said once, the marks and panels a snapshot gives each camera, the
+// origin tag's coverage of the captures kept, and the 3D view's cameras
+// before and at Calibrate's result. The GPU cases run under the validation
+// layer when the environment asks (VKC_TEST_VALIDATION) and skip without a
+// Vulkan device, the cross-family case also with one family, and the 3D
+// view's with one queue.
 
 #include "volumetric_kit/calib/app/live_view.hpp"
 
@@ -605,16 +606,49 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
   EXPECT_EQ(retire.pending(), 0u);
 }
 
+// The device calib_rig makes, on whatever queues `SharedDevice::create`
+// gives it: two families on MoltenVK, two queues of one family on NVIDIA.
+// Skips where both libraries share one queue, as no GPU-side wait on a value
+// the host sets later may be submitted there.
+class AppLiveTwoQueues : public core::test::VulkanTest {
+ protected:
+  core::DeviceRequirements requirements() const override {
+    return gfx::device_requirements();
+  }
+  core::test::Validation validation() const override {
+    return core::test::Validation::On;
+  }
+  void SetUp() override {
+    core::test::VulkanTest::SetUp();
+    if (base_setup_incomplete()) return;
+    core::Result<std::unique_ptr<core::test::TwoFamilyDevice>> made =
+        core::test::TwoFamilyDevice::create(sensor::device_requirements(),
+                                            gfx::device_requirements(),
+                                            active_validation());
+    ASSERT_TRUE(made.ok()) << made.status().message();
+    two_ = std::move(made).value();
+    if (two_->shared().plan() == core::QueuePlan::SharedQueue) {
+      GTEST_SKIP() << "one queue for both libraries: "
+                   << two_->shared().summary();
+    }
+  }
+  core::test::TwoFamilyDevice& two() { return *two_; }
+
+ private:
+  std::unique_ptr<core::test::TwoFamilyDevice> two_;
+};
+
 // As calib_rig runs with the 3D view shown: a camera's decoded picture
 // carries a ready value its decoder sets later, as NVIDIA's do. The live
 // worker, not detecting, takes the set with no luma pass and publishes it at
 // once, reading nothing; the 3D view's worker, offered the set, prepares it
-// on the compute family only once the value is set, its batch waiting on
-// the device; and the window, back on the images before then, records
-// nothing of the set, and copies it on the graphics family after, in a frame
-// that waits for the value.
-TEST_F(AppLiveCrossFamily, ASetTakenWhileThe3DViewShowedIsReadAfterItsValue) {
-  core::test::TwoFamilyDevice& two = two_family();
+// on the compute queue only once the value is set, its batch waiting on the
+// device; and the window, back on the images before then, records nothing of
+// the set, and copies it on the graphics queue after, in a frame that waits
+// for the value.
+TEST_F(AppLiveTwoQueues, ASetTakenWhileThe3DViewShowedIsReadAfterItsValue) {
+  core::test::TwoFamilyDevice& two = this->two();
+  // CONCURRENT across two families; one family's twice collapses.
   const std::vector<std::uint32_t> families(two.families().begin(),
                                             two.families().end());
   core::Result<core::TimelineSemaphore> made =
