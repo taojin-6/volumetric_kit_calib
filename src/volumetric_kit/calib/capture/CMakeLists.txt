@@ -40,7 +40,8 @@ if(_vc_type STREQUAL "STATIC_LIBRARY")
 endif()
 
 target_include_directories(calib_capture PUBLIC "${_vc_generated_inc}")
-# nlohmann/json writes the files, privately: no public header names it.
+# nlohmann/json writes the session's JSON files, privately, through calib's JSON
+# writer (core/json_text.hpp): no public header names it.
 target_include_directories(calib_capture SYSTEM
                            PRIVATE "${VC_JSON_INCLUDE_DIR}")
 

@@ -7,7 +7,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -174,15 +173,6 @@ void triple(Writer& w, const camera::Vec3d& v) {
   w.value(v.y);
   w.value(v.z);
   w.close_array();
-}
-
-template <class T>
-void value_or_null(Writer& w, const std::optional<T>& value) {
-  if (value) {
-    w.value(*value);
-  } else {
-    w.null();
-  }
 }
 
 // An ErrorStats' members, in an object already open.
@@ -590,9 +580,9 @@ std::string report_text(const std::vector<solve::RigCamera>& cameras,
     w.key("capture").value(view.capture);
     w.key("fate").value(solve::to_string(view.fate));
     w.key("use").value(compute::to_string(view.use));
-    value_or_null(w.key("pnp_rms_px"), view.pnp_rms_px);
-    value_or_null(w.key("ambiguity"), view.ambiguity);
-    value_or_null(w.key("tilt_deg"), view.tilt_deg);
+    w.key("pnp_rms_px").value_or_null(view.pnp_rms_px);
+    w.key("ambiguity").value_or_null(view.ambiguity);
+    w.key("tilt_deg").value_or_null(view.tilt_deg);
     w.close_object();
   }
   w.close_array();
@@ -659,9 +649,9 @@ std::string report_text(const std::vector<solve::RigCamera>& cameras,
     const CameraStability& s = loo.cameras[c];
     w.key(ids[c]).open_object();
     w.key("centre_mm").value(s.centre_mm);
-    value_or_null(w.key("centre_capture"), s.centre_capture);
+    w.key("centre_capture").value_or_null(s.centre_capture);
     w.key("rotation_deg").value(s.rotation_deg);
-    value_or_null(w.key("rotation_capture"), s.rotation_capture);
+    w.key("rotation_capture").value_or_null(s.rotation_capture);
     w.close_object();
   }
   w.close_object();

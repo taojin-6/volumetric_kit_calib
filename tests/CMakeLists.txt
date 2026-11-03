@@ -181,14 +181,28 @@ vc_add_test(pair_row_check volumetric_kit::calib_quality vc_synthetic_rig
             opencv_geometry)
 
 if(VC_WITH_RIG)
-  # capture: sessions on disk, read back with sensor's readers and nlohmann.
+  # capture: sessions on disk, read back with sensor's readers and nlohmann; the
+  # tier's private formatters (src/.../capture/session_files.hpp, its header
+  # from the sources), called directly (a static calib_capture, as the rig is
+  # built), against their goldens (goldens/session_files/), byte for byte.
   vc_add_test(session_writer volumetric_kit::calib_capture
               volumetric_kit::sensor_image_io vc_test_support Threads::Threads)
   target_include_directories(vc_session_writer_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
+  target_include_directories(vc_session_writer_test
+                             PRIVATE "${PROJECT_SOURCE_DIR}/src")
+  target_compile_definitions(
+    vc_session_writer_test
+    PRIVATE
+      VC_SESSION_GOLDENS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/goldens/session_files"
+  )
+  # The capture tier's API swept, and its private formatters, called directly,
+  # on the test's thread.
   vc_add_test(capture_oom volumetric_kit::calib_capture vc_test_support
               Threads::Threads)
   target_sources(vc_capture_oom_test PRIVATE support/allocation_failure.cpp)
+  target_include_directories(vc_capture_oom_test
+                             PRIVATE "${PROJECT_SOURCE_DIR}/src")
 
   # source: fake cameras in an array and a fake stereo pair, each set's luma and
   # half made and read back on a device, through the core's Vulkan test fixtures

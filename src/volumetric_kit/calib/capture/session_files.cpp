@@ -9,18 +9,13 @@
 #include <optional>
 #include <utility>
 
-#include <nlohmann/json.hpp>
-
+#include "../core/json_text.hpp"
 #include "volumetric_kit/core/base/check.hpp"
 
 namespace volumetric_kit::calib::capture::detail {
 namespace {
 
-// TODO: write these files with core/json_text.hpp's JsonWriter, as the
-// report is (DECISIONS.md, 2026-10-16): nlohmann's containers built here, on
-// the writer thread, allocate in their destructors and so terminate when
-// memory runs out.
-using json = nlohmann::ordered_json;
+using calib::detail::JsonWriter;
 
 // The capture's index as its file names give it: three digits or more.
 std::string padded(int index) {
@@ -40,9 +35,9 @@ std::size_t pgm_bytes(std::size_t pixels, sensor::camera::ImageSize size) {
   return pgm_header(size).size() + pixels;
 }
 
-// The double of the shortest decimal that reads back to `value`, which
-// nlohmann/json, writing doubles, then writes as that decimal: 0.001 for
-// 0.001f, not the float's own double, 0.0010000000474974513.
+// The double of the shortest decimal that reads back to `value`, which the
+// writer then writes as that decimal: 0.001 for 0.001f, not the float's own
+// double, 0.0010000000474974513.
 double shortest(float value) {
   char text[32];
   // Nine significant digits always read back to the float.
@@ -55,75 +50,81 @@ double shortest(float value) {
   return static_cast<double>(value);
 }
 
-json optional_number(const std::optional<double>& value) {
-  return value ? json(*value) : json(nullptr);
+// Each writes one value, after its key: `write_check(w.key("check"), check)`.
+
+// [width, height].
+void write_size(JsonWriter& w, sensor::camera::ImageSize size) {
+  w.open_array();
+  w.value(std::size_t{size.width});
+  w.value(std::size_t{size.height});
+  w.close_array();
 }
 
-json pixel(const sensor::camera::Vec2d& p) { return json::array({p.x, p.y}); }
+void write_pixel(JsonWriter& w, const sensor::camera::Vec2d& p) {
+  w.open_array();
+  w.value(p.x);
+  w.value(p.y);
+  w.close_array();
+}
 
-json detection_json(const Detection& detection) {
-  json ids = json::array();
-  json corners = json::array();
-  json weights = json::array();
-  for (const DetectedPoint& point : detection.observation.points) {
-    ids.push_back(point.id);
-    corners.push_back(pixel(point.pixel));
-    weights.push_back(point.weight);
-  }
-  json marker_ids = json::array();
-  json marker_corners = json::array();
+void write_detection(JsonWriter& w, const Detection& detection) {
+  const std::vector<DetectedPoint>& points = detection.observation.points;
+  w.open_object();
+  w.key("method").value("full");
+  write_size(w.key("image_size"), detection.image_size);
+  w.key("pixel_convention").value("opencv");
+  w.key("ids").open_array();
+  for (const DetectedPoint& point : points) w.value(point.id);
+  w.close_array();
+  w.key("corners_px").open_array();
+  for (const DetectedPoint& point : points) write_pixel(w, point.pixel);
+  w.close_array();
+  w.key("weights").open_array();
+  for (const DetectedPoint& point : points) w.value(point.weight);
+  w.close_array();
+  w.key("marker_ids").open_array();
+  for (const DetectedMarker& marker : detection.markers) w.value(marker.id);
+  w.close_array();
+  w.key("marker_corners_px").open_array();
   for (const DetectedMarker& marker : detection.markers) {
-    marker_ids.push_back(marker.id);
-    json outline = json::array();
+    w.open_array();
     for (const sensor::camera::Vec2d& corner : marker.corners) {
-      outline.push_back(pixel(corner));
+      write_pixel(w, corner);
     }
-    marker_corners.push_back(std::move(outline));
+    w.close_array();
   }
-  json j;
-  j["method"] = "full";
-  j["image_size"] =
-      json::array({detection.image_size.width, detection.image_size.height});
-  j["pixel_convention"] = "opencv";
-  j["ids"] = std::move(ids);
-  j["corners_px"] = std::move(corners);
-  j["weights"] = std::move(weights);
-  j["marker_ids"] = std::move(marker_ids);
-  j["marker_corners_px"] = std::move(marker_corners);
-  return j;
+  w.close_array();
+  w.close_object();
 }
 
-json check_json(const ViewCheck& check) {
-  json j;
-  j["corners"] = check.corners;
-  j["markers"] = check.markers;
-  j["collinear"] = check.collinear;
-  j["distance_m"] = optional_number(check.distance_m);
-  j["tilt_deg"] = optional_number(check.tilt_deg);
-  j["pnp_rms_px"] = optional_number(check.pnp_rms_px);
-  j["cell"] = check.cell ? json(*check.cell) : json(nullptr);
-  j["verdict"] = to_string(check.verdict);
-  return j;
+void write_check(JsonWriter& w, const ViewCheck& check) {
+  w.open_object();
+  w.key("corners").value(check.corners);
+  w.key("markers").value(check.markers);
+  w.key("collinear").value(check.collinear);
+  w.key("distance_m").value_or_null(check.distance_m);
+  w.key("tilt_deg").value_or_null(check.tilt_deg);
+  w.key("pnp_rms_px").value_or_null(check.pnp_rms_px);
+  w.key("cell").value_or_null(check.cell);
+  w.key("verdict").value(to_string(check.verdict));
+  w.close_object();
 }
 
-json origin_tag_json(const OriginTag& tag,
-                     const std::optional<DetectedMarker>& found) {
-  if (!found) return nullptr;
-  json corners = json::array();
+void write_origin_tag(JsonWriter& w, const OriginTag& tag,
+                      const std::optional<DetectedMarker>& found) {
+  if (!found) {
+    w.null();
+    return;
+  }
+  w.open_object();
+  w.key("dictionary").value(to_string(tag.dictionary));
+  w.key("id").value(found->id);
+  w.key("corners_px").open_array();
   for (const sensor::camera::Vec2d& corner : found->corners) {
-    corners.push_back(pixel(corner));
+    write_pixel(w, corner);
   }
-  json j;
-  j["dictionary"] = to_string(tag.dictionary);
-  j["id"] = found->id;
-  j["corners_px"] = std::move(corners);
-  return j;
-}
-
-// Strings from a driver or an application may not be UTF-8: their bad bytes
-// become U+FFFD rather than a throw.
-std::string text_of(const json& doc) {
-  return doc.dump(2, ' ', false, json::error_handler_t::replace) + "\n";
+  w.close_array();
+  w.close_object();
 }
 
 }  // namespace
@@ -187,61 +188,71 @@ std::string iso_time(std::int64_t ns) {
 
 std::string format_session(const SessionInfo& info, const SessionFacts& facts,
                            const std::vector<CaptureEntry>& captures) {
-  json doc;
-  doc["format"] = "volumetric_kit_calib.session";
-  doc["version"] = 2;
-  doc["created"] = facts.created;
-  doc["mode"] =
-      info.mode == SessionMode::Intrinsics ? "intrinsics" : "extrinsics";
+  JsonWriter w;
+  w.open_object();
+  w.key("format").value("volumetric_kit_calib.session");
+  w.key("version").value(2);
+  w.key("created").value(facts.created);
+  w.key("mode").value(info.mode == SessionMode::Intrinsics ? "intrinsics"
+                                                           : "extrinsics");
 
-  json& software = doc["software"];
-  software["calib"] = info.software.calib;
-  software["sensor"] = info.software.sensor;
-  software["gfx"] = info.software.gfx;
-  software["core"] = info.software.core;
-  software["opencv"] = info.software.opencv;
-  if (!info.software.orbbec_sdk.empty()) {
-    software["orbbec_sdk"] = info.software.orbbec_sdk;
+  const Software& software = info.software;
+  w.key("software").open_object();
+  w.key("calib").value(software.calib);
+  w.key("sensor").value(software.sensor);
+  w.key("gfx").value(software.gfx);
+  w.key("core").value(software.core);
+  w.key("opencv").value(software.opencv);
+  if (!software.orbbec_sdk.empty()) {
+    w.key("orbbec_sdk").value(software.orbbec_sdk);
   }
+  w.close_object();
 
-  json& rig = doc["rig"];
-  rig["driver"] = info.driver;
+  w.key("rig").open_object();
+  w.key("driver").value(info.driver);
   if (!info.sync_path.empty()) {
-    rig["sync_file"] = info.sync_path;
-    rig["sync_sha256"] = facts.sync_sha256;
+    w.key("sync_file").value(info.sync_path);
+    w.key("sync_sha256").value(facts.sync_sha256);
   }
-  rig["reference"] = info.reference;
+  w.key("reference").value(info.reference);
+  w.close_object();
 
   const Target& board = info.board;
-  json& b = doc["board"];
-  b["type"] = to_string(board.kind);
+  w.key("board").open_object();
+  w.key("type").value(to_string(board.kind));
   // OpenCV's CharucoBoard counts squares, x then y: one more than corners.
-  b["squares"] = json::array({board.cols + 1, board.rows + 1});
-  b["square_m"] = board.square_size_m;
+  w.key("squares").open_array();
+  w.value(board.cols + 1);
+  w.value(board.rows + 1);
+  w.close_array();
+  w.key("square_m").value(board.square_size_m);
   // A checkerboard has no markers.
   if (board.kind == TargetKind::ChArUco) {
-    b["marker_m"] = board.marker_size_m;
-    b["dictionary"] = to_string(board.dictionary);
-    b["first_marker_id"] = board.first_marker_id;
-    b["legacy_pattern"] = board.legacy_pattern;
+    w.key("marker_m").value(board.marker_size_m);
+    w.key("dictionary").value(to_string(board.dictionary));
+    w.key("first_marker_id").value(board.first_marker_id);
+    w.key("legacy_pattern").value(board.legacy_pattern);
   }
-  b["square_measured"] = info.square_measured;
-  b["square_tolerance_m"] = optional_number(board.square_size_tolerance_m);
-  b["planarity_bow_m"] = optional_number(board.planarity_bow_m);
+  w.key("square_measured").value(info.square_measured);
+  w.key("square_tolerance_m").value_or_null(board.square_size_tolerance_m);
+  w.key("planarity_bow_m").value_or_null(board.planarity_bow_m);
+  w.close_object();
 
-  json& tag = doc["origin_tag"];
-  tag["dictionary"] = to_string(info.origin_tag.dictionary);
-  tag["id"] = info.origin_tag.id;
-  tag["edge_m"] = info.origin_tag.edge_m;
+  w.key("origin_tag").open_object();
+  w.key("dictionary").value(to_string(info.origin_tag.dictionary));
+  w.key("id").value(info.origin_tag.id);
+  w.key("edge_m").value(info.origin_tag.edge_m);
+  w.close_object();
 
   // Every camera streams what the first does; every depth camera, what the
   // first of them does.
   const SessionCamera& first = info.cameras.front();
-  json& streams = doc["streams"];
-  json& color = streams["color"];
-  color["width"] = first.size.width;
-  color["height"] = first.size.height;
-  if (!info.color_codec.empty()) color["codec"] = info.color_codec;
+  w.key("streams").open_object();
+  w.key("color").open_object();
+  w.key("width").value(std::size_t{first.size.width});
+  w.key("height").value(std::size_t{first.size.height});
+  if (!info.color_codec.empty()) w.key("codec").value(info.color_codec);
+  w.close_object();
   if (info.depth_mode) {
     const DepthMode& mode = *info.depth_mode;
     const SessionCamera* with_depth = nullptr;
@@ -250,94 +261,105 @@ std::string format_session(const SessionInfo& info, const SessionFacts& facts,
     }
     VKC_CHECK(with_depth != nullptr,
               "format_session: a depth mode with no depth camera");
-    json& depth = streams["depth"];
-    depth["width"] = with_depth->depth->size.width;
-    depth["height"] = with_depth->depth->size.height;
-    depth["mode"] = mode.name;
-    depth["metres_per_unit"] = shortest(mode.metres_per_unit);
-    depth["min_m"] = shortest(mode.min_m);
-    depth["max_m"] = shortest(mode.max_m);
+    w.key("depth").open_object();
+    w.key("width").value(std::size_t{with_depth->depth->size.width});
+    w.key("height").value(std::size_t{with_depth->depth->size.height});
+    w.key("mode").value(mode.name);
+    w.key("metres_per_unit").value(shortest(mode.metres_per_unit));
+    w.key("min_m").value(shortest(mode.min_m));
+    w.key("max_m").value(shortest(mode.max_m));
+    w.close_object();
   }
-  streams["fps"] = first.fps;
+  w.key("fps").value(std::size_t{first.fps});
+  w.close_object();
 
-  json cameras = json::array();
+  w.key("cameras").open_array();
   for (std::size_t i = 0; i < info.cameras.size(); ++i) {
     const SessionCamera& camera = info.cameras[i];
-    json c;
-    c["id"] = camera.id;
-    c["model"] = camera.model;
+    w.open_object();
+    w.key("id").value(camera.id);
+    w.key("model").value(camera.model);
     if (camera.orbbec) {
-      c["firmware"] = camera.orbbec->firmware;
-      c["ip"] = camera.orbbec->ip_address;
+      w.key("firmware").value(camera.orbbec->firmware);
+      w.key("ip").value(camera.orbbec->ip_address);
     }
-    if (!camera.role.empty()) c["role"] = camera.role;
+    if (!camera.role.empty()) w.key("role").value(camera.role);
     if (camera.orbbec) {
-      c["sync_mode"] = camera.orbbec->sync_mode;
-      c["depth_delay_us"] = camera.orbbec->depth_delay_us;
-      c["color_lens_model"] = camera.orbbec->color_lens_model;
-      c["depth_lens_model"] = camera.orbbec->depth_lens_model;
+      w.key("sync_mode").value(camera.orbbec->sync_mode);
+      w.key("depth_delay_us").value(camera.orbbec->depth_delay_us);
+      w.key("color_lens_model").value(camera.orbbec->color_lens_model);
+      w.key("depth_lens_model").value(camera.orbbec->depth_lens_model);
     }
-    if (!camera.input.empty()) c["input"] = camera.input;
-    json& lens = c["lens"];
-    lens["origin"] = to_string(camera.lens);
+    if (!camera.input.empty()) w.key("input").value(camera.input);
+    w.key("lens").open_object();
+    w.key("origin").value(to_string(camera.lens));
     if (camera.lens == LensOrigin::File) {
-      lens["path"] = camera.lens_file;
-      lens["sha256"] = facts.lens_sha256[i];
+      w.key("path").value(camera.lens_file);
+      w.key("sha256").value(facts.lens_sha256[i]);
     }
-    cameras.push_back(std::move(c));
+    w.close_object();
+    w.close_object();
   }
-  doc["cameras"] = std::move(cameras);
-  if (facts.factory) doc["factory_calibration"] = kFactoryFile;
+  w.close_array();
+  if (facts.factory) w.key("factory_calibration").value(kFactoryFile);
 
-  json listed = json::array();
+  w.key("captures").open_array();
   for (const CaptureEntry& capture : captures) {
-    json c;
-    c["index"] = capture.index;
-    c["file"] = capture_file(capture.index);
-    c["dropped"] = capture.dropped;
-    listed.push_back(std::move(c));
+    w.open_object();
+    w.key("index").value(capture.index);
+    w.key("file").value(capture_file(capture.index));
+    w.key("dropped").value(capture.dropped);
+    w.close_object();
   }
-  doc["captures"] = std::move(listed);
-  return text_of(doc);
+  w.close_array();
+  w.close_object();
+  return std::move(w).text();
 }
 
 std::string format_capture(const SessionInfo& info, const CaptureJob& job) {
   const CaptureMeta& meta = job.meta;
-  json doc;
-  doc["format"] = "volumetric_kit_calib.capture";
-  doc["version"] = 1;
-  doc["index"] = meta.index;
-  doc["time"] = iso_time(meta.time_ns);
-  doc["trigger_ns"] = meta.trigger_ns;
-  doc["sequence"] = meta.sequence;
-  doc["spread_ms"] = meta.spread_ms;
-  doc["stillness_px"] = meta.stillness_px;
-  doc["live_vs_full_px"] = optional_number(meta.live_vs_full_px);
+  JsonWriter w;
+  w.open_object();
+  w.key("format").value("volumetric_kit_calib.capture");
+  w.key("version").value(1);
+  w.key("index").value(meta.index);
+  w.key("time").value(iso_time(meta.time_ns));
+  w.key("trigger_ns").value(meta.trigger_ns);
+  w.key("sequence").value(meta.sequence);
+  w.key("spread_ms").value(meta.spread_ms);
+  w.key("stillness_px").value(meta.stillness_px);
+  w.key("live_vs_full_px").value_or_null(meta.live_vs_full_px);
 
-  json cameras = json::object();
+  // Keyed by id, which no two cameras share (SessionWriter::create).
+  w.key("cameras").open_object();
   int usable_views = 0;
   for (std::size_t i = 0; i < info.cameras.size(); ++i) {
     const SessionCamera& camera = info.cameras[i];
     const std::string& id = camera.id;
     const CameraCapture& part = job.cameras[i];
     const bool jpeg = !part.jpeg.empty();
-    json c;
-    c["color"] = color_file(id, meta.index, jpeg);
-    c["depth"] =
-        camera.depth ? json(depth_file(id, meta.index)) : json(nullptr);
-    c["color_bytes"] =
-        jpeg ? part.jpeg.size() : pgm_bytes(part.luma.size(), camera.size);
-    c["timestamp_ns"] = part.timestamp_ns;
-    c["sequence"] = part.sequence;
-    c["detection"] = detection_json(part.detection);
-    c["check"] = check_json(part.check);
-    c["origin_tag"] = origin_tag_json(info.origin_tag, part.origin_tag);
-    cameras[id] = std::move(c);
+    w.key(id).open_object();
+    w.key("color").value(color_file(id, meta.index, jpeg));
+    if (camera.depth) {
+      w.key("depth").value(depth_file(id, meta.index));
+    } else {
+      w.key("depth").null();
+    }
+    w.key("color_bytes")
+        .value(jpeg ? part.jpeg.size()
+                    : pgm_bytes(part.luma.size(), camera.size));
+    w.key("timestamp_ns").value(part.timestamp_ns);
+    w.key("sequence").value(part.sequence);
+    write_detection(w.key("detection"), part.detection);
+    write_check(w.key("check"), part.check);
+    write_origin_tag(w.key("origin_tag"), info.origin_tag, part.origin_tag);
+    w.close_object();
     if (is_usable(part.check.verdict)) ++usable_views;
   }
-  doc["cameras"] = std::move(cameras);
-  doc["usable_views"] = usable_views;
-  return text_of(doc);
+  w.close_object();
+  w.key("usable_views").value(usable_views);
+  w.close_object();
+  return std::move(w).text();
 }
 
 }  // namespace volumetric_kit::calib::capture::detail

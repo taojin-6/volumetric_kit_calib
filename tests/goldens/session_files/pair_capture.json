@@ -1,0 +1,118 @@
+{
+  "format": "volumetric_kit_calib.capture",
+  "version": 1,
+  "index": 99,
+  "time": "2025-10-13T09:41:12.004Z",
+  "trigger_ns": 18446744073709551614,
+  "sequence": 1234,
+  "spread_ms": 1.4000000000000001,
+  "stillness_px": 0.08,
+  "live_vs_full_px": null,
+  "cameras": {
+    "bm-1": {
+      "color": "images/bm-1/calib_img_bm-1_099.pgm",
+      "depth": null,
+      "color_bytes": 3085,
+      "timestamp_ns": 1760348472003911000,
+      "sequence": 1234,
+      "detection": {
+        "method": "full",
+        "image_size": [
+          64,
+          48
+        ],
+        "pixel_convention": "opencv",
+        "ids": [
+          0,
+          1,
+          5
+        ],
+        "corners_px": [
+          [
+            12.7,
+            3.033333333333333
+          ],
+          [
+            20.000000000000004,
+            9.3
+          ],
+          [
+            0.14285714285714285,
+            1e-300
+          ]
+        ],
+        "weights": [
+          1.0,
+          0.75,
+          0.3333333333333333
+        ],
+        "marker_ids": [
+          3
+        ],
+        "marker_corners_px": [
+          [
+            [
+              10.1,
+              5.2
+            ],
+            [
+              14.3,
+              5.200000000000001
+            ],
+            [
+              14.0,
+              9.9
+            ],
+            [
+              10.0,
+              9.7
+            ]
+          ]
+        ]
+      },
+      "check": {
+        "corners": 3,
+        "markers": 1,
+        "collinear": false,
+        "distance_m": 2.8000000000000003,
+        "tilt_deg": 12.0,
+        "pnp_rms_px": null,
+        "cell": 4,
+        "verdict": "partial"
+      },
+      "origin_tag": null
+    },
+    "bm-2": {
+      "color": "images/bm-2/calib_img_bm-2_099.pgm",
+      "depth": null,
+      "color_bytes": 3085,
+      "timestamp_ns": 1760348472003911001,
+      "sequence": 1235,
+      "detection": {
+        "method": "full",
+        "image_size": [
+          64,
+          48
+        ],
+        "pixel_convention": "opencv",
+        "ids": [],
+        "corners_px": [],
+        "weights": [],
+        "marker_ids": [],
+        "marker_corners_px": []
+      },
+      "check": {
+        "corners": 0,
+        "markers": 0,
+        "collinear": false,
+        "distance_m": null,
+        "tilt_deg": null,
+        "pnp_rms_px": null,
+        "cell": null,
+        "verdict": "none"
+      },
+      "origin_tag": null
+    }
+  },
+  "usable_views": 1
+}
