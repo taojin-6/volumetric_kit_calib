@@ -109,12 +109,20 @@ vc_add_test(detect_tag volumetric_kit::calib_detect vc_synthetic_rig)
 # detect: either board through one detector -- the lab's checkerboard rendered
 # at 4K through a fisheye truth, whole, cut and still, and the rig's ChArUco
 # board, full and half -- with the stillness and capture rule of a still
-# checkerboard; and, labelled slow, its search times on 20 pictures (U1),
-# `detect_board.timing`.
+# checkerboard; and, labelled slow, every scene, seed and state of its cases
+# (`detect_board.sweeps`, SB at 4K some 70 times) and its search times on 20
+# pictures (U1, `detect_board.timing`).
 vc_add_test(detect_board volumetric_kit::calib_quality
             volumetric_kit::calib_detect vc_synthetic_rig)
-# About 25 s on an M5 Max: SB at 4K, a few dozen times.
-set_tests_properties(detect_board PROPERTIES TIMEOUT 300)
+add_test(NAME detect_board.sweeps COMMAND vc_detect_board_test
+                                          --gtest_filter=DetectBoard.*)
+set_tests_properties(detect_board.sweeps PROPERTIES ${_vc_test_properties})
+set_tests_properties(detect_board.sweeps PROPERTIES TIMEOUT 300)
+set_property(TEST detect_board.sweeps PROPERTY LABELS slow)
+set_property(
+  TEST detect_board.sweeps
+  APPEND
+  PROPERTY ENVIRONMENT VC_TEST_SWEEPS=1)
 add_test(NAME detect_board.timing COMMAND vc_detect_board_test
                                           --gtest_filter=DetectBoardTiming.*)
 set_tests_properties(detect_board.timing PROPERTIES ${_vc_test_properties})
