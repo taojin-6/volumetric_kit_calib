@@ -156,10 +156,10 @@ renderer.
   ([DECISIONS.md](DECISIONS.md#2026-10-16--calib_rigs-live-view-and-capture)).
   Calibrate's worker solves and measures the kept captures, locates the
   origin tag, checks their raw depth against the solved rig on the GPU,
-  pass or fail per camera and per pair, and writes a results directory in
-  the tag's world, or the reference camera's when it cannot be located;
-  each result fills the window with the live points at the solved poses,
-  and a key goes back to the images
+  pass or fail per camera and per pair, checks each stereo pair's rectified
+  rows, and writes a results directory in the tag's world, or the reference
+  camera's when it cannot be located; each result fills the window with the
+  live points at the solved poses, and a key goes back to the images
   ([DECISIONS.md](DECISIONS.md#2026-10-18--calibrate-t4)). In intrinsic
   mode it instead fits each ready camera's lens and writes a lens-only
   results directory ([its modes](#intrinsic-and-extrinsic-mode);
@@ -288,15 +288,17 @@ The scenario's `operation` is calib_rig's mode:
 | | Intrinsic (`calibrate_intrinsics`) | Extrinsic (`calibrate`) |
 | --- | --- | --- |
 | Board | the checkerboard, its squares and size edited | the rig's ChArUco board |
-| Each camera's live lens | `source.calibration`'s at the stream's size, else the driver's, else a stand-in | the file's or the driver's; none stops the run |
+| Each camera's live lens | `source.calibration`'s at the stream's size, else the driver's, else a stand-in | the file's or the driver's; none stops the run, naming the file; a factory camera with a calibrated lens in the file is refused |
 | A capture | a still board, one view enough | a still board |
 | Calibrate | once a camera is ready (the Lenses panel) | once the session's links are |
-| Its result | each ready camera's lens, in a lens-only `array_calibration.json`; a factory lens is reported, never written | the rig's poses, and the 3D view |
+| Its result | each ready camera's lens, in a lens-only `array_calibration.json`; a factory lens is reported, never written | the rig's poses, and the 3D view; each of `source.pairs`' rectified rows (Δy) at the scenario's depth size, FFS's, in `report.json` and the Calibration window |
 
 The checkerboard is the intrinsic board: the rig's 5 x 3 ChArUco board has 8
 inner corners, fewer than a lens view takes (12), and is refused there.
-calib_rig fits a DeckLink pair's lenses; it does not solve the pair's poses
-yet:
+calib_rig calibrates a DeckLink pair in two sessions, each writing
+`<session>/results/<RRR>_<stamp>/array_calibration.json`, its report beside
+it: its lenses, from the pair's current file, then its poses, from that
+lens file:
 
 ```json
 {"version": 1, "operation": "calibrate_intrinsics",
@@ -307,19 +309,31 @@ yet:
  "output": {"path": "sessions"}}
 ```
 
-A pair's lenses, in the lab:
+The pose session's scenario is the same but for `"operation": "calibrate"`
+and `"calibration"` the lens file. FuseDecklink then reads the pose
+session's file.
 
-1. **Board.** Measure the checkerboard's square with calipers over 12
+A pair, in the lab:
+
+1. **Boards.** Measure the checkerboard's square with calipers over 12
    squares, check the board is flat (note any bow) with about a square of
    white margin around it, and enter it with "square measured" ticked.
+   Measure the 5 x 3 ChArUco board end to end with a steel rule (its
+   squares set the pair's scale) and enter it the same way. Have the floor
+   tag (id 0) at hand.
 2. **Cameras.** Tape focus and iris; fix exposure and white balance over
    PTP.
-3. **Session.** Run the scenario above, `source.calibration` the pair's
+3. **Lenses.** Run the lens scenario, `source.calibration` the pair's
    current file. Capture about 40 still boards, tilted 20-45 degrees, near
    and far, pushing the board into each corner and along both sides until
-   each camera's line in the Lenses panel turns green; then press C. The
-   lens file is `<session>/results/<RRR>_<stamp>/array_calibration.json`,
-   its report beside it.
+   each camera's line in the Lenses panel turns green; then press C.
+4. **Poses.** Run the pose scenario, `source.calibration` step 3's lens
+   file. Capture about 15-20 still ChArUco boards both cameras see, spread
+   over their shared view (all 9 parts, both sides), with the floor tag in
+   view; then press C. The Calibration window's `rows bm-1 | bm-2` line
+   reads `pass`; when it reads `insufficient`, capture where it names and
+   press C again; when it reads `swapped`, name the left camera it names
+   first in `source.pairs`, here and in FuseDecklink's scenario.
 
 ## Use it in your project
 

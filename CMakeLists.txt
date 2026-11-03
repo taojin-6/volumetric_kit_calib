@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(
   volumetric_kit_calib
-  VERSION 0.5.0
+  VERSION 0.6.0
   DESCRIPTION
     "Calibration companion for volumetric_kit: diagnostics, acquisition guidance, and a requirements solver"
   HOMEPAGE_URL "https://github.com/taojin-6/volumetric_kit_calib"
