@@ -39,6 +39,10 @@ core::Status record_snapshot(
         pictures[i] = &set.rgbd->frames[i]->color;
       }
     }
+    // TODO: put each decoder picture's ready value among the frame's waits
+    // (sensor's add_ready_point). The luma pass waits for it, so only a set
+    // taken while the 3D view showed, with no pass, is copied without: on
+    // NVIDIA's decoders, at the first frame back on the images.
     // Held, not freed: the tiles and the decoder's images go back once
     // nothing holds the set, after the GPU is done with the frame that copied
     // them. Held before the record, whose OutOfMemory may follow copies

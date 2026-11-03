@@ -97,7 +97,9 @@ struct TagFrameOptions {
 /// @endcode
 inline constexpr double kMaxTagWorldRmsPx = 3.0;
 
-/// @brief Why @ref origin_tag_frame gave no tag world.
+/// @brief Why @ref origin_tag_frame gave no tag world, or
+///        `tracked_world_from_tag` (tracked_world.hpp) no fit: there a
+///        camera is a still's, and `TrackedWorld::miss` says which apply.
 enum class TagMiss {
   NotSeen,     ///< No camera saw the tag.
   OneCamera,   ///< One camera alone saw it (@ref WorldOrigin::camera).

@@ -40,7 +40,6 @@
 
 #include <opencv2/core.hpp>
 
-#include "device_picture.hpp"
 #include "fake_sensor.hpp"
 #include "fake_stereo.hpp"
 #include "live_pair.hpp"
@@ -52,6 +51,7 @@
 #include "volumetric_kit/calib/source/rig_source.hpp"
 #include "volumetric_kit/core/testing/vulkan_fixture.hpp"
 #include "volumetric_kit/sensor/frame/device_requirements.hpp"
+#include "volumetric_kit/sensor/testing/nv12_picture.hpp"
 
 #if defined(VC_WITH_ORBBEC)
 #include "volumetric_kit/calib/app/orbbec_arm.hpp"
@@ -174,10 +174,17 @@ class AppLive : public core::test::VulkanDeviceTest {
         cam.truth = test::project(live_lens(), board_pose(board, i),
                                   board.object_points());
       }
-      cam.picture =
-          test::device_nv12(device(), allocator(), kWidth, kHeight, cam.luma);
-      ASSERT_NE(cam.picture.image[0], nullptr);
-      ASSERT_NE(cam.picture.image[1], nullptr);
+      // The luma with neutral chroma, as a decoder hands a picture out.
+      sensor::testing::HostNv12 host;
+      host.width = kWidth;
+      host.height = kHeight;
+      host.luma = cam.luma;
+      host.chroma.assign(
+          std::size_t{(kWidth + 1) / 2} * ((kHeight + 1) / 2) * 2, 128);
+      core::Result<sensor::YuvImage> picture =
+          sensor::testing::device_picture(device(), allocator(), host);
+      ASSERT_TRUE(picture.ok()) << picture.status().message();
+      cam.picture = std::move(picture).value();
       sensor::SensorInfo info;
       info.id = "SYN" + std::to_string(i);
       info.model = "fake";

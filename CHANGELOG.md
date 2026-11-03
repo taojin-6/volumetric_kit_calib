@@ -7,6 +7,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.9.0] - 2026-11-03
+
+### Added
+
+- **A tracked camera's world at the origin tag** (DECISIONS.md, 2026-11-03):
+  `solve/tracked_world.hpp`. `tracked_world_from_tag` places a tracked
+  camera's world (ARKit's) in the tag's from its stills of the tag at their
+  recorded poses: the tilt from the tracking's gravity, the yaw and the
+  translation fitted to a square of the edge the rig measured. Its misses
+  are `TagMiss` values: `NotSeen`, `CameraBelowTag`, `Numerical`, and
+  `PoorFit` above `kMaxTrackedRmsPx` or `kMaxTrackedSeedGapM`.
+  `register_tracked` turns the fit of a session's stills into sensor's
+  `TrackedRegistration`, which the caller writes.
+- `examples/03_register_tracked`: a registration file from a calibration, a
+  stills file and the rig's measured edge, optionally from one hold's window.
+
+### Changed
+
+- build: **calib pins sensor at its tracked stills** (#48's merge, dfe601f,
+  0.41.0), where it was at #28's (5697a87, 0.21.0), and **core at #97's
+  merge** (3f48e14, 0.44.2), where it was at #86's (e1adf08, 0.40.0), as are
+  sensor's Orbbec SDK action and the core's actions in CI. calib needs sensor
+  0.41.0 (`VC_SENSOR_MIN_VERSION`), for `camera/tracked_stills.hpp`; its
+  other code builds and passes unchanged on the new pins. With
+  `VC_WITH_RIG`, sensor's tiers need core 0.41.0, which sensor's configure
+  checks.
+- calib's version is 0.9.0, where it was 0.8.0.
+
+### Removed
+
+- `tests/support/device_picture.hpp`: the app tests' NV12 pictures are
+  sensor's (`testing/nv12_picture.hpp`). The cross-family case keeps a maker
+  of its own for planes CONCURRENT across two queue families, which sensor's
+  `device_picture` does not make.
+
 ## [0.8.0] - 2026-11-03
 
 ### Added

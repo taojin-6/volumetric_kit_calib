@@ -38,8 +38,8 @@ endif()
 # on for sensor or gfx keeps it. Only the examples and calib_rig opt into
 # core_config.
 #
-# The pin is core 0.40.0 (e1adf08, core #86's merge), for CalibRig's operation
-# and DeckLink cameras, as are the core's actions in .github/workflows.
+# The pin is core main at #97's merge (3f48e14, 0.44.2), at or past the 0.41.0
+# sensor's tiers need, as are the core's actions in .github/workflows.
 if(VC_WITH_RIG)
   set(VKC_WITH_VULKAN ON)
 endif()
@@ -51,7 +51,7 @@ endif()
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG e1adf08203b6eb5956ebaa48f511a9a73996009b)
+  GIT_TAG 3f48e1423084139b4a7ea46b4205f670bbfe2141)
 FetchContent_MakeAvailable(volumetric_kit_core)
 # The set() above is lost when the application made the core available first.
 if(VC_WITH_RIG)
@@ -78,13 +78,13 @@ endif()
 # and VS_WITH_CUDA apply. Work on both checkouts at once with
 # -DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_SENSOR=<sensor checkout>.
 #
-# The pin is sensor main at #28's merge (5697a87, 0.21.0), for its prep tier's
-# LumaPass and list read, as is its Orbbec SDK action in
-# .github/workflows/_build.yml.
+# The pin is sensor main at its tracked stills (#48's merge, dfe601f, 0.41.0),
+# the camera tier's reader of a tracked sensor's stills, as is its Orbbec SDK
+# action in .github/workflows/_build.yml.
 FetchContent_Declare(
   volumetric_kit_sensor
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_sensor.git
-  GIT_TAG 5697a8772f25ac146c2da99357e1400488665c22)
+  GIT_TAG dfe601f9712c389ef3b91130ed9c0cae89756989)
 if(VC_WITH_RIG)
   set(VS_CAMERA_ONLY OFF)
 elseif(NOT DEFINED VS_CAMERA_ONLY)

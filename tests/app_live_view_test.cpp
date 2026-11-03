@@ -33,24 +33,79 @@
 
 #include <opencv2/core.hpp>
 
-#include "device_picture.hpp"
 #include "fake_sensor.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/core/testing/two_family_device.hpp"
 #include "volumetric_kit/core/testing/vulkan_fixture.hpp"
+#include "volumetric_kit/core/testing/write_image.hpp"
+#include "volumetric_kit/core/vulkan/allocator.hpp"
 #include "volumetric_kit/core/vulkan/command_buffer.hpp"
 #include "volumetric_kit/core/vulkan/command_pool.hpp"
+#include "volumetric_kit/core/vulkan/image.hpp"
 #include "volumetric_kit/core/vulkan/sync.hpp"
 #include "volumetric_kit/gfx/core/device_requirements.hpp"
 #include "volumetric_kit/gfx/core/offscreen_target.hpp"
 #include "volumetric_kit/gfx/pipelines/color.hpp"
 #include "volumetric_kit/sensor/frame/device_requirements.hpp"
+#include "volumetric_kit/sensor/testing/nv12_picture.hpp"
 
 namespace volumetric_kit::calib::app {
 namespace {
 
 using Code = core::Status::Code;
+
+// `luma` (`width * height` bytes, rows packed) with neutral chroma.
+sensor::testing::HostNv12 grey_nv12(std::uint32_t width, std::uint32_t height,
+                                    std::vector<std::uint8_t> luma) {
+  sensor::testing::HostNv12 picture;
+  picture.width = width;
+  picture.height = height;
+  picture.luma = std::move(luma);
+  picture.chroma.assign(std::size_t{(width + 1) / 2} * ((height + 1) / 2) * 2,
+                        128);
+  return picture;
+}
+
+// @p host's NV12 planes in device images written on @p device's queue and
+// left in GENERAL, as sensor's testing::device_picture makes them, but
+// CONCURRENT across @p families, as calib_rig's decoded pictures are (sensor's
+// color_queue_families). sensor's are exclusive to the device's family, and no
+// public helper makes them concurrent.
+core::Result<sensor::YuvImage> concurrent_picture(
+    const core::Device& device, core::Allocator& allocator,
+    const sensor::testing::HostNv12& host,
+    const std::vector<std::uint32_t>& families) {
+  struct Plane {
+    const std::vector<std::uint8_t>* bytes;
+    std::uint32_t width, height;
+    VkFormat format;
+  };
+  const Plane planes[2] = {
+      {&host.luma, host.width, host.height, VK_FORMAT_R8_UNORM},
+      {&host.chroma, (host.width + 1) / 2, (host.height + 1) / 2,
+       VK_FORMAT_R8G8_UNORM}};
+  sensor::YuvImage picture;
+  picture.layout = sensor::YuvLayout::Nv12;
+  picture.width = host.width;
+  picture.height = host.height;
+  for (std::size_t k = 0; k < 2; ++k) {
+    core::ImageDesc desc;
+    desc.extent = {planes[k].width, planes[k].height};
+    desc.format = planes[k].format;
+    desc.usage =
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    desc.with_view = false;
+    desc.queue_families = families.data();
+    desc.queue_family_count = static_cast<std::uint32_t>(families.size());
+    VKC_ASSIGN(core::Image image, allocator.create_image(desc));
+    VKC_TRY(core::test::write_image(
+        device, allocator, image, planes[k].bytes->data(),
+        planes[k].bytes->size(), VK_IMAGE_LAYOUT_GENERAL));
+    picture.image[k] = std::make_shared<const core::Image>(std::move(image));
+  }
+  return picture;
+}
 
 constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
 constexpr VkExtent2D kExtent{128, 96};
@@ -86,10 +141,13 @@ class AppLiveView : public core::test::VulkanDeviceTest {
         continue;
       }
       sensor::RgbdFrame frame;
-      frame.color = test::device_nv12(
-          device(), allocator(), kTileW, kTileH,
-          std::vector<std::uint8_t>(std::size_t{kTileW} * kTileH, *level));
-      EXPECT_NE(frame.color.image[0], nullptr);
+      core::Result<sensor::YuvImage> picture = sensor::testing::device_picture(
+          device(), allocator(),
+          grey_nv12(
+              kTileW, kTileH,
+              std::vector<std::uint8_t>(std::size_t{kTileW} * kTileH, *level)));
+      EXPECT_TRUE(picture.ok()) << picture.status().message();
+      if (picture.ok()) frame.color = std::move(picture).value();
       auto held = std::make_shared<int>(*level);
       out.pixels.emplace_back(held);
       frame.pixels = std::move(held);
@@ -279,10 +337,11 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
       board);
   const std::vector<std::uint8_t> luma(render.data,
                                        render.data + render.total());
-  const sensor::YuvImage picture = test::device_nv12(
-      two.compute(), two.compute_allocator(), kW, kH, luma, families);
-  ASSERT_NE(picture.image[0], nullptr);
-  ASSERT_NE(picture.image[1], nullptr);
+  core::Result<sensor::YuvImage> made =
+      concurrent_picture(two.compute(), two.compute_allocator(),
+                         grey_nv12(kW, kH, luma), families);
+  ASSERT_TRUE(made.ok()) << made.status().message();
+  const sensor::YuvImage picture = std::move(made).value();
 
   sensor::SensorInfo info;
   info.id = "SYN0";

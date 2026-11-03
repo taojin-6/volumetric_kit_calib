@@ -106,6 +106,42 @@ solve, the second camera pair) assemble the brain, and a rule that shows in
 review costs little. Freezing everything would stall the app; an ABI promise
 means nothing for a library nobody installs.
 
+## 2026-11-03 — A tracked camera's world at the origin tag
+
+`solve::tracked_world_from_tag` places a tracked camera's world in the
+tag's from the camera's stills of the tag, posed as its session records
+them (sensor's `camera/tracked_stills.hpp`); `register_tracked` makes
+sensor's registration file of it (`solve/tracked_world.hpp` has the method).
+
+- **Gravity gives the tilt; the fit solves yaw and position** (the
+  owner's call). A hold's rays are nearly parallel: triangulating its
+  corners, as `origin_tag_frame` does from the rig, fixes no size, and in
+  the planning simulation no hold landed within the tracker's basin (1° of
+  yaw, 5 cm). With the tilt given, 94-99 % did, and one still holds yaw and
+  position, face-on included.
+- **The edge is the rig's measured one, an argument** (`TagWorld::edge_m`):
+  the printed size puts a camera 1.9 % of its range off, about 40 mm at
+  2.2 m.
+- **The seed in closed form, not IPPE.** With the tilt given the tag's
+  plane is level, and one still's yaw, height and shift are a similarity
+  of where its corners' rays meet it. IPPE's square poses of a marker
+  face-on are a half turn, where OpenCV 5.0.0's IPPE loses the angle or
+  gives no pose (`view_pose.cpp`).
+- **A poor fit is above 12 px, not the rig's 3** (`kMaxTrackedRmsPx` says
+  why): each still carries the tracker's own pose error, which at 0.1° and
+  2 mm a still fits a hold at up to about 9 px RMS from 1.2 m, where one
+  still 10 cm off fits at 48 px or more.
+- **And a poor fit moves a camera over 3 cm from the stills' median**
+  (`kMaxTrackedSeedGapM`): from 2.2 m a still whose pose is a few cm off
+  pulls every camera 6–19 cm along its line of sight at under 12 px, since
+  range shows only in the tag's apparent size. On the bars' noise with
+  one still 3 cm off, the RMS gate alone let 28–41 % of holds from 2.2 m
+  out of the basin; with this gate 0–1 %, or 3 % with the tag 0.65° off
+  level, an error neither gate sees. Clean holds lose up to 1 % from
+  2.2 m, 3 % from 3 m.
+- **Misses are `TagMiss` values,** as the rig's tag world's are, with no
+  `TagWorld`: the fit locates no corners.
+
 ## 2026-11-03 — One calib_rig, the mode chosen in it
 
 calib_rig is one app: its Setup panel picks the mode, Lenses or Poses, and

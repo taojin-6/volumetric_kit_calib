@@ -4,14 +4,15 @@
 // The stable API (README.md's table) as a program built on calib uses it: the
 // sample mains, including only the table's headers (and the core's), run on
 // synthetic data: their pictures and views are the test's own, the rest of
-// main 2 is examples/02_lens_from_images. A break in a call they make fails
-// this build; the rest of the table is held in review (DECISIONS.md,
-// 2026-11-01).
+// main 2 is examples/02_lens_from_images and of main 6
+// examples/03_register_tracked. A break in a call they make fails this build;
+// the rest of the table is held in review (DECISIONS.md, 2026-11-01).
 
 // First, before anything that could stand in for an include one of them lacks.
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/core/target.hpp"
 #include "volumetric_kit/calib/detect/board.hpp"
+#include "volumetric_kit/calib/detect/tag.hpp"
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
 #include "volumetric_kit/calib/quality/lens_check.hpp"
 #include "volumetric_kit/calib/quality/lens_gate.hpp"
@@ -20,10 +21,13 @@
 #include "volumetric_kit/calib/solve/bundle_adjust.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
 #include "volumetric_kit/calib/solve/lens.hpp"
+#include "volumetric_kit/calib/solve/tracked_world.hpp"
 #include "volumetric_kit/calib/solve/world_tag.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/sensor/camera/array_calibration.hpp"
+#include "volumetric_kit/sensor/camera/tracked_registration.hpp"
+#include "volumetric_kit/sensor/camera/tracked_stills.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -172,6 +176,74 @@ TEST(Api, PosesAPair) {
   const std::string pairs =
       files->report.substr(files->report.find("\"pairs\": ["));
   EXPECT_NE(pairs.find("\"verdict\": \"pass\""), std::string::npos) << pairs;
+}
+
+// Main 6, a tracked camera's registration, but for the files: the stills'
+// pictures are given, and the registration is returned, not written.
+core::Result<camera::TrackedRegistration> register_stills(
+    const camera::ArrayCalibration& array, const camera::TrackedStills& stills,
+    const std::vector<cv::Mat>& pictures, double edge_mm) {
+  std::vector<calib::solve::TrackedTagView> views;
+  for (std::size_t i = 0; i < stills.stills.size(); ++i) {
+    const camera::TrackedStill& s = stills.stills[i];
+    const cv::Mat& grey = pictures[i];
+    const camera::ImageSize size{std::uint32_t(grey.cols),
+                                 std::uint32_t(grey.rows)};
+    VKC_ASSIGN(const calib::detect::MarkerSearch search,
+               calib::detect::detect_tag(
+                   {size.width, size.height, grey.step, grey.data},
+                   calib::kOriginTag));
+    if (search.found) {
+      views.push_back(
+          {s.image, size, s.model, s.cam_to_tracking, *search.found});
+    }
+  }
+  VKC_ASSIGN(const calib::solve::TrackedWorld found,
+             calib::solve::tracked_world_from_tag(views, calib::kOriginTag,
+                                                  edge_mm / 1000.0));
+  VKC_ASSIGN(camera::TrackedRegistration reg,
+             calib::solve::register_tracked(stills, array.world, found));
+  std::printf("%u of %zu stills, %.2f px\n", reg.views, stills.stills.size(),
+              reg.rms_px);
+  return reg;
+}
+
+TEST(Api, RegistersATrackedCamera) {
+  const camera::CameraModel model = calib::test::tracked_pinhole();
+  // ARKit's world, y up, turned and moved from the tag's.
+  camera::Mat4d tracking_to_world(1.0);
+  tracking_to_world[1] = glm::dvec4(0.0, 0.0, 1.0, 0.0);
+  tracking_to_world[2] = glm::dvec4(0.0, -1.0, 0.0, 0.0);
+  tracking_to_world[3] = glm::dvec4(0.4, -0.2, 1.1, 1.0);
+  camera::TrackedStills stills;
+  stills.sensor = "ipad-pro-m5";
+  stills.session[0] = 0x8f;
+  std::vector<cv::Mat> pictures;
+  for (int i = 0; i < 2; ++i) {
+    const camera::Mat4d cam_to_world =
+        calib::test::camera_over_tag(1.2, 40.0, 30.0 + 3.0 * i, 10.0);
+    cv::Mat render(1440, 1920, CV_8UC1, cv::Scalar(110));
+    calib::test::draw_marker(
+        render, calib::kOriginTag.dictionary, calib::kOriginTag.id,
+        calib::test::floor_tag_print(model, camera::rigid_inverse(cam_to_world),
+                                     {0.14725, {}, 0.0}));
+    pictures.push_back(calib::test::camera_image(render));
+    stills.stills.push_back(
+        {"still_" + std::to_string(i) + ".png",
+         1761957000000000000u + 100000000u * std::uint64_t(i), model,
+         camera::rigid_inverse(tracking_to_world) * cam_to_world});
+  }
+  camera::ArrayCalibration array;  // the rig's, in the tag's world
+  array.world.apriltag = camera::AprilTagWorld{"tag36h11", 0, 0.15};
+  const core::Result<camera::TrackedRegistration> reg =
+      register_stills(array, stills, pictures, 147.25);
+  ASSERT_TRUE(reg.ok()) << reg.status().message();
+  EXPECT_EQ(reg->views, 2u);
+  const camera::Vec3d placed(
+      (reg->tracking_to_world * stills.stills[0].cam_to_tracking)[3]);
+  const camera::Vec3d truth(
+      (tracking_to_world * stills.stills[0].cam_to_tracking)[3]);
+  EXPECT_LT(glm::length(placed - truth), 0.005);
 }
 
 // Main 5, the lenses a pose session uses, checked on its rig solve: the

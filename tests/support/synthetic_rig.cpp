@@ -427,6 +427,57 @@ std::array<cv::Point3d, 4> floor_tag_corners(const FloorTag& tag) {
   return corners;
 }
 
+camera::CameraModel tracked_pinhole() {
+  return {{1920, 1440}, {1600.0, 1600.0, 959.5, 719.5}, {}};
+}
+
+camera::Mat4d camera_over_tag(double distance_m, double off_normal_deg,
+                              double azimuth_deg, double roll_deg) {
+  // Rz(azimuth) Ry(off_normal) of a camera looking straight down, x along
+  // the world's, rolled about its z first.
+  const double a = azimuth_deg * kDeg;
+  const double t = off_normal_deg * kDeg;
+  const double r = roll_deg * kDeg;
+  const camera::Mat3d spin =
+      glm::transpose(camera::Mat3d(std::cos(a), -std::sin(a), 0.0, std::sin(a),
+                                   std::cos(a), 0.0, 0.0, 0.0, 1.0));
+  const camera::Mat3d tilt =
+      glm::transpose(camera::Mat3d(std::cos(t), 0.0, std::sin(t), 0.0, 1.0, 0.0,
+                                   -std::sin(t), 0.0, std::cos(t)));
+  const camera::Mat3d down(camera::Vec3d(1.0, 0.0, 0.0),
+                           camera::Vec3d(0.0, -1.0, 0.0),
+                           camera::Vec3d(0.0, 0.0, -1.0));
+  const camera::Mat3d roll =
+      glm::transpose(camera::Mat3d(std::cos(r), -std::sin(r), 0.0, std::sin(r),
+                                   std::cos(r), 0.0, 0.0, 0.0, 1.0));
+  camera::Mat4d m(spin * tilt * down * roll);
+  m[3] = glm::dvec4(spin * camera::Vec3d(distance_m * std::sin(t), 0.0,
+                                         distance_m * std::cos(t)),
+                    1.0);
+  return m;
+}
+
+cv::Matx33d floor_tag_print(const camera::CameraModel& model,
+                            const camera::Mat4d& world_to_camera,
+                            const FloorTag& tag) {
+  // The print's (u, v) is corner 0 + u (corner 1 - corner 0)
+  // + v (corner 3 - corner 0), moved into the camera and through K.
+  const std::array<cv::Point3d, 4> c = floor_tag_corners(tag);
+  const auto in_camera = [&](const cv::Point3d& p, double w) {
+    return camera::Vec3d(world_to_camera * glm::dvec4(p.x, p.y, p.z, w));
+  };
+  const camera::Vec3d columns[3] = {in_camera(c[1] - c[0], 0.0),
+                                    in_camera(c[3] - c[0], 0.0),
+                                    in_camera(c[0], 1.0)};
+  const camera::PinholeIntrinsics& k = model.intrinsics;
+  const cv::Matx33d kk(k.fx, 0.0, k.cx, 0.0, k.fy, k.cy, 0.0, 0.0, 1.0);
+  cv::Matx33d m;
+  for (int col = 0; col < 3; ++col) {
+    for (int row = 0; row < 3; ++row) m(row, col) = columns[col][row];
+  }
+  return kk * m;
+}
+
 std::vector<MarkerSighting> observe_marker(
     const std::vector<SyntheticCamera>& rig, int id,
     const std::array<cv::Point3d, 4>& corners, std::size_t captures,

@@ -185,6 +185,37 @@ struct FloorTag {
 /// @return The corners.
 std::array<cv::Point3d, 4> floor_tag_corners(const FloorTag& tag = {});
 
+/// @brief A tracked camera's pinhole, as ARKit states one for its pictures:
+///        1920 x 1440, fx = fy = 1600, centred, no lens.
+/// @return The model, which sensor's `check_camera_model` accepts.
+sensor::camera::CameraModel tracked_pinhole();
+
+/// @brief A camera looking at the world's origin, as a hand holds a tracked
+///        camera over the floor tag: its centre @p distance_m away,
+///        @p off_normal_deg from +z toward @p azimuth_deg about z, rolled
+///        @p roll_deg about its view. Face-on with no roll, its image's x is
+///        the world's x and its y the world's -y; past 90 degrees off the
+///        normal it is below the floor, looking up.
+/// @param distance_m      Its centre's distance from the origin (metres).
+/// @param off_normal_deg  Its centre's angle from +z (degrees).
+/// @param azimuth_deg     Which way, about z from +x (degrees).
+/// @param roll_deg        Its turn about its view direction (degrees).
+/// @return Its frame (sensor's camera axes, +z forward, +y down) to the
+///         world's.
+sensor::camera::Mat4d camera_over_tag(double distance_m, double off_normal_deg,
+                                      double azimuth_deg, double roll_deg);
+
+/// @brief Where @ref draw_marker draws @p tag for a pinhole: the print's
+///        frame to the image's pixels, through @p model's camera matrix (its
+///        lens ignored).
+/// @param model            The camera, a pinhole.
+/// @param world_to_camera  The world to the camera's frame.
+/// @param tag              The tag.
+/// @return The homography.
+cv::Matx33d floor_tag_print(const sensor::camera::CameraModel& model,
+                            const sensor::camera::Mat4d& world_to_camera,
+                            const FloorTag& tag = {});
+
 /// @brief One camera's sighting of a marker in one capture.
 struct MarkerSighting {
   std::size_t camera = 0;    ///< The camera, by index in the rig.
