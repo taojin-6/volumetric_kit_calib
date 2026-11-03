@@ -51,11 +51,20 @@ struct View {
   std::vector<std::vector<cv::Point2d>> markers;  // by marker id
 };
 
+// Two samples a pixel on each axis, not the renderer's three: the full
+// views' corners err alike (a mean of 0.028 px either way), in under half the
+// time.
+test::RenderOptions sampled_twice() {
+  test::RenderOptions options;
+  options.supersampling = 2;
+  return options;
+}
+
 // The board at `board_to_camera` through the colour-like lens, with
 // `options`' levels; `seed` seeds the camera's noise, or none when 0.
 View render(std::string name, const compute::Board& board,
             const camera::Mat4d& board_to_camera, std::uint64_t seed,
-            const test::RenderOptions& options = {}) {
+            const test::RenderOptions& options = sampled_twice()) {
   const camera::CameraModel model = test::color_like_lens();
   View view;
   view.name = std::move(name);
@@ -166,6 +175,11 @@ std::ostream& operator<<(std::ostream& out, const Errors& e) {
              << " px, bias (" << e.bias.x << ", " << e.bias.y << ") px";
 }
 
+// The board front-on 2.5 m away, off the pixel grid and rolled 7 degrees.
+camera::Mat4d front_on(const compute::Board& board) {
+  return board_facing_camera(board, {0.031, -0.017, 2.5}, 0.0, 7.0);
+}
+
 // Views in which both modes should find every corner: front-on, turned 60
 // and 70 degrees, and a JPEG at quality 85, each off the pixel grid and
 // rolled. Rendered once for the suite.
@@ -174,9 +188,7 @@ class FullViews : public ::testing::Test {
   static void SetUpTestSuite() {
     const compute::Board board = femto_board();
     views_ = std::make_unique<std::vector<View>>();
-    views_->push_back(
-        render("front-on", board,
-               board_facing_camera(board, {0.031, -0.017, 2.5}, 0.0, 7.0), 1));
+    views_->push_back(render("front-on", board, front_on(board), 1));
     views_->push_back(
         render("60 deg", board,
                board_facing_camera(board, {-0.12, 0.08, 2.0}, 60.0, -11.0), 2));
@@ -379,11 +391,11 @@ TEST(DetectCharuco, FindsPartOfABoardTheImageEdgeCuts) {
 // The bottom row of squares cropped away, and with it markers 5 and 6: only
 // the top row of corners keeps two markers beside it, and one row fixes no
 // pose, as compute::usable_for_pose answers.
-TEST(DetectCharuco, CollinearCropFindsOneRowOfCorners) {
+TEST_F(FullViews, CollinearCropFindsOneRowOfCorners) {
   const compute::Board board = femto_board();
-  const camera::Mat4d pose =
-      board_facing_camera(board, {0.031, -0.017, 2.5}, 0.0, 0.0);
-  View view = render("cropped", board, pose, 6);
+  const camera::Mat4d pose = front_on(board);
+  View view = views().front();
+  view.image = view.image.clone();
   const double s = board.target().square_size_m;
   const std::vector<cv::Point3d> below = {{-0.1, 2.3 * s, 0.0},
                                           {6.0 * s, 2.3 * s, 0.0},
@@ -425,14 +437,12 @@ TEST(DetectCharuco, FindsNothingInABlankImage) {
 }
 
 // The rig's board sought with another dictionary's markers.
-TEST(DetectCharuco, FindsNothingWithTheWrongDictionary) {
+TEST_F(FullViews, FindsNothingWithTheWrongDictionary) {
   const compute::Board board = femto_board();
   Target other = legacy_femto_board();
   other.dictionary = MarkerDictionary::ArUco5x5_100;
   const compute::Board wrong = compute::Board::create(other).value();
-  const View view =
-      render("front-on", board,
-             board_facing_camera(board, {0.031, -0.017, 2.5}, 0.0, 7.0), 8);
+  const View& view = views().front();
   for (const Mode mode : {Mode::Full, Mode::Hybrid}) {
     EXPECT_EQ(detect(view.image, board, mode).observation.size(), 8u)
         << name(mode);
@@ -444,7 +454,7 @@ TEST(DetectCharuco, FindsNothingWithTheWrongDictionary) {
 
 // The rig's board on the image's left, and one of the same dictionary
 // numbered from marker 20 on its right: each detection holds its own
-// board's markers only.
+// board's markers only. Only ids are held, so each pixel is sampled once.
 TEST(DetectCharuco, ReportsOnlyItsBoardsMarkers) {
   const compute::Board board = femto_board();
   Target next = legacy_femto_board();
@@ -464,9 +474,11 @@ TEST(DetectCharuco, ReportsOnlyItsBoardsMarkers) {
        test::project(model, right, test::board_outline(other, 0.02, 4))) {
     ASSERT_GT(p.x, middle + 20.0);
   }
-  cv::Mat both = test::render_board(model, right, other);
+  test::RenderOptions once;
+  once.supersampling = 1;
+  cv::Mat both = test::render_board(model, right, other, once);
   const cv::Rect half(0, 0, both.cols / 2, both.rows);
-  test::render_board(model, left, board)(half).copyTo(both(half));
+  test::render_board(model, left, board, once)(half).copyTo(both(half));
   test::CameraOptions optics;
   optics.seed = 10;
   const cv::Mat image = test::camera_image(both, optics);
@@ -593,10 +605,11 @@ struct Pulled {
 
 Pulled pulled_corner_5(int d) {
   const compute::Board board = femto_board();
+  // Rendered once for both amplitudes.
+  static const View kFaded =
+      render("faded", board, front_on(board), 0, faded());
   Pulled pulled;
-  pulled.view = render(
-      "faded", board,
-      board_facing_camera(board, {0.031, -0.017, 2.5}, 0.0, 7.0), 0, faded());
+  pulled.view = kFaded;
   const cv::Point2d corner = pulled.view.corners[5];
   pulled.image = pulled.view.image.clone();
   add_fine_pattern(

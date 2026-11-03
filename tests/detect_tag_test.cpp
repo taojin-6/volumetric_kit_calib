@@ -222,13 +222,25 @@ TEST(DetectTag, StartsAtTheBottomRightOfAprilTagsOwnPrint) {
   EXPECT_TRUE(Accurate(errors));
 }
 
+// The rig's board as the colour-like lens sees it, on the image's left,
+// rendered once. Only its markers count here, so each pixel is sampled once.
+const cv::Mat& board_render() {
+  static const cv::Mat render = [] {
+    const compute::Board board = test::femto_board();
+    test::RenderOptions once;
+    once.supersampling = 1;
+    return test::render_board(
+        test::color_like_lens(),
+        test::board_facing_camera(board, {-0.5, 0.0, 2.5}, 20.0, 5.0), board,
+        once);
+  }();
+  return render;
+}
+
 // A capture's picture holds the board too: its markers are another
 // dictionary's, and the tag is found as alone.
 TEST(DetectTag, FindsTheTagBesideTheBoard) {
-  const compute::Board board = test::femto_board();
-  cv::Mat render = test::render_board(
-      test::color_like_lens(),
-      test::board_facing_camera(board, {-0.5, 0.0, 2.5}, 20.0, 5.0), board);
+  cv::Mat render = board_render().clone();
   const Corners truth = test::draw_marker(
       render, kOriginTag.dictionary, 0,
       marker_placement({2900.3, 1400.6}, 120.0, -20.0, 0.7, {5e-4, -5e-4}));
@@ -287,13 +299,7 @@ TEST(DetectTag, TakesNeitherOfTwoPrints) {
 // though a tag of that dictionary finds its marker 0, the dictionary taken
 // by name.
 TEST(DetectTag, FindsNothingInTheBoardsImage) {
-  const compute::Board board = test::femto_board();
-  const cv::Mat image = picture(
-      test::render_board(
-          test::color_like_lens(),
-          test::board_facing_camera(board, {0.031, -0.017, 2.5}, 0.0, 7.0),
-          board),
-      70);
+  const cv::Mat image = picture(board_render(), 70);
   const MarkerSearch origin = search(image);
   EXPECT_FALSE(origin.found.has_value());
   EXPECT_EQ(origin.matches, 0);
