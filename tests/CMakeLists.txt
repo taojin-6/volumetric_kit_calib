@@ -326,8 +326,6 @@ if(TARGET calib_app)
               volumetric_kit::core_test_support)
   target_include_directories(vc_app_intrinsic_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
-  # About 15 s on an M5 Max: 400 renders and searches, 60 captures, one fit.
-  set_tests_properties(app_intrinsic PROPERTIES TIMEOUT 300)
   # app: extrinsic mode for a stereo pair end to end, on a device: a lens file
   # as intrinsic mode writes it, then a fake pair's 960 x 540 pictures of the
   # ChArUco board rendered through the lab's fisheye (scaled): the live view,
@@ -337,7 +335,6 @@ if(TARGET calib_app)
               volumetric_kit::core_test_support)
   target_include_directories(vc_app_extrinsic_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
-  set_tests_properties(app_extrinsic PROPERTIES TIMEOUT 300)
   # app: one calib_rig, the mode chosen in it: a fake pair's lens session, its
   # lenses taken, and the switch to a pose session with the cameras open, on a
   # device; the lens runs listed, a lens file checked against the rig, the
@@ -346,9 +343,6 @@ if(TARGET calib_app)
               volumetric_kit::core_test_support)
   target_include_directories(vc_app_setup_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
-  # About 25 s on an M5 Max: two sessions' renders and searches, two fits and a
-  # rig solve.
-  set_tests_properties(app_setup PROPERTIES TIMEOUT 300)
   # app: Calibrate on the synthetic rig's detections, its results directories
   # read back with sensor's reader and nlohmann; its out-of-memory sweep.
   vc_add_test(app_calibrate volumetric_kit::calib_app vc_synthetic_rig)

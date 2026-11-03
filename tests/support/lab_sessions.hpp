@@ -10,10 +10,13 @@
 ///        Its users link calib_detect and vc_synthetic_rig.
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <optional>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -83,6 +86,33 @@ inline std::optional<PlacedBoard> place_board(const FisheyeTruth& truth,
                      full->observation};
 }
 
+/// How many placements @ref place_boards makes at once: each takes about half
+/// a GiB at its peak.
+inline constexpr std::size_t kPlacedAtOnce = 4;
+
+/// @brief @ref place_board at each of @p poses, @ref kPlacedAtOnce at a time:
+///        the placements are independent, and each search seeds its own
+///        random numbers (detect_board), so the results are a loop's, in
+///        order.
+inline std::vector<std::optional<PlacedBoard>> place_boards(
+    const FisheyeTruth& truth, const compute::Board& board,
+    const std::vector<sensor::camera::Mat4d>& poses, std::size_t min_live,
+    std::size_t min_full) {
+  std::vector<std::optional<PlacedBoard>> placed(poses.size());
+  std::atomic<std::size_t> next{0};
+  const auto work = [&] {
+    for (std::size_t i = next++; i < poses.size(); i = next++) {
+      placed[i] = place_board(truth, board, poses[i], min_live, min_full);
+    }
+  };
+  const std::size_t workers = std::min(poses.size(), kPlacedAtOnce);
+  std::vector<std::thread> threads(workers > 1 ? workers - 1 : 0);
+  for (std::thread& thread : threads) thread = std::thread(work);
+  work();
+  for (std::thread& thread : threads) thread.join();
+  return placed;
+}
+
 /// @brief A lens session's pictures, as a person makes them by the runbook:
 ///        the board tilted 20-35 degrees near the axis and further out, its
 ///        tilt's axis turning, 13 times each; then pushed toward each image
@@ -97,22 +127,25 @@ inline std::vector<std::vector<std::uint8_t>> lens_session_pictures(
   const auto min_corners =
       static_cast<std::size_t>(solve::LensOptions{}.min_corners);
   std::vector<std::vector<std::uint8_t>> pictures;
-  const auto keep = [&](const sensor::camera::Mat4d& pose) {
-    std::optional<PlacedBoard> placed =
-        place_board(truth, board, pose, 1, min_corners);
-    if (placed) pictures.push_back(std::move(placed->picture));
-  };
   constexpr int kTurns = 13;
   constexpr double kStep = 360.0 / kTurns;
+  std::vector<sensor::camera::Mat4d> tilted;
   for (int i = 0; i < kTurns; ++i) {
-    keep(facing(board, 8.0 + 6.0 * (i % 3), kStep * i, 0.65 + 0.05 * (i % 2),
-                2.0 * kStep * i, 25.0 + 5.0 * (i % 3)));
+    tilted.push_back(facing(board, 8.0 + 6.0 * (i % 3), kStep * i,
+                            0.65 + 0.05 * (i % 2), 2.0 * kStep * i,
+                            25.0 + 5.0 * (i % 3)));
   }
   for (int i = 0; i < kTurns; ++i) {
-    keep(facing(board, 38.0 + 4.0 * (i % 2), kStep * (i + 0.5), 0.55,
-                2.0 * kStep * i + 15.0, 20.0 + 5.0 * (i % 3)));
+    tilted.push_back(facing(board, 38.0 + 4.0 * (i % 2), kStep * (i + 0.5),
+                            0.55, 2.0 * kStep * i + 15.0,
+                            20.0 + 5.0 * (i % 3)));
   }
-  // Toward each image corner and side, in solve::LensReach's order.
+  for (std::optional<PlacedBoard>& placed :
+       place_boards(truth, board, tilted, 1, min_corners)) {
+    if (placed) pictures.push_back(std::move(placed->picture));
+  }
+  // Toward each image corner and side, in solve::LensReach's order: the first
+  // four placements that reach it, tried kPlacedAtOnce at a time.
   const struct {
     double azimuth_deg;
     double roll_deg;
@@ -120,26 +153,33 @@ inline std::vector<std::vector<std::uint8_t>> lens_session_pictures(
                {29.4, -17.0},   {180.0, -5.0}, {0.0, 5.0}};
   constexpr int kEach = 4;
   for (std::size_t g = 0; g < std::size(goals); ++g) {
-    int kept = 0;
-    for (double off = 58.0; off <= 74.0 && kept < kEach; off += 2.0) {
+    std::vector<sensor::camera::Mat4d> tries;
+    for (double off = 58.0; off <= 74.0; off += 2.0) {
       for (const double tilt : {0.0, 10.0, 20.0}) {
         for (const double turn : {0.0, -10.0, 10.0}) {
-          if (kept == kEach) break;
-          std::optional<PlacedBoard> placed =
-              place_board(truth, board,
-                          facing(board, off, goals[g].azimuth_deg, 0.5,
-                                 goals[g].roll_deg + turn, tilt),
-                          1, min_corners);
-          if (!placed) continue;
-          double reach = 0.0;
-          for (const DetectedPoint& point : placed->full.points) {
-            reach = std::max(reach,
-                             solve::pixel_reach(kLabQuarter, point.pixel)[g]);
-          }
-          if (reach < solve::kLensReach) continue;
-          pictures.push_back(std::move(placed->picture));
-          ++kept;
+          tries.push_back(facing(board, off, goals[g].azimuth_deg, 0.5,
+                                 goals[g].roll_deg + turn, tilt));
         }
+      }
+    }
+    int kept = 0;
+    for (std::size_t from = 0; from < tries.size() && kept < kEach;
+         from += kPlacedAtOnce) {
+      const std::vector<sensor::camera::Mat4d> batch(
+          tries.begin() + static_cast<std::ptrdiff_t>(from),
+          tries.begin() + static_cast<std::ptrdiff_t>(
+                              std::min(from + kPlacedAtOnce, tries.size())));
+      for (std::optional<PlacedBoard>& placed :
+           place_boards(truth, board, batch, 1, min_corners)) {
+        if (!placed || kept == kEach) continue;
+        double reach = 0.0;
+        for (const DetectedPoint& point : placed->full.points) {
+          reach =
+              std::max(reach, solve::pixel_reach(kLabQuarter, point.pixel)[g]);
+        }
+        if (reach < solve::kLensReach) continue;
+        pictures.push_back(std::move(placed->picture));
+        ++kept;
       }
     }
   }
@@ -168,7 +208,8 @@ inline std::vector<ShownPair> pair_session_pictures(
   constexpr double kDeg = 3.14159265358979323846 / 180.0;
   const sensor::camera::Mat4d left_to_world =
       sensor::camera::rigid_inverse(pair[0].world_to_camera);
-  std::vector<ShownPair> shown;
+  // Each placement's left and right poses, in turn.
+  std::vector<sensor::camera::Mat4d> poses;
   for (const double down : {0.0, -22.0, 22.0}) {
     for (const double across : {0.0, -35.0, 35.0}) {
       for (const double distance : {2.0, 2.6}) {
@@ -179,17 +220,20 @@ inline std::vector<ShownPair> pair_session_pictures(
               left_to_world *
               facing(board, std::atan(std::hypot(tx, ty)) / kDeg,
                      std::atan2(ty, tx) / kDeg, distance, 0.0, tilt);
-          ShownPair placed;
-          bool seen = true;
-          for (std::size_t c = 0; c < 2 && seen; ++c) {
-            std::optional<PlacedBoard> one = place_board(
-                truth, board, pair[c].world_to_camera * board_to_world, 6, 6);
-            seen = one.has_value();
-            if (seen) (c == 0 ? placed.left : placed.right) = one->picture;
+          for (std::size_t c = 0; c < 2; ++c) {
+            poses.push_back(pair[c].world_to_camera * board_to_world);
           }
-          if (seen) shown.push_back(std::move(placed));
         }
       }
+    }
+  }
+  std::vector<std::optional<PlacedBoard>> placed =
+      place_boards(truth, board, poses, 6, 6);
+  std::vector<ShownPair> shown;
+  for (std::size_t i = 0; i + 1 < placed.size(); i += 2) {
+    if (placed[i] && placed[i + 1]) {
+      shown.push_back(
+          {std::move(placed[i]->picture), std::move(placed[i + 1]->picture)});
     }
   }
   return shown;
