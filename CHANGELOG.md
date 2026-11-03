@@ -7,6 +7,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.8.0] - 2026-11-03
+
+### Changed
+
+- build: **calib pins sensor at #47's merge** (881f42b, 0.36.0), where it was
+  at #28's (5697a87, 0.21.0), and **core at #97's merge** (3f48e14, 0.44.2),
+  where it was at #86's (e1adf08, 0.40.0), as are sensor's Orbbec SDK action
+  and the core's actions in CI. calib's code builds and passes unchanged on
+  them; with `VC_WITH_RIG`, sensor's tiers need core 0.41.0, which sensor's
+  configure checks.
+- A build with `VC_BUILD_TESTS` needs sensor 0.23.0
+  (`VC_SENSOR_MIN_VERSION`), for its NV12 test pictures; calib alone still
+  needs 0.21.0.
+- calib's version is 0.8.0, where it was 0.6.0.
+
+### Removed
+
+- `tests/support/device_picture.hpp`: the app tests' NV12 pictures are
+  sensor's (`testing/nv12_picture.hpp`). The cross-family case keeps a maker
+  of its own for planes CONCURRENT across two queue families, which sensor's
+  `device_picture` does not make.
+
 ## [0.6.0] - 2026-11-02
 
 ### Added

@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(
   volumetric_kit_calib
-  VERSION 0.6.0
+  VERSION 0.8.0
   DESCRIPTION
     "Calibration companion for volumetric_kit: diagnostics, acquisition guidance, and a requirements solver"
   HOMEPAGE_URL "https://github.com/taojin-6/volumetric_kit_calib"
@@ -64,9 +64,14 @@ include(vc_sanitizers)
 # The oldest volumetric_kit_core and volumetric_kit_sensor calib builds with
 # (DECISIONS.md, 2026-10-29), checked in the ones that arrive (third_party/):
 # sensor 0.21.0 has its prep tier's LumaPass and list read (DECISIONS.md,
-# 2026-11-02).
+# 2026-11-02), and the tests take 0.23.0's NV12 test pictures
+# (testing/nv12_picture.hpp).
 set(VC_CORE_MIN_VERSION 0.29.0)
-set(VC_SENSOR_MIN_VERSION 0.21.0)
+if(VC_BUILD_TESTS)
+  set(VC_SENSOR_MIN_VERSION 0.23.0)
+else()
+  set(VC_SENSOR_MIN_VERSION 0.21.0)
+endif()
 # calib_app's: CalibRig's operation and DeckLink cameras (DECISIONS.md,
 # 2026-11-02, intrinsic mode).
 set(VC_APP_CORE_MIN_VERSION 0.40.0)
