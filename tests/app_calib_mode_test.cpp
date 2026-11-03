@@ -6,10 +6,12 @@
 // lenses alone) and what extrinsic mode refuses; where a lens fit starts,
 // never the stand-in; the board each mode seeds and takes, a board too small
 // for a lens view refused, saying why; the capture rule; and when Calibrate
-// may run. Host-only.
+// may run; a stereo pair's camera records and lenses; and every part of the
+// window a mode sets, set from one place. Host-only.
 
 #include "volumetric_kit/calib/app/calib_mode.hpp"
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -67,7 +69,8 @@ TEST(AppCalibMode, TheOperationIsTheMode) {
   EXPECT_EQ(session_mode(Operation::Calibrate).value(),
             SessionMode::Extrinsics);
   refused(session_mode(Operation::Fuse).status(), Code::InvalidArgument,
-          "operation: fuse is not one calib_rig runs");
+          "operation: " + std::to_string(static_cast<int>(Operation::Fuse)) +
+              " is not one calib_rig runs (calibrate, calibrate_intrinsics)");
   refused(session_mode(static_cast<Operation>(99)).status(),
           Code::InvalidArgument, "operation: 99 is not one calib_rig runs");
 }
@@ -228,6 +231,75 @@ TEST(AppCalibMode, CalibrateWaitsForItsModesReadiness) {
   EXPECT_FALSE(session_ready(SessionMode::Extrinsics, quality::SessionSummary{},
                              {ready}));
   EXPECT_TRUE(session_ready(SessionMode::Extrinsics, linked, {}));
+}
+
+// A pair's camera, opened with no calibration, takes its lens from the
+// scenario's file and records the file; one not there takes the stand-in for
+// lenses, and stops a pose session.
+TEST(AppCalibMode, RecordsEachStereoCameraWithItsLens) {
+  const std::string path = "bm_pair/array_calibration.json";
+  RigScenario scenario;
+  scenario.mode = SessionMode::Intrinsics;
+  scenario.driver = "decklink";
+  scenario.calibration = std::make_shared<const camera::ArrayCalibration>(
+      file_of({{"bm-1", calibrated(k4K, 1702.0)}}));
+  OpenedSource opened;
+  for (const char* id : {"bm-1", "bm-2"}) {
+    capture::SessionCamera camera;
+    camera.id = id;
+    camera.size = k4K;
+    camera.input = "SDI 2";
+    ASSERT_TRUE(add_stereo_camera(camera, scenario, path, opened).ok());
+  }
+  ASSERT_EQ(opened.cameras.size(), 2u);
+  ASSERT_EQ(opened.lenses.size(), 2u);
+  EXPECT_EQ(opened.cameras[0].lens, LensOrigin::File);
+  EXPECT_EQ(opened.cameras[0].lens_file, path);
+  EXPECT_EQ(opened.cameras[0].input, "SDI 2");
+  EXPECT_EQ(opened.lenses[0].intrinsics.fx, 1702.0);
+  EXPECT_EQ(opened.cameras[1].lens, LensOrigin::StandIn);
+  EXPECT_EQ(opened.cameras[1].lens_file, "");
+  EXPECT_EQ(opened.lenses[1].intrinsics.fx, stand_in_lens(k4K).intrinsics.fx);
+
+  scenario.mode = SessionMode::Extrinsics;
+  capture::SessionCamera bm2;
+  bm2.id = "bm-2";
+  bm2.size = k4K;
+  refused(add_stereo_camera(bm2, scenario, path, opened), Code::InvalidArgument,
+          "bm-2 has no lens at 3840x2160 in " + path);
+  EXPECT_EQ(opened.cameras.size(), 2u);
+}
+
+// The window takes every part a mode sets from one place: the session's mode
+// and file, the capture rule, its own mode, and the Board window's board and
+// the boards it takes. Each part starts at the other mode's.
+TEST(AppCalibMode, SetsEveryPartToTheScenariosMode) {
+  for (const SessionMode mode :
+       {SessionMode::Intrinsics, SessionMode::Extrinsics}) {
+    const bool lenses = mode == SessionMode::Intrinsics;
+    RigScenario scenario;
+    scenario.mode = mode;
+    scenario.driver = "decklink";
+    scenario.calibration = std::make_shared<const camera::ArrayCalibration>(
+        file_of({{"bm-1", calibrated(k4K, 1702.0)}}));
+    CaptureSetup setup;
+    setup.mode = lenses ? SessionMode::Extrinsics : SessionMode::Intrinsics;
+    LiveOptions live;
+    live.rule.min_views = 7;
+    RigMode window;
+    window.intrinsic = !lenses;
+    const viz::BoardEditor editor =
+        apply_mode(scenario, setup, live, window).value();
+    EXPECT_EQ(setup.mode, mode);
+    EXPECT_EQ(setup.calibration, scenario.calibration);
+    EXPECT_EQ(live.rule.min_views, capture_rule(mode).min_views);
+    EXPECT_EQ(window.intrinsic, lenses);
+    EXPECT_EQ(editor.board(), board_seed(mode));
+    EXPECT_EQ(editor.rule().checkerboard, lenses);
+    EXPECT_EQ(editor.rule().min_corners, board_rule(mode).min_corners);
+    EXPECT_FALSE(editor.square_measured());
+    EXPECT_FALSE(editor.locked());
+  }
 }
 
 }  // namespace

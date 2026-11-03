@@ -909,8 +909,6 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   CaptureSetup setup;
   setup.root = config.output.path;
   setup.software = app_software();
-  setup.mode = scenario.mode;
-  setup.calibration = scenario.calibration;
   setup.driver = opened.driver;
   setup.sync_path = opened.sync_path;
   setup.reference = opened.reference;
@@ -928,14 +926,16 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     origins.emplace_back(capture::to_string(camera.lens));
   }
   setup.cameras = opened.cameras;
+  // The mode's parts: the session's mode and file, the capture rule, the
+  // window's mode, and the Board window's board and the boards it takes.
+  LiveOptions live_options;
+  RigMode mode;
+  VKC_ASSIGN(viz::BoardEditor editor,
+             apply_mode(scenario, setup, live_options, mode));
   // TODO: cap cv::setNumThreads once H4 measures the contention between
   // OpenCV, the SDK and the decode threads.
   VKC_ASSIGN(std::unique_ptr<CaptureWorker> captures,
              CaptureWorker::create(std::move(setup)));
-  // The mode's board, and the boards it takes.
-  VKC_ASSIGN(viz::BoardEditor editor,
-             viz::BoardEditor::create(board_seed(scenario.mode), false,
-                                      board_rule(scenario.mode)));
   // The 3D view's worker, prepared frames shared with the renderer's family.
   VKC_ASSIGN(std::unique_ptr<CloudWorker> cloud,
              CloudWorker::create(
@@ -985,8 +985,6 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   // --- The live worker last, as its thread starts the cameras: from here
   // every way out stops Calibrate's worker, then it, then the 3D view's
   // (Teardown), so no set is held when the source closes.
-  LiveOptions live_options;
-  live_options.rule = capture_rule(scenario.mode);
   VKC_ASSIGN(std::unique_ptr<LiveWorker> live,
              LiveWorker::create(std::move(opened.source), opened.lenses,
                                 editor.board(), editor.square_measured(),
@@ -995,8 +993,6 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   std::shared_ptr<const LiveSnapshot> latest;  // released before live
   const Teardown teardown(*calibrate, *live, *cloud, app, retire);
   const Workers workers{*live, *captures, *calibrate};
-  RigMode mode;
-  mode.intrinsic = scenario.mode == capture::SessionMode::Intrinsics;
   RigView shown = mode.view;        // the last frame's
   std::optional<RigOrigin> framed;  // the 3D view's, once framed on a result
   std::vector<viz::PanelLine> calibration;  // the result's panel

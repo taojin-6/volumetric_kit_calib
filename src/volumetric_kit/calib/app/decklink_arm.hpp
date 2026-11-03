@@ -32,7 +32,7 @@ core::Result<sensor::DecklinkStereo::Options> decklink_options(
     const core::config::Source& source);
 
 // open_source's DeckLink arm: the pair opened with decklink_options, the left
-// camera the reference, each camera's lens rig_lens's.
+// camera the reference, each camera's record add_stereo_camera's.
 core::Result<OpenedSource> open_decklink(
     const core::config::Config& config, const RigScenario& scenario,
     const core::Device& device, core::Allocator& allocator,

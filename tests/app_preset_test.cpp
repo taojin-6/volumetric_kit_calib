@@ -9,16 +9,13 @@
 
 #include "volumetric_kit/calib/app/preset.hpp"
 
-#include <unistd.h>
-
 #include <cstdint>
-#include <filesystem>
 #include <string>
-#include <system_error>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include "scratch_dir.hpp"
 #include "volumetric_kit/calib/app/calib_rig.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
 #include "volumetric_kit/sensor/camera/array_calibration.hpp"
@@ -28,6 +25,7 @@ namespace {
 
 namespace camera = sensor::camera;
 using Code = core::Status::Code;
+using test::ScratchDir;
 
 camera::CameraModel model(std::uint32_t width, std::uint32_t height) {
   camera::CameraModel m;
@@ -138,44 +136,24 @@ TEST(AppPreset, RefusesADepthSizeWithNoMode) {
           "source.depth_width/depth_height: 800x600");
 }
 
-// A scratch directory for the scenario's files, gone with the test.
-class ScenarioDir {
- public:
-  ScenarioDir()
-      : dir_(std::filesystem::temp_directory_path() /
-             ("vc_app_scenario_" + std::to_string(::getpid()))) {
-    std::error_code ec;
-    std::filesystem::remove_all(dir_, ec);
-    std::filesystem::create_directories(dir_, ec);
-  }
-  ~ScenarioDir() {
-    std::error_code ec;
-    std::filesystem::remove_all(dir_, ec);
-  }
-  ScenarioDir(const ScenarioDir&) = delete;
-  ScenarioDir& operator=(const ScenarioDir&) = delete;
-
-  std::string path() const { return dir_.string(); }
-  std::string write(const std::string& name, const std::string& text) const {
-    const std::string path = (dir_ / name).string();
-    EXPECT_TRUE(core::write_file(path, text, core::WriteMode::Replace).ok());
-    return path;
-  }
-
- private:
-  std::filesystem::path dir_;
-};
+// `text` written to `name` in `dir`: its path.
+std::string write(const ScratchDir& dir, const std::string& name,
+                  const std::string& text) {
+  const std::string path = dir / name;
+  EXPECT_TRUE(core::write_file(path, text, core::WriteMode::Replace).ok());
+  return path;
+}
 
 // A scenario of calib_rig's as core's config resolves it: `operation` over
 // `driver`, its session root `dir`; an Orbbec rig's sync file of one camera,
 // or a DeckLink pair's cameras and modes.
-core::config::Config scenario(const ScenarioDir& dir,
+core::config::Config scenario(const ScratchDir& dir,
                               core::config::Operation operation,
                               const std::string& driver) {
   core::config::Config config;
   config.operation = operation;
   config.source.driver = driver;
-  config.output.path = dir.path();
+  config.output.path = dir.path().string();
   if (driver == "decklink") {
     config.source.cameras = {{"bm-1", "SDI 2"}, {"bm-2", "SDI 1"}};
     config.source.pairs = {{"bm-1", "bm-2"}};
@@ -192,8 +170,8 @@ core::config::Config scenario(const ScenarioDir& dir,
   config.source.depth_width = 640;
   config.source.depth_height = 576;
   config.source.fps = 25;
-  config.source.sync_config = dir.write(
-      "rig.json",
+  config.source.sync_config = write(
+      dir, "rig.json",
       R"({"devices": [{"sn": "CL2A141000N", "syncConfig": {)"
       R"("syncMode": "OB_MULTI_DEVICE_SYNC_MODE_PRIMARY", "depthDelayUs": 0,)"
       R"("colorDelayUs": 0, "trigger2ImageDelayUs": 0,)"
@@ -207,21 +185,16 @@ core::config::Config scenario(const ScenarioDir& dir,
 // field and its value, so no scenario runs another solve than it asks for.
 TEST(AppPreset, RunsOnlyTheOperationsAndDriversItSupports) {
   using Operation = core::config::Operation;
-  const ScenarioDir dir;
-  // Every other operation, as a scenario spells it.
-  const struct {
-    Operation operation;
-    const char* name;
-  } others[] = {{Operation::Fuse, "fuse"},
-                {Operation::Stream, "stream"},
-                {Operation::Codec, "codec"},
-                {Operation::View, "view"},
-                {Operation::Project, "project"}};
-  for (const auto& [operation, name] : others) {
+  const ScratchDir dir;
+  // Every other operation, by its number: core's load refuses them for
+  // calib_rig, so only a scenario made in code reaches this.
+  for (const Operation operation :
+       {Operation::Fuse, Operation::Stream, Operation::Codec, Operation::View,
+        Operation::Project}) {
     for (const char* driver : {"orbbec", "decklink"}) {
       refused(check_scenario(scenario(dir, operation, driver)).status(),
               Code::InvalidArgument,
-              std::string("operation: ") + name +
+              "operation: " + std::to_string(static_cast<int>(operation)) +
                   " is not one calib_rig runs (calibrate, "
                   "calibrate_intrinsics)");
     }
@@ -270,18 +243,25 @@ TEST(AppPreset, RunsOnlyTheOperationsAndDriversItSupports) {
   }
 }
 
-// `source.calibration`, when given, is read before anything opens: the
-// lenses a session starts from.
+// `source.calibration`, when given, is read before anything opens and kept:
+// the lenses a session starts from. On whichever driver this build has (an
+// app is built with one at least), so every build reads it.
 TEST(AppPreset, ReadsTheScenariosCalibrationFile) {
-  const ScenarioDir dir;
+  const ScratchDir dir;
+#if defined(VC_WITH_DECKLINK)
+  const char* driver = "decklink";
+#else
+  const char* driver = "orbbec";
+#endif
   core::config::Config config =
-      scenario(dir, core::config::Operation::CalibrateIntrinsics, "decklink");
-  // The driver's own checks come last: whatever this build lacks, the file
-  // is refused first.
-  config.source.calibration = dir.path() + "/missing.json";
+      scenario(dir, core::config::Operation::CalibrateIntrinsics, driver);
+  const core::Result<RigScenario> without = check_scenario(config);
+  ASSERT_TRUE(without.ok()) << without.status().message();
+  EXPECT_EQ(without->calibration, nullptr);
+  config.source.calibration = dir / "missing.json";
   refused(check_scenario(config).status(), Code::NotFound,
           "source.calibration: ");
-  config.source.calibration = dir.write("bad.json", "{\"format\": 1}");
+  config.source.calibration = write(dir, "bad.json", "{\"format\": 1}");
   refused(check_scenario(config).status(), Code::InvalidArgument,
           "source.calibration: ");
   sensor::camera::ArrayCalibration file;
@@ -290,69 +270,44 @@ TEST(AppPreset, ReadsTheScenariosCalibrationFile) {
   bm1.color = sensor::camera::CameraCalibration{
       model(3840, 2160), sensor::camera::IntrinsicsSource::Calibrated};
   config.source.calibration =
-      dir.write("array_calibration.json",
-                sensor::camera::format_array_calibration(file).value());
+      write(dir, "array_calibration.json",
+            sensor::camera::format_array_calibration(file).value());
   const core::Result<RigScenario> read = check_scenario(config);
-#if defined(VC_WITH_DECKLINK)
   ASSERT_TRUE(read.ok()) << read.status().message();
   ASSERT_NE(read->calibration, nullptr);
   ASSERT_EQ(read->calibration->sensors.size(), 1u);
   EXPECT_EQ(read->calibration->sensors[0].id, "bm-1");
-#else
-  refused(read.status(), Code::InvalidArgument, "built without");
-#endif
+  ASSERT_TRUE(read->calibration->sensors[0].color.has_value());
+  EXPECT_EQ(read->calibration->sensors[0].color->model.size.width, 3840u);
 }
 
 #if defined(VC_WITH_ORBBEC)
 // The session root and the sync file, before anything opens.
 TEST(AppPreset, ChecksTheScenarioBeforeOpeningAnything) {
-  namespace fs = std::filesystem;
-  const fs::path dir = fs::temp_directory_path() /
-                       ("vc_app_preset_" + std::to_string(::getpid()));
-  std::error_code ec;
-  fs::remove_all(dir, ec);
-  ASSERT_TRUE(fs::create_directories(dir, ec)) << ec.message();
-  const auto write = [&](const std::string& name, const std::string& text) {
-    const std::string path = (dir / name).string();
-    EXPECT_TRUE(core::write_file(path, text, core::WriteMode::Replace).ok());
-    return path;
-  };
-  core::config::Config config;
-  config.operation = core::config::Operation::Calibrate;
-  config.source.driver = "orbbec";
-  config.source.color_codec = core::config::ColorCodec::Mjpeg;
-  config.source.color_width = 3840;
-  config.source.color_height = 2160;
-  config.source.depth_width = 640;
-  config.source.depth_height = 576;
-  config.source.fps = 25;
-  config.source.sync_config = write(
-      "rig.json",
-      R"({"devices": [{"sn": "CL2A141000N", "syncConfig": {)"
-      R"("syncMode": "OB_MULTI_DEVICE_SYNC_MODE_PRIMARY", "depthDelayUs": 0,)"
-      R"("colorDelayUs": 0, "trigger2ImageDelayUs": 0,)"
-      R"("triggerOutEnable": true, "triggerOutDelayUs": 0,)"
-      R"("framesPerTrigger": 1}}]})");
-  config.output.path = (dir / "no_such_directory").string();
+  const ScratchDir dir;
+  core::config::Config config =
+      scenario(dir, core::config::Operation::Calibrate, "orbbec");
+  config.output.path = dir / "no_such_directory";
   refused(
       check_scenario(config).status(), Code::NotFound,
       "output.path: " + config.output.path + " is not an existing directory");
 
-  config.output.path = dir.string();
-  core::Result<RigScenario> scenario = check_scenario(config);
-  ASSERT_TRUE(scenario.ok()) << scenario.status().message();
-  EXPECT_EQ(scenario->mode, capture::SessionMode::Extrinsics);
-  EXPECT_EQ(scenario->driver, "orbbec");
-  EXPECT_EQ(scenario->calibration, nullptr);
+  config.output.path = dir.path().string();
+  core::Result<RigScenario> checked = check_scenario(config);
+  ASSERT_TRUE(checked.ok()) << checked.status().message();
+  EXPECT_EQ(checked->mode, capture::SessionMode::Extrinsics);
+  EXPECT_EQ(checked->driver, "orbbec");
+  EXPECT_EQ(checked->calibration, nullptr);
 
   const std::string good = config.source.sync_config;
-  config.source.sync_config = (dir / "missing.json").string();
+  config.source.sync_config = dir / "missing.json";
   refused(check_scenario(config).status(), Code::NotFound,
           "source.sync_config: ");
-  config.source.sync_config = write("bad.json", R"({"devices": [{"sn": 1}]})");
+  config.source.sync_config =
+      write(dir, "bad.json", R"({"devices": [{"sn": 1}]})");
   refused(check_scenario(config).status(), Code::InvalidArgument,
           "source.sync_config: ");
-  config.source.sync_config = write("empty.json", R"({"devices": []})");
+  config.source.sync_config = write(dir, "empty.json", R"({"devices": []})");
   refused(check_scenario(config).status(), Code::InvalidArgument,
           "source.sync_config: " + config.source.sync_config +
               ": sync config: no \"devices\" array");
@@ -361,7 +316,6 @@ TEST(AppPreset, ChecksTheScenarioBeforeOpeningAnything) {
   config.source.depth_height = 600;
   refused(check_scenario(config).status(), Code::InvalidArgument,
           "800x600 is not a depth mode");
-  fs::remove_all(dir, ec);
 }
 #endif  // VC_WITH_ORBBEC
 

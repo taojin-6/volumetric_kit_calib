@@ -6,12 +6,14 @@
 // rendered through the lab's fisheye scaled from 4K; the live view finds it in
 // each picture's half through a stand-in lens, a still board is captured at
 // each placement with one view enough, the session is written, and
-// Calibrate's lens run gives a lens file whose lens passes every gate, the
-// right camera, which saw a few boards, listed as not ready. Then Calibrate's
-// lens run on views alone: a factory camera fitted for its report and never
-// written, a run with nothing to write leaving no calibration file, and the
-// mode deciding the solve. The device part runs under the validation layer
-// when the environment asks (VKC_TEST_VALIDATION) and skips without a device.
+// Calibrate's lens run gives a lens file whose lens passes every gate and
+// follows the truth's curve, the right camera, which saw a few boards, listed
+// as not ready. Then Calibrate's lens run on views alone: a factory camera
+// fitted for its report and never written, the scenario's file a fit's start
+// and its other lenses carried, a run with nothing to write leaving no
+// calibration file, and the mode deciding the solve. The device part runs under
+// the validation layer when the environment asks (VKC_TEST_VALIDATION) and
+// skips without a device.
 
 #include <algorithm>
 #include <chrono>
@@ -39,6 +41,7 @@
 #include "volumetric_kit/calib/app/calibrate_worker.hpp"
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 #include "volumetric_kit/calib/app/live_worker.hpp"
+#include "volumetric_kit/calib/app/open_source.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/detect/board.hpp"
 #include "volumetric_kit/calib/source/rig_source.hpp"
@@ -160,20 +163,6 @@ std::vector<std::vector<std::uint8_t>> lens_session_pictures(
   return pictures;
 }
 
-// A stereo pair's camera record, as the DeckLink arm makes it: no factory
-// lens, the stand-in its live lens.
-capture::SessionCamera pair_camera(const std::string& id,
-                                   const std::string& input) {
-  capture::SessionCamera camera;
-  camera.id = id;
-  camera.model = "fake stereo";
-  camera.size = kSize;
-  camera.fps = 30;
-  camera.input = input;
-  camera.lens = capture::LensOrigin::StandIn;
-  return camera;
-}
-
 class AppIntrinsic : public core::test::VulkanDeviceTest {
  protected:
   core::DeviceRequirements requirements() const override {
@@ -221,14 +210,38 @@ TEST_F(AppIntrinsic, ASessionGivesALensFileThatPassesItsGates) {
   const std::vector<std::uint8_t> blank(
       static_cast<std::size_t>(kSize.width) * kSize.height, 110);
 
+  // The pair's records and live lenses as the DeckLink arm makes them, with
+  // no file: the stand-in.
+  RigScenario scenario;
+  scenario.mode = capture::SessionMode::Intrinsics;
+  scenario.driver = "decklink";
+  OpenedSource opened;
+  const struct {
+    const char* id;
+    const char* input;
+  } ports[] = {{"bm-1", "SDI 2"}, {"bm-2", "SDI 1"}};
+  for (const auto& port : ports) {
+    capture::SessionCamera camera;
+    camera.id = port.id;
+    camera.model = "fake stereo";
+    camera.size = kSize;
+    camera.fps = 30;
+    camera.input = port.input;
+    const core::Status added =
+        add_stereo_camera(std::move(camera), scenario, "", opened);
+    ASSERT_TRUE(added.ok()) << added.message();
+  }
+  EXPECT_EQ(opened.cameras[1].lens, capture::LensOrigin::StandIn);
+  EXPECT_EQ(opened.lenses[1].intrinsics.fx, stand_in_lens(kSize).intrinsics.fx);
+
   const ScratchDir root;
   CaptureSetup setup;
   setup.root = root.path().string();
   setup.software = app_software();
   setup.mode = capture::SessionMode::Intrinsics;
   setup.driver = "decklink";
-  setup.cameras = {pair_camera("bm-1", "SDI 2"), pair_camera("bm-2", "SDI 1")};
-  setup.lenses = {stand_in_lens(kSize), stand_in_lens(kSize)};
+  setup.cameras = opened.cameras;
+  setup.lenses = opened.lenses;
   core::Result<std::unique_ptr<CaptureWorker>> made =
       CaptureWorker::create(setup);
   ASSERT_TRUE(made.ok()) << made.status().message();
@@ -317,7 +330,8 @@ TEST_F(AppIntrinsic, ASessionGivesALensFileThatPassesItsGates) {
       << result->unsolved[0].reason;
 
   // Written, the lens file reads back through sensor: bm-1's lens, at the
-  // pictures' size, calibrated and unposed; no bm-2.
+  // pictures' size, calibrated and unposed, the truth's curve within 0.15 px
+  // to 56 degrees (0.05 px measured; the stand-in is 300 px off); no bm-2.
   const core::Result<WrittenResults> written = write_results(
       kept->directory, 0, std::chrono::system_clock::now(), result->files);
   ASSERT_TRUE(written.ok()) << written.status().message();
@@ -331,6 +345,7 @@ TEST_F(AppIntrinsic, ASessionGivesALensFileThatPassesItsGates) {
   EXPECT_EQ(bm1->color->source, camera::IntrinsicsSource::Calibrated);
   EXPECT_EQ(bm1->color->model.size.width, kSize.width);
   EXPECT_EQ(bm1->color->model.size.height, kSize.height);
+  EXPECT_LT(test::curve_error_px(bm1->color->model, truth, 56.0), 0.15);
   EXPECT_FALSE(bm1->color_to_world.has_value());
   EXPECT_EQ(camera::find_sensor(*file, "bm-2"), nullptr);
   const json report =
@@ -448,6 +463,65 @@ TEST(AppIntrinsicRun, AFactoryCameraIsFittedForItsReportAlone) {
   EXPECT_EQ(cameras["bm-1"]["written"], true);
   EXPECT_EQ(cameras["CL2A141000N"]["written"], false);
   EXPECT_EQ(report["lenses"]["unsolved"], json::array({"bm-3"}));
+}
+
+// The scenario's file (`source.calibration`), as the lab's holds the pair's
+// lenses at 4K: the ready camera's fit starts from its lens there, and the
+// unready camera's lens is carried into the new file unchanged, so the pair
+// keeps a lens for each camera.
+TEST(AppIntrinsicRun, StartsFromTheScenariosFileAndCarriesItsOtherLenses) {
+  KeptCaptures kept =
+      lens_session({lens_camera("bm-1", false), lens_camera("bm-3", false)},
+                   {fisheye_views("bm-1", 1), fisheye_views("bm-3", 3, 5)}, "");
+  camera::ArrayCalibration lab;
+  for (const char* id : {"bm-1", "bm-3"}) {
+    camera::SensorCalibration& entry = lab.sensors.emplace_back();
+    entry.id = id;
+    entry.color = camera::CameraCalibration{
+        test::lab_lens(), camera::IntrinsicsSource::Calibrated};
+  }
+  kept.calibration = std::make_shared<const camera::ArrayCalibration>(lab);
+  const core::Result<CalibrateResult> result = calibrate(kept);
+  ASSERT_TRUE(result.ok()) << result.status().message();
+  ASSERT_EQ(result->lenses.size(), 1u);
+  EXPECT_EQ(result->lenses[0].fit.camera.id, "bm-1");
+  ASSERT_EQ(result->unsolved.size(), 1u);
+  EXPECT_EQ(result->unsolved[0].id, "bm-3");
+
+  const core::Result<camera::ArrayCalibration> file =
+      camera::parse_array_calibration(result->files.array_calibration);
+  ASSERT_TRUE(file.ok()) << file.status().message();
+  const camera::SensorCalibration* bm1 = camera::find_sensor(*file, "bm-1");
+  ASSERT_NE(bm1, nullptr);
+  ASSERT_TRUE(bm1->color.has_value());
+  EXPECT_EQ(bm1->color->model.intrinsics.fx,
+            result->lenses[0].fit.camera.model.intrinsics.fx);
+  const camera::SensorCalibration* bm3 = camera::find_sensor(*file, "bm-3");
+  ASSERT_NE(bm3, nullptr);
+  ASSERT_TRUE(bm3->color.has_value());
+  EXPECT_EQ(bm3->color->source, camera::IntrinsicsSource::Calibrated);
+  const camera::CameraModel& carried = bm3->color->model;
+  const camera::CameraModel& was = lab.sensors[1].color->model;
+  EXPECT_EQ(carried.size.width, was.size.width);
+  EXPECT_EQ(carried.size.height, was.size.height);
+  EXPECT_EQ(carried.intrinsics.fx, was.intrinsics.fx);
+  EXPECT_EQ(carried.intrinsics.cy, was.intrinsics.cy);
+  EXPECT_EQ(carried.distortion.k1, was.distortion.k1);
+  EXPECT_EQ(carried.distortion.k6, was.distortion.k6);
+
+  // Which start wins is the lower RMS's, to its last bits, so the file's
+  // start shows where no fit can use it: with bm-1's lens there unusable (a
+  // focal length of 0, which sensor's reader refuses), bm-1 is not fitted,
+  // and its lens, carried, stops the run. Fitted from OpenCV's start alone,
+  // it would have been replaced.
+  camera::ArrayCalibration broken = lab;
+  broken.sensors[0].color->model.intrinsics.fx = 0.0;
+  kept.calibration = std::make_shared<const camera::ArrayCalibration>(broken);
+  const core::Result<CalibrateResult> refused = calibrate(kept);
+  ASSERT_FALSE(refused.ok());
+  EXPECT_NE(refused.status().message().find("sensor bm-1: color"),
+            std::string::npos)
+      << refused.status().message();
 }
 
 // With no lens to write -- every camera a factory one -- the results have no

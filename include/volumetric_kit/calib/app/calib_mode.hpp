@@ -9,20 +9,17 @@
 ///        extrinsic (`calibrate`), the rig's poses. The workers read the
 ///        mode, never the driver.
 ///
-/// | | Intrinsic | Extrinsic |
-/// | --- | --- | --- |
-/// | Board | the checkerboard first; either kind, with a lens view's corners |
-/// the rig's ChArUco board | | Lens | the file's, the factory's, else the
-/// stand-in | the file's, the factory's, else none: the run stops | | Capture |
-/// one view is enough | two views | | Calibrate | once a camera is ready (@ref
-/// lens_states) | once the session's links are | | Its result | a lens file |
-/// the rig's poses, in the 3D view |
+/// README.md's "Intrinsic and extrinsic mode" table says how the modes
+/// differ; each difference has its one home here.
 
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "volumetric_kit/calib/app/capture_worker.hpp"
+#include "volumetric_kit/calib/app/live_worker.hpp"
+#include "volumetric_kit/calib/app/open_source.hpp"
+#include "volumetric_kit/calib/app/rig_mode.hpp"
 #include "volumetric_kit/calib/capture/session_writer.hpp"
 #include "volumetric_kit/calib/core/target.hpp"
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
@@ -39,8 +36,9 @@ namespace volumetric_kit::calib::app {
 /// @brief The mode @p operation asks for.
 /// @param operation  The scenario's operation.
 /// @return `Intrinsics` for `calibrate_intrinsics`, `Extrinsics` for
-///         `calibrate`; `InvalidArgument` naming any other ("operation:
-///         fuse is not ...").
+///         `calibrate`; `InvalidArgument` for any other, by its number
+///         ("operation: 0 is not ..."): core's `load` refuses them for
+///         calib_rig, so only a scenario made in code gets one.
 ///
 /// @code
 /// VKC_ASSIGN(const capture::SessionMode mode, session_mode(config.operation));
@@ -141,8 +139,9 @@ core::Result<RigLens> rig_lens(
 /// @return The start; empty for none.
 ///
 /// @code
-/// const auto start = lens_start(id, size, camera.color,
-/// kept.calibration.get()); VKC_ASSIGN(solve::LensFit fit,
+/// const auto start =
+///     lens_start(id, size, camera.color, kept.calibration.get());
+/// VKC_ASSIGN(solve::LensFit fit,
 ///            solve::solve_lens(id, size, board, views, start));
 /// @endcode
 std::optional<sensor::camera::CameraModel> lens_start(
@@ -180,5 +179,27 @@ core::Result<std::vector<quality::LensReadiness>> lens_states(
 bool session_ready(capture::SessionMode mode,
                    const std::optional<quality::SessionSummary>& summary,
                    const std::vector<quality::LensReadiness>& lenses) noexcept;
+
+/// @brief Sets calib_rig's parts to @p scenario's mode, the one place the
+///        window does: the capture worker's session (`setup.mode`, and the
+///        scenario's file as `setup.calibration`), the live view's capture
+///        rule (@ref capture_rule), the window's mode (`RigMode::intrinsic`),
+///        and the Board window's board and the boards it takes
+///        (@ref board_seed, @ref board_rule).
+/// @param scenario  The scenario, checked (`check_scenario`).
+/// @param setup     The capture worker's setup: its mode and file are set.
+/// @param live      The live worker's options: its rule is set.
+/// @param window    The window's mode: `intrinsic` is set.
+/// @return The Board window's editor; or `OutOfMemory`.
+///
+/// @code
+/// LiveOptions live;
+/// RigMode mode;
+/// VKC_ASSIGN(viz::BoardEditor editor,
+///            apply_mode(scenario, setup, live, mode));
+/// @endcode
+core::Result<viz::BoardEditor> apply_mode(const RigScenario& scenario,
+                                          CaptureSetup& setup,
+                                          LiveOptions& live, RigMode& window);
 
 }  // namespace volumetric_kit::calib::app

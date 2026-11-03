@@ -108,8 +108,8 @@ vc_add_test(detect_charuco volumetric_kit::calib_detect vc_synthetic_rig
 vc_add_test(detect_tag volumetric_kit::calib_detect vc_synthetic_rig)
 # detect: either board through one detector -- the lab's checkerboard rendered
 # at 4K through a fisheye truth, whole, cut and still, and the rig's ChArUco
-# board as detect_charuco finds it -- with the stillness and capture rule of a
-# still checkerboard; and, labelled slow, its search times on 20 pictures (U1),
+# board, full and half -- with the stillness and capture rule of a still
+# checkerboard; and, labelled slow, its search times on 20 pictures (U1),
 # `detect_board.timing`.
 vc_add_test(detect_board volumetric_kit::calib_quality
             volumetric_kit::calib_detect vc_synthetic_rig)
@@ -257,7 +257,7 @@ if(TARGET calib_app)
   # drawn from its snapshots, through the core's Vulkan test fixtures (they skip
   # without a device); the capture worker's sessions on disk, read back with
   # sensor's readers and nlohmann.
-  vc_add_test(app_preset volumetric_kit::calib_app)
+  vc_add_test(app_preset volumetric_kit::calib_app vc_test_support)
   # GLFW's key codes, through gfx_glfw, whose GLFW is gfx's own find.
   vc_add_test(app_keys volumetric_kit::calib_app volumetric_kit::gfx_glfw)
   # The window's mode: each key's action in each view, Calibrate's gate, the 3D
@@ -307,7 +307,8 @@ if(TARGET calib_app)
     vc_with_arm(app_decklink volumetric_kit::sensor_decklink)
   endif()
   # app: each mode's table -- the lens rule, a fit's start, the board, the
-  # capture rule, Calibrate's gate -- from host data.
+  # capture rule, Calibrate's gate, the window's parts -- and a stereo pair's
+  # camera records, from host data.
   vc_add_test(app_calib_mode volumetric_kit::calib_app)
   # app: intrinsic mode end to end, through a fake stereo pair of 960 x 540
   # pictures of the lab's checkerboard rendered through its fisheye (scaled), on

@@ -4,6 +4,8 @@
 #include "volumetric_kit/calib/app/open_source.hpp"
 
 #include <filesystem>
+#include <optional>
+#include <string>
 #include <system_error>
 #include <utility>
 
@@ -105,6 +107,21 @@ core::Result<OpenedSource> open_source(
   return core::Status::invalid_argument(
       "open_source: no arm opens source.driver \"" + scenario.driver +
       "\" (check_scenario refuses it)");
+}
+
+core::Status add_stereo_camera(capture::SessionCamera camera,
+                               const RigScenario& scenario,
+                               const std::string& path, OpenedSource& opened) {
+  return compute::guarded("add_stereo_camera", [&]() -> core::Status {
+    VKC_ASSIGN(const RigLens lens,
+               rig_lens(scenario.mode, camera.id, camera.size, std::nullopt,
+                        scenario.calibration.get(), path));
+    camera.lens = lens.origin;
+    if (lens.origin == capture::LensOrigin::File) camera.lens_file = path;
+    opened.cameras.push_back(std::move(camera));
+    opened.lenses.push_back(lens.model);
+    return {};
+  });
 }
 
 }  // namespace volumetric_kit::calib::app

@@ -18,27 +18,6 @@ namespace {
 namespace camera = sensor::camera;
 using Operation = core::config::Operation;
 
-// An operation as a scenario spells it.
-std::string operation_name(Operation operation) {
-  switch (operation) {
-    case Operation::Fuse:
-      return "fuse";
-    case Operation::Stream:
-      return "stream";
-    case Operation::Codec:
-      return "codec";
-    case Operation::View:
-      return "view";
-    case Operation::Project:
-      return "project";
-    case Operation::Calibrate:
-      return "calibrate";
-    case Operation::CalibrateIntrinsics:
-      return "calibrate_intrinsics";
-  }
-  return std::to_string(static_cast<int>(operation));
-}
-
 bool same_size(camera::ImageSize a, camera::ImageSize b) noexcept {
   return a.width == b.width && a.height == b.height;
 }
@@ -68,8 +47,10 @@ core::Result<capture::SessionMode> session_mode(Operation operation) {
         if (operation == Operation::Calibrate) {
           return capture::SessionMode::Extrinsics;
         }
+        // By its number: core's load refuses these for calib_rig, so only a
+        // scenario made in code gets here, and core spells no operation.
         return core::Status::invalid_argument(
-            "operation: " + operation_name(operation) +
+            "operation: " + std::to_string(static_cast<int>(operation)) +
             " is not one calib_rig runs (calibrate, calibrate_intrinsics)");
       });
 }
@@ -195,6 +176,22 @@ bool session_ready(capture::SessionMode mode,
         [](const quality::LensReadiness& lens) { return lens.ready; });
   }
   return summary && summary->ready;
+}
+
+core::Result<viz::BoardEditor> apply_mode(const RigScenario& scenario,
+                                          CaptureSetup& setup,
+                                          LiveOptions& live, RigMode& window) {
+  return compute::guarded(
+      "apply_mode", [&]() -> core::Result<viz::BoardEditor> {
+        VKC_ASSIGN(viz::BoardEditor editor,
+                   viz::BoardEditor::create(board_seed(scenario.mode), false,
+                                            board_rule(scenario.mode)));
+        setup.mode = scenario.mode;
+        setup.calibration = scenario.calibration;
+        live.rule = capture_rule(scenario.mode);
+        window.intrinsic = scenario.mode == capture::SessionMode::Intrinsics;
+        return editor;
+      });
 }
 
 }  // namespace volumetric_kit::calib::app

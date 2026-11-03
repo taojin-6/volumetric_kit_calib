@@ -146,4 +146,24 @@ core::Result<OpenedSource> open_source(
     const core::Device& device, core::Allocator& allocator,
     const std::vector<std::uint32_t>& families);
 
+/// @brief One camera of a stereo pair opened with no calibration, added to
+///        @p opened with its live lens: `rig_lens`'s for the mode, with no
+///        factory lens, its origin recorded, and `lens_file` the scenario's
+///        file where the lens is from it. The DeckLink arm's records, built
+///        on any host, so a test makes the same.
+/// @param camera    Its record as the driver gives it: id, model, size, rate
+///                  and input.
+/// @param scenario  What @ref check_scenario read: the mode and the file.
+/// @param path      `source.calibration`, for the record and the messages.
+/// @param opened    Where the record and the lens are added.
+/// @return OK; or what `rig_lens` refuses.
+///
+/// @code
+/// VKC_TRY(add_stereo_camera(std::move(left), scenario,
+///                           config.source.calibration, opened));
+/// @endcode
+core::Status add_stereo_camera(capture::SessionCamera camera,
+                               const RigScenario& scenario,
+                               const std::string& path, OpenedSource& opened);
+
 }  // namespace volumetric_kit::calib::app

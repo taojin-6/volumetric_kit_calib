@@ -10,7 +10,6 @@
 #include <utility>
 #include <vector>
 
-#include "volumetric_kit/calib/app/calib_mode.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 
 namespace volumetric_kit::calib::app {
@@ -76,16 +75,8 @@ core::Result<OpenedSource> open_decklink(
       camera.size = size;
       camera.fps = options.fps;
       camera.input = side->input;
-      VKC_ASSIGN(
-          const RigLens lens,
-          rig_lens(scenario.mode, camera.id, size, std::nullopt,
-                   scenario.calibration.get(), config.source.calibration));
-      camera.lens = lens.origin;
-      if (lens.origin == capture::LensOrigin::File) {
-        camera.lens_file = config.source.calibration;
-      }
-      out.cameras.push_back(std::move(camera));
-      out.lenses.push_back(lens.model);
+      VKC_TRY(add_stereo_camera(std::move(camera), scenario,
+                                config.source.calibration, out));
     }
     source::StereoMember member;
     member.sensor = std::make_unique<sensor::DecklinkStereo>(std::move(pair));
