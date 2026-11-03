@@ -139,6 +139,10 @@ vc_add_sweeps(bundle_adjust)
 # solve: the world at the origin tag on the synthetic rig, and the outputs moved
 # into it, read back with sensor's calibration file.
 vc_add_test(world_tag volumetric_kit::calib_solve vc_synthetic_rig)
+# solve: a tracked camera's world from its stills of the tag, on exact and noisy
+# holds and on the detector's corners in drawn stills; its registration.
+vc_add_test(tracked_world volumetric_kit::calib_solve
+            volumetric_kit::calib_detect vc_synthetic_rig)
 # solve: a camera's lens from its views of a fisheye truth.
 vc_add_test(lens volumetric_kit::calib_solve vc_synthetic_rig opencv_geometry)
 vc_add_test(solve_oom volumetric_kit::calib_solve vc_synthetic_rig)

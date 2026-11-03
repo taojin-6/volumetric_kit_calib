@@ -78,13 +78,14 @@ endif()
 # and VS_WITH_CUDA apply. Work on both checkouts at once with
 # -DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_SENSOR=<sensor checkout>.
 #
-# The pin is sensor main at #47's merge (881f42b, 0.36.0), whose test support
-# makes the app tests' NV12 pictures, as is its Orbbec SDK action in
-# .github/workflows/_build.yml.
+# The pin is sensor's tracked stills (dfe6111, 0.40.0), the camera tier's reader
+# of a tracked sensor's stills, as is its Orbbec SDK action in
+# .github/workflows/_build.yml. TODO: move the pin to that PR's merge commit on
+# sensor main before this merges.
 FetchContent_Declare(
   volumetric_kit_sensor
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_sensor.git
-  GIT_TAG 881f42b11a075ebb30a57d393aad21c7b070b5aa)
+  GIT_TAG dfe6111190657f8819b96267ad61646c905b2f04)
 if(VC_WITH_RIG)
   set(VS_CAMERA_ONLY OFF)
 elseif(NOT DEFINED VS_CAMERA_ONLY)

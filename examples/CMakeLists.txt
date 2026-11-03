@@ -16,8 +16,8 @@ target_link_libraries(
 vc_target_warnings(example_01_project_point)
 
 # 02_lens_from_images: one camera's lens from saved pictures of a checkerboard,
-# on the stable API (README.md). Only this example reads image files, so only it
-# takes OpenCV's imgcodecs.
+# on the stable API (README.md). Only examples 02 and 03 read image files, so
+# only they take OpenCV's imgcodecs.
 find_package(OpenCV 5.0 CONFIG REQUIRED COMPONENTS imgcodecs)
 add_executable(example_02_lens_from_images 02_lens_from_images/main.cpp)
 target_link_libraries(
@@ -25,6 +25,15 @@ target_link_libraries(
   PRIVATE volumetric_kit::calib_detect volumetric_kit::calib_quality
           opencv_imgcodecs)
 vc_target_warnings(example_02_lens_from_images)
+
+# 03_register_tracked: a tracked camera's world in the rig's from its stills of
+# the origin tag, on the stable API, written as sensor's registration file.
+add_executable(example_03_register_tracked 03_register_tracked/main.cpp)
+target_link_libraries(
+  example_03_register_tracked
+  PRIVATE volumetric_kit::calib_detect volumetric_kit::calib_solve
+          opencv_imgcodecs)
+vc_target_warnings(example_03_register_tracked)
 
 if(VC_BUILD_TESTS)
   add_test(
@@ -40,4 +49,10 @@ if(VC_BUILD_TESTS)
       ${CMAKE_COMMAND} -DEXECUTABLE=$<TARGET_FILE:example_02_lens_from_images>
       -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/lens-test -P
       ${CMAKE_CURRENT_SOURCE_DIR}/02_lens_from_images/arguments_test.cmake)
+  add_test(
+    NAME register_tracked.arguments
+    COMMAND
+      ${CMAKE_COMMAND} -DEXECUTABLE=$<TARGET_FILE:example_03_register_tracked>
+      -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/register-tracked-test -P
+      ${CMAKE_CURRENT_SOURCE_DIR}/03_register_tracked/arguments_test.cmake)
 endif()
