@@ -103,6 +103,8 @@ struct CaptureRequest {
 ///
 /// Both members are called from the live worker's thread while the window's
 /// thread may call the sink's own members: an implementation is thread-safe.
+/// `submit` is called under the worker's lock (@ref LiveWorker::restart), so
+/// a sink never calls the worker.
 ///
 /// @code
 /// class Collect final : public CaptureSink {
@@ -302,8 +304,8 @@ class LiveWorker {
   const std::vector<std::string>& ids() const noexcept { return ids_; }
 
   /// @return The capture rule's thresholds as this source sets them
-  ///         (@ref LiveOptions::rule), for the panels.
-  const quality::CaptureRuleOptions& rule_options() const noexcept;
+  ///         (@ref LiveOptions::rule, or @ref restart's), for the panels.
+  quality::CaptureRuleOptions rule_options() const;
 
   /// @brief Whether to search each set for the board: on, the default,
   ///        while the window shows the camera images; off while it shows the
@@ -315,6 +317,39 @@ class LiveWorker {
   /// searched for.
   /// @param on  Whether to search.
   void set_detecting(bool on) noexcept;
+
+  /// @brief Pause the board search while the images are shown (calib_rig
+  ///        does before and while Calibrate runs, so its fits have the CPU
+  ///        and OpenCV's loops to themselves).
+  ///
+  /// Paused, each set's luma is still made and read back, so its pictures
+  /// keep showing, but nothing is detected or ruled on -- unless a capture
+  /// is armed, which goes on being searched for. A pause waits out the set
+  /// being searched, if any: once it returns, no search runs, its OpenCV
+  /// loops among it, but an armed capture's.
+  /// @param paused  Whether to pause.
+  void pause_search(bool paused);
+
+  /// @brief Start the next session's live view, the source left running:
+  ///        each view checked through @p lenses, @p board searched for and
+  ///        unlocked (@ref captures is 0 again), and a capture rule of
+  ///        @p rule, unarmed. The thread takes them before it searches its
+  ///        next set; from this call until then, no capture is handed to the
+  ///        sink, so none taken for the last session reaches the next.
+  ///
+  /// The sink's own restart (`CaptureWorker::restart`) is queued after this
+  /// call and before the next @ref arm: a capture of the next session needs
+  /// a press, so none reaches the sink before it.
+  /// @param lenses           Each camera's lens, as @ref create takes them.
+  /// @param board            The board to find, as @ref create takes it.
+  /// @param square_measured  Whether its square size was measured.
+  /// @param rule             The capture rule's thresholds; its
+  ///                         `spread_warn_ms` raised as @ref create raises it.
+  /// @return OK; `InvalidArgument` for what @ref create refuses of them; or
+  ///         `OutOfMemory`. Refused, nothing changes.
+  core::Status restart(const std::vector<sensor::camera::CameraModel>& lenses,
+                       const Target& board, bool square_measured,
+                       const quality::CaptureRuleOptions& rule);
 
   /// @brief Arm a capture: a press, at this moment.
   /// @return `true` once the worker will arm its rule; `false` with no

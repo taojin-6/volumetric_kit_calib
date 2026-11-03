@@ -4,14 +4,14 @@
 # --- calib_app: Tier 5 -------------------------------------------------------
 # calib_rig's live view, 3D view, capture and Calibrate: the opener, the one
 # code that names a driver, with an arm per driver built (Orbbec's preset check,
-# DeckLink's pair); the per-mode table; the key map, the window's mode, the
-# acquisition and live-detection worker (T1) on the source tier, the 3D view's
-# frame preparation worker (T2), the capture worker (T3), the Calibrate worker
-# (T4) and the window loop (T0) on gfx's GLFW glue, ImGui overlay and the viz
-# tier's mosaic and scene. Built with VC_BUILD_APPS and the viz tier when
-# gfx_glfw (an installed GLFW) and a sensor driver tier exist: Orbbec's
-# (VS_WITH_ORBBEC) or DeckLink's (VS_WITH_DECKLINK) (src/CMakeLists.txt). A
-# static library, as calib_viz is.
+# DeckLink's pair); the per-mode table and the Setup panel's switch of mode and
+# lens file; the key map, the window's mode, the acquisition and live-detection
+# worker (T1) on the source tier, the 3D view's frame preparation worker (T2),
+# the capture worker (T3), the Calibrate worker (T4) and the window loop (T0) on
+# gfx's GLFW glue, ImGui overlay and the viz tier's mosaic and scene. Built with
+# VC_BUILD_APPS and the viz tier when gfx_glfw (an installed GLFW) and a sensor
+# driver tier exist: Orbbec's (VS_WITH_ORBBEC) or DeckLink's (VS_WITH_DECKLINK)
+# (src/CMakeLists.txt). A static library, as calib_viz is.
 
 # calib_rig loads its scenario as config::Application::CalibRig, whose operation
 # (calibrate or calibrate_intrinsics) and DeckLink cameras the core has from
@@ -68,8 +68,12 @@ target_sources(
           open_source.cpp
           preset.cpp
           rig_mode.cpp
+          rig_setup.cpp
           "${_vc_software_cpp}")
 add_dependencies(calib_app calib_app_software)
+# nlohmann/json reads a lens run's report for the Setup panel's picker,
+# privately: no public header names it.
+target_include_directories(calib_app SYSTEM PRIVATE "${VC_JSON_INCLUDE_DIR}")
 
 # The public headers name the viz tier's mosaic, overlays, board editor and
 # scene, the quality tier's metrics, lens checks and results files, the capture

@@ -26,25 +26,14 @@ release may break it, and each such entry says how to migrate
 ### Changed
 
 - build: **calib pins sensor at its tracked stills** (#48's merge, dfe601f,
-  0.41.0), where it was at #47's merge (881f42b, 0.36.0), as is sensor's
-  Orbbec SDK action in CI; calib needs sensor 0.41.0
-  (`VC_SENSOR_MIN_VERSION`), for `camera/tracked_stills.hpp`.
+  0.41.0), where it was at #28's (5697a87, 0.21.0), and **core at #97's
+  merge** (3f48e14, 0.44.2), where it was at #86's (e1adf08, 0.40.0), as are
+  sensor's Orbbec SDK action and the core's actions in CI. calib needs sensor
+  0.41.0 (`VC_SENSOR_MIN_VERSION`), for `camera/tracked_stills.hpp`; its
+  other code builds and passes unchanged on the new pins. With
+  `VC_WITH_RIG`, sensor's tiers need core 0.41.0, which sensor's configure
+  checks.
 - calib's version is 0.9.0, where it was 0.8.0.
-
-## [0.8.0] - 2026-11-03
-
-### Changed
-
-- build: **calib pins sensor at #47's merge** (881f42b, 0.36.0), where it was
-  at #28's (5697a87, 0.21.0), and **core at #97's merge** (3f48e14, 0.44.2),
-  where it was at #86's (e1adf08, 0.40.0), as are sensor's Orbbec SDK action
-  and the core's actions in CI. calib's code builds and passes unchanged on
-  them; with `VC_WITH_RIG`, sensor's tiers need core 0.41.0, which sensor's
-  configure checks.
-- A build with `VC_BUILD_TESTS` needs sensor 0.23.0
-  (`VC_SENSOR_MIN_VERSION`), for its NV12 test pictures; calib alone still
-  needs 0.21.0.
-- calib's version is 0.8.0, where it was 0.6.0.
 
 ### Removed
 
@@ -52,6 +41,97 @@ release may break it, and each such entry says how to migrate
   sensor's (`testing/nv12_picture.hpp`). The cross-family case keeps a maker
   of its own for planes CONCURRENT across two queue families, which sensor's
   `device_picture` does not make.
+
+## [0.8.0] - 2026-11-03
+
+### Added
+
+- **One calib_rig, the mode chosen in it** (DECISIONS.md, 2026-11-03): a
+  Setup panel picks Lenses or Poses and the lens file, from the lens runs
+  under `output.path` (newest first, each camera's pass or fail) or a typed
+  path; a switch after captures closes the session, asking first, its
+  captures on disk, and the next capture opens a new one, the cameras left
+  open (`app/rig_setup.hpp`: `switch_session`, `read_lens_run`,
+  `find_lens_results`, `lens_result_label`, `load_lens_file`,
+  `lens_run_file`, `setup_lines`, `LensResult`, `LensFile`). A lens run,
+  picked or by "Use these lenses", gives the next session its lenses that
+  passed and those it carried, never one that failed.
+- `LiveWorker::restart`, `CaptureWorker::restart` and
+  `CaptureWorker::accepts`: the next session on the same source;
+  `LiveWorker::pause_search`, the live search paused while Calibrate runs
+  (`search_paused`), its pictures still shown, a pause waiting out the set
+  being searched.
+- `app::LensStatus`, `lens_status`, `lens_statuses` and `take_lens`: where
+  each camera's lens comes from (calibrated, factory, stand-in, missing).
+- `app::calibrate_blockers` and `NotReady`: why Calibrate is held back, per
+  camera, which the Calibration window says when it is pressed so; a run
+  that ends with no result says why there too.
+- `app::capture_refusal`: a pose capture is refused while a camera's lens is
+  missing, naming it.
+- A pose Calibrate checks each lens on its solve (`quality::check_rig_lens`):
+  `CalibrateResult::lens_checks`, the Lenses panel (`viz::lens_check_panel`)
+  and `report.json`'s `lens_checks`, from `quality::format_results`' new
+  trailing `lens_checks` (null, the default, for none); a check refused for
+  its inputs reads insufficient, `not checked: ...`.
+- `quality::kReportFormat`, the report's `format`; `app::results_name` and
+  `ResultsName`, a results directory's name read back.
+- `RigScenario::calibration_path`.
+
+### Changed
+
+- For poses a camera with no lens takes the stand-in and Calibrate waits
+  for a real lens; it stopped the run (`rig_lens`, `session_ready` with each
+  camera's `LensStatus`).
+- A lens Calibrate fits the ready cameras at once, calib_rig pausing its
+  live search first: when no other OpenCV loop runs as they start, each
+  fit's own loops run on its thread, and the files are fitting them in turn
+  on one thread's, whatever the cores.
+- Calibrate's button is pressable while held back; the gate's reasons say
+  to press C to see why, and a capture, drop or switch under way holds it
+  back.
+- `CalibrateWorker` numbers each session's results from 0.
+- `LensReadiness::unmet` names each direction short of the reach, with its
+  reach: `reach 0.83 toward the top-left corner, needs 0.9: capture there`.
+- `LiveWorker::rule_options` returns a copy.
+- A session directory made within the same second as another takes `_2`,
+  `_3`, ... after its stamp.
+- calib's version is 0.8.0, where it was 0.7.0.
+
+## [0.7.0] - 2026-11-02
+
+### Added
+
+- **A lens checked on views of any board, or on a solve** (DECISIONS.md,
+  2026-11-02): `quality/lens_check.hpp`, in the stable API, holds a camera's
+  residuals to the lens gates' RMS and share of corners dropped, the share
+  only when the drops lie in 2 views or more, and each 8 x 6 cell's mean, a
+  cell of 6 corners, to 0.1 px or Student's t standard errors
+  (`LensCheckOptions`, `LensCheck`, `LensCell`). `Suspect` names each limit
+  passed and the part of the image of each cell past its own;
+  `Insufficient`, the parts without a judged cell, where to capture;
+  `LensCheck::reach`, how far out the corners judged get, as far as a good
+  verdict holds.
+  `quality::check_lens` poses each of a camera's views through a lens held
+  fixed, ChArUco views of 8 corners as well as a checkerboard's;
+  `quality::check_lens_residuals` takes any solve's residuals, and
+  `quality::check_rig_lens` a camera's in a rig solve, whose shared board
+  poses show a lens error a view's own pose takes up: the boards it alone
+  kept corners of left out, and suspect too when a camera sharing its boards
+  reads suspect. `to_string(LensCheck::Verdict)`.
+- `solve::pose_lens_views` (`solve/lens_poses.hpp`, outside the stable
+  table): a camera's views posed through a lens held fixed, as `solve_lens`
+  poses a held-out view, and each corner's residual.
+- Sample main 5 in `tests/api_test.cpp`: the lenses a pose session uses,
+  checked on its rig solve.
+- `lens_check.sweeps` (label `slow`): noise alone over 300 checks of views,
+  300 of rig solves and 3,200 of rig solves over random sessions.
+
+### Changed
+
+- `judge_lens`'s bias gate and the lens checks share one function for the
+  cells' means and limits, the pair row check and the lens checks one
+  Student's t; `judge_lens`'s and `check_pair_rows`'s results are unchanged.
+- calib's version is 0.7.0, where it was 0.6.0.
 
 ## [0.6.0] - 2026-11-02
 

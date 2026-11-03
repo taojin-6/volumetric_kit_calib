@@ -58,7 +58,9 @@ struct LensReadiness {
   std::optional<double> frontal;
   bool ready = false;  ///< All of it enough.
   /// What is not enough yet, in words: the first of the views, cells, reach
-  /// and frontal share that falls short ("22 views of 30"); empty when ready.
+  /// and frontal share that falls short ("22 views of 30"; "reach 0.83
+  /// toward the top-left corner, needs 0.9: capture there", each direction
+  /// short named, its reach rounded down); empty when ready.
   std::string unmet;
 };
 

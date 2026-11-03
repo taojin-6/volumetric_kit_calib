@@ -128,18 +128,19 @@ TEST(AppRigMode, CalibrateRunsOnceReadyIdleAndNothingUnresolved) {
       gate = calibrate_gate(running, false, 3);
       EXPECT_EQ(gate.reason, "already running");
 
-      // A drop queued counts as a capture does: the snapshot still holds
-      // its capture.
+      // A drop or a session switch queued counts as a capture does: the
+      // snapshot does not reflect it yet.
       gate = calibrate_gate(idle, true, 1);
       EXPECT_FALSE(gate.enabled);
-      EXPECT_EQ(gate.reason, "a capture or a drop is still being written");
+      EXPECT_EQ(gate.reason,
+                "a capture, a drop or a session switch is under way");
       gate = calibrate_gate(idle, false, 2);
-      EXPECT_EQ(gate.reason, "a capture or a drop is still being written");
+      EXPECT_EQ(gate.reason,
+                "a capture, a drop or a session switch is under way");
 
       gate = calibrate_gate(idle, false, 0);
       EXPECT_FALSE(gate.enabled);
-      EXPECT_EQ(gate.reason,
-                "the session is not ready (see the Session panel)");
+      EXPECT_EQ(gate.reason, "the session is not ready: press C to see why");
     }
   }
 }
@@ -190,7 +191,7 @@ TEST(AppRigMode, IntrinsicModeStaysOnTheImages) {
     mode.calibrated = calibrated;
     const RigStep step = rig_action(mode, KeyRequest::SwitchView);
     EXPECT_EQ(step.action, RigAction::Ignore);
-    EXPECT_EQ(step.hint, "intrinsic mode has no 3D view");
+    EXPECT_EQ(step.hint, "Lenses mode has no 3D view");
     EXPECT_EQ(rig_action(mode, KeyRequest::Capture).action, RigAction::Arm);
     EXPECT_EQ(rig_action(mode, KeyRequest::Calibrate).action,
               RigAction::Calibrate);
@@ -203,8 +204,20 @@ TEST(AppRigMode, IntrinsicModeStaysOnTheImages) {
   EXPECT_EQ(scene_placement(after), ScenePlacement::Hidden);
   const CalibrateGate gate = calibrate_gate(mode, false, 0);
   EXPECT_FALSE(gate.enabled);
-  EXPECT_EQ(gate.reason, "no camera is ready (see the Lenses panel)");
+  EXPECT_EQ(gate.reason, "no camera is ready: press C to see why");
   EXPECT_TRUE(calibrate_gate(mode, true, 0).enabled);
+}
+
+// The live view's search pauses while Calibrate runs, in either view and
+// mode, so its fits have the CPU.
+TEST(AppRigMode, TheSearchPausesWhileCalibrateRuns) {
+  for (const RigMode& mode : every_mode()) {
+    SCOPED_TRACE(name(mode));
+    EXPECT_EQ(search_paused(mode), mode.calibrating);
+    RigMode lenses = mode;
+    lenses.intrinsic = true;
+    EXPECT_EQ(search_paused(lenses), mode.calibrating);
+  }
 }
 
 // The view is framed at the first result and when the world's origin moves;

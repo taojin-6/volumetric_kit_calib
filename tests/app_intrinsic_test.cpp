@@ -9,9 +9,10 @@
 // Calibrate's lens run gives a lens file whose lens passes every gate and
 // follows the truth's curve, the right camera, which saw a few boards, listed
 // as not ready. Then Calibrate's lens run on views alone: a factory camera
-// fitted for its report and never written, the scenario's file a fit's start
-// and its other lenses carried, a run with nothing to write leaving no
-// calibration file, and the mode deciding the solve. The device part runs under
+// fitted for its report and never written, the cameras fitted at once as in
+// turn, the scenario's file a fit's start and its other lenses carried, a run
+// with nothing to write leaving no calibration file, and the mode deciding the
+// solve. The device part runs under
 // the validation layer when the environment asks (VKC_TEST_VALIDATION) and
 // skips without a device.
 
@@ -30,10 +31,11 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <opencv2/core.hpp>
+#include <opencv2/core/utility.hpp>
 
 #include "calibrate_worker_support.hpp"
-#include "detect_helpers.hpp"
 #include "fake_stereo.hpp"
+#include "lab_sessions.hpp"
 #include "live_pair.hpp"
 #include "scratch_dir.hpp"
 #include "synthetic_rig.hpp"
@@ -43,7 +45,7 @@
 #include "volumetric_kit/calib/app/live_worker.hpp"
 #include "volumetric_kit/calib/app/open_source.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
-#include "volumetric_kit/calib/detect/board.hpp"
+#include "volumetric_kit/calib/quality/lens_gate.hpp"
 #include "volumetric_kit/calib/source/rig_source.hpp"
 #include "volumetric_kit/core/testing/vulkan_fixture.hpp"
 #include "volumetric_kit/sensor/camera/array_calibration.hpp"
@@ -58,96 +60,9 @@ using json = nlohmann::json;
 using Code = core::Status::Code;
 using test::ScratchDir;
 
-constexpr camera::ImageSize kSize{960, 540};  // test::quarter_fisheye()'s
-
-// The lab's checkerboard with 40 mm squares: at a quarter of 4K, half a 4K
-// picture's pixels a square, as near as the 20 mm board at half the distance.
-Target board_target() {
-  Target board = legacy_checkerboard();
-  board.square_size_m = 0.04;
-  return board;
-}
-
-// The board at `pose`, through `truth`, when the live view finds it in the
-// picture's half and the capture gives a view to fit: the picture, and the
-// capture's corners.
-struct Placed {
-  std::vector<std::uint8_t> picture;
-  Observation full;
-};
-std::optional<Placed> place(const test::FisheyeTruth& truth,
-                            const compute::Board& board,
-                            const camera::Mat4d& pose) {
-  test::RenderOptions options;
-  options.ray = truth.pixel_to_ray();
-  const cv::Mat picture =
-      test::render_board(truth.frame(), pose, board, options);
-  const cv::Mat half = test::halved(picture);
-  const detect::LumaView half_view = test::luma(half);
-  const core::Result<Detection> live =
-      detect::detect_board(test::luma(picture), board, {&half_view});
-  const core::Result<Detection> full =
-      detect::detect_board(test::luma(picture), board);
-  if (!live.ok() || !full.ok() || live->observation.empty() ||
-      full->observation.size() <
-          static_cast<std::size_t>(solve::LensOptions{}.min_corners)) {
-    return std::nullopt;
-  }
-  return Placed{{picture.data, picture.data + picture.total()},
-                full->observation};
-}
-
-// A lens session's pictures, as a person makes them by the runbook: the
-// board tilted 20-35 degrees near the axis and further out, its tilt's axis
-// turning; then pushed toward each image corner and side, turned along the
-// line to it, and held where the live view finds it and its corners reach
-// 0.9 of the way there, as the Lenses panel asks, four times each.
-std::vector<std::vector<std::uint8_t>> lens_session_pictures(
-    const test::FisheyeTruth& truth, const compute::Board& board) {
-  std::vector<std::vector<std::uint8_t>> pictures;
-  const auto keep = [&](const camera::Mat4d& pose) {
-    std::optional<Placed> placed = place(truth, board, pose);
-    if (placed) pictures.push_back(std::move(placed->picture));
-  };
-  for (int i = 0; i < 18; ++i) {
-    keep(test::facing(board, 8.0 + 6.0 * (i % 3), 20.0 * i,
-                      0.65 + 0.05 * (i % 2), 40.0 * i, 25.0 + 5.0 * (i % 3)));
-  }
-  for (int i = 0; i < 18; ++i) {
-    keep(test::facing(board, 38.0 + 4.0 * (i % 2), 20.0 * i + 10.0, 0.55,
-                      40.0 * i + 15.0, 20.0 + 5.0 * (i % 3)));
-  }
-  // Toward each image corner and side, in solve::LensReach's order.
-  const struct {
-    double azimuth_deg;
-    double roll_deg;
-  } goals[] = {{-150.6, -17.0}, {-29.4, 17.0}, {150.6, 17.0},
-               {29.4, -17.0},   {180.0, -5.0}, {0.0, 5.0}};
-  constexpr int kEach = 4;
-  for (std::size_t g = 0; g < std::size(goals); ++g) {
-    int kept = 0;
-    for (double off = 58.0; off <= 74.0 && kept < kEach; off += 2.0) {
-      for (const double tilt : {0.0, 10.0, 20.0}) {
-        for (const double turn : {0.0, -10.0, 10.0}) {
-          if (kept == kEach) break;
-          std::optional<Placed> placed =
-              place(truth, board,
-                    test::facing(board, off, goals[g].azimuth_deg, 0.5,
-                                 goals[g].roll_deg + turn, tilt));
-          if (!placed) continue;
-          double reach = 0.0;
-          for (const DetectedPoint& point : placed->full.points) {
-            reach = std::max(reach, solve::pixel_reach(kSize, point.pixel)[g]);
-          }
-          if (reach < solve::kLensReach) continue;
-          pictures.push_back(std::move(placed->picture));
-          ++kept;
-        }
-      }
-    }
-  }
-  return pictures;
-}
+constexpr camera::ImageSize kSize = test::kLabQuarter;
+using test::lab_lens_board;
+using test::lens_session_pictures;
 
 class AppIntrinsic : public core::test::VulkanDeviceTest {
  protected:
@@ -163,7 +78,7 @@ TEST_F(AppIntrinsic, ASessionGivesALensFileThatPassesItsGates) {
   const test::FisheyeTruth truth = test::quarter_fisheye();
   ASSERT_EQ(truth.size.width, kSize.width);
   ASSERT_EQ(truth.size.height, kSize.height);
-  const Target target = board_target();
+  const Target target = lab_lens_board();
   const compute::Board board = compute::Board::create(target).value();
   const std::vector<std::vector<std::uint8_t>> pictures =
       lens_session_pictures(truth, board);
@@ -413,6 +328,55 @@ TEST(AppIntrinsicRun, AFactoryCameraIsFittedForItsReportAlone) {
   EXPECT_EQ(cameras["bm-1"]["written"], true);
   EXPECT_EQ(cameras["CL2A141000N"]["written"], false);
   EXPECT_EQ(report["lenses"]["unsolved"], json::array({"bm-3"}));
+}
+
+// The cameras are fitted at once, in one OpenCV loop, and the result is the
+// one fitting them in turn on one thread gives, to the last bit of every
+// file: each fit reads its own camera's views alone, and its own loops run on
+// its thread.
+TEST(AppIntrinsicRun, FitsTheCamerasAtOnceAsInTurn) {
+  const KeptCaptures kept = lens_session(
+      {lens_camera("bm-1", false), lens_camera("CL2A141000N", true),
+       lens_camera("bm-3", false)},
+      {fisheye_views("bm-1", 1), fisheye_views("CL2A141000N", 2),
+       fisheye_views("bm-3", 3)},
+      "");
+  const core::Result<CalibrateResult> at_once = calibrate(kept);
+  ASSERT_TRUE(at_once.ok()) << at_once.status().message();
+  ASSERT_EQ(at_once->lenses.size(), 3u);
+
+  // In turn, on one thread, through the brain alone, from the same views and
+  // starts.
+  struct OneThread {
+    int was = cv::getNumThreads();
+    OneThread() { cv::setNumThreads(1); }
+    ~OneThread() { cv::setNumThreads(was); }
+  } const one_thread;
+  const compute::Board board = compute::Board::create(kept.board).value();
+  std::vector<Observation> views;
+  for (const std::shared_ptr<const KeptCapture>& capture : kept.captures) {
+    for (const Detection& view : capture->views) {
+      if (!view.observation.empty()) views.push_back(view.observation);
+    }
+  }
+  const std::vector<quality::LensReadiness> states = lens_states(kept).value();
+  std::vector<quality::LensVerdict> in_turn;
+  std::vector<std::string> report_only;
+  for (std::size_t c = 0; c < kept.sensors.size(); ++c) {
+    const capture::SessionCamera& camera = kept.sensors[c];
+    ASSERT_TRUE(states[c].ready) << camera.id;
+    solve::LensFit fit = solve::solve_lens(camera.id, camera.size, board, views,
+                                           lens_start(camera.id, camera.size,
+                                                      camera.color, nullptr))
+                             .value();
+    in_turn.push_back(quality::judge_lens(std::move(fit)).value());
+    if (camera.color) report_only.push_back(camera.id);
+  }
+  const quality::ResultFiles files =
+      quality::format_lens_results(in_turn, {}, nullptr, report_only).value();
+  EXPECT_EQ(at_once->files.array_calibration, files.array_calibration);
+  EXPECT_EQ(at_once->files.report, files.report);
+  EXPECT_EQ(at_once->files.residuals, files.residuals);
 }
 
 // The scenario's file (`source.calibration`), as the lab's holds the pair's

@@ -178,6 +178,14 @@ vc_add_test(lens_gate volumetric_kit::calib_quality vc_synthetic_rig
             opencv_calib opencv_geometry)
 target_include_directories(vc_lens_gate_test SYSTEM
                            PRIVATE "${VC_JSON_INCLUDE_DIR}")
+# quality: a lens checked on views of either board posed through it and on a
+# solve's residuals, the lab-like pair's rig solve among them: the true lens and
+# lenses bent or off, sessions spread and short, and, labelled slow, noise alone
+# over many seeds (`lens_check.sweeps`).
+vc_add_test(lens_check volumetric_kit::calib_quality vc_synthetic_rig)
+vc_add_sweeps(lens_check)
+# About 50 s on an M5 Max: 3,800 checks, most on rig solves of random sessions.
+set_tests_properties(lens_check.sweeps PROPERTIES TIMEOUT 300)
 # quality: a stereo pair's rectified rows on a pair like the lab's, corners
 # placed in its view and seen through the true pair, against sensor's own
 # rectification; and calib's undistortion against OpenCV's default.
@@ -334,6 +342,17 @@ if(TARGET calib_app)
   target_include_directories(vc_app_extrinsic_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
   set_tests_properties(app_extrinsic PROPERTIES TIMEOUT 300)
+  # app: one calib_rig, the mode chosen in it: a fake pair's lens session, its
+  # lenses taken, and the switch to a pose session with the cameras open, on a
+  # device; the lens runs listed, a lens file checked against the rig, the
+  # lenses that passed taken, and the Setup panel's lines, from host data.
+  vc_add_test(app_setup volumetric_kit::calib_app vc_synthetic_rig
+              volumetric_kit::core_test_support)
+  target_include_directories(vc_app_setup_test SYSTEM
+                             PRIVATE "${VC_JSON_INCLUDE_DIR}")
+  # About 25 s on an M5 Max: two sessions' renders and searches, two fits and a
+  # rig solve.
+  set_tests_properties(app_setup PROPERTIES TIMEOUT 300)
   # app: Calibrate on the synthetic rig's detections, its results directories
   # read back with sensor's reader and nlohmann; its out-of-memory sweep.
   vc_add_test(app_calibrate volumetric_kit::calib_app vc_synthetic_rig)

@@ -13,6 +13,8 @@
 #include <thread>
 #include <utility>
 
+#include <opencv2/core/utility.hpp>
+
 #include "volumetric_kit/calib/app/calib_mode.hpp"
 #include "volumetric_kit/calib/capture/session_writer.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
@@ -246,46 +248,80 @@ core::Result<quality::DepthSummary> check_depth(
   return quality::summarize_depth_checks(n, run.checked, run.pairs, options);
 }
 
+// A camera's lens fit and verdict: the fit's failure, or what the gates made
+// of it.
+struct LensRun {
+  core::Status fit_failure;
+  std::optional<core::Result<quality::LensVerdict>> verdict;
+};
+
 // A lens session's Calibrate: each ready camera's lens fitted and judged,
-// and the lens results' files. `step` is called with the cameras fitted,
-// before each and after the last.
+// and the lens results' files. The ready cameras are fitted at once, one
+// OpenCV loop over them. OpenCV runs a loop started while another runs, in
+// any thread, in turn on its caller's thread. So when no other loop runs as
+// this one starts, each fit's own loops run on its thread, and the result is
+// the one fitting them in turn on one thread gives, whatever the cores;
+// otherwise this loop runs in turn, and each fit's loops on OpenCV's threads
+// once the other ends. `step` is called with the cameras fitted: none, then
+// all.
 core::Result<CalibrateResult> calibrate_lenses(
     const KeptCaptures& kept, const std::function<void(std::size_t)>& step) {
   VKC_ASSIGN(const std::vector<Observation> views, solve_views(kept));
   VKC_ASSIGN(const compute::Board board, compute::Board::create(kept.board));
   VKC_ASSIGN(const std::vector<quality::LensReadiness> states,
              lens_states(kept));
+  const std::size_t n = kept.cameras.size();
+  std::vector<std::size_t> ready;
+  for (std::size_t c = 0; c < n; ++c) {
+    if (states[c].ready) ready.push_back(c);
+  }
+  std::vector<LensRun> runs(n);
+  step(0);
+  cv::parallel_for_(
+      cv::Range(0, static_cast<int>(ready.size())),
+      [&](const cv::Range& range) {
+        for (int r = range.start; r < range.end; ++r) {
+          const std::size_t c = ready[static_cast<std::size_t>(r)];
+          const capture::SessionCamera& camera = kept.sensors[c];
+          LensRun& run = runs[c];
+          // A real lens only: the stand-in is never a start. What a fit
+          // throws (an allocation) is its failure.
+          run.fit_failure =
+              compute::guarded("solve_lens", [&]() -> core::Status {
+                core::Result<solve::LensFit> fit = solve::solve_lens(
+                    camera.id, camera.size, board, views,
+                    lens_start(camera.id, camera.size, camera.color,
+                               kept.calibration.get()));
+                if (!fit.ok()) return fit.status();
+                run.verdict = quality::judge_lens(*std::move(fit));
+                return {};
+              });
+        }
+      });
   CalibrateResult out;
   out.mode = capture::SessionMode::Intrinsics;
   out.reference = kept.reference;
   out.captures = kept.captures.size();
   std::vector<std::string> unsolved;
-  const std::size_t n = kept.cameras.size();
   for (std::size_t c = 0; c < n; ++c) {
-    step(c);
     const capture::SessionCamera& camera = kept.sensors[c];
     out.ids.push_back(camera.id);
     if (!states[c].ready) {
       out.unsolved.push_back({camera.id, "not ready: " + states[c].unmet});
       continue;
     }
-    // A real lens only: the stand-in is never a start.
-    const std::optional<camera::CameraModel> start = lens_start(
-        camera.id, camera.size, camera.color, kept.calibration.get());
-    core::Result<solve::LensFit> fit =
-        solve::solve_lens(camera.id, camera.size, board, views, start);
-    if (!fit.ok()) {
-      const core::Status::Code code = fit.status().domain();
+    LensRun& run = runs[c];
+    if (!run.fit_failure.ok()) {
+      const core::Status::Code code = run.fit_failure.domain();
       if (code != core::Status::Code::InvalidArgument &&
           code != core::Status::Code::Numerical) {
-        return fit.status();
+        return run.fit_failure;
       }
       out.unsolved.push_back(
-          {camera.id, "fit failed: " + fit.status().message()});
+          {camera.id, "fit failed: " + run.fit_failure.message()});
       continue;
     }
-    VKC_ASSIGN(quality::LensVerdict verdict,
-               quality::judge_lens(*std::move(fit)));
+    VKC_ASSIGN(quality::LensVerdict verdict, *std::move(run.verdict));
     // The runtime reads a factory lens: its fit is for the report.
     if (camera.color) out.report_only.push_back(camera.id);
     out.lenses.push_back(std::move(verdict));
@@ -407,6 +443,25 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
     CalibrateResult out;
     out.reference = kept.reference;
     out.captures = kept.captures.size();
+    // Each lens on the solve's residuals, the boards' poses shared: it warns,
+    // and stops nothing; a check refused is insufficient, saying why. What
+    // else fails it (an allocation) fails the run.
+    for (const solve::RigCamera& cam : kept.cameras) {
+      core::Result<quality::LensCheck> check =
+          quality::check_rig_lens(cam.id, kept.cameras, *solution);
+      if (!check.ok()) {
+        const core::Status::Code code = check.status().domain();
+        if (code != core::Status::Code::InvalidArgument &&
+            code != core::Status::Code::Numerical) {
+          return in(check.status());
+        }
+        quality::LensCheck refused;
+        refused.camera = cam.id;
+        refused.reason = "not checked: " + check.status().message();
+        check = std::move(refused);
+      }
+      out.lens_checks.push_back(*std::move(check));
+    }
     // The poses in the reference's gauge, which the depth checks take.
     std::vector<camera::Mat4d> gauge;
     for (const solve::RigCamera& cam : kept.cameras) {
@@ -473,7 +528,7 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
     core::Result<quality::ResultFiles> files = quality::format_results(
         kept.cameras, *solution, *metrics, out.depth ? &*out.depth : nullptr,
         out.depth_failure.ok() ? std::string() : out.depth_failure.message(),
-        out.world, out.pairs);
+        out.world, out.pairs, &out.lens_checks);
     if (!files.ok()) return in(files.status());
     out.color_to_world = std::move(rig->color_to_world);
     out.boards_to_world = std::move(rig->boards_to_world);
@@ -502,6 +557,15 @@ core::Result<std::string> results_directory(
     return (fs::path(session) / kResultsDirectory / (rrr + "_" + *when))
         .string();
   });
+}
+
+std::optional<ResultsName> results_name(const std::string& name) {
+  if (name.size() < 5 || name[3] != '_' ||
+      !std::all_of(name.begin(), name.begin() + 3,
+                   [](char c) { return c >= '0' && c <= '9'; })) {
+    return std::nullopt;
+  }
+  return ResultsName{std::stoi(name.substr(0, 3)), name.substr(4)};
 }
 
 core::Result<WrittenResults> write_results(
@@ -537,12 +601,9 @@ core::Result<WrittenResults> write_results(
     fs::directory_iterator entry(results, error);
     for (; !error && entry != fs::directory_iterator();
          entry.increment(error)) {
-      const std::string name = entry->path().filename().string();
-      if (name.size() > 4 && name[3] == '_' &&
-          std::all_of(name.begin(), name.begin() + 3,
-                      [](char c) { return c >= '0' && c <= '9'; })) {
-        number = std::max(number, std::stoi(name.substr(0, 3)) + 1);
-      }
+      const std::optional<ResultsName> taken =
+          results_name(entry->path().filename().string());
+      if (taken) number = std::max(number, taken->number + 1);
     }
     if (error) {
       return core::Status::io_error(std::string(kWhat) + ": " +
@@ -592,7 +653,8 @@ struct CalibrateWorker::State {
 
   // The worker's thread's alone.
   std::unique_ptr<CalibrateDepth> depth;  // null checks no depth
-  int next_number = 0;  // the lowest results number not yet written
+  std::string numbered;                   // the session the last run wrote in
+  int next_number = 0;  // its lowest results number not yet written
 
   // Shared.
   mutable std::mutex mutex;
@@ -637,6 +699,12 @@ struct CalibrateWorker::State {
       }
     }
     if (!made.ok()) return made.status().with_context("Calibrate");
+    // Each session's numbers go up from 0: one worker serves every session
+    // of calib_rig's run.
+    if (kept.directory != numbered) {
+      numbered = kept.directory;
+      next_number = 0;
+    }
     core::Result<WrittenResults> written =
         write_results(kept.directory, next_number, when, made->files, sink);
     if (!written.ok()) return written.status().with_context("Calibrate");

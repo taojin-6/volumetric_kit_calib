@@ -1067,6 +1067,41 @@ TEST(PairRowsPanel, SaysEachPairsRowsAndWhatToDo) {
   EXPECT_EQ(notices[2], "calibration 004: rows bm-2 | bm-1: " + lines[3].value);
 }
 
+// Each lens checked on a pose solve: good green, suspect amber, saying the
+// lenses disagree and which session tells which is off, insufficient muted,
+// saying where to capture; a figure not measured is a dash.
+TEST(LensCheckPanel, SaysWhatEachLensCheckFound) {
+  using Verdict = quality::LensCheck::Verdict;
+  quality::LensCheck good;
+  good.camera = "bm-5";
+  good.verdict = Verdict::Good;
+  good.rms_px = 0.163;
+  good.p95_px = 0.31;
+  quality::LensCheck suspect = good;
+  suspect.camera = "bm-6";
+  suspect.verdict = Verdict::Suspect;
+  suspect.reason = "the RMS is 0.66 px, above 0.5 px";
+  quality::LensCheck few;
+  few.camera = "bm-7";
+  few.reason = "too few corners in the top-left (0): capture the board there";
+  const std::vector<PanelLine> lines =
+      lens_check_panel({good, suspect, few}).value();
+  ASSERT_EQ(lines.size(), 3u);
+  EXPECT_EQ(lines[0].label, "lens bm-5");
+  EXPECT_EQ(lines[0].value, "good: RMS 0.16 px, p95 0.31 px");
+  EXPECT_EQ(lines[0].tone, Tone::Good);
+  EXPECT_EQ(lines[1].label, "lens bm-6");
+  EXPECT_EQ(lines[1].value,
+            "suspect: RMS 0.16 px, p95 0.31 px: the RMS is 0.66 px, above "
+            "0.5 px; the lenses disagree: a lens session says which is off");
+  EXPECT_EQ(lines[1].tone, Tone::Warn);
+  EXPECT_EQ(lines[2].value,
+            "insufficient: RMS -, p95 -: too few corners in the top-left "
+            "(0): capture the board there");
+  EXPECT_EQ(lines[2].tone, Tone::Muted);
+  EXPECT_TRUE(lens_check_panel({}).value().empty());
+}
+
 // The stages' rows go to gfx's panel as they are; the frame's time is their
 // host total without breakdowns.
 TEST(StageFrameMetrics, CarriesTheStagesToGfxsPanel) {

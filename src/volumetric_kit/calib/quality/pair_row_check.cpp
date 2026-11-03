@@ -5,13 +5,13 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <map>
 #include <optional>
 #include <utility>
 
 #include <opencv2/core.hpp>
 
+#include "checks.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
@@ -22,21 +22,15 @@ namespace volumetric_kit::calib::quality {
 namespace {
 
 namespace camera = sensor::camera;
+using detail::number;
+using detail::student_t;
 using Verdict = PairRowCheck::Verdict;
 
 constexpr const char* kWho = "check_pair_rows";
 constexpr int kColumns = 3;
-constexpr double kPi = 3.14159265358979323846;
 constexpr std::array<const char*, kPairRowCells> kCellNames = {
     "top-left", "top",         "top-right", "left",        "centre",
     "right",    "bottom-left", "bottom",    "bottom-right"};
-
-// `v` in a reason: "%.3g".
-std::string number(double v) {
-  char text[32];
-  std::snprintf(text, sizeof text, "%.3g", v);
-  return text;
-}
 
 core::Status check_options(const PairRowCheckOptions& o) {
   const auto refuse = [](const char* name, const char* rule) {
@@ -103,35 +97,6 @@ core::Result<std::vector<camera::Vec2d>> rectify_pixels(
     out.emplace_back(k.fx * q.x / q.z + k.cx, k.fy * q.y / q.z + k.cy);
   }
   return out;
-}
-
-// The standard errors in a cell's limit for its `n` corners: Student's t for
-// n - 1 degrees of freedom at the two-sided tail a normal's 3 leaves, 0.27%.
-// Its distribution for whole degrees of freedom (Abramowitz and Stegun 26.7.3
-// and 26.7.4), solved by bisection.
-double student_t(std::size_t n) {
-  const std::size_t dof = n - 1;
-  const double inside = std::erf(3.0 / std::sqrt(2.0));
-  // P(|T| <= sqrt(dof) tan(theta)).
-  const auto within = [dof](double theta) {
-    const double s = std::sin(theta);
-    const double c = std::cos(theta);
-    double term = dof % 2 == 0 ? 1.0 : c;
-    double sum = term;
-    for (std::size_t k = dof % 2 == 0 ? 2 : 3; k + 2 <= dof; k += 2) {
-      term *= (k - 1.0) / static_cast<double>(k) * c * c;
-      sum += term;
-    }
-    if (dof % 2 == 0) return s * sum;
-    return 2.0 / kPi * (theta + (dof > 1 ? s * sum : 0.0));
-  };
-  double lo = 0.0;
-  double hi = kPi / 2.0;
-  for (int i = 0; i < 60; ++i) {
-    const double mid = 0.5 * (lo + hi);
-    (within(mid) < inside ? lo : hi) = mid;
-  }
-  return std::sqrt(static_cast<double>(dof)) * std::tan(0.5 * (lo + hi));
 }
 
 // The gate over the cells' Δy: fills the cells, the verdict and its reason.
