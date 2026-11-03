@@ -2,8 +2,10 @@
 // Copyright (c) 2026 Tao Jin
 
 // Sessions on disk: the tree and its names, the files' bytes and JSON, what is
-// refused, the queue, I/O failures, drops and shutdown. Synthetic cameras and
-// frames: small images, a few corners, numbers with long binary expansions.
+// refused, the queue, I/O failures, drops and shutdown; and the JSON files'
+// text, from the tier's private formatters, against goldens/session_files/.
+// Synthetic cameras and frames: small images, a few corners, numbers with
+// long binary expansions.
 
 #include "volumetric_kit/calib/capture/session_writer.hpp"
 
@@ -34,6 +36,7 @@
 #include <nlohmann/json.hpp>
 
 #include "scratch_dir.hpp"
+#include "session_files.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
 #include "volumetric_kit/sensor/camera/array_calibration.hpp"
 #include "volumetric_kit/sensor/camera/geometry.hpp"
@@ -898,6 +901,93 @@ TEST(SessionWriter, RecordsTheSyncFilesSha256) {
               digest)
         << bytes.size() << " bytes";
   }
+}
+
+// --- The files' text, byte for byte -----------------------------------------
+
+// `text` is goldens/session_files/`name` byte for byte; VC_WRITE_GOLDENS=1
+// writes it afresh.
+void expect_golden(const std::string& text, const std::string& name) {
+  const std::string path = std::string(VC_SESSION_GOLDENS_DIR) + "/" + name;
+  if (std::getenv("VC_WRITE_GOLDENS") != nullptr) write(path, text);
+  EXPECT_EQ(text, read(path)) << name;
+}
+
+// make_info's Femto rig with every key a session can have: a lens file, a
+// board's tolerance, and strings to escape, one not UTF-8. Paths are as
+// given: the formatter reads no file.
+SessionInfo femto_golden(const ScratchDir& dir) {
+  SessionInfo info = make_info(dir);
+  info.sync_path = "config/femto_mega_sync.json";
+  info.software.calib = "calib-sha\xff";
+  info.board.square_size_tolerance_m = 0.0002;
+  info.cameras[0].lens = LensOrigin::File;
+  info.cameras[0].lens_file = "lab/lens.json";
+  info.cameras[1].orbbec->firmware = "1.2.9\t\"rc\\1\"";
+  return info;
+}
+
+// pair_info's DeckLink pair in intrinsic mode on a checkerboard: no sync
+// file, no depth, no marker keys, no SDK.
+SessionInfo pair_golden(const ScratchDir& dir) {
+  SessionInfo info = pair_info(dir);
+  info.mode = SessionMode::Intrinsics;
+  info.board = legacy_checkerboard();
+  for (SessionCamera& camera : info.cameras) {
+    camera.lens_file = "bm_pair/array_calibration.json";
+  }
+  return info;
+}
+
+TEST(SessionFiles, AFemtoSessionIsItsGolden) {
+  const ScratchDir dir;
+  detail::SessionFacts facts;
+  facts.created = "2026-10-13T09:41:07.250Z";
+  facts.sync_sha256 = std::string(64, 'a');
+  facts.lens_sha256 = {std::string(64, 'b'), ""};
+  facts.factory = true;
+  expect_golden(detail::format_session(femto_golden(dir), facts,
+                                       {{0, false}, {1, true}, {2, false}}),
+                "femto_session.json");
+}
+
+TEST(SessionFiles, APairsIntrinsicSessionIsItsGolden) {
+  const ScratchDir dir;
+  detail::SessionFacts facts;
+  facts.created = "2026-11-02T10:15:00.000Z";
+  facts.lens_sha256 = {std::string(64, 'c'), std::string(64, 'c')};
+  expect_golden(detail::format_session(pair_golden(dir), facts, {}),
+                "pair_session.json");
+}
+
+// Both cameras' JPEG and depth; one camera's tag found and its every measure,
+// the other's tag missing and its PnP residual empty.
+TEST(SessionFiles, AFemtoCaptureIsItsGolden) {
+  const ScratchDir dir;
+  CaptureJob job = make_job(2);
+  job.meta.index = 7;
+  job.meta.live_vs_full_px = 0.12;
+  job.cameras[0].check.pnp_rms_px = 0.21000000000000002;
+  job.cameras[1].origin_tag = DetectedMarker{0,
+                                             {{{30.1 + 0.2, 20.000000000000004},
+                                               {41.3, 1.0 / 3.0},
+                                               {40.9, -0.5},
+                                               {29.8, 1e-300}}}};
+  expect_golden(detail::format_capture(femto_golden(dir), job),
+                "femto_capture.json");
+}
+
+// Each camera's PGM and no depth; one camera found nothing, so its lists are
+// empty and its measures null.
+TEST(SessionFiles, APairsCaptureIsItsGolden) {
+  const ScratchDir dir;
+  CaptureJob job = pair_job();
+  CameraCapture& empty = job.cameras[1];
+  empty.detection.observation.points.clear();
+  empty.detection.markers.clear();
+  empty.check = ViewCheck{};
+  expect_golden(detail::format_capture(pair_golden(dir), job),
+                "pair_capture.json");
 }
 
 // --- Never overwrite --------------------------------------------------------

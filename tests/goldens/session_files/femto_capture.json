@@ -1,0 +1,181 @@
+{
+  "format": "volumetric_kit_calib.capture",
+  "version": 1,
+  "index": 7,
+  "time": "2025-10-13T09:41:12.004Z",
+  "trigger_ns": 18446744073709551614,
+  "sequence": 1234,
+  "spread_ms": 1.4000000000000001,
+  "stillness_px": 0.08,
+  "live_vs_full_px": 0.12,
+  "cameras": {
+    "CL2A14100A4": {
+      "color": "images/CL2A14100A4/calib_img_CL2A14100A4_007.jpg",
+      "depth": "depth/CL2A14100A4/calib_depth_CL2A14100A4_007.png",
+      "color_bytes": 211,
+      "timestamp_ns": 1760348472003911002,
+      "sequence": 1236,
+      "detection": {
+        "method": "full",
+        "image_size": [
+          64,
+          48
+        ],
+        "pixel_convention": "opencv",
+        "ids": [
+          0,
+          1,
+          5
+        ],
+        "corners_px": [
+          [
+            12.7,
+            3.033333333333333
+          ],
+          [
+            20.000000000000004,
+            9.3
+          ],
+          [
+            0.14285714285714285,
+            1e-300
+          ]
+        ],
+        "weights": [
+          1.0,
+          0.75,
+          0.3333333333333333
+        ],
+        "marker_ids": [
+          3
+        ],
+        "marker_corners_px": [
+          [
+            [
+              10.1,
+              5.2
+            ],
+            [
+              14.3,
+              5.200000000000001
+            ],
+            [
+              14.0,
+              9.9
+            ],
+            [
+              10.0,
+              11.7
+            ]
+          ]
+        ]
+      },
+      "check": {
+        "corners": 3,
+        "markers": 1,
+        "collinear": false,
+        "distance_m": 2.8000000000000003,
+        "tilt_deg": 12.0,
+        "pnp_rms_px": 0.21000000000000002,
+        "cell": 4,
+        "verdict": "partial"
+      },
+      "origin_tag": null
+    },
+    "CL2A141000N": {
+      "color": "images/CL2A141000N/calib_img_CL2A141000N_007.jpg",
+      "depth": "depth/CL2A141000N/calib_depth_CL2A141000N_007.png",
+      "color_bytes": 212,
+      "timestamp_ns": 1760348472003911003,
+      "sequence": 1237,
+      "detection": {
+        "method": "full",
+        "image_size": [
+          64,
+          48
+        ],
+        "pixel_convention": "opencv",
+        "ids": [
+          0,
+          1,
+          5
+        ],
+        "corners_px": [
+          [
+            12.7,
+            3.033333333333333
+          ],
+          [
+            20.000000000000004,
+            9.3
+          ],
+          [
+            0.14285714285714285,
+            1e-300
+          ]
+        ],
+        "weights": [
+          1.0,
+          0.75,
+          0.3333333333333333
+        ],
+        "marker_ids": [
+          3
+        ],
+        "marker_corners_px": [
+          [
+            [
+              10.1,
+              5.2
+            ],
+            [
+              14.3,
+              5.200000000000001
+            ],
+            [
+              14.0,
+              9.9
+            ],
+            [
+              10.0,
+              12.7
+            ]
+          ]
+        ]
+      },
+      "check": {
+        "corners": 3,
+        "markers": 1,
+        "collinear": true,
+        "distance_m": 2.8000000000000003,
+        "tilt_deg": 12.0,
+        "pnp_rms_px": null,
+        "cell": 4,
+        "verdict": "collinear"
+      },
+      "origin_tag": {
+        "dictionary": "DICT_APRILTAG_36h11",
+        "id": 0,
+        "corners_px": [
+          [
+            30.3,
+            20.000000000000004
+          ],
+          [
+            41.3,
+            0.3333333333333333
+          ],
+          [
+            40.9,
+            -0.5
+          ],
+          [
+            29.8,
+            1e-300
+          ]
+        ]
+      }
+    }
+  },
+  "usable_views": 1
+}

@@ -1,0 +1,63 @@
+{
+  "format": "volumetric_kit_calib.session",
+  "version": 2,
+  "created": "2026-11-02T10:15:00.000Z",
+  "mode": "intrinsics",
+  "software": {
+    "calib": "calib-sha",
+    "sensor": "sensor-sha",
+    "gfx": "gfx-sha",
+    "core": "core-sha",
+    "opencv": "5.0.0"
+  },
+  "rig": {
+    "driver": "decklink",
+    "reference": "bm-1"
+  },
+  "board": {
+    "type": "checkerboard",
+    "squares": [
+      14,
+      9
+    ],
+    "square_m": 0.02,
+    "square_measured": false,
+    "square_tolerance_m": null,
+    "planarity_bow_m": null
+  },
+  "origin_tag": {
+    "dictionary": "DICT_APRILTAG_36h11",
+    "id": 0,
+    "edge_m": 0.15
+  },
+  "streams": {
+    "color": {
+      "width": 64,
+      "height": 48
+    },
+    "fps": 30
+  },
+  "cameras": [
+    {
+      "id": "bm-1",
+      "model": "DeckLink 8K Pro",
+      "input": "SDI 2",
+      "lens": {
+        "origin": "file",
+        "path": "bm_pair/array_calibration.json",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    {
+      "id": "bm-2",
+      "model": "DeckLink 8K Pro",
+      "input": "SDI 1",
+      "lens": {
+        "origin": "file",
+        "path": "bm_pair/array_calibration.json",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    }
+  ],
+  "captures": []
+}

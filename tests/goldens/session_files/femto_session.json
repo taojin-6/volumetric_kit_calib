@@ -1,0 +1,106 @@
+{
+  "format": "volumetric_kit_calib.session",
+  "version": 2,
+  "created": "2026-10-13T09:41:07.250Z",
+  "mode": "extrinsics",
+  "software": {
+    "calib": "calib-sha�",
+    "sensor": "sensor-sha",
+    "gfx": "gfx-sha",
+    "core": "core-sha",
+    "opencv": "5.0.0",
+    "orbbec_sdk": "2.10.6"
+  },
+  "rig": {
+    "driver": "orbbec",
+    "sync_file": "config/femto_mega_sync.json",
+    "sync_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "reference": "CL2A141000N"
+  },
+  "board": {
+    "type": "charuco",
+    "squares": [
+      5,
+      3
+    ],
+    "square_m": 0.1505,
+    "marker_m": 0.112,
+    "dictionary": "DICT_4X4_100",
+    "first_marker_id": 0,
+    "legacy_pattern": true,
+    "square_measured": true,
+    "square_tolerance_m": 0.0002,
+    "planarity_bow_m": 0.0005
+  },
+  "origin_tag": {
+    "dictionary": "DICT_APRILTAG_36h11",
+    "id": 0,
+    "edge_m": 0.15
+  },
+  "streams": {
+    "color": {
+      "width": 64,
+      "height": 48,
+      "codec": "mjpeg"
+    },
+    "depth": {
+      "width": 16,
+      "height": 12,
+      "mode": "nfov_unbinned",
+      "metres_per_unit": 0.001,
+      "min_m": 0.5,
+      "max_m": 3.86
+    },
+    "fps": 25
+  },
+  "cameras": [
+    {
+      "id": "CL2A14100A4",
+      "model": "Orbbec Femto Mega",
+      "firmware": "1.2.9",
+      "ip": "192.168.1.11",
+      "role": "secondary",
+      "sync_mode": "secondary-synced",
+      "depth_delay_us": 160,
+      "color_lens_model": "brown-conrady",
+      "depth_lens_model": "brown-conrady-k6",
+      "lens": {
+        "origin": "file",
+        "path": "lab/lens.json",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    {
+      "id": "CL2A141000N",
+      "model": "Orbbec Femto Mega",
+      "firmware": "1.2.9\t\"rc\\1\"",
+      "ip": "192.168.1.12",
+      "role": "primary",
+      "sync_mode": "primary",
+      "depth_delay_us": 320,
+      "color_lens_model": "brown-conrady",
+      "depth_lens_model": "brown-conrady-k6",
+      "lens": {
+        "origin": "factory"
+      }
+    }
+  ],
+  "factory_calibration": "factory_calibration.json",
+  "captures": [
+    {
+      "index": 0,
+      "file": "captures/000.json",
+      "dropped": false
+    },
+    {
+      "index": 1,
+      "file": "captures/001.json",
+      "dropped": true
+    },
+    {
+      "index": 2,
+      "file": "captures/002.json",
+      "dropped": false
+    }
+  ]
+}
