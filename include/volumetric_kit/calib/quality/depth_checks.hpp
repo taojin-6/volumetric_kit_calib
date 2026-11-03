@@ -63,7 +63,7 @@ inline constexpr std::size_t kMaxAgreementBins = 4096;
 ///
 /// @code
 /// DepthCheckOptions options;
-/// options.max_offset_mm = 5.0;
+/// options.max_scatter_mm = 2.0;
 /// @endcode
 struct DepthCheckOptions {
   /// How far inside the chessboard's outer edge the board region stays
@@ -98,9 +98,11 @@ struct DepthCheckOptions {
   std::size_t min_overlap = kMinOverlap;
   /// The scale's bound on `|mean ratio - 1|` (@ref CameraDepth::scale).
   double max_scale_error = 0.002;
-  /// The plane's bound on the median offset (millimetres,
-  /// @ref CameraDepth::plane).
-  double max_offset_mm = 10.0;
+  /// The plane's bound on its views' scatter once the camera's depth offset
+  /// is taken off (millimetres, @ref CameraDepth::scatter_mm): a pair's
+  /// bound on its signed median, since what is left is depth error another
+  /// camera would see.
+  double max_scatter_mm = 5.0;
   /// The plane's bound on the median angle (degrees).
   double max_angle_deg = 1.0;
   /// A pair's bound on its signed median (millimetres,
@@ -299,6 +301,15 @@ struct BoardDepthCheck {
   /// camera seeing its face. Not a number when the plane is not valid, or is
   /// perpendicular to the board.
   double offset_mm = std::numeric_limits<double>::quiet_NaN();
+  /// @ref offset_mm made axial: how far the depth reads along its camera's
+  /// own axis to put the plane there, `offset_mm d_z / (n . d)`, with `d`
+  /// the unit ray from the depth camera to the chessboard's centre and `n`
+  /// the board's z, both in the depth camera's frame (millimetres; positive
+  /// when the depth reads too far). A board seen square on the axis gives
+  /// the offset itself; seen at 60 degrees, about twice it. Not a number
+  /// when the offset is not, or the centre is not in front of the depth
+  /// camera.
+  double axial_offset_mm = std::numeric_limits<double>::quiet_NaN();
   /// The angle between the plane and the solved board (degrees), in
   /// [0, 90]; not a number when the plane is not valid.
   double angle_deg = std::numeric_limits<double>::quiet_NaN();
@@ -309,8 +320,9 @@ struct BoardDepthCheck {
 ///        plane, and the plane against the solved board.
 ///
 /// The ratios do not depend on the solved board: the plane comes to the
-/// colour camera through `T_cb T_cb^-1 depth_to_color`. The offset and the
-/// angle do.
+/// colour camera through `T_cb T_cb^-1 depth_to_color`. The offset, its
+/// axial form and the angle do; the axial form takes the depth camera from
+/// the region's `depth_to_board`.
 /// @param cameras  The rig's cameras.
 /// @param board    The board seen.
 /// @param view     The view's detection, at its camera's lens's size.
@@ -414,7 +426,8 @@ struct RatioStats {
 ///
 /// @code
 /// const CameraDepth& c = summary.cameras[i];
-/// if (c.plane == DepthVerdict::Off) warn(ids[i], c.offset_mm, c.angle_deg);
+/// if (c.plane == DepthVerdict::Ok) offset[i] = c.depth_offset_m;
+/// else warn(ids[i], c.depth_offset_m, c.scatter_mm, c.angle_deg);
 /// @endcode
 struct CameraDepth {
   std::size_t views = 0;  ///< Its views whose plane is valid.
@@ -422,13 +435,28 @@ struct CameraDepth {
   /// Its board scale: `Insufficient` for no ratios, else `Off` when the mean
   /// is beyond `max_scale_error` from 1.
   DepthVerdict scale = DepthVerdict::Insufficient;
-  /// The median of their offsets (millimetres); not a number for none.
+  /// The median of their offsets along the boards' normals (millimetres);
+  /// not a number for none. Not judged: @ref depth_offset_m takes it off.
   double offset_mm = std::numeric_limits<double>::quiet_NaN();
   /// The median of their angles (degrees); not a number for none.
   double angle_deg = std::numeric_limits<double>::quiet_NaN();
-  /// Its plane against the solved boards: `Insufficient` for no valid view,
-  /// else `Off` when the median offset is beyond `max_offset_mm` or the
-  /// median angle beyond `max_angle_deg`.
+  /// How far its depth reads along its axis, too far when positive: the
+  /// median of their axial offsets (@ref BoardDepthCheck::axial_offset_mm),
+  /// in metres, sensor's `SensorCalibration::depth_offset_m`, which
+  /// @ref format_results writes when @ref plane is `Ok`. Not a number for
+  /// none.
+  double depth_offset_m = std::numeric_limits<double>::quiet_NaN();
+  /// How far their axial offsets lie from @ref depth_offset_m: the median of
+  /// `|a - depth offset|` over their axial offsets `a` (millimetres); not a
+  /// number for fewer than 2.
+  double scatter_mm = std::numeric_limits<double>::quiet_NaN();
+  /// Its plane against the solved boards once @ref depth_offset_m is taken
+  /// off: `Insufficient` for no valid view; else `Off` when the median angle
+  /// is beyond `max_angle_deg` or the depth offset is one sensor's
+  /// calibration file does not carry (its `validate_array_calibration`
+  /// refuses it, as it does one not a number); else `Insufficient` when the
+  /// scatter is not a number (one view), and `Off` when it is beyond
+  /// `max_scatter_mm`.
   DepthVerdict plane = DepthVerdict::Insufficient;
   /// Its depth's: @ref camera_verdict of @ref scale and @ref plane.
   DepthVerdict verdict = DepthVerdict::Insufficient;
