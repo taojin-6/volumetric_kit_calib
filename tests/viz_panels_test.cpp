@@ -976,6 +976,82 @@ TEST(LensResultsPanel, SaysWhatEachLensIsWorth) {
   EXPECT_EQ(unnamed[1].tone, Tone::Bad);
 }
 
+// Each stereo pair's rows: its verdict with the cells judged, the worst
+// cell's mean and the 95th percentile; then a fail's cells, where to capture
+// for too few, how to name a pair named the wrong way round, a refusal's
+// reason. A swapped pair and too few cells are posted as notices.
+TEST(PairRowsPanel, SaysEachPairsRowsAndWhatToDo) {
+  using Verdict = quality::PairRowCheck::Verdict;
+  quality::PairRowCheck pass;
+  pass.left = "bm-1";
+  pass.right = "bm-2";
+  pass.verdict = Verdict::Pass;
+  pass.cell_mean_px = {0.05, -0.02, 0.01, -0.01, 0.01, 0.0, -0.08, 0.01, -0.02};
+  pass.dy_p95_px = 0.213;
+  quality::PairRowCheck fail = pass;
+  fail.verdict = Verdict::Fail;
+  fail.cell_mean_px[5] = 0.41;
+  fail.reason =
+      "the rows differ on average by 0.41 px in the view's right, beyond "
+      "0.15 px";
+  quality::PairRowCheck few;
+  few.left = "bm-1";
+  few.right = "bm-2";
+  few.verdict = Verdict::Insufficient;
+  few.cell_mean_px[4] = 0.012;
+  few.dy_p95_px = 0.2;
+  few.reason =
+      "too few corners seen by both cameras in the view's top-left (0): 8 in "
+      "each of 7 of its 9 parts, both sides among them; capture the board "
+      "there";
+  quality::PairRowCheck swapped;
+  swapped.left = "bm-2";
+  swapped.right = "bm-1";
+  swapped.verdict = Verdict::Swapped;
+  swapped.reason = "\"bm-1\" is the left camera: name it first, then \"bm-2\"";
+  quality::PairRowCheck refused = swapped;
+  refused.verdict = Verdict::Refused;
+  refused.reason = "rectify_stereo: the cameras are one above the other";
+  const std::vector<PanelLine> lines =
+      pair_rows_panel({pass, fail, few, swapped, refused}).value();
+  ASSERT_EQ(lines.size(), 5u);
+  EXPECT_EQ(lines[0].label, "rows bm-1 | bm-2");
+  EXPECT_EQ(lines[0].value,
+            "pass: cells 9/9, worst -0.08 px (bottom-left), p95 0.21 px");
+  EXPECT_EQ(lines[0].tone, Tone::Good);
+  EXPECT_EQ(lines[1].value,
+            "fail: cells 9/9, worst +0.41 px (right), p95 0.21 px: the rows "
+            "differ on average by 0.41 px in the view's right, beyond 0.15 px");
+  EXPECT_EQ(lines[1].tone, Tone::Bad);
+  EXPECT_EQ(lines[2].value,
+            "insufficient: cells 1/9, worst +0.01 px (centre), "
+            "p95 0.20 px: " +
+                few.reason + ", then press C again");
+  EXPECT_EQ(lines[2].tone, Tone::Warn);
+  EXPECT_EQ(lines[3].label, "rows bm-2 | bm-1");
+  EXPECT_EQ(lines[3].value,
+            "swapped: bm-1 is the left camera: put it first in source.pairs, "
+            "here and in the runtime's scenario; the file needs no change");
+  EXPECT_EQ(lines[3].tone, Tone::Warn);
+  EXPECT_EQ(lines[4].value,
+            "refused: rectify_stereo: the cameras are one above the other");
+  EXPECT_EQ(lines[4].tone, Tone::Bad);
+  // No cell judged: no worst, and no percentile without a corner.
+  const std::vector<PanelLine> none =
+      pair_rows_panel({quality::PairRowCheck{}}).value();
+  ASSERT_EQ(none.size(), 1u);
+  EXPECT_EQ(none[0].value.rfind("insufficient: cells 0/9, worst -, p95 -", 0),
+            0u)
+      << none[0].value;
+  EXPECT_TRUE(pair_rows_panel({}).value().empty());
+
+  const std::vector<std::string> notices =
+      calibration_notices(4, "results/004_a", lines).value();
+  ASSERT_EQ(notices.size(), 3u);
+  EXPECT_EQ(notices[1], "calibration 004: rows bm-1 | bm-2: " + lines[2].value);
+  EXPECT_EQ(notices[2], "calibration 004: rows bm-2 | bm-1: " + lines[3].value);
+}
+
 // The stages' rows go to gfx's panel as they are; the frame's time is their
 // host total without breakdowns.
 TEST(StageFrameMetrics, CarriesTheStagesToGfxsPanel) {

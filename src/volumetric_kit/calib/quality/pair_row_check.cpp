@@ -307,6 +307,10 @@ const char* to_string(PairRowCheck::Verdict verdict) noexcept {
   return "unknown";
 }
 
+const char* pair_row_cell_name(std::size_t cell) noexcept {
+  return cell < kCellNames.size() ? kCellNames[cell] : "none";
+}
+
 core::Result<PairRowCheck> check_pair_rows(
     const camera::ArrayCalibration& solved, std::string_view left,
     std::string_view right, const std::vector<Observation>& views,

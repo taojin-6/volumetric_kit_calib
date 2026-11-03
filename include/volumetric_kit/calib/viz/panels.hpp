@@ -9,7 +9,8 @@
 ///        origin tag they hold, how far each lens's views are, where a
 ///        capture stands, and the stage timings; and Calibrate's: how far it
 ///        has got, what its result and its depth checks are worth, where its
-///        world is, what each lens fitted is worth, and the notices it posts.
+///        world is, what each stereo pair's rows and each lens fitted are
+///        worth, and the notices it posts.
 ///
 /// Each panel is a model -- lines of text, each in a @ref Tone -- built from
 /// host data alone (the quality tier's checks and metrics, sensor's counters,
@@ -33,6 +34,7 @@
 #include "volumetric_kit/calib/quality/depth_checks.hpp"
 #include "volumetric_kit/calib/quality/lens_gate.hpp"
 #include "volumetric_kit/calib/quality/lens_readiness.hpp"
+#include "volumetric_kit/calib/quality/pair_row_check.hpp"
 #include "volumetric_kit/calib/quality/results.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
 #include "volumetric_kit/calib/solve/spanning_tree.hpp"
@@ -413,15 +415,44 @@ core::Result<std::vector<PanelLine>> world_panel(
     const std::vector<std::string>& ids, std::size_t reference,
     const quality::ResultWorld& world);
 
+/// @brief The Calibration window's stereo pair lines, after
+///        @ref world_panel's: each pair's rectified rows
+///        (`quality::check_pair_rows`), and what to do when they do not
+///        pass.
+///
+/// One line per pair, `rows <left> | <right>`, its figures `cells <n>/9`
+/// (the cells judged), `worst <mean> px (<cell>)` (the judged cell whose
+/// mean is farthest from 0) and `p95 <p95> px`, a figure that is not a
+/// number shown as `-`:
+/// - `pass: <figures>` (green);
+/// - `fail: <figures>: <the cells past their limits>` (red);
+/// - `insufficient: <figures>: <where to capture>, then press C again`
+///   (amber);
+/// - `swapped: <right> is the left camera: put it first in source.pairs,
+///   here and in the runtime's scenario; the file needs no change` (amber):
+///   the file is keyed by id, so the poses are right either way;
+/// - `refused: <the rectification's refusal>` (red).
+/// @param pairs  Each pair's check, in the scenario's order.
+/// @return The lines; or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const std::vector<PanelLine> rows,
+///            pair_rows_panel(result.pairs));
+/// lines.insert(lines.end(), rows.begin(), rows.end());
+/// @endcode
+core::Result<std::vector<PanelLine>> pair_rows_panel(
+    const std::vector<quality::PairRowCheck>& pairs);
+
 /// @brief The notices a Calibrate result posts: where it was written, and
-///        each amber line of its world (@ref world_panel), such as an edge
-///        warned of or a tag world refused.
+///        each amber line of its world and its pairs (@ref world_panel,
+///        @ref pair_rows_panel), such as an edge warned of, a tag world
+///        refused, or a pair to name the other way round.
 /// @param number     Its results directory's number, `RRR`.
 /// @param directory  Its results directory.
-/// @param world      Its world lines (@ref world_panel).
+/// @param lines      Its world and pair lines.
 /// @return `calibration RRR: written to <directory>`, then
 ///         `calibration RRR: <label>: <value>` for each `Tone::Warn` line of
-///         @p world, in order; or `OutOfMemory`.
+///         @p lines, in order; or `OutOfMemory`.
 ///
 /// @code
 /// VKC_ASSIGN(const std::vector<std::string> notices,
@@ -430,7 +461,7 @@ core::Result<std::vector<PanelLine>> world_panel(
 /// @endcode
 core::Result<std::vector<std::string>> calibration_notices(
     int number, const std::string& directory,
-    const std::vector<PanelLine>& world);
+    const std::vector<PanelLine>& lines);
 
 /// @brief The Lenses panel, in intrinsic mode: one line per camera, its id
 ///        and how far its views are toward its lens fit, amber until ready,

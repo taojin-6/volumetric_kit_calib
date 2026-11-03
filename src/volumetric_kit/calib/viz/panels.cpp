@@ -718,15 +718,75 @@ core::Result<std::vector<PanelLine>> world_panel(
       });
 }
 
+core::Result<std::vector<PanelLine>> pair_rows_panel(
+    const std::vector<quality::PairRowCheck>& pairs) {
+  return compute::guarded(
+      "pair_rows_panel", [&]() -> core::Result<std::vector<PanelLine>> {
+        using Verdict = quality::PairRowCheck::Verdict;
+        constexpr std::size_t kCells = quality::kPairRowCells;
+        std::vector<PanelLine> lines;
+        for (const quality::PairRowCheck& p : pairs) {
+          std::size_t judged = 0;
+          std::size_t worst = kCells;  // none judged
+          for (std::size_t c = 0; c < kCells; ++c) {
+            const double mean = p.cell_mean_px[c];
+            if (!std::isfinite(mean)) continue;
+            ++judged;
+            if (worst == kCells ||
+                std::abs(mean) > std::abs(p.cell_mean_px[worst])) {
+              worst = c;
+            }
+          }
+          std::string figures =
+              "cells " + std::to_string(judged) + "/" + std::to_string(kCells) +
+              ", worst " +
+              (worst < kCells
+                   ? signed_figure(p.cell_mean_px[worst], 2, " px") + " (" +
+                         quality::pair_row_cell_name(worst) + ")"
+                   : std::string("-")) +
+              ", p95 " + figure(p.dy_p95_px, 2, " px");
+          std::string value = std::string(quality::to_string(p.verdict)) + ": ";
+          Tone tone = Tone::Bad;
+          switch (p.verdict) {
+            case Verdict::Pass:
+              value += figures;
+              tone = Tone::Good;
+              break;
+            case Verdict::Fail:
+              value += figures + ": " + p.reason;
+              break;
+            case Verdict::Insufficient:
+              value += figures + ": " + p.reason + ", then press C again";
+              tone = Tone::Warn;
+              break;
+            case Verdict::Swapped:
+              // The file is keyed by id: only the scenario's order is wrong.
+              value += p.right +
+                       " is the left camera: put it first in source.pairs, "
+                       "here and in the runtime's scenario; the file needs no "
+                       "change";
+              tone = Tone::Warn;
+              break;
+            case Verdict::Refused:
+              value += p.reason;
+              break;
+          }
+          lines.push_back(
+              {"rows " + p.left + " | " + p.right, std::move(value), tone});
+        }
+        return lines;
+      });
+}
+
 core::Result<std::vector<std::string>> calibration_notices(
     int number, const std::string& directory,
-    const std::vector<PanelLine>& world) {
+    const std::vector<PanelLine>& lines) {
   return compute::guarded(
       "calibration_notices", [&]() -> core::Result<std::vector<std::string>> {
         const std::string name = "calibration " + results_number(number);
         std::vector<std::string> notices;
         notices.push_back(name + ": written to " + directory);
-        for (const PanelLine& line : world) {
+        for (const PanelLine& line : lines) {
           if (line.tone == Tone::Warn) {
             notices.push_back(name + ": " + line.label + ": " + line.value);
           }
