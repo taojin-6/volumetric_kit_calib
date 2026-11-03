@@ -11,8 +11,9 @@
 // their depth shared with the writer, their cap, and the captures and drops
 // unresolved until a snapshot reflects them; the origin tag found in
 // each camera's luma, kept, written and counted, an image with two prints of
-// it and a failed search. Synthetic board and tag renders, a few cameras, no
-// device. Then what a session records of each camera and of the software.
+// it, a failed search, and none in a lens session. Synthetic board and tag
+// renders, a few cameras, no device. Then what a session records of each camera
+// and of the software.
 
 #include "volumetric_kit/calib/app/capture_worker.hpp"
 
@@ -1089,6 +1090,30 @@ TEST(AppCapture, KeepsAndWritesTheOriginTagEachCameraFinds) {
   const json session = json::parse(read(dir / "session.json"));
   EXPECT_EQ(session["origin_tag"]["id"], kOriginTag.id);
   EXPECT_EQ(session["origin_tag"]["edge_m"].get<double>(), kOriginTag.edge_m);
+}
+
+// A lens session places no pose, so it searches for no tag: a print in view
+// is neither kept nor counted.
+TEST(AppCapture, ALensSessionSearchesForNoTag) {
+  ScratchDir root;
+  CaptureSetup lenses = setup(root.path(), 2);
+  lenses.mode = capture::SessionMode::Intrinsics;
+  std::unique_ptr<CaptureWorker> worker = make(std::move(lenses));
+  ASSERT_NE(worker, nullptr);
+  CaptureRequest r = request(2, 0.0);
+  draw_origin_tag(r, 1);
+  ASSERT_TRUE(submit(*worker, std::move(r)));
+  worker->flush();
+  EXPECT_TRUE(worker->take_errors().empty());
+  const std::vector<CaptureEvent> events = worker->take_events();
+  ASSERT_EQ(events.size(), 1u);
+  ASSERT_EQ(events[0].kind, CaptureEvent::Kind::Saved)
+      << events[0].status.message();
+  EXPECT_EQ(events[0].tag_cameras, 0);
+  const std::vector<std::optional<DetectedMarker>>& tags =
+      worker->kept()->captures[0]->tags;
+  ASSERT_EQ(tags.size(), 2u);
+  EXPECT_FALSE(tags[1].has_value());
 }
 
 // Two prints of the tag in a camera's image: neither is taken for the tag,

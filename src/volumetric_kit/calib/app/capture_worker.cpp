@@ -239,13 +239,15 @@ struct CaptureWorker::State {
     std::vector<core::Status> detect_errors(n);
     std::vector<core::Status> check_errors(n);
     std::vector<TagSearch> searches(n);
+    // The origin tag places the rig's poses; a lens session has none.
+    const bool tag = setup.mode == capture::SessionMode::Extrinsics;
     cv::parallel_for_(
         cv::Range(0, static_cast<int>(n)), [&](const cv::Range& range) {
           for (int c = range.start; c < range.end; ++c) {
             const auto i = static_cast<std::size_t>(c);
             detect_one(i, request.cameras[i], full[i], views[i], frontal[i],
                        detect_errors[i], check_errors[i]);
-            searches[i] = search_tag(request.cameras[i]);
+            if (tag) searches[i] = search_tag(request.cameras[i]);
           }
         });
     std::vector<core::Status> failures;
