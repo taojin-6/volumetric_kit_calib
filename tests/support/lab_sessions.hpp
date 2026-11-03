@@ -87,8 +87,9 @@ inline std::optional<PlacedBoard> place_board(const FisheyeTruth& truth,
 }
 
 /// How many placements @ref place_boards makes at once: each takes about half
-/// a GiB at its peak.
-inline constexpr std::size_t kPlacedAtOnce = 4;
+/// a GiB at its peak, so two keep app_setup under 1.7 GiB beside ctest's
+/// other tests (four took it to 2.8 GiB).
+inline constexpr std::size_t kPlacedAtOnce = 2;
 
 /// @brief @ref place_board at each of @p poses, @ref kPlacedAtOnce at a time:
 ///        the placements are independent, and each search seeds its own
