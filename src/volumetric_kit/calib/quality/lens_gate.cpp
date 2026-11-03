@@ -118,9 +118,9 @@ void judge_holdout(const LensGateOptions& options, LensVerdict& out) {
 // the cell past its limit by the most.
 void judge_bias(const std::vector<const solve::CornerResidual*>& corners,
                 const LensGateOptions& options, LensVerdict& out) {
-  const std::array<LensCell, kLensCells> cells =
-      detail::lens_cells(corners, out.fit.camera.model.size,
-                         options.max_cell_bias_px, options.min_cell_corners);
+  const std::array<LensCell, kLensCells> cells = detail::lens_cells(
+      corners, out.fit.camera.model.size, options.max_cell_bias_px,
+      options.min_cell_corners, detail::CellErrors::Three);
   double worst_over = 1.0;
   std::string failure;
   for (std::size_t c = 0; c < cells.size(); ++c) {

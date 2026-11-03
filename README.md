@@ -116,9 +116,9 @@ renderer.
   frame, corners reaching the image's corners and sides), and a lens-only
   results directory
   ([DECISIONS.md](DECISIONS.md#2026-11-01--a-cameras-lens-from-its-views));
-  and whether a lens holds on views of either board, a pose session's
-  ChArUco views among them: each posed through the lens held fixed, the
-  residuals held to the gates' RMS and cell limits
+  and whether a lens holds, its residuals held to the gates' RMS and cell
+  limits: on a lens session's views, each posed through the lens held fixed,
+  or on a pose session's rig solve, whose shared board poses hide far less
   ([DECISIONS.md](DECISIONS.md#2026-11-02--a-lens-checked-on-views-of-any-board)).
   For a stereo pair: how far apart each board corner's rows land in its two
   rectified views, through sensor's own rectification at the runtime's size,

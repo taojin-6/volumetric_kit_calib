@@ -290,6 +290,23 @@ TEST(QualityOom, CrossCameraTransfer) {
       [](const core::Result<Transfer>& r) { return ippe_failed(r.status()); });
 }
 
+// A camera's lens checked on the rig's solve and on its residuals alone; and
+// refused.
+TEST(QualityOom, TheLensChecksOnASolve) {
+  const Solved s(2);
+  const std::string& id = s.cameras[0].id;
+  expect_oom_anywhere(
+      [&] { return check_rig_lens(id, s.cameras, s.solution); });
+  std::vector<solve::CornerResidual> its;
+  for (const solve::CornerResidual& r : s.solution.residuals) {
+    if (r.camera == 0) its.push_back(r);
+  }
+  expect_oom_anywhere(
+      [&] { return check_lens_residuals(id, s.cameras[0].model.size, its); });
+  expect_oom_anywhere(
+      [&] { return check_rig_lens("none", s.cameras, s.solution); });
+}
+
 // Out of memory anywhere, a re-solve's included, fails the whole, as IPPE's
 // failure in the transfer does. Two cameras make about half the allocations
 // four do, from every call stack four do but cv::invert's buffer for the

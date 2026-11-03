@@ -174,24 +174,34 @@ TEST(Api, PosesAPair) {
   EXPECT_NE(pairs.find("\"verdict\": \"pass\""), std::string::npos) << pairs;
 }
 
-// Main 5, the lenses a pose session uses, checked on its views: each camera's
-// ChArUco views taken as a checkerboard's, posed through its lens held fixed.
-// Main 4 is source_rig_test's.
+// Main 5, the lenses a pose session uses, checked on its rig solve: the
+// cameras share each capture's board, so a lens off shows where a view's own
+// pose would take it up. Main 4 is source_rig_test's.
 core::Result<std::vector<calib::quality::LensCheck>> check_lenses(
     const calib::compute::Board& board,            // the 5 x 3 ChArUco
     const std::vector<calib::Observation>& views,  // both, frame_id = capture
     const camera::ArrayCalibration& lenses) {      // intrinsic mode's file
+  namespace solve = calib::solve;
   namespace quality = calib::quality;
-  std::vector<quality::LensCheck> checks;
+  std::vector<solve::RigCamera> cameras;
   for (const char* id : {"bm-1", "bm-2"}) {
     const camera::SensorCalibration* entry = camera::find_sensor(lenses, id);
     if (entry == nullptr || !entry->color) {
       return core::Status::invalid_argument(std::string(id) +
                                             " has no lens: run intrinsic mode");
     }
+    cameras.push_back(
+        {id, entry->color->model, camera::IntrinsicsSource::Calibrated});
+  }
+  VKC_ASSIGN(const solve::InitialRig start,
+             solve::initialise(cameras, board, views, 0));
+  VKC_ASSIGN(const solve::RigSolution solution,
+             solve::bundle_adjust(cameras, board, views, start));
+  std::vector<quality::LensCheck> checks;
+  for (const solve::RigCamera& cam : cameras) {
     VKC_ASSIGN(quality::LensCheck check,
-               quality::check_lens(id, entry->color->model, board, views));
-    std::printf("%s: lens %s, %.2f px over %zu views %s\n", id,
+               quality::check_rig_lens(cam.id, cameras, solution));
+    std::printf("%s: lens %s, %.2f px over %zu views %s\n", cam.id.c_str(),
                 quality::to_string(check.verdict), check.rms_px, check.views,
                 check.reason.c_str());
     checks.push_back(std::move(check));
@@ -199,17 +209,22 @@ core::Result<std::vector<calib::quality::LensCheck>> check_lenses(
   return checks;
 }
 
-// A pair's 30 views of its middle, as main 3's: the true lenses fit them, and
-// leave the image's sides and corners unjudged.
-TEST(Api, ChecksThePairsLensesOnItsViews) {
+// A pair's 60 views, the board over each camera's view in turn: the true
+// lenses are good; bm-1's with its k1 1% high reads suspect.
+TEST(Api, ChecksThePairsLensesOnItsSolve) {
   const std::vector<calib::test::SyntheticCamera> pair =
       calib::test::lab_pair();
   const calib::compute::Board board = calib::test::femto_board();
   calib::test::ObserveOptions noise;
   noise.noise_px = 0.15;
   noise.portable = true;
-  const std::vector<calib::Observation> views = calib::test::observe(
-      pair, board, calib::test::view_plan(pair, 0, board), noise);
+  std::vector<calib::test::Placement> plan =
+      calib::test::view_plan(pair, 0, board);
+  for (calib::test::Placement& p : calib::test::view_plan(pair, 1, board)) {
+    plan.push_back(std::move(p));
+  }
+  const std::vector<calib::Observation> views =
+      calib::test::observe(pair, board, plan, noise);
   camera::ArrayCalibration lenses;
   for (const calib::test::SyntheticCamera& cam : pair) {
     camera::SensorCalibration& sensor = lenses.sensors.emplace_back();
@@ -217,16 +232,22 @@ TEST(Api, ChecksThePairsLensesOnItsViews) {
     sensor.color = camera::CameraCalibration{
         cam.model, camera::IntrinsicsSource::Calibrated};
   }
-  const core::Result<std::vector<calib::quality::LensCheck>> checks =
+  using Verdict = calib::quality::LensCheck::Verdict;
+  core::Result<std::vector<calib::quality::LensCheck>> checks =
       check_lenses(board, views, lenses);
   ASSERT_TRUE(checks.ok()) << checks.status().message();
   ASSERT_EQ(checks->size(), 2u);
   for (const calib::quality::LensCheck& check : *checks) {
-    EXPECT_EQ(check.verdict, calib::quality::LensCheck::Verdict::Insufficient)
+    EXPECT_EQ(check.verdict, Verdict::Good)
         << check.camera << ": " << check.reason;
-    EXPECT_GT(check.views, 20u) << check.camera;
-    EXPECT_LT(check.rms_px, 0.2) << check.camera;
+    EXPECT_EQ(check.views, plan.size()) << check.camera;
+    EXPECT_LT(check.rms_px, 0.25) << check.camera;
   }
+
+  lenses.sensors[0].color->model.distortion.k1 *= 1.01;
+  checks = check_lenses(board, views, lenses);
+  ASSERT_TRUE(checks.ok()) << checks.status().message();
+  EXPECT_EQ((*checks)[0].verdict, Verdict::Suspect) << (*checks)[0].reason;
 }
 
 }  // namespace

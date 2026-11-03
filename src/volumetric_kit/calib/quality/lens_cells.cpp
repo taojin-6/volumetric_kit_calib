@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <optional>
 
+#include "checks.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
 
 namespace volumetric_kit::calib::quality::detail {
@@ -26,7 +27,8 @@ struct Sums {
 
 std::array<LensCell, kLensCells> lens_cells(
     const std::vector<const solve::CornerResidual*>& corners,
-    camera::ImageSize size, double max_bias_px, int min_corners) {
+    camera::ImageSize size, double max_bias_px, int min_corners,
+    CellErrors errors) {
   std::array<Sums, kLensCells> sums;
   for (const solve::CornerResidual* r : corners) {
     if (!std::isfinite(r->residual.x) || !std::isfinite(r->residual.y))
@@ -51,8 +53,11 @@ std::array<LensCell, kLensCells> lens_cells(
     // it, of both components, over n.
     const double variance =
         std::max(0.0, (cell.squares - n * glm::dot(mean, mean)) / (n - 1.0));
+    const double t = errors == CellErrors::Three
+                         ? 3.0
+                         : student_t(static_cast<std::size_t>(cell.n));
     cells[c].mean_px = mean;
-    cells[c].limit_px = std::max(max_bias_px, 3.0 * std::sqrt(variance / n));
+    cells[c].limit_px = std::max(max_bias_px, t * std::sqrt(variance / n));
   }
   return cells;
 }

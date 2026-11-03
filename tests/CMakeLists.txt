@@ -174,9 +174,10 @@ vc_add_test(lens_gate volumetric_kit::calib_quality vc_synthetic_rig
             opencv_calib opencv_geometry)
 target_include_directories(vc_lens_gate_test SYSTEM
                            PRIVATE "${VC_JSON_INCLUDE_DIR}")
-# quality: a lens checked on views of either board posed through it, the true
-# lens and lenses bent or off, views spread and central, and, labelled slow,
-# noise alone over many seeds (`lens_check.sweeps`).
+# quality: a lens checked on views of either board posed through it and on a
+# solve's residuals, the lab-like pair's rig solve among them: the true lens and
+# lenses bent or off, sessions spread and short, and, labelled slow, noise alone
+# over many seeds (`lens_check.sweeps`).
 vc_add_test(lens_check volumetric_kit::calib_quality vc_synthetic_rig)
 vc_add_sweeps(lens_check)
 # quality: a stereo pair's rectified rows on a pair like the lab's, corners
