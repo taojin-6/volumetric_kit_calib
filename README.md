@@ -16,9 +16,9 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > `Status`/`Result` — builds and is tested (GoogleTest); so do the `compute`
 > tier's OpenCV bridge, the `detect` tier's board and tag detection, the `solve`
 > tier's rig and lens solves and the `quality` tier's live checks, solved-rig
-> metrics, lens gates and pair row check; with `VC_WITH_RIG`, the `source`
-> tier's grey pictures from any sensor source, the `capture` tier's session
-> writer, the `viz` tier's live and 3D views and the `depth` tier's
+> metrics, lens gates, lens check and pair row check; with `VC_WITH_RIG`, the
+> `source` tier's grey pictures from any sensor source, the `capture` tier's
+> session writer, the `viz` tier's live and 3D views and the `depth` tier's
 > board-plane fit and pairwise depth agreement; and, with GLFW and a sensor
 > driver too, Orbbec's or DeckLink's, the `app` tier's `calib_rig`, live view,
 > 3D view, capture and Calibrate, of each camera's lens or the rig's poses.
@@ -115,7 +115,11 @@ renderer.
   bound, no pattern left in the residuals over the image, no fold inside the
   frame, corners reaching the image's corners and sides), and a lens-only
   results directory
-  ([DECISIONS.md](DECISIONS.md#2026-11-01--a-cameras-lens-from-its-views)).
+  ([DECISIONS.md](DECISIONS.md#2026-11-01--a-cameras-lens-from-its-views));
+  and whether a lens holds on views of either board, a pose session's
+  ChArUco views among them: each posed through the lens held fixed, the
+  residuals held to the gates' RMS and cell limits
+  ([DECISIONS.md](DECISIONS.md#2026-11-02--a-lens-checked-on-views-of-any-board)).
   For a stereo pair: how far apart each board corner's rows land in its two
   rectified views, through sensor's own rectification at the runtime's size,
   judged cell by cell over the view, and whether the pair is named the right
@@ -184,7 +188,7 @@ it.
 | Detect | `detect/luma.hpp`, `detect/board.hpp`, `detect/tag.hpp` |
 | Views | `core/observation.hpp`, `core/detection.hpp`: the views are a `std::vector<Observation>`, by camera id and capture index |
 | Solve | `solve/initialise.hpp`, `solve/bundle_adjust.hpp`, `solve/world_tag.hpp`, `solve/lens.hpp` |
-| Quality | `quality/calibration_metrics.hpp`, `quality/results.hpp`, `quality/lens_gate.hpp`, `quality/pair_row_check.hpp` |
+| Quality | `quality/calibration_metrics.hpp`, `quality/results.hpp`, `quality/lens_gate.hpp`, `quality/lens_check.hpp`, `quality/pair_row_check.hpp` |
 | File | sensor's `camera/array_calibration.hpp`: calib formats it, the caller writes it |
 
 ## Prerequisites

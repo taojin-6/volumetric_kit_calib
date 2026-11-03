@@ -7,17 +7,16 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <limits>
 #include <map>
-#include <optional>
 #include <utility>
 
 #include <glm/trigonometric.hpp>
 
+#include "checks.hpp"
+#include "lens_cells.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
-#include "volumetric_kit/calib/compute/measures.hpp"
 #include "volumetric_kit/calib/quality/session_checks.hpp"
 #include "volumetric_kit/sensor/camera/projection.hpp"
 #include "volumetric_kit/sensor/camera/stereo_rectification.hpp"
@@ -26,16 +25,10 @@ namespace volumetric_kit::calib::quality {
 namespace {
 
 namespace camera = sensor::camera;
+using detail::number;
 using Use = solve::LensView::Use;
 
 constexpr double kInfinity = std::numeric_limits<double>::infinity();
-
-// `v` in a gate's message: "%.3g".
-std::string number(double v) {
-  char text[32];
-  std::snprintf(text, sizeof text, "%.3g", v);
-  return text;
-}
 
 core::Status check_options(const LensGateOptions& o) {
   const auto refuse = [](const char* name, const char* rule) {
@@ -94,9 +87,9 @@ core::Result<std::vector<const solve::CornerResidual*>> fitted_corners(
 // The gates on the held-out views: fills `failed` for each missed.
 void judge_holdout(const LensGateOptions& options, LensVerdict& out) {
   const solve::LensFit& judged = out.fit;
-  const double scale = judged.camera.model.size.width / 3840.0;
+  const camera::ImageSize& size = judged.camera.model.size;
   const double holdout = judged.holdout_rms_px;
-  const double most = options.max_holdout_rms_px * scale;
+  const double most = detail::at_width(options.max_holdout_rms_px, size);
   if (std::isnan(holdout)) {
     out.failed.push_back("no view was held out");
     return;
@@ -106,7 +99,7 @@ void judge_holdout(const LensGateOptions& options, LensVerdict& out) {
                          " px, above " + number(most) + " px");
   }
   const double ratio = holdout / judged.rms_px;
-  if (holdout > options.min_ratio_holdout_rms_px * scale &&
+  if (holdout > detail::at_width(options.min_ratio_holdout_rms_px, size) &&
       !(ratio <= options.max_holdout_ratio)) {
     out.failed.push_back("the held-out RMS is " + number(ratio) +
                          " times the fit's, above " +
@@ -121,45 +114,20 @@ void judge_holdout(const LensGateOptions& options, LensVerdict& out) {
   }
 }
 
-// One grid cell's fitted residuals.
-struct Cell {
-  int n = 0;
-  camera::Vec2d sum{0.0};
-  double squares = 0.0;  // of both components
-};
-
 // The bias gate: fills `worst_cell_bias_px`, `worst_cell`, and `failed` for
 // the cell past its limit by the most.
 void judge_bias(const std::vector<const solve::CornerResidual*>& corners,
                 const LensGateOptions& options, LensVerdict& out) {
-  const camera::ImageSize& size = out.fit.camera.model.size;
-  std::array<Cell, kCoverageCols * kCoverageRows> cells;
-  for (const solve::CornerResidual* r : corners) {
-    if (!std::isfinite(r->residual.x) || !std::isfinite(r->residual.y))
-      continue;
-    const std::optional<int> at = compute::grid_cell(
-        r->pixel.x, r->pixel.y, static_cast<int>(size.width),
-        static_cast<int>(size.height), kCoverageCols, kCoverageRows);
-    if (!at) continue;
-    Cell& cell = cells[static_cast<std::size_t>(*at)];
-    ++cell.n;
-    cell.sum += r->residual;
-    cell.squares += glm::dot(r->residual, r->residual);
-  }
+  const std::array<LensCell, kLensCells> cells =
+      detail::lens_cells(corners, out.fit.camera.model.size,
+                         options.max_cell_bias_px, options.min_cell_corners);
   double worst_over = 1.0;
   std::string failure;
   for (std::size_t c = 0; c < cells.size(); ++c) {
-    const Cell& cell = cells[c];
-    if (cell.n < options.min_cell_corners) continue;
-    const double n = cell.n;
-    const camera::Vec2d mean = cell.sum / n;
-    const double bias = glm::length(mean);
-    // The standard error of the mean, as a vector: the sample variance about
-    // it, of both components, over n.
-    const double variance =
-        std::max(0.0, (cell.squares - n * glm::dot(mean, mean)) / (n - 1.0));
-    const double limit =
-        std::max(options.max_cell_bias_px, 3.0 * std::sqrt(variance / n));
+    const LensCell& cell = cells[c];
+    if (cell.corners < options.min_cell_corners) continue;
+    const double bias = glm::length(cell.mean_px);
+    const double limit = cell.limit_px;
     if (bias >= out.worst_cell_bias_px) {
       out.worst_cell_bias_px = bias;
       out.worst_cell = {static_cast<int>(c) % kCoverageCols,

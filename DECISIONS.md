@@ -106,6 +106,56 @@ solve, the second camera pair) assemble the brain, and a rule that shows in
 review costs little. Freezing everything would stall the app; an ABI promise
 means nothing for a library nobody installs.
 
+## 2026-11-02 — A lens checked on views of any board
+
+`quality::check_lens` says whether a lens holds on one camera's views of
+either board (`quality/lens_check.hpp`): each view posed through the lens
+held fixed, the residuals held to the lens gates' limits. So a pose session's
+ChArUco views, taken as a checkerboard's, can say whether its lenses are good.
+The numbers are the lab lens's, synthetic, 0.15 px of corner noise.
+
+- **Posed as a held-out view.** `solve::pose_lens_views`
+  (`solve/lens_poses.hpp`, outside the stable table) poses each view through
+  the functions `solve_lens` poses a held-out one by; its corner bound is the
+  adjustment's rule over the views' residuals at their first poses, as
+  `solve_lens`'s is over the fitted views'. The fit itself is untouched.
+- **The lens gates' limits, by reference** (`LensCheckOptions`, from
+  `LensGateOptions`'s defaults): the RMS at most 0.5 px at 3840 wide, the
+  held-out views'; at most 1% of corners dropped, past the bound or in a view
+  left with no pose; each 8 x 6 cell of 30 corners within 0.1 px or 3
+  standard errors. The cells' maths and the width's scaling are one function
+  each, `judge_lens`'s too; its results are unchanged.
+- **Views of 6 corners or more:** a pose takes 6 of a view's numbers, so 6
+  corners leave 6 to show the lens, and a 5 x 3 board's view keeps its pose
+  with 2 corners lost. A corner 8 px off costs such a view that corner; one
+  10 px or more pulls the pose so far that its neighbours pass the bound, and
+  the view goes: 4 of the 377 views below would read suspect.
+- **The verdict:** `Suspect` for any limit passed, naming each, and each cell
+  by the part of the image it lies in; else `Insufficient` when a part of the
+  image's 3 x 3 split (the cells by their centres: 3, 2 and 3 columns, 2
+  rows each) has no judged cell, naming those parts and their fullest cell's
+  corners; else `Good`. Suspect comes first, as in the pair check: no capture
+  elsewhere mends it. `LensCheck::Verdict` is nested as `PairRowCheck`'s is,
+  and `check_lens` takes a camera id and `Observation`s, as `solve_lens`
+  does: a `LensView` holds no corners.
+- **What a view's pose hides:** any lens error close to affine over the board.
+  On the lab checkerboard, 110 views over the image: k1 1% high reads suspect
+  by its cells, 3% by the RMS too, and a step of 3 px over 100 px three
+  quarters across reads suspect in the right third alone at 0.37 px RMS; f 1%
+  high, cx 30 px off and k3 raised to 10 px at 70 degrees read good. On the
+  rig's 5 x 3 ChArUco board, 377 views: only a lens off by pixels reads
+  suspect (k3 raised to 5 px at 56 degrees, 23 at 65, by its RMS and its
+  corners past the bound); k1 3% high and the step of 6 px read good. Noise
+  alone (0.1, 0.2 and 0.3 px, both boards, 50 seeds: `lens_check.sweeps`)
+  read suspect in none of 300 checks, the worst cell at 0.62 of its limit.
+  A pose session's 30 views of the pair's middle (main 5) are insufficient:
+  at most 19 corners in a cell.
+- **The rig sees more:** its solve shares each capture's board pose between
+  the cameras. On those 30 views, k1 1% high on bm-1 moves the solve's RMS
+  from 0.19 to 0.64 px, and the check's from 0.169 to 0.174 px. Judging each
+  camera's cells over the solve's residuals as well is open, for calib_rig's
+  pose mode.
+
 ## 2026-11-02 — A DeckLink pair's poses
 
 calib_rig solves a DeckLink pair's poses (`operation` `calibrate`) as it

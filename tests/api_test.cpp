@@ -13,6 +13,7 @@
 #include "volumetric_kit/calib/core/target.hpp"
 #include "volumetric_kit/calib/detect/board.hpp"
 #include "volumetric_kit/calib/quality/calibration_metrics.hpp"
+#include "volumetric_kit/calib/quality/lens_check.hpp"
 #include "volumetric_kit/calib/quality/lens_gate.hpp"
 #include "volumetric_kit/calib/quality/pair_row_check.hpp"
 #include "volumetric_kit/calib/quality/results.hpp"
@@ -171,6 +172,61 @@ TEST(Api, PosesAPair) {
   const std::string pairs =
       files->report.substr(files->report.find("\"pairs\": ["));
   EXPECT_NE(pairs.find("\"verdict\": \"pass\""), std::string::npos) << pairs;
+}
+
+// Main 5, the lenses a pose session uses, checked on its views: each camera's
+// ChArUco views taken as a checkerboard's, posed through its lens held fixed.
+// Main 4 is source_rig_test's.
+core::Result<std::vector<calib::quality::LensCheck>> check_lenses(
+    const calib::compute::Board& board,            // the 5 x 3 ChArUco
+    const std::vector<calib::Observation>& views,  // both, frame_id = capture
+    const camera::ArrayCalibration& lenses) {      // intrinsic mode's file
+  namespace quality = calib::quality;
+  std::vector<quality::LensCheck> checks;
+  for (const char* id : {"bm-1", "bm-2"}) {
+    const camera::SensorCalibration* entry = camera::find_sensor(lenses, id);
+    if (entry == nullptr || !entry->color) {
+      return core::Status::invalid_argument(std::string(id) +
+                                            " has no lens: run intrinsic mode");
+    }
+    VKC_ASSIGN(quality::LensCheck check,
+               quality::check_lens(id, entry->color->model, board, views));
+    std::printf("%s: lens %s, %.2f px over %zu views %s\n", id,
+                quality::to_string(check.verdict), check.rms_px, check.views,
+                check.reason.c_str());
+    checks.push_back(std::move(check));
+  }
+  return checks;
+}
+
+// A pair's 30 views of its middle, as main 3's: the true lenses fit them, and
+// leave the image's sides and corners unjudged.
+TEST(Api, ChecksThePairsLensesOnItsViews) {
+  const std::vector<calib::test::SyntheticCamera> pair =
+      calib::test::lab_pair();
+  const calib::compute::Board board = calib::test::femto_board();
+  calib::test::ObserveOptions noise;
+  noise.noise_px = 0.15;
+  noise.portable = true;
+  const std::vector<calib::Observation> views = calib::test::observe(
+      pair, board, calib::test::view_plan(pair, 0, board), noise);
+  camera::ArrayCalibration lenses;
+  for (const calib::test::SyntheticCamera& cam : pair) {
+    camera::SensorCalibration& sensor = lenses.sensors.emplace_back();
+    sensor.id = cam.id;
+    sensor.color = camera::CameraCalibration{
+        cam.model, camera::IntrinsicsSource::Calibrated};
+  }
+  const core::Result<std::vector<calib::quality::LensCheck>> checks =
+      check_lenses(board, views, lenses);
+  ASSERT_TRUE(checks.ok()) << checks.status().message();
+  ASSERT_EQ(checks->size(), 2u);
+  for (const calib::quality::LensCheck& check : *checks) {
+    EXPECT_EQ(check.verdict, calib::quality::LensCheck::Verdict::Insufficient)
+        << check.camera << ": " << check.reason;
+    EXPECT_GT(check.views, 20u) << check.camera;
+    EXPECT_LT(check.rms_px, 0.2) << check.camera;
+  }
 }
 
 }  // namespace

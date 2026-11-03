@@ -5,10 +5,10 @@
 # What the views and the captures are worth, before and after the solve: the
 # live checks of each view and set, the capture rule, the session's checks, the
 # solved rig's metrics, the depth checks' geometry and verdicts over the
-# device's results, the boards on the origin tag's floor, a lens's readiness and
-# gates, a stereo pair's rectified rows, and its results files' text. Pure and
-# geometric, on core's detection records and solve's poses, view rule, tree,
-# adjustment, world and lens.
+# device's results, the boards on the origin tag's floor, a lens's readiness,
+# gates and check on views of any board, a stereo pair's rectified rows, and its
+# results files' text. Pure and geometric, on core's detection records and
+# solve's poses, view rule, tree, adjustment, world and lens.
 include(GenerateExportHeader)
 
 set(_vc_generated_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
@@ -22,6 +22,8 @@ target_sources(
           capture_rule.cpp
           depth_checks.cpp
           floor_boards.cpp
+          lens_cells.cpp
+          lens_check.cpp
           lens_gate.cpp
           lens_readiness.cpp
           live_checks.cpp

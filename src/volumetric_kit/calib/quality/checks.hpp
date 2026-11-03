@@ -6,12 +6,20 @@
 // What the quality tier's checks share: private to the tier.
 
 #include <cmath>
+#include <cstdio>
 #include <string>
 
 #include "volumetric_kit/calib/quality/live_checks.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 
 namespace volumetric_kit::calib::quality::detail {
+
+// `v` in a gate's message or a verdict's reason: "%.3g".
+inline std::string number(double v) {
+  char text[32];
+  std::snprintf(text, sizeof text, "%.3g", v);
+  return text;
+}
 
 // Refuses options out of range, each message `prefix` and the field's name.
 inline core::Status check_view_options(const ViewCheckOptions& options,

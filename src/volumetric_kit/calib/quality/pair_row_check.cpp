@@ -5,13 +5,13 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <map>
 #include <optional>
 #include <utility>
 
 #include <opencv2/core.hpp>
 
+#include "checks.hpp"
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/compute/measures.hpp"
@@ -22,6 +22,7 @@ namespace volumetric_kit::calib::quality {
 namespace {
 
 namespace camera = sensor::camera;
+using detail::number;
 using Verdict = PairRowCheck::Verdict;
 
 constexpr const char* kWho = "check_pair_rows";
@@ -30,13 +31,6 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr std::array<const char*, kPairRowCells> kCellNames = {
     "top-left", "top",         "top-right", "left",        "centre",
     "right",    "bottom-left", "bottom",    "bottom-right"};
-
-// `v` in a reason: "%.3g".
-std::string number(double v) {
-  char text[32];
-  std::snprintf(text, sizeof text, "%.3g", v);
-  return text;
-}
 
 core::Status check_options(const PairRowCheckOptions& o) {
   const auto refuse = [](const char* name, const char* rule) {

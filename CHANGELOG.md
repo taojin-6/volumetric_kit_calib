@@ -7,6 +7,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.7.0] - 2026-11-02
+
+### Added
+
+- **A lens checked on views of any board** (DECISIONS.md, 2026-11-02):
+  `quality::check_lens` (`quality/lens_check.hpp`, in the stable API) poses
+  each of a camera's views through a lens held fixed, ChArUco views of 8
+  corners as well as a checkerboard's, and holds the residuals to the lens
+  gates' limits: the RMS, the corners dropped and each 8 x 6 cell's mean
+  (`LensCheckOptions`, `LensCheck`, `LensCell`). `Suspect` names each limit
+  passed and the part of the image of each cell past its own;
+  `Insufficient`, the parts without a judged cell, where to capture.
+  `to_string(LensCheck::Verdict)`.
+- `solve::pose_lens_views` (`solve/lens_poses.hpp`, outside the stable
+  table): a camera's views posed through a lens held fixed, as `solve_lens`
+  poses a held-out view, and each corner's residual.
+- Sample main 5 in `tests/api_test.cpp`: the lenses a pose session uses,
+  checked on its views.
+- `lens_check.sweeps` (label `slow`): noise alone over 300 checks.
+
+### Changed
+
+- `judge_lens`'s bias gate and `check_lens` share one function for the
+  cells' means and limits; `judge_lens`'s results are unchanged.
+- calib's version is 0.7.0, where it was 0.6.0.
+
 ## [0.6.0] - 2026-11-02
 
 ### Added
