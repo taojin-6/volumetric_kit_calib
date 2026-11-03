@@ -1413,8 +1413,13 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     core::StageMetrics recorded;
     if (fresh && latest && mosaic_shown) {
       core::StageScope scope(recorded, "tiles");
-      VKC_TRY(
+      VKC_ASSIGN(
+          const std::vector<core::TimelinePoint> ready,
           record_snapshot(*mosaic, retire, frame.cmd, latest, frame.number));
+      // The decoders' ready values, reached: the copies see their writes.
+      for (const core::TimelinePoint& point : ready) {
+        frame.waits.push_back({point, VK_PIPELINE_STAGE_TRANSFER_BIT});
+      }
       VKC_ASSIGN(const std::vector<viz::TileRefusal> unsaid,
                  refusals_to_say(mosaic->refused(), refusals_said));
       for (const viz::TileRefusal& refusal : unsaid) {

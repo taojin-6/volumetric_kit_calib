@@ -38,7 +38,15 @@ namespace volumetric_kit::calib::app {
 
 /// @brief Record @p snapshot's pictures into @p mosaic, and hold its set in
 ///        @p retire until frame @p frame_number retires, so the pictures the
-///        copies read outlive them on the GPU.
+///        copies read, and the timelines the frame waits on, outlive them on
+///        the GPU.
+///
+/// A picture that carries a ready value (`sensor::YuvImage::ready`, as
+/// NVIDIA's decoders hand theirs out) is copied only once that value is
+/// reached, and its value is returned for the frame to wait for on the
+/// device, whatever view the set was taken in: gfx's frame loop takes only
+/// values already reached, and nothing here waits on the host. One not
+/// reached yet is left out, as a missing camera is.
 /// @param mosaic        The rig's mosaic, one tile per camera.
 /// @param retire        The window's retire queue, on its frame loop's
 ///                      timeline.
@@ -46,21 +54,30 @@ namespace volumetric_kit::calib::app {
 ///                      rendering scope, on the renderer's graphics queue.
 /// @param snapshot      The snapshot; each camera's picture is written into
 ///                      its tile -- its grey tile (`source::CameraPicture::
-///                      tile`), else its frame's colour -- and a missing one
-///                      keeps its last.
+///                      tile`), else its frame's colour -- and a missing one,
+///                      or one whose ready value is not reached, keeps its
+///                      last.
 /// @param frame_number  The frame's number (`windowing::Frame::number`).
-/// @return OK, with what the mosaic left out in its `refused`;
+/// @return What the frame's submission must wait for at
+///         `VK_PIPELINE_STAGE_TRANSFER_BIT`: the ready value of each picture
+///         handed to the mosaic, one a timeline (sensor's
+///         `add_ready_point`), every one already reached; empty when none
+///         carries one. What the mosaic left out is in its `refused`.
 ///         `InvalidArgument` for a null snapshot or one whose set has a
 ///         picture per camera missing or extra, with nothing recorded or
-///         held; the mosaic's `OutOfMemory`.
+///         held; a ready timeline's failure to be read, with nothing
+///         recorded or held; the mosaic's `OutOfMemory`.
 ///
 /// @code
 /// if (fresh) {
-///   VKC_TRY(record_snapshot(*mosaic, retire, frame.cmd, latest,
-///                           frame.number));
+///   VKC_ASSIGN(const auto ready, record_snapshot(*mosaic, retire, frame.cmd,
+///                                                latest, frame.number));
+///   for (const core::TimelinePoint& point : ready) {
+///     frame.waits.push_back({point, VK_PIPELINE_STAGE_TRANSFER_BIT});
+///   }
 /// }
 /// @endcode
-core::Status record_snapshot(
+core::Result<std::vector<core::TimelinePoint>> record_snapshot(
     viz::RigMosaic& mosaic, gfx::RetireQueue& retire, VkCommandBuffer cmd,
     const std::shared_ptr<const LiveSnapshot>& snapshot,
     std::uint64_t frame_number);

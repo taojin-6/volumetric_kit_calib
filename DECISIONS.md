@@ -1200,6 +1200,18 @@ The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
   write on a coding change alone, clearing uncovered tiles before converting
   the page. A refusal keeps the previous pictures and advances their ages
   as a set with no new picture does.
+- **A decoder's ready value, waited for on the device** (2026-11-03). A
+  picture whose writer did not wait for its work (`YuvImage::ready`, as
+  NVIDIA's decoders hand theirs out) is copied only in a frame whose
+  submission waits for that value at the transfer stage, whatever view the
+  set was taken in: one taken while the 3D view showed had no luma pass to
+  wait for it. gfx's frame loop takes only values already reached, and no
+  host waits on one (a host wait on a value CUDA sets wakes about 10 ms
+  late), so the window reads the value, never waits on it, and leaves out a
+  picture whose value is not reached yet, its tile keeping its last picture
+  until the next set. The live worker's luma pass and the 3D view's
+  preparation wait for it in their own batches (sensor's `LumaPass` and
+  `GpuFramePrep`); a capture copies host data alone.
 - **Marks in the detector's pixels.** Corners keep OpenCV's integer pixel
   centres, and gfx's `ImageOverlay` is the one home of the half-pixel and
   framebuffer-scale mapping onto a tile's region of the mosaic, of the clip

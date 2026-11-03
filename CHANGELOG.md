@@ -7,6 +7,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.10.0] - 2026-11-03
+
+### Fixed
+
+- calib_rig copies a decoder's picture that carries a ready value
+  (`YuvImage::ready`, NVIDIA's) into the mosaic only in a frame that waits
+  for that value on the device, whatever view the set was taken in
+  (DECISIONS.md, 2026-10-16, amended 2026-11-03). A set taken while the 3D
+  view showed had no luma pass to wait for it, so the first frame back on
+  the images could copy its pictures unwaited. `app::record_snapshot` now
+  returns each copied picture's ready value, already reached, for the frame
+  to wait for at `VK_PIPELINE_STAGE_TRANSFER_BIT`, and leaves out a picture
+  whose value is not reached yet, its tile keeping its last picture: gfx's
+  frame loop takes only reached values, and nothing waits on the host. It
+  returned a `Status`; its header is internal, outside the stable API.
+
+### Changed
+
+- calib's version is 0.10.0, where it was 0.9.0.
+
 ## [0.9.0] - 2026-11-03
 
 ### Added

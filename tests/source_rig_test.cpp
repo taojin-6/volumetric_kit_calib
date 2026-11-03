@@ -5,10 +5,11 @@
 // images, host luma) and a fake stereo sensor of host luma pairs, each set's
 // luma and half made by sensor's LumaPass and read back. Each set's pictures,
 // times and spread; its tiles, held by the set past the next take; the half
-// against a host reference; newest wins; the stereo source's refusals and its
-// skew bound; a poll's failure against a picture's; the ChArUco board found in
-// the GPU's half as in the CPU's; and sample main 4 of the design, reading a
-// source. Runs under the validation layer when the environment asks
+// against a host reference; newest wins; a decoder's picture read only once
+// its ready value is set; the stereo source's refusals and its skew bound; a
+// poll's failure against a picture's; the ChArUco board found in the GPU's
+// half as in the CPU's; and sample main 4 of the design, reading a source.
+// Runs under the validation layer when the environment asks
 // (VKC_TEST_VALIDATION); skips without a Vulkan device.
 
 #include <gtest/gtest.h>
@@ -18,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
@@ -39,8 +41,10 @@
 #include "volumetric_kit/core/testing/write_image.hpp"
 #include "volumetric_kit/core/vulkan/allocator.hpp"
 #include "volumetric_kit/core/vulkan/image.hpp"
+#include "volumetric_kit/core/vulkan/sync.hpp"
 #include "volumetric_kit/sensor/frame/device_requirements.hpp"
 #include "volumetric_kit/sensor/prep/picture_readback.hpp"
+#include "volumetric_kit/sensor/testing/nv12_picture.hpp"
 
 namespace volumetric_kit::calib::source {
 namespace {
@@ -555,6 +559,59 @@ TEST_F(SourceArray, NoGreyTileWhereTheDecodersImagesShowColour) {
   ASSERT_NE(set->rgbd, nullptr);
   EXPECT_TRUE(set->rgbd->frames[0]->has_color());
   EXPECT_EQ(rows_of(rig->host()[0].luma), luma);
+}
+
+// A decoder's picture that carries a ready value, as NVIDIA's do, is read by
+// the luma pass only once the value is set: the take waits for it on the
+// device, with no host wait on the value, and then reads the picture.
+TEST_F(SourceArray, ReadsADecodersPictureOnlyOnceItsReadyValueIsSet) {
+  const std::vector<std::uint8_t> luma = pattern(kWidth, kHeight, 9);
+  sensor::testing::HostNv12 host;
+  host.width = kWidth;
+  host.height = kHeight;
+  host.luma = luma;
+  host.chroma.assign(std::size_t{kWidth} * kHeight / 2, 128);
+  core::Result<sensor::YuvImage> picture =
+      sensor::testing::device_picture(device(), allocator(), host);
+  ASSERT_TRUE(picture.ok()) << picture.status().message();
+  core::Result<core::TimelineSemaphore> made =
+      core::TimelineSemaphore::create(device());
+  ASSERT_TRUE(made.ok()) << made.status().message();
+  const auto ready =
+      std::make_shared<core::TimelineSemaphore>(std::move(made).value());
+  picture->ready = ready;
+  picture->ready_value = 1;
+  make_array({picture.value()});
+  std::unique_ptr<RigSource> rig = open();
+  ASSERT_NE(rig, nullptr);
+  ASSERT_TRUE(rig->start().ok());
+  push(1);
+  using Taken = core::Result<std::optional<PictureSet>>;
+  std::future<Taken> taken = std::async(std::launch::async, [&]() -> Taken {
+    for (;;) {
+      Taken next = rig->take();
+      if (!next.ok() || next.value()) return next;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  });
+  // The array has the frame, and the take its set; it waits on the device.
+  // Nothing returns before the value is set, so no take is left waiting.
+  const auto give_up = std::chrono::steady_clock::now() + kPatience;
+  while (fakes_[0]->queued() != 0 &&
+         std::chrono::steady_clock::now() < give_up) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  const bool waited =
+      taken.wait_for(std::chrono::seconds(0)) == std::future_status::timeout;
+  const bool set = ready->signal(1).ok();
+  ASSERT_TRUE(set);
+  EXPECT_TRUE(waited);
+  Taken result = taken.get();
+  ASSERT_TRUE(result.ok()) << result.status().message();
+  ASSERT_TRUE(result.value().has_value());
+  EXPECT_EQ(rows_of(rig->host()[0].luma), luma);
+  EXPECT_EQ(rows_of(rig->host()[0].half), half_of(luma, kWidth, kHeight));
 }
 
 TEST_F(SourceArray, RefusesACameraWithoutColour) {

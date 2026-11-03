@@ -5,15 +5,18 @@
 // own tile of the rig mosaic, a camera missing from the next set keeping its
 // last picture, and the set held until the frame that copied it retires on
 // the window's timeline; a snapshot that does not fit refused with nothing
-// held. Then the app's device split: the live worker reads a camera's picture
-// back on the compute library's queue family while the window copies the same
-// images into the mosaic on the renderer's. Then each camera's tile refusal,
-// said once, the marks and panels a snapshot gives each camera, the origin
-// tag's coverage of the captures kept, and the 3D view's cameras before and
-// at Calibrate's result. The GPU
-// cases run under the validation layer
-// when the environment asks (VKC_TEST_VALIDATION) and skip without a Vulkan
-// device, the cross-family case also with one family.
+// held; a decoder's picture with a ready value copied only once it is
+// reached, in a frame that waits for it. Then the app's device split: the
+// live worker reads a camera's picture back on the compute library's queue
+// family while the window copies the same images into the mosaic on the
+// renderer's; and a set taken while the 3D view showed, its picture's ready
+// value set later, read by neither the 3D view's worker nor the window
+// before it. Then each camera's tile refusal, said once, the marks and panels
+// a snapshot gives each camera, the origin tag's coverage of the captures
+// kept, and the 3D view's cameras before and at Calibrate's result. The GPU
+// cases run under the validation layer when the environment asks
+// (VKC_TEST_VALIDATION) and skip without a Vulkan device, the cross-family
+// cases also with one family.
 
 #include "volumetric_kit/calib/app/live_view.hpp"
 
@@ -28,6 +31,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -42,8 +46,10 @@
 #include "volumetric_kit/core/vulkan/allocator.hpp"
 #include "volumetric_kit/core/vulkan/command_buffer.hpp"
 #include "volumetric_kit/core/vulkan/command_pool.hpp"
+#include "volumetric_kit/core/vulkan/device.hpp"
 #include "volumetric_kit/core/vulkan/image.hpp"
 #include "volumetric_kit/core/vulkan/sync.hpp"
+#include "volumetric_kit/core/vulkan/vk_result.hpp"
 #include "volumetric_kit/gfx/core/device_requirements.hpp"
 #include "volumetric_kit/gfx/core/offscreen_target.hpp"
 #include "volumetric_kit/gfx/pipelines/color.hpp"
@@ -68,14 +74,17 @@ sensor::testing::HostNv12 grey_nv12(std::uint32_t width, std::uint32_t height,
 }
 
 // @p host's NV12 planes in device images written on @p device's queue and
-// left in GENERAL, as sensor's testing::device_picture makes them, but
-// CONCURRENT across @p families, as calib_rig's decoded pictures are (sensor's
-// color_queue_families). sensor's are exclusive to the device's family, and no
-// public helper makes them concurrent.
+// left in GENERAL, each with a view and SAMPLED usage, as sensor's
+// testing::device_picture makes them, but CONCURRENT across @p families, as
+// calib_rig's decoded pictures are (sensor's color_queue_families), or
+// exclusive to the device's family with none. sensor's are always exclusive,
+// and no public helper makes them concurrent. @p luma, when given, is the
+// luma image, which the test rewrites as a decoder writes its next picture.
 core::Result<sensor::YuvImage> concurrent_picture(
     const core::Device& device, core::Allocator& allocator,
     const sensor::testing::HostNv12& host,
-    const std::vector<std::uint32_t>& families) {
+    const std::vector<std::uint32_t>& families,
+    std::shared_ptr<core::Image>* luma = nullptr) {
   struct Plane {
     const std::vector<std::uint8_t>* bytes;
     std::uint32_t width, height;
@@ -93,18 +102,73 @@ core::Result<sensor::YuvImage> concurrent_picture(
     core::ImageDesc desc;
     desc.extent = {planes[k].width, planes[k].height};
     desc.format = planes[k].format;
-    desc.usage =
-        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    desc.with_view = false;
-    desc.queue_families = families.data();
+    desc.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                 VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    desc.queue_families = families.empty() ? nullptr : families.data();
     desc.queue_family_count = static_cast<std::uint32_t>(families.size());
     VKC_ASSIGN(core::Image image, allocator.create_image(desc));
     VKC_TRY(core::test::write_image(
         device, allocator, image, planes[k].bytes->data(),
         planes[k].bytes->size(), VK_IMAGE_LAYOUT_GENERAL));
-    picture.image[k] = std::make_shared<const core::Image>(std::move(image));
+    auto shared = std::make_shared<core::Image>(std::move(image));
+    if (k == 0 && luma != nullptr) *luma = shared;
+    picture.image[k] = std::move(shared);
   }
   return picture;
+}
+
+// Sets `timeline` to `value` as it goes, unless it is there already, so a
+// test that fails early leaves nothing waiting for it: a retire queue, or a
+// batch waiting on the device.
+struct SetOnExit {
+  core::TimelineSemaphore& timeline;
+  std::uint64_t value;
+  ~SetOnExit() {
+    const core::Result<std::uint64_t> now = timeline.value();
+    if (now.ok() && now.value() < value) (void)timeline.signal(value);
+  }
+};
+
+// Whether @p waits are one wait, for @p value on @p semaphore.
+bool waits_for(const std::vector<core::TimelinePoint>& waits,
+               const core::TimelineSemaphore* semaphore, std::uint64_t value) {
+  return waits.size() == 1 && waits[0].semaphore == semaphore &&
+         waits[0].value == value;
+}
+
+// Submits @p cmd, ended, to @p device's queue as gfx's frame loop submits a
+// frame -- after @p waits, each at the TRANSFER stage, which the loop takes
+// only once reached (core::TimelineWaits::Reached) -- and waits for it.
+core::Status submit_frame(const core::Device& device, VkCommandBuffer cmd,
+                          const std::vector<core::TimelinePoint>& waits) {
+  VKC_TRY(core::check_timeline_points(device, waits, {}, "submit_frame",
+                                      core::TimelineWaits::Reached));
+  std::vector<VkSemaphore> semaphores;
+  std::vector<std::uint64_t> values;
+  for (const core::TimelinePoint& wait : waits) {
+    semaphores.push_back(wait.semaphore->handle());
+    values.push_back(wait.value);
+  }
+  const std::vector<VkPipelineStageFlags> stages(
+      waits.size(), VK_PIPELINE_STAGE_TRANSFER_BIT);
+  VkTimelineSemaphoreSubmitInfo timeline{};
+  timeline.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+  timeline.waitSemaphoreValueCount = static_cast<std::uint32_t>(values.size());
+  timeline.pWaitSemaphoreValues = values.data();
+  VkSubmitInfo submit{};
+  submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submit.pNext = &timeline;
+  submit.waitSemaphoreCount = static_cast<std::uint32_t>(semaphores.size());
+  submit.pWaitSemaphores = semaphores.data();
+  submit.pWaitDstStageMask = stages.data();
+  submit.commandBufferCount = 1;
+  submit.pCommandBuffers = &cmd;
+  VKC_ASSIGN(const core::Fence fence, core::Fence::create(device.handle()));
+  const VkResult submitted = device.queue_submit(1, &submit, fence.handle());
+  if (submitted != VK_SUCCESS) {
+    return core::vk_error(submitted, "submit_frame: vkQueueSubmit");
+  }
+  return fence.wait();
 }
 
 constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
@@ -119,11 +183,111 @@ gfx::RenderTargetLayout color_layout() {
   return layout;
 }
 
+// A kTileW x kTileH picture of one grey.
+sensor::testing::HostNv12 flat_grey(std::uint8_t level) {
+  return grey_nv12(
+      kTileW, kTileH,
+      std::vector<std::uint8_t>(std::size_t{kTileW} * kTileH, level));
+}
+
 // A set of one frame per luma, a picture of that grey; none where empty.
 struct Set {
   std::shared_ptr<const sensor::FrameSet> frames;
   std::vector<std::weak_ptr<const void>> pixels;  // each frame's
 };
+
+// The set as a source hands an array's set out: each frame's NV12 images its
+// colour tile.
+std::shared_ptr<const source::PictureSet> pictures_of(
+    const std::shared_ptr<const sensor::FrameSet>& frames) {
+  auto set = std::make_shared<source::PictureSet>();
+  for (const std::optional<sensor::RgbdFrame>& frame : frames->frames) {
+    source::CameraPicture& picture = set->cameras.emplace_back();
+    picture.present = frame.has_value();
+  }
+  set->rgbd = frames;
+  return set;
+}
+
+std::shared_ptr<const LiveSnapshot> snapshot_of(const Set& set) {
+  auto snapshot = std::make_shared<LiveSnapshot>();
+  snapshot->set = pictures_of(set.frames);
+  const std::size_t n = set.frames->frames.size();
+  snapshot->detections.resize(n);
+  snapshot->checks.resize(n);
+  snapshot->errors.resize(n);
+  return snapshot;
+}
+
+// The mosaic of `n` kTileW x kTileH tiles on `device`, fitted to kExtent.
+std::unique_ptr<viz::RigMosaic> make_mosaic(const core::Device& device,
+                                            core::Allocator& allocator,
+                                            std::size_t n) {
+  core::Result<std::unique_ptr<viz::RigMosaic>> mosaic = viz::RigMosaic::create(
+      device, allocator, color_layout(),
+      std::vector<sensor::camera::ImageSize>(n, {kTileW, kTileH}));
+  EXPECT_TRUE(mosaic.ok()) << mosaic.status().message();
+  if (!mosaic.ok()) return nullptr;
+  mosaic.value()->view().set_viewport(
+      {0.0f, 0.0f},
+      {static_cast<float>(kExtent.width), static_cast<float>(kExtent.height)});
+  mosaic.value()->view().fit();
+  return std::move(mosaic).value();
+}
+
+// Records the snapshot into the mosaic as frame `number` on `device`, draws
+// the mosaic, submits the frame after the waits the record returns
+// (submit_frame), and returns the target's pixels; `waits`, when given, gets
+// those waits.
+std::vector<std::uint8_t> render(
+    const core::Device& device, core::Allocator& allocator,
+    viz::RigMosaic& mosaic, gfx::RetireQueue& retire,
+    const std::shared_ptr<const LiveSnapshot>& s, std::uint64_t number,
+    std::vector<core::TimelinePoint>* waits = nullptr) {
+  gfx::OffscreenTargetDesc desc;
+  desc.extent = kExtent;
+  desc.color_format = kFormat;
+  core::Result<gfx::OffscreenTarget> target =
+      gfx::OffscreenTarget::create(allocator, desc);
+  core::Result<core::CommandPool> pool =
+      core::CommandPool::create(device.handle(), device.queue_family());
+  EXPECT_TRUE(target.ok() && pool.ok());
+  if (!target.ok() || !pool.ok()) return {};
+  core::Result<core::CommandBuffer> cmd = pool.value().allocate_primary();
+  EXPECT_TRUE(cmd.ok());
+  if (!cmd.ok()) return {};
+  EXPECT_TRUE(
+      cmd.value().begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT).ok());
+  const VkCommandBuffer raw = cmd.value().handle();
+  core::Result<std::vector<core::TimelinePoint>> recorded =
+      record_snapshot(mosaic, retire, raw, s, number);
+  EXPECT_TRUE(recorded.ok()) << recorded.status().message();
+  if (!recorded.ok()) return {};
+  if (waits != nullptr) *waits = recorded.value();
+  target.value().prepare(raw);
+  const gfx::RenderTarget rt = target.value().target();
+  rt.begin(raw, gfx::RenderTargetBeginInfo{});
+  mosaic.draw(raw, kExtent);
+  rt.end(raw);
+  target.value().record_readback(raw);
+  EXPECT_TRUE(cmd.value().end().ok());
+  const core::Status submitted = submit_frame(device, raw, recorded.value());
+  EXPECT_TRUE(submitted.ok()) << submitted.message();
+  if (!submitted.ok()) return {};
+  const auto* px = static_cast<const std::uint8_t*>(target.value().pixels());
+  return {px, px + std::size_t{kExtent.width} * kExtent.height * 4};
+}
+
+// The grey at the middle of tile `i`, as drawn.
+int tile_grey(const viz::RigMosaic& mosaic,
+              const std::vector<std::uint8_t>& pixels, std::size_t i) {
+  const gfx::ui::OverlayRegion region = mosaic.tile_region(i);
+  const glm::vec2 middle =
+      mosaic.view().image_to_target(region.origin + 0.5f * region.size);
+  const auto x = static_cast<std::size_t>(middle.x);
+  const auto y = static_cast<std::size_t>(middle.y);
+  return pixels[(y * kExtent.width + x) * 4 + 1];
+}
 
 class AppLiveView : public core::test::VulkanDeviceTest {
  protected:
@@ -131,7 +295,9 @@ class AppLiveView : public core::test::VulkanDeviceTest {
     return gfx::device_requirements();
   }
 
-  Set make_set(const std::vector<std::optional<std::uint8_t>>& grey) {
+  // Camera 0's picture is `first` when given.
+  Set make_set(const std::vector<std::optional<std::uint8_t>>& grey,
+               std::optional<sensor::YuvImage> first = std::nullopt) {
     auto set = std::make_shared<sensor::FrameSet>();
     Set out;
     for (const std::optional<std::uint8_t>& level : grey) {
@@ -141,13 +307,15 @@ class AppLiveView : public core::test::VulkanDeviceTest {
         continue;
       }
       sensor::RgbdFrame frame;
-      core::Result<sensor::YuvImage> picture = sensor::testing::device_picture(
-          device(), allocator(),
-          grey_nv12(
-              kTileW, kTileH,
-              std::vector<std::uint8_t>(std::size_t{kTileW} * kTileH, *level)));
-      EXPECT_TRUE(picture.ok()) << picture.status().message();
-      if (picture.ok()) frame.color = std::move(picture).value();
+      if (first && set->frames.empty()) {
+        frame.color = *first;
+      } else {
+        core::Result<sensor::YuvImage> picture =
+            sensor::testing::device_picture(device(), allocator(),
+                                            flat_grey(*level));
+        EXPECT_TRUE(picture.ok()) << picture.status().message();
+        if (picture.ok()) frame.color = std::move(picture).value();
+      }
       auto held = std::make_shared<int>(*level);
       out.pixels.emplace_back(held);
       frame.pixels = std::move(held);
@@ -157,90 +325,15 @@ class AppLiveView : public core::test::VulkanDeviceTest {
     return out;
   }
 
-  // The set as a source hands an array's set out: each frame's NV12 images
-  // its colour tile.
-  static std::shared_ptr<const source::PictureSet> pictures_of(
-      const std::shared_ptr<const sensor::FrameSet>& frames) {
-    auto set = std::make_shared<source::PictureSet>();
-    for (const std::optional<sensor::RgbdFrame>& frame : frames->frames) {
-      source::CameraPicture& picture = set->cameras.emplace_back();
-      picture.present = frame.has_value();
-    }
-    set->rgbd = frames;
-    return set;
-  }
-
-  static std::shared_ptr<const LiveSnapshot> snapshot_of(const Set& set) {
-    auto snapshot = std::make_shared<LiveSnapshot>();
-    snapshot->set = pictures_of(set.frames);
-    const std::size_t n = set.frames->frames.size();
-    snapshot->detections.resize(n);
-    snapshot->checks.resize(n);
-    snapshot->errors.resize(n);
-    return snapshot;
-  }
-
-  // Records the snapshot into the mosaic as frame `number`, draws the mosaic,
-  // and returns the target's pixels.
-  std::vector<std::uint8_t> render(viz::RigMosaic& mosaic,
-                                   gfx::RetireQueue& retire,
-                                   const std::shared_ptr<const LiveSnapshot>& s,
-                                   std::uint64_t number) {
-    gfx::OffscreenTargetDesc desc;
-    desc.extent = kExtent;
-    desc.color_format = kFormat;
-    core::Result<gfx::OffscreenTarget> target =
-        gfx::OffscreenTarget::create(allocator(), desc);
-    core::Result<core::CommandPool> pool =
-        core::CommandPool::create(device().handle(), device().queue_family());
-    EXPECT_TRUE(target.ok() && pool.ok());
-    if (!target.ok() || !pool.ok()) return {};
-    core::Result<core::CommandBuffer> cmd = pool.value().allocate_primary();
-    EXPECT_TRUE(cmd.ok());
-    if (!cmd.ok()) return {};
-    EXPECT_TRUE(
-        cmd.value().begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT).ok());
-    const VkCommandBuffer raw = cmd.value().handle();
-    const core::Status recorded =
-        record_snapshot(mosaic, retire, raw, s, number);
-    EXPECT_TRUE(recorded.ok()) << recorded.message();
-    target.value().prepare(raw);
-    const gfx::RenderTarget rt = target.value().target();
-    rt.begin(raw, gfx::RenderTargetBeginInfo{});
-    mosaic.draw(raw, kExtent);
-    rt.end(raw);
-    target.value().record_readback(raw);
-    EXPECT_TRUE(cmd.value().end().ok());
-    const core::Status submitted = device().submit_and_wait(raw);
-    EXPECT_TRUE(submitted.ok()) << submitted.message();
-    if (!submitted.ok()) return {};
-    const auto* px = static_cast<const std::uint8_t*>(target.value().pixels());
-    return {px, px + std::size_t{kExtent.width} * kExtent.height * 4};
-  }
-
-  // The grey at the middle of tile `i`, as drawn.
-  static int tile_grey(const viz::RigMosaic& mosaic,
-                       const std::vector<std::uint8_t>& pixels, std::size_t i) {
-    const gfx::ui::OverlayRegion region = mosaic.tile_region(i);
-    const glm::vec2 middle =
-        mosaic.view().image_to_target(region.origin + 0.5f * region.size);
-    const auto x = static_cast<std::size_t>(middle.x);
-    const auto y = static_cast<std::size_t>(middle.y);
-    return pixels[(y * kExtent.width + x) * 4 + 1];
+  std::vector<std::uint8_t> render(
+      viz::RigMosaic& mosaic, gfx::RetireQueue& retire,
+      const std::shared_ptr<const LiveSnapshot>& s, std::uint64_t number,
+      std::vector<core::TimelinePoint>* waits = nullptr) {
+    return app::render(device(), allocator(), mosaic, retire, s, number, waits);
   }
 
   std::unique_ptr<viz::RigMosaic> make_mosaic(std::size_t n) {
-    core::Result<std::unique_ptr<viz::RigMosaic>> mosaic =
-        viz::RigMosaic::create(
-            device(), allocator(), color_layout(),
-            std::vector<sensor::camera::ImageSize>(n, {kTileW, kTileH}));
-    EXPECT_TRUE(mosaic.ok()) << mosaic.status().message();
-    if (!mosaic.ok()) return nullptr;
-    mosaic.value()->view().set_viewport({0.0f, 0.0f},
-                                        {static_cast<float>(kExtent.width),
-                                         static_cast<float>(kExtent.height)});
-    mosaic.value()->view().fit();
-    return std::move(mosaic).value();
+    return app::make_mosaic(device(), allocator(), n);
   }
 };
 
@@ -293,14 +386,75 @@ TEST_F(AppLiveView, RefusesASnapshotThatDoesNotFitTheMosaic) {
   ASSERT_TRUE(timeline.ok());
   gfx::RetireQueue retire(timeline.value());
   core::Status refused =
-      record_snapshot(*mosaic, retire, VK_NULL_HANDLE, nullptr, 1);
+      record_snapshot(*mosaic, retire, VK_NULL_HANDLE, nullptr, 1).status();
   EXPECT_EQ(refused.domain(), Code::InvalidArgument);
   const Set three = make_set({10, 20, 30});
   refused =
-      record_snapshot(*mosaic, retire, VK_NULL_HANDLE, snapshot_of(three), 1);
+      record_snapshot(*mosaic, retire, VK_NULL_HANDLE, snapshot_of(three), 1)
+          .status();
   EXPECT_EQ(refused.domain(), Code::InvalidArgument);
   EXPECT_NE(refused.message().find("a set of 3 pictures for a mosaic of 2"),
             std::string::npos);
+  EXPECT_EQ(retire.pending(), 0u);
+}
+
+// A decoder's picture that carries a ready value, as NVIDIA's do, is copied
+// only once the value is reached, in a frame that waits for it on the device
+// at the copy's stage, as gfx's frame loop takes it: before, its tile keeps
+// its last picture and the frame waits for nothing, so the tile shows what
+// the decoder wrote before setting the value, never what the picture held
+// before. A picture without one is copied as ever.
+TEST_F(AppLiveView, CopiesADecodersPictureInAFrameThatWaitsForItsReadyValue) {
+  std::unique_ptr<viz::RigMosaic> mosaic = make_mosaic(2);
+  ASSERT_NE(mosaic, nullptr);
+  core::Result<core::TimelineSemaphore> timeline =
+      core::TimelineSemaphore::create(device());
+  ASSERT_TRUE(timeline.ok()) << timeline.status().message();
+  gfx::RetireQueue retire(timeline.value());
+  const SetOnExit retired{timeline.value(), 3};
+  core::Result<core::TimelineSemaphore> made =
+      core::TimelineSemaphore::create(device());
+  ASSERT_TRUE(made.ok()) << made.status().message();
+  const auto ready =
+      std::make_shared<core::TimelineSemaphore>(std::move(made).value());
+
+  Set first = make_set({40, 120});
+  std::vector<std::uint8_t> pixels =
+      render(*mosaic, retire, snapshot_of(first), 1);
+  ASSERT_FALSE(pixels.empty());
+
+  // Camera 0's next picture, its decoder's copy under way until it sets 1.
+  std::shared_ptr<core::Image> luma;
+  core::Result<sensor::YuvImage> decoded =
+      concurrent_picture(device(), allocator(), flat_grey(90), {}, &luma);
+  ASSERT_TRUE(decoded.ok()) << decoded.status().message();
+  decoded->ready = ready;
+  decoded->ready_value = 1;
+  const Set second = make_set({90, 200}, decoded.value());
+  const std::shared_ptr<const LiveSnapshot> snapshot = snapshot_of(second);
+  std::vector<core::TimelinePoint> waits;
+  pixels = render(*mosaic, retire, snapshot, 2, &waits);
+  ASSERT_FALSE(pixels.empty());
+  EXPECT_TRUE(waits.empty());
+  EXPECT_NEAR(tile_grey(*mosaic, pixels, 0), 40, 3);  // its last picture
+  EXPECT_NEAR(tile_grey(*mosaic, pixels, 1), 200, 3);
+  EXPECT_EQ(mosaic->sets_since_picture(0), std::optional<std::uint64_t>(1));
+  EXPECT_TRUE(mosaic->refused().empty());
+
+  // The copy lands, then the decoder sets the value.
+  const sensor::testing::HostNv12 written = flat_grey(150);
+  ASSERT_TRUE(core::test::write_image(device(), allocator(), *luma,
+                                      written.luma.data(), written.luma.size(),
+                                      VK_IMAGE_LAYOUT_GENERAL)
+                  .ok());
+  ASSERT_TRUE(ready->signal(1).ok());
+  pixels = render(*mosaic, retire, snapshot, 3, &waits);
+  ASSERT_FALSE(pixels.empty());
+  EXPECT_TRUE(waits_for(waits, ready.get(), 1));
+  EXPECT_NEAR(tile_grey(*mosaic, pixels, 0), 150, 3);
+  EXPECT_NEAR(tile_grey(*mosaic, pixels, 1), 200, 3);
+  ASSERT_TRUE(timeline.value().signal(3).ok());
+  retire.poll();
   EXPECT_EQ(retire.pending(), 0u);
 }
 
@@ -403,9 +557,10 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
   ASSERT_TRUE(
       cmd.value().begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT).ok());
   const VkCommandBuffer raw = cmd.value().handle();
-  const core::Status recorded =
+  const core::Result<std::vector<core::TimelinePoint>> recorded =
       record_snapshot(tiles, retire, raw, snapshot, 1);
-  ASSERT_TRUE(recorded.ok()) << recorded.message();
+  ASSERT_TRUE(recorded.ok()) << recorded.status().message();
+  EXPECT_TRUE(recorded->empty());  // a picture with no ready value
   target.value().prepare(raw);
   const gfx::RenderTarget rt = target.value().target();
   rt.begin(raw, gfx::RenderTargetBeginInfo{});
@@ -430,6 +585,142 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
 
   live.value()->stop();
   ASSERT_TRUE(timeline.value().signal(1).ok());
+  retire.poll();
+  EXPECT_EQ(retire.pending(), 0u);
+}
+
+// As calib_rig runs with the 3D view shown: a camera's decoded picture
+// carries a ready value its decoder sets later, as NVIDIA's do. The live
+// worker, not detecting, takes the set with no luma pass and publishes it at
+// once, reading nothing; the 3D view's worker, offered the set, prepares it
+// on the compute family only once the value is set, its batch waiting on
+// the device; and the window, back on the images before then, leaves the
+// picture out, waiting for nothing, and copies it on the graphics family
+// after, in a frame that waits for the value.
+TEST_F(AppLiveCrossFamily, ASetTakenWhileThe3DViewShowedIsReadAfterItsValue) {
+  core::test::TwoFamilyDevice& two = two_family();
+  const std::vector<std::uint32_t> families(two.families().begin(),
+                                            two.families().end());
+  core::Result<core::TimelineSemaphore> made =
+      core::TimelineSemaphore::create(two.compute());
+  ASSERT_TRUE(made.ok()) << made.status().message();
+  const auto ready =
+      std::make_shared<core::TimelineSemaphore>(std::move(made).value());
+  core::Result<sensor::YuvImage> decoded = concurrent_picture(
+      two.compute(), two.compute_allocator(), flat_grey(90), families);
+  ASSERT_TRUE(decoded.ok()) << decoded.status().message();
+  decoded->ready = ready;
+  decoded->ready_value = 1;
+
+  sensor::camera::CameraModel lens;
+  lens.size = {kTileW, kTileH};
+  lens.intrinsics = {30.0, 30.0, 16.0, 12.0};
+  sensor::camera::CameraModel depth_lens;
+  depth_lens.size = {16, 12};
+  depth_lens.intrinsics = {15.0, 15.0, 8.0, 6.0};
+  sensor::SensorInfo info;
+  info.id = "SYN0";
+  info.color = lens;
+  info.depth = depth_lens;
+  info.fps = 25;
+  auto fake = std::make_unique<test::FakeSensor>(info);
+  test::FakeSensor& camera = *fake;
+  std::vector<std::unique_ptr<sensor::IRgbdSensor>> sensors;
+  sensors.push_back(std::move(fake));
+  core::Result<sensor::SensorArray> array =
+      sensor::SensorArray::open(std::move(sensors), {});
+  ASSERT_TRUE(array.ok()) << array.status().message();
+  core::Result<std::unique_ptr<source::RigSource>> rig =
+      source::RigSource::open(std::move(array).value(), two.compute(),
+                              two.compute_allocator(), families);
+  ASSERT_TRUE(rig.ok()) << rig.status().message();
+  CloudOptions every_set;
+  every_set.live_every = 1;
+  core::Result<std::unique_ptr<CloudWorker>> cloud = CloudWorker::create(
+      two.compute(), two.compute_allocator(), 1, families, every_set);
+  ASSERT_TRUE(cloud.ok()) << cloud.status().message();
+  core::Result<std::unique_ptr<LiveWorker>> live =
+      LiveWorker::create(std::move(rig).value(), {lens}, legacy_femto_board(),
+                         false, nullptr, cloud.value().get());
+  ASSERT_TRUE(live.ok()) << live.status().message();
+  std::unique_ptr<viz::RigMosaic> mosaic =
+      make_mosaic(two.graphics(), two.graphics_allocator(), 1);
+  ASSERT_NE(mosaic, nullptr);
+  core::Result<core::TimelineSemaphore> timeline =
+      core::TimelineSemaphore::create(two.graphics());
+  ASSERT_TRUE(timeline.ok()) << timeline.status().message();
+  gfx::RetireQueue retire(timeline.value());
+  const SetOnExit retired{timeline.value(), 2};
+  const SetOnExit decoded_by_then{*ready, 1};  // before the workers stop
+
+  // The window shows the 3D view alone: the board is not searched for.
+  live.value()->set_detecting(false);
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  auto depth = std::make_shared<std::vector<std::uint16_t>>(16 * 12, 1500);
+  sensor::RgbdFrame frame;
+  frame.color = decoded.value();
+  frame.color_camera = lens;
+  frame.depth = depth->data();
+  frame.depth_camera = depth_lens;
+  frame.metres_per_unit = 0.001f;
+  frame.min_depth = 0.5f;
+  frame.max_depth = 3.86f;
+  frame.timestamp_ns = 1'760'000'000'000'000'000ull;
+  frame.pixels = depth;
+  camera.push(std::move(frame));
+
+  // Every check before the value is set is an EXPECT, so a failing one
+  // leaves no batch waiting for it.
+  std::shared_ptr<const LiveSnapshot> snapshot;
+  const auto give_up =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (!snapshot && std::chrono::steady_clock::now() < give_up) {
+    snapshot = live.value()->take_snapshot();
+    if (!snapshot) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_NE(snapshot, nullptr);
+  if (snapshot != nullptr) {
+    EXPECT_EQ(snapshot->set->cameras[0].tile, nullptr);  // no luma made
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    EXPECT_EQ(cloud.value()->prepared(), 0u);
+    std::vector<core::TimelinePoint> waits;
+    const std::vector<std::uint8_t> before =
+        render(two.graphics(), two.graphics_allocator(), *mosaic, retire,
+               snapshot, 1, &waits);
+    EXPECT_FALSE(before.empty());
+    EXPECT_TRUE(waits.empty());
+    EXPECT_FALSE(mosaic->sets_since_picture(0).has_value());  // never copied
+  }
+
+  // The decoder sets the value: both readers read the picture.
+  ASSERT_TRUE(ready->signal(1).ok());
+  ASSERT_NE(snapshot, nullptr);
+  const auto prepared_by =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (cloud.value()->prepared() < 1) {
+    ASSERT_LT(std::chrono::steady_clock::now(), prepared_by);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_TRUE(cloud.value()->take_errors().empty());
+  std::shared_ptr<const CloudSnapshot> points = cloud.value()->take_snapshot();
+  ASSERT_NE(points, nullptr);
+  EXPECT_TRUE(points->color);
+  ASSERT_TRUE(points->frames[0].has_value());
+  EXPECT_NE(points->frames[0]->color, nullptr);
+  std::vector<core::TimelinePoint> waits;
+  const std::vector<std::uint8_t> after =
+      render(two.graphics(), two.graphics_allocator(), *mosaic, retire,
+             snapshot, 2, &waits);
+  ASSERT_FALSE(after.empty());
+  EXPECT_TRUE(waits_for(waits, ready.get(), 1));
+  EXPECT_NEAR(tile_grey(*mosaic, after, 0), 90, 3);
+  EXPECT_TRUE(live.value()->take_errors().empty());
+
+  live.value()->stop();
+  points.reset();
+  snapshot.reset();
+  cloud.value()->stop();
+  ASSERT_TRUE(timeline.value().signal(2).ok());
   retire.poll();
   EXPECT_EQ(retire.pending(), 0u);
 }
