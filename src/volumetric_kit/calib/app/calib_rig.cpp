@@ -794,8 +794,11 @@ core::Status show_result(const CalibrateResult& result,
       const std::vector<viz::PanelLine> depth,
       viz::depth_panel(result.ids, result.depth ? &*result.depth : nullptr,
                        result.depth_failure));
-  VKC_ASSIGN(const std::vector<viz::PanelLine> world,
+  VKC_ASSIGN(std::vector<viz::PanelLine> world,
              viz::world_panel(result.ids, result.reference, result.world));
+  VKC_ASSIGN(const std::vector<viz::PanelLine> rows,
+             viz::pair_rows_panel(result.pairs));
+  world.insert(world.end(), rows.begin(), rows.end());
   lines.insert(lines.end(), depth.begin(), depth.end());
   lines.insert(lines.end(), world.begin(), world.end());
   VKC_ASSIGN(const std::vector<std::string> said,

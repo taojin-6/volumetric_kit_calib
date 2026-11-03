@@ -208,23 +208,31 @@ TEST(AppPreset, RunsOnlyTheOperationsAndDriversItSupports) {
                   "\" is not one calib_rig opens (orbbec, decklink)");
     }
   }
-  // A DeckLink pair's lenses, not yet its poses.
-  refused(
-      check_scenario(scenario(dir, Operation::Calibrate, "decklink")).status(),
-      Code::InvalidArgument,
-      "source.driver: decklink with operation calibrate: calib_rig fits "
-      "a DeckLink pair's lenses alone (operation calibrate_intrinsics)");
-  const core::Result<RigScenario> pair =
-      check_scenario(scenario(dir, Operation::CalibrateIntrinsics, "decklink"));
+  // A DeckLink pair's lenses and its poses, its pair's rows checked at the
+  // size its runtime rectifies to, the scenario's depth size (FFS's).
+  for (const Operation operation :
+       {Operation::Calibrate, Operation::CalibrateIntrinsics}) {
+    core::config::Config config = scenario(dir, operation, "decklink");
+    config.source.depth_width = 1024;  // not FFS's own, read as given
+    config.source.depth_height = 576;
+    const core::Result<RigScenario> pair = check_scenario(config);
 #if defined(VC_WITH_DECKLINK)
-  ASSERT_TRUE(pair.ok()) << pair.status().message();
-  EXPECT_EQ(pair->mode, capture::SessionMode::Intrinsics);
-  EXPECT_EQ(pair->driver, "decklink");
+    ASSERT_TRUE(pair.ok()) << pair.status().message();
+    EXPECT_EQ(pair->mode, operation == Operation::Calibrate
+                              ? capture::SessionMode::Extrinsics
+                              : capture::SessionMode::Intrinsics);
+    EXPECT_EQ(pair->driver, "decklink");
+    ASSERT_EQ(pair->pairs.size(), 1u);
+    EXPECT_EQ(pair->pairs[0].left, "bm-1");
+    EXPECT_EQ(pair->pairs[0].right, "bm-2");
+    EXPECT_EQ(pair->pair_rows.rectified.width, 1024u);
+    EXPECT_EQ(pair->pair_rows.rectified.height, 576u);
 #else
-  refused(pair.status(), Code::InvalidArgument,
-          "source.driver: decklink: this calib_rig was built without "
-          "sensor's DeckLink driver (configure with -DVS_WITH_DECKLINK=ON");
+    refused(pair.status(), Code::InvalidArgument,
+            "source.driver: decklink: this calib_rig was built without "
+            "sensor's DeckLink driver (configure with -DVS_WITH_DECKLINK=ON");
 #endif
+  }
   for (const Operation operation :
        {Operation::Calibrate, Operation::CalibrateIntrinsics}) {
     const core::Result<RigScenario> rig =
@@ -235,6 +243,9 @@ TEST(AppPreset, RunsOnlyTheOperationsAndDriversItSupports) {
                              ? capture::SessionMode::Extrinsics
                              : capture::SessionMode::Intrinsics);
     EXPECT_EQ(rig->driver, "orbbec");
+    // The Femto rig has no pair whose rows to check.
+    EXPECT_TRUE(rig->pairs.empty());
+    EXPECT_EQ(rig->pair_rows.rectified.width, 0u);
 #else
     refused(rig.status(), Code::InvalidArgument,
             "source.driver: orbbec: this calib_rig was built without "

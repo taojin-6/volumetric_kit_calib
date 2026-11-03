@@ -3,7 +3,8 @@
 
 // calib_rig's per-mode table: the mode an operation asks for; each camera's
 // live lens (the file's at exactly its size, the factory's, the stand-in for
-// lenses alone) and what extrinsic mode refuses; where a lens fit starts,
+// lenses alone) and what extrinsic mode refuses; the mark a lens carries into
+// the file the solve writes; where a lens fit starts,
 // never the stand-in; the board each mode seeds and takes, a board too small
 // for a lens view refused, saying why; the capture rule; and when Calibrate
 // may run; a stereo pair's camera records and lenses; and every part of the
@@ -137,6 +138,47 @@ TEST(AppCalibMode, EachCamerasLensComesFromTheFileTheFactoryOrTheStandIn) {
                 .value()
                 .origin,
             LensOrigin::File);
+  // The runtime reads the factory lens at any size, so a calibrated one at
+  // another size is refused for poses too; for lenses it is not the
+  // camera's, which keeps its factory lens.
+  refused(rig_lens(SessionMode::Extrinsics, "bm-2", k4K, factory, &file, path)
+              .status(),
+          Code::InvalidArgument,
+          "bm-2 has a factory lens and a calibrated one in " + path);
+  EXPECT_EQ(rig_lens(SessionMode::Intrinsics, "bm-2", k4K, factory, &file, path)
+                .value()
+                .origin,
+            LensOrigin::Factory);
+}
+
+// The mark a lens carries into the file the solve writes: a file lens keeps
+// the file's, calibrated or factory; a factory lens, or a stand-in, is
+// factory.
+TEST(AppCalibMode, ALensKeepsTheMarkOfWhereItCameFrom) {
+  const camera::ArrayCalibration file = file_of(
+      {{"bm-1", calibrated(k4K, 1702.0)},
+       {"CL2A141000N", {lens(k4K, 2200.0), camera::IntrinsicsSource::Factory}},
+       {"bm-2", calibrated({1920, 1080}, 851.0)}});
+  const auto record = [](const std::string& id, LensOrigin origin) {
+    capture::SessionCamera camera;
+    camera.id = id;
+    camera.size = k4K;
+    camera.lens = origin;
+    return camera;
+  };
+  using Source = camera::IntrinsicsSource;
+  EXPECT_EQ(lens_source(record("bm-1", LensOrigin::File), &file),
+            Source::Calibrated);
+  EXPECT_EQ(lens_source(record("CL2A141000N", LensOrigin::File), &file),
+            Source::Factory);
+  EXPECT_EQ(lens_source(record("CL2A141000N", LensOrigin::Factory), &file),
+            Source::Factory);
+  EXPECT_EQ(lens_source(record("bm-2", LensOrigin::StandIn), &file),
+            Source::Factory);
+  EXPECT_EQ(lens_source(record("bm-1", LensOrigin::Factory), &file),
+            Source::Factory);
+  EXPECT_EQ(lens_source(record("bm-1", LensOrigin::File), nullptr),
+            Source::Factory);
 }
 
 // A lens fit starts from a real lens or OpenCV's own: the camera's file
@@ -282,6 +324,8 @@ TEST(AppCalibMode, SetsEveryPartToTheScenariosMode) {
     scenario.driver = "decklink";
     scenario.calibration = std::make_shared<const camera::ArrayCalibration>(
         file_of({{"bm-1", calibrated(k4K, 1702.0)}}));
+    scenario.pairs = {{"bm-1", "bm-2"}};
+    scenario.pair_rows.rectified = {960, 544};
     CaptureSetup setup;
     setup.mode = lenses ? SessionMode::Extrinsics : SessionMode::Intrinsics;
     LiveOptions live;
@@ -292,6 +336,11 @@ TEST(AppCalibMode, SetsEveryPartToTheScenariosMode) {
         apply_mode(scenario, setup, live, window).value();
     EXPECT_EQ(setup.mode, mode);
     EXPECT_EQ(setup.calibration, scenario.calibration);
+    ASSERT_EQ(setup.pairs.size(), 1u);
+    EXPECT_EQ(setup.pairs[0].left, "bm-1");
+    EXPECT_EQ(setup.pairs[0].right, "bm-2");
+    EXPECT_EQ(setup.pair_rows.rectified.width, 960u);
+    EXPECT_EQ(setup.pair_rows.rectified.height, 544u);
     EXPECT_EQ(live.rule.min_views, capture_rule(mode).min_views);
     EXPECT_EQ(window.intrinsic, lenses);
     EXPECT_EQ(editor.board(), board_seed(mode));

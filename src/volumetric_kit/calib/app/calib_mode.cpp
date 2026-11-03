@@ -26,14 +26,21 @@ std::string size_text(camera::ImageSize size) {
   return std::to_string(size.width) + "x" + std::to_string(size.height);
 }
 
+// @p file's colour lens for @p id, at any size.
+const camera::CameraCalibration* file_color(
+    const camera::ArrayCalibration* file, const std::string& id) {
+  if (file == nullptr) return nullptr;
+  const camera::SensorCalibration* entry = camera::find_sensor(*file, id);
+  return entry != nullptr && entry->color ? &*entry->color : nullptr;
+}
+
 // @p file's colour lens for @p id, when it is at exactly @p size.
 const camera::CameraCalibration* file_lens(const camera::ArrayCalibration* file,
                                            const std::string& id,
                                            camera::ImageSize size) {
-  if (file == nullptr) return nullptr;
-  const camera::SensorCalibration* entry = camera::find_sensor(*file, id);
-  if (entry == nullptr || !entry->color) return nullptr;
-  return same_size(entry->color->model.size, size) ? &*entry->color : nullptr;
+  const camera::CameraCalibration* color = file_color(file, id);
+  return color != nullptr && same_size(color->model.size, size) ? color
+                                                                : nullptr;
 }
 
 }  // namespace
@@ -90,13 +97,15 @@ core::Result<RigLens> rig_lens(
     const camera::ArrayCalibration* file, const std::string& file_path) {
   return compute::guarded("rig_lens", [&]() -> core::Result<RigLens> {
     const bool poses = mode == capture::SessionMode::Extrinsics;
-    const camera::CameraCalibration* filed = file_lens(file, id, size);
-    if (poses && factory && filed != nullptr &&
-        filed->source == camera::IntrinsicsSource::Calibrated) {
+    // At any size: the runtime reads the factory lens whatever the file's.
+    const camera::CameraCalibration* color = file_color(file, id);
+    if (poses && factory && color != nullptr &&
+        color->source == camera::IntrinsicsSource::Calibrated) {
       return core::Status::invalid_argument(
           id + " has a factory lens and a calibrated one in " + file_path +
           ": the runtime reads the factory lens, so take the file's out");
     }
+    const camera::CameraCalibration* filed = file_lens(file, id, size);
     if (filed != nullptr)
       return RigLens{filed->model, capture::LensOrigin::File};
     if (factory) return RigLens{*factory, capture::LensOrigin::Factory};
@@ -108,6 +117,15 @@ core::Result<RigLens> rig_lens(
     }
     return RigLens{stand_in_lens(size), capture::LensOrigin::StandIn};
   });
+}
+
+camera::IntrinsicsSource lens_source(const capture::SessionCamera& camera,
+                                     const camera::ArrayCalibration* file) {
+  const camera::CameraCalibration* filed =
+      camera.lens == capture::LensOrigin::File
+          ? file_lens(file, camera.id, camera.size)
+          : nullptr;
+  return filed != nullptr ? filed->source : camera::IntrinsicsSource::Factory;
 }
 
 std::optional<camera::CameraModel> lens_start(
@@ -188,6 +206,8 @@ core::Result<viz::BoardEditor> apply_mode(const RigScenario& scenario,
                                             board_rule(scenario.mode)));
         setup.mode = scenario.mode;
         setup.calibration = scenario.calibration;
+        setup.pairs = scenario.pairs;
+        setup.pair_rows = scenario.pair_rows;
         live.rule = capture_rule(scenario.mode);
         window.intrinsic = scenario.mode == capture::SessionMode::Intrinsics;
         return editor;

@@ -169,7 +169,8 @@ struct CaptureWorker::State {
     VKC_ASSIGN(compute::Board made, compute::Board::create(request.board));
     std::vector<solve::RigCamera> rig;
     for (std::size_t i = 0; i < setup.cameras.size(); ++i) {
-      rig.push_back({setup.cameras[i].id, setup.lenses[i]});
+      rig.push_back({setup.cameras[i].id, setup.lenses[i],
+                     lens_source(setup.cameras[i], setup.calibration.get())});
     }
     VKC_ASSIGN(quality::SessionChecks session,
                quality::SessionChecks::create(rig, made, setup.reference,
@@ -177,6 +178,8 @@ struct CaptureWorker::State {
     KeptCaptures base;
     base.mode = setup.mode;
     base.calibration = setup.calibration;
+    base.pairs = setup.pairs;
+    base.pair_rows = setup.pair_rows;
     base.board = request.board;
     base.cameras = std::move(rig);
     base.sensors = setup.cameras;
