@@ -145,9 +145,10 @@ work and statistical sweeps are for hand runs.
   so what moves the dependencies' objects outside the hashed files (the root
   CMakeLists.txt's flags, a runner image's libraries) is rebuilt on each run
   until the pins next change.
-- **The sanitizer job compiles through ccache**, its cache saved by each run
-  and restored from the newest under the deps key's prefix; ccache hashes
-  each object's flags and headers itself. With the deps cached, the job's
+- **The sanitizer job compiles through ccache**, each run saving its cache
+  and restoring the newest whose key starts with the deps key's parts (the
+  workspace, compiler, OS and packages); ccache hashes each object's flags
+  and headers itself. With the deps cached, the job's
   build is calib's own objects under the sanitizers: 219-297 s (run
   41734682596, both attempts).
 
