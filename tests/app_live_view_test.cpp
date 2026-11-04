@@ -1036,7 +1036,9 @@ TEST_F(AppLiveTwoQueues, TheImagesShowNoSetTakenWhileThe3DViewShowed) {
                     snapshot, 2, &step);
     EXPECT_FALSE(pixels.empty());
     EXPECT_TRUE(Skipped(step));
-    if (!pixels.empty()) EXPECT_NEAR(tile_grey(*mosaic, pixels, 0), 40, 3);
+    if (!pixels.empty()) {
+      EXPECT_NEAR(tile_grey(*mosaic, pixels, 0), 40, 3);
+    }
     EXPECT_TRUE(mosaic->refused().empty());
   }
 
