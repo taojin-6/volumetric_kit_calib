@@ -81,50 +81,6 @@ sensor::testing::HostNv12 grey_nv12(std::uint32_t width, std::uint32_t height,
   return picture;
 }
 
-// @p host's NV12 planes in device images written on @p device's queue and
-// left in GENERAL, each with a view and SAMPLED usage, as sensor's
-// testing::device_picture makes them, but CONCURRENT across @p families, as
-// calib_rig's decoded pictures are (sensor's color_queue_families), or
-// exclusive to the device's family with none. sensor's are always exclusive,
-// and no public helper makes them concurrent. @p luma, when given, is the
-// luma image, which the test rewrites as a decoder writes its next picture.
-core::Result<sensor::YuvImage> concurrent_picture(
-    const core::Device& device, core::Allocator& allocator,
-    const sensor::testing::HostNv12& host,
-    const std::vector<std::uint32_t>& families,
-    std::shared_ptr<core::Image>* luma = nullptr) {
-  struct Plane {
-    const std::vector<std::uint8_t>* bytes;
-    std::uint32_t width, height;
-    VkFormat format;
-  };
-  const Plane planes[2] = {
-      {&host.luma, host.width, host.height, VK_FORMAT_R8_UNORM},
-      {&host.chroma, (host.width + 1) / 2, (host.height + 1) / 2,
-       VK_FORMAT_R8G8_UNORM}};
-  sensor::YuvImage picture;
-  picture.layout = sensor::YuvLayout::Nv12;
-  picture.width = host.width;
-  picture.height = host.height;
-  for (std::size_t k = 0; k < 2; ++k) {
-    core::ImageDesc desc;
-    desc.extent = {planes[k].width, planes[k].height};
-    desc.format = planes[k].format;
-    desc.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                 VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    desc.queue_families = families.empty() ? nullptr : families.data();
-    desc.queue_family_count = static_cast<std::uint32_t>(families.size());
-    VKC_ASSIGN(core::Image image, allocator.create_image(desc));
-    VKC_TRY(core::test::write_image(
-        device, allocator, image, planes[k].bytes->data(),
-        planes[k].bytes->size(), VK_IMAGE_LAYOUT_GENERAL));
-    auto shared = std::make_shared<core::Image>(std::move(image));
-    if (k == 0 && luma != nullptr) *luma = shared;
-    picture.image[k] = std::move(shared);
-  }
-  return picture;
-}
-
 // What the window's mosaic step (record_fresh) did in a frame, which starts
 // with its snapshot fresh.
 struct Step {
@@ -554,10 +510,13 @@ TEST_F(AppLiveView, CopiesADecodersPictureInAFrameThatWaitsForItsReadyValue) {
   ASSERT_FALSE(pixels.empty());
 
   // Camera 0's next picture, its decoder's copy under way until it sets 1.
-  std::shared_ptr<core::Image> luma;
   core::Result<sensor::YuvImage> decoded =
-      concurrent_picture(device(), allocator(), flat_grey(90), {}, &luma);
+      sensor::testing::device_picture(device(), allocator(), flat_grey(90));
   ASSERT_TRUE(decoded.ok()) << decoded.status().message();
+  // The luma plane, which the test rewrites as a decoder writes its next
+  // picture: not a const object (sensor's device_picture says so).
+  const std::shared_ptr<core::Image> luma =
+      std::const_pointer_cast<core::Image>(decoded->image[0]);
   decoded->ready = ready;
   decoded->ready_value = 1;
   const Set second = make_set({90, 200}, decoded.value());
@@ -613,7 +572,7 @@ TEST_F(AppLiveView, ShowsNoSetTakenWithoutLumaUntilOneTakenWithIt) {
 
   // Camera 0's picture as NVDEC hands it out, before a pass takes it over.
   core::Result<sensor::YuvImage> decoded =
-      concurrent_picture(device(), allocator(), flat_grey(90), {});
+      sensor::testing::device_picture(device(), allocator(), flat_grey(90));
   ASSERT_TRUE(decoded.ok()) << decoded.status().message();
   decoded->queue_family = sensor::kQueueFamilyExternal;
   Set without = make_set({90, 200}, decoded.value());
@@ -725,8 +684,8 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
   const std::vector<std::uint8_t> luma(render.data,
                                        render.data + render.total());
   core::Result<sensor::YuvImage> made =
-      concurrent_picture(two.compute(), two.compute_allocator(),
-                         grey_nv12(kW, kH, luma), families);
+      sensor::testing::device_picture(two.compute(), two.compute_allocator(),
+                                      grey_nv12(kW, kH, luma), 0, families);
   ASSERT_TRUE(made.ok()) << made.status().message();
   const sensor::YuvImage picture = std::move(made).value();
 
@@ -927,8 +886,8 @@ TEST_F(AppLiveTwoQueues, TheImagesShowNoSetTakenWhileThe3DViewShowed) {
   ASSERT_TRUE(made.ok()) << made.status().message();
   const auto ready =
       std::make_shared<core::TimelineSemaphore>(std::move(made).value());
-  core::Result<sensor::YuvImage> decoded = concurrent_picture(
-      two.compute(), two.compute_allocator(), flat_grey(90), families);
+  core::Result<sensor::YuvImage> decoded = sensor::testing::device_picture(
+      two.compute(), two.compute_allocator(), flat_grey(90), 0, families);
   ASSERT_TRUE(decoded.ok()) << decoded.status().message();
   decoded->ready = ready;
   decoded->ready_value = 1;
@@ -982,8 +941,8 @@ TEST_F(AppLiveTwoQueues, TheImagesShowNoSetTakenWhileThe3DViewShowed) {
   };
 
   // The images first: a set taken with luma, copied after its pass.
-  core::Result<sensor::YuvImage> earlier = concurrent_picture(
-      two.compute(), two.compute_allocator(), flat_grey(40), families);
+  core::Result<sensor::YuvImage> earlier = sensor::testing::device_picture(
+      two.compute(), two.compute_allocator(), flat_grey(40), 0, families);
   ASSERT_TRUE(earlier.ok()) << earlier.status().message();
   push(earlier.value(), 1);
   const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live);

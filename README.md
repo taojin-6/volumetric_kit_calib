@@ -418,7 +418,7 @@ above, and installs nothing: it has no install rules or package config
 
 calib needs `volumetric_kit_core` 0.29.0 or newer, with its vulkan tier for
 `VC_WITH_RIG`, and 0.40.0 or newer with its config tier for `calib_app`; and
-`volumetric_kit_sensor` 0.21.0 or newer. An application that declares either
+`volumetric_kit_sensor` 0.43.0 or newer. An application that declares either
 before calib, to share it with another sibling, pins at least that: on an
 older one, calib's configure fails at `vkc_require_core` or
 `vkc_require_sibling`. Without `VC_WITH_RIG`,
