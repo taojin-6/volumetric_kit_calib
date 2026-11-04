@@ -66,12 +66,12 @@ namespace volumetric_kit::calib::app {
 ///         of each picture handed to the mosaic, one a timeline (sensor's
 ///         `add_ready_point`), every one already reached; empty when none
 ///         carries one. What the mosaic left out is in its `refused`.
-///         Nothing (`std::nullopt`) while a picture's ready value is not
-///         reached, with nothing recorded or held: record the snapshot at a
-///         later frame. `InvalidArgument` for a null snapshot or one whose
-///         set has a picture per camera missing or extra, or a ready
-///         timeline's error when its value cannot be read, with nothing
-///         recorded or held; the mosaic's `OutOfMemory`.
+///         Nothing (`std::nullopt`) while a ready value, the set's or a
+///         picture's, is not reached, with nothing recorded or held: record
+///         the snapshot at a later frame. `InvalidArgument` for a null
+///         snapshot or one whose set has a picture per camera missing or
+///         extra, or a ready timeline's error when its value cannot be read,
+///         with nothing recorded or held; the mosaic's `OutOfMemory`.
 ///
 /// @code
 /// VKC_ASSIGN(const auto ready, record_snapshot(*mosaic, retire, frame.cmd,

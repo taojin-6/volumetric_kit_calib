@@ -105,7 +105,7 @@ struct PictureSet {
   /// hands the set out. A reader on another queue (the window's copy into
   /// the mosaic) waits for it on the device, as the pass's fence makes no
   /// device write visible there. Null for a set taken without luma, whose
-  /// pictures no pass took over: the window shows none of them.
+  /// pictures no pass took over.
   std::shared_ptr<const core::TimelineSemaphore> ready;
   std::uint64_t ready_value = 0;  ///< See @ref ready.
 

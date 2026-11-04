@@ -1260,16 +1260,15 @@ The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
   worker's luma pass and the 3D view's preparation wait for it in their own
   batches (sensor's `LumaPass` and `GpuFramePrep`); a capture copies host
   data alone.
-- **The luma pass's value, too** (2026-11-03, amended the same day, the
-  owner's call on #72's follow-ups). The pass writes the grey tiles and takes
-  the decoder's images over on sensor's queue, and its fence makes no device
-  write visible to the renderer's. So the source sets a timeline value on
-  its queue after the pass and its readback, waited for on the host, so it
-  is reached when the set comes (`source::PictureSet::ready`), as the 3D
-  view's worker does after its preparation. Each frame that copies the set
-  waits for it at the transfer stage, as it waits for a decoder's. The
-  validation layer, synchronization validation included, reported nothing
-  without it.
+- **The luma pass's value, too** (2026-11-03, the owner's call on #72's
+  follow-ups). The pass writes the grey tiles and takes the decoder's images
+  over on sensor's queue, and its fence makes no device write visible to the
+  renderer's. So the source sets a timeline value on its queue after the
+  pass and its readback, waited for on the host, so it is reached when the
+  set comes (`source::PictureSet::ready`), as the 3D view's worker does after
+  its preparation. Each frame that copies the set waits for it at the
+  transfer stage, as it waits for a decoder's. The validation layer,
+  synchronization validation included, reported nothing without it.
 - **A set taken without luma is not shown** (2026-11-03, the same call). A
   set taken while the 3D view showed holds pictures no pass took over, and
   on NVIDIA the mosaic refuses them (NVDEC's images still owned outside

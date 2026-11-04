@@ -106,10 +106,11 @@ core::Result<bool> record_fresh(
       VKC_ASSIGN(ready, record_snapshot(mosaic, retire, frame.cmd, snapshot,
                                         frame.number));
     }
-    // Not yet: a decoder's ready value is not reached. It stays fresh, and
-    // the check is not the tiles' time.
+    // Not yet: a ready value is not reached. It stays fresh, and the check
+    // is not the tiles' time.
     if (!ready) return false;
-    // The decoders' values, reached: the copies see their writes.
+    // The pass's and the decoders' values, reached: the copies see their
+    // writes.
     for (const core::TimelinePoint& point : *ready) {
       frame.waits.push_back({point, VK_PIPELINE_STAGE_TRANSFER_BIT});
     }
