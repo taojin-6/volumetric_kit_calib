@@ -7,6 +7,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.12.0] - 2026-11-03
+
+### Changed
+
+- build: **calib pins sensor at #51's merge** (1c5dd48, 0.43.0), where it
+  was at #48's (dfe601f, 0.41.0), as is sensor's Orbbec SDK action in CI.
+  calib needs sensor 0.43.0 (`VC_SENSOR_MIN_VERSION`), whose
+  `testing::device_picture` makes NV12 planes CONCURRENT across queue
+  families; its other code builds and passes unchanged on the new pin. The
+  core pin (3f48e14, 0.44.2) is already past the 0.41.0 sensor's tiers
+  need, and stays, as do the core's actions and the DeckLink SDK checkout.
+- calib's version is 0.12.0, where it was 0.11.0.
+
+### Removed
+
+- The app tests' own maker of NV12 pictures CONCURRENT across queue
+  families (`tests/app_live_view_test.cpp`): the cross-family and two-queue
+  cases take sensor's `testing::device_picture` with the device's families,
+  and the case that rewrites a luma plane casts the const away from the
+  picture's, as sensor's header allows.
+
 ## [0.11.0] - 2026-11-03
 
 ### Fixed
