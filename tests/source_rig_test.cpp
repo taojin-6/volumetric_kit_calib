@@ -7,10 +7,10 @@
 // times and spread; its tiles, held by the set past the next take; its luma
 // pass's ready value, reached, and none for a set taken without luma; the
 // half against a host reference; newest wins; a decoder's picture read only
-// once its ready value is set; the stereo source's refusals and its skew
-// bound; a poll's failure against a picture's; the ChArUco board found in the
-// GPU's half as in the CPU's; and sample main 4 of the design, reading a
-// source.
+// once its ready value is set, and the set's own value set only after the
+// pass; the stereo source's refusals and its skew bound; a poll's failure
+// against a picture's; the ChArUco board found in the GPU's half as in the
+// CPU's; and sample main 4 of the design, reading a source.
 // Runs under the validation layer when the environment asks
 // (VKC_TEST_VALIDATION); skips without a Vulkan device.
 
@@ -596,7 +596,9 @@ TEST_F(SourceArray, NoGreyTileWhereTheDecodersImagesShowColour) {
 
 // A decoder's picture that carries a ready value, as NVIDIA's do, is read by
 // the luma pass only once the value is set: the take waits for it on the
-// device, with no host wait on the value, and then reads the picture.
+// device, with no host wait on the value, and then reads the picture. The
+// set's own value comes after the pass: while the take waits, the source's
+// timeline stays at the last set's.
 TEST_F(SourceArray, ReadsADecodersPictureOnlyOnceItsReadyValueIsSet) {
   const std::vector<std::uint8_t> luma = pattern(kWidth, kHeight, 9);
   sensor::testing::HostNv12 host;
@@ -618,7 +620,15 @@ TEST_F(SourceArray, ReadsADecodersPictureOnlyOnceItsReadyValueIsSet) {
   std::unique_ptr<RigSource> rig = open();
   ASSERT_NE(rig, nullptr);
   ASSERT_TRUE(rig->start().ok());
+  // First a picture decoded by the take: the source's timeline and value.
+  ASSERT_TRUE(ready->signal(1).ok());
   push(1);
+  const std::optional<PictureSet> earlier = next(*rig);
+  ASSERT_TRUE(earlier.has_value());
+  ASSERT_NE(earlier->ready, nullptr);
+  const std::uint64_t passed = earlier->ready_value;
+  pictures_[0].ready_value = 2;
+  push(2);
   using Taken = core::Result<std::optional<PictureSet>>;
   const auto give_up = std::chrono::steady_clock::now() + kPatience;
   std::future<Taken> taken = std::async(std::launch::async, [&]() -> Taken {
@@ -631,7 +641,7 @@ TEST_F(SourceArray, ReadsADecodersPictureOnlyOnceItsReadyValueIsSet) {
   });
   // A check failing before the value is set leaves no take waiting for it:
   // the guard sets it before the future joins the take.
-  const test::SetOnExit decoded_by_then{*ready, 1};
+  const test::SetOnExit decoded_by_then{*ready, 2};
   // The array has the frame, and the take its set; it waits on the device.
   while (fakes_[0]->queued() != 0 &&
          std::chrono::steady_clock::now() < give_up) {
@@ -640,14 +650,24 @@ TEST_F(SourceArray, ReadsADecodersPictureOnlyOnceItsReadyValueIsSet) {
   std::this_thread::sleep_for(std::chrono::milliseconds(30));
   const bool waited =
       taken.wait_for(std::chrono::seconds(0)) == std::future_status::timeout;
-  const bool set = ready->signal(1).ok();
+  // Nothing set for the set yet: its value comes after the pass.
+  const core::Result<std::uint64_t> during = earlier->ready->value();
+  const bool set = ready->signal(2).ok();
   ASSERT_TRUE(set);
   EXPECT_TRUE(waited);
+  ASSERT_TRUE(during.ok()) << during.status().message();
+  EXPECT_EQ(during.value(), passed);
   Taken result = taken.get();
   ASSERT_TRUE(result.ok()) << result.status().message();
   ASSERT_TRUE(result.value().has_value());
   EXPECT_EQ(rows_of(rig->host()[0].luma), luma);
   EXPECT_EQ(rows_of(rig->host()[0].half), half_of(luma, kWidth, kHeight));
+  const PictureSet& later = *result.value();
+  EXPECT_EQ(later.ready, earlier->ready);
+  EXPECT_EQ(later.ready_value, passed + 1);
+  const core::Result<std::uint64_t> now = later.ready->value();
+  ASSERT_TRUE(now.ok()) << now.status().message();
+  EXPECT_GE(now.value(), later.ready_value);
 }
 
 TEST_F(SourceArray, RefusesACameraWithoutColour) {
