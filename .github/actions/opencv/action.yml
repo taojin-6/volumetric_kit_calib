@@ -4,8 +4,9 @@ description: >-
   OpenCV_DIR set for the rest of the job, so a configure finds it. The cache
   keys on the OpenCV version, the OS release and architecture, the compiler and
   the script, so a new OpenCV release or a changed script builds it once and
-  every other run restores it (DECISIONS.md, 2026-10-17). Run after checkout,
-  with git, CMake and a C++ compiler installed.
+  every other run restores it (DECISIONS.md, 2026-10-17). The script is the
+  one beside the action, so another repository's job can use it at a calib
+  commit. Run with git, CMake and a C++ compiler installed.
 
 inputs:
   version:
@@ -35,7 +36,7 @@ runs:
       env:
         OPENCV_VERSION: ${{ inputs.version }}
       run: |
-        script="${GITHUB_WORKSPACE}/tools/install-opencv.sh"
+        script="${GITHUB_ACTION_PATH}/../../../tools/install-opencv.sh"
         version="${OPENCV_VERSION}"
         if [ "${version}" = latest ]; then
           version=$("${script}" --latest)
@@ -67,8 +68,8 @@ runs:
         OPENCV_PREFIX: ${{ steps.key.outputs.prefix }}
       run: |
         start=${SECONDS}
-        "${GITHUB_WORKSPACE}/tools/install-opencv.sh" "${OPENCV_VERSION}" \
-          "${OPENCV_PREFIX}"
+        "${GITHUB_ACTION_PATH}/../../../tools/install-opencv.sh" \
+          "${OPENCV_VERSION}" "${OPENCV_PREFIX}"
         echo "::notice::OpenCV ${OPENCV_VERSION} built in $((SECONDS - start)) s"
 
     # Saved as soon as it is built, so a job that fails later keeps it.
