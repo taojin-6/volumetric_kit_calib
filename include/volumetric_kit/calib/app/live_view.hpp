@@ -28,17 +28,27 @@
 #include "volumetric_kit/calib/viz/point_cloud.hpp"
 #include "volumetric_kit/calib/viz/scene_view.hpp"
 #include "volumetric_kit/core/base/result.hpp"
+#include "volumetric_kit/core/base/stage_metrics.hpp"
 #include "volumetric_kit/core/vulkan/sync.hpp"
 #include "volumetric_kit/core/vulkan/vulkan.hpp"
 #include "volumetric_kit/gfx/core/retire_queue.hpp"
 #include "volumetric_kit/gfx/pipelines/depth_cloud_pipeline.hpp"
+#include "volumetric_kit/gfx/windowing/frame_loop.hpp"
 #include "volumetric_kit/sensor/camera/camera_model.hpp"
 
 namespace volumetric_kit::calib::app {
 
 /// @brief Record @p snapshot's pictures into @p mosaic, and hold its set in
 ///        @p retire until frame @p frame_number retires, so the pictures the
-///        copies read outlive them on the GPU.
+///        copies read, and the timelines the frame waits on, outlive them on
+///        the GPU.
+///
+/// A picture that carries a ready value (`sensor::YuvImage::ready`, as
+/// NVIDIA's decoders hand theirs out) is copied only once that value is
+/// reached, and its value is returned for the frame to wait for on the
+/// device: gfx's frame loop takes only values already reached, and nothing
+/// here waits on the host. A snapshot with a value not reached yet is
+/// recorded at a later frame. The window records through record_fresh.
 /// @param mosaic        The rig's mosaic, one tile per camera.
 /// @param retire        The window's retire queue, on its frame loop's
 ///                      timeline.
@@ -49,21 +59,66 @@ namespace volumetric_kit::calib::app {
 ///                      tile`), else its frame's colour -- and a missing one
 ///                      keeps its last.
 /// @param frame_number  The frame's number (`windowing::Frame::number`).
-/// @return OK, with what the mosaic left out in its `refused`;
-///         `InvalidArgument` for a null snapshot or one whose set has a
-///         picture per camera missing or extra, with nothing recorded or
-///         held; the mosaic's `OutOfMemory`.
+/// @return What the frame's submission must wait for at
+///         `VK_PIPELINE_STAGE_TRANSFER_BIT`: the ready value of each picture
+///         handed to the mosaic, one a timeline (sensor's
+///         `add_ready_point`), every one already reached; empty when none
+///         carries one. What the mosaic left out is in its `refused`.
+///         Nothing (`std::nullopt`) while a picture's ready value is not
+///         reached, with nothing recorded or held: record the snapshot at a
+///         later frame. `InvalidArgument` for a null snapshot or one whose
+///         set has a picture per camera missing or extra, or a ready
+///         timeline's error when its value cannot be read, with nothing
+///         recorded or held; the mosaic's `OutOfMemory`.
 ///
 /// @code
-/// if (fresh) {
-///   VKC_TRY(record_snapshot(*mosaic, retire, frame.cmd, latest,
-///                           frame.number));
+/// VKC_ASSIGN(const auto ready, record_snapshot(*mosaic, retire, frame.cmd,
+///                                              latest, frame.number));
+/// if (ready) {  // else record the snapshot at a later frame
+///   for (const core::TimelinePoint& point : *ready) {
+///     frame.waits.push_back({point, VK_PIPELINE_STAGE_TRANSFER_BIT});
+///   }
 /// }
 /// @endcode
-core::Status record_snapshot(
+core::Result<std::optional<std::vector<core::TimelinePoint>>> record_snapshot(
     viz::RigMosaic& mosaic, gfx::RetireQueue& retire, VkCommandBuffer cmd,
     const std::shared_ptr<const LiveSnapshot>& snapshot,
     std::uint64_t frame_number);
+
+/// @brief The window's mosaic in a frame: while @p fresh, record @p snapshot
+///        (record_snapshot), the frame waiting for each ready value it
+///        returns at `VK_PIPELINE_STAGE_TRANSFER_BIT`, the record timed as
+///        @p ran's `"tiles"` row, and @p fresh cleared.
+///
+/// A snapshot with a ready value not reached yet stays fresh, for a later
+/// frame, with nothing recorded, held, waited for or timed, so the Stages
+/// panel keeps the last record's time (`viz::hold_stages`).
+/// @param mosaic    The rig's mosaic, one tile per camera.
+/// @param retire    The window's retire queue, on its frame loop's timeline.
+/// @param frame     The frame, recording, outside its rendering scope; its
+///                  `waits` gain the ready values.
+/// @param snapshot  The latest snapshot; null records nothing.
+/// @param fresh     Whether @p snapshot is still to be recorded: false
+///                  records nothing, and a record clears it.
+/// @param ran       This frame's run of the tiles; a record adds its row.
+/// @return Whether it recorded @p snapshot, after which the window says the
+///         mosaic's new refusals (refusals_to_say); record_snapshot's errors,
+///         with @p fresh kept; or `OutOfMemory`.
+///
+/// @code
+/// core::StageMetrics ran;
+/// if (mosaic_shown) {
+///   VKC_ASSIGN(const bool recorded,
+///              record_fresh(*mosaic, retire, frame, latest, fresh, ran));
+///   // ... once recorded, say refusals_to_say(mosaic->refused(), said) ...
+/// }
+/// VKC_TRY(viz::hold_stages(ran, mosaic_shown, tiles, frame_stages));
+/// @endcode
+core::Result<bool> record_fresh(
+    viz::RigMosaic& mosaic, gfx::RetireQueue& retire,
+    gfx::windowing::Frame& frame,
+    const std::shared_ptr<const LiveSnapshot>& snapshot, bool& fresh,
+    core::StageMetrics& ran);
 
 /// @brief Which of the mosaic's refusals the window says: each camera's
 ///        once, until its message changes, as every set's picture from a

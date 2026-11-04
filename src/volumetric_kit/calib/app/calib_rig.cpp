@@ -1409,19 +1409,20 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       fitted = true;
     }
     // The tiles only while the mosaic is shown: a snapshot taken meanwhile
-    // stays fresh for the images' return.
+    // stays fresh for the images' return, as one whose decoder's ready value
+    // is not reached yet does for a later frame.
     core::StageMetrics recorded;
-    if (fresh && latest && mosaic_shown) {
-      core::StageScope scope(recorded, "tiles");
-      VKC_TRY(
-          record_snapshot(*mosaic, retire, frame.cmd, latest, frame.number));
-      VKC_ASSIGN(const std::vector<viz::TileRefusal> unsaid,
-                 refusals_to_say(mosaic->refused(), refusals_said));
-      for (const viz::TileRefusal& refusal : unsaid) {
-        notices.note("camera " + ids[refusal.camera] + ": " +
-                     refusal.status.message());
+    if (mosaic_shown) {
+      VKC_ASSIGN(const bool copied,
+                 record_fresh(*mosaic, retire, frame, latest, fresh, recorded));
+      if (copied) {
+        VKC_ASSIGN(const std::vector<viz::TileRefusal> unsaid,
+                   refusals_to_say(mosaic->refused(), refusals_said));
+        for (const viz::TileRefusal& refusal : unsaid) {
+          notices.note("camera " + ids[refusal.camera] + ": " +
+                       refusal.status.message());
+        }
       }
-      fresh = false;
     }
     VKC_TRY(viz::hold_stages(recorded, mosaic_shown, tiles, in.stages));
     steer(window, input, pointer, io.WantCaptureMouse, split, view,

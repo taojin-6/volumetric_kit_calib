@@ -7,7 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
-## [Unreleased]
+## [0.10.0] - 2026-11-03
+
+### Fixed
+
+- calib_rig's copy of a decoder's NV12 images into the mosaic in the Images
+  view (`YuvImage::ready`, NVDEC's) now waits on the device for their ready
+  value; before, only the luma batch's fence stood between CUDA's write and
+  the copy (DECISIONS.md, 2026-10-16, amended 2026-11-03). A set taken while
+  the 3D view showed is still refused, as before. `app::record_snapshot` now
+  returns each copied picture's ready value, already reached, for the frame
+  to wait for at `VK_PIPELINE_STAGE_TRANSFER_BIT`, or nothing, with nothing
+  recorded, while a value is not reached yet: gfx's frame loop takes only
+  reached values, and nothing waits on the host. It returned a `Status`; its
+  header is internal, outside the stable API. `app::record_fresh`, new
+  there, is the window's step around it: the frame's waits, the snapshot
+  kept fresh for a later frame, and the tiles' time only when they are
+  recorded.
 
 ### Changed
 
@@ -19,6 +35,7 @@ release may break it, and each such entry says how to migrate
 - CI runs no `slow` test, and its deps caches hash the pins rather than the
   root CMakeLists.txt and restore by prefix, so a version bump no longer
   misses them. The sanitizer job compiles through ccache.
+- calib's version is 0.10.0, where it was 0.9.0.
 
 ## [0.9.0] - 2026-11-03
 

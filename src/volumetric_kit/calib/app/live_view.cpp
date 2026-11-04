@@ -10,14 +10,16 @@
 
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/gfx/pipelines/color.hpp"
+#include "volumetric_kit/sensor/frame/ready_points.hpp"
 
 namespace volumetric_kit::calib::app {
 
-core::Status record_snapshot(
+core::Result<std::optional<std::vector<core::TimelinePoint>>> record_snapshot(
     viz::RigMosaic& mosaic, gfx::RetireQueue& retire, VkCommandBuffer cmd,
     const std::shared_ptr<const LiveSnapshot>& snapshot,
     std::uint64_t frame_number) {
-  return compute::guarded("record_snapshot", [&]() -> core::Status {
+  using Waits = std::optional<std::vector<core::TimelinePoint>>;
+  return compute::guarded("record_snapshot", [&]() -> core::Result<Waits> {
     if (snapshot == nullptr || snapshot->set == nullptr) {
       return core::Status::invalid_argument("record_snapshot: no snapshot");
     }
@@ -29,26 +31,63 @@ core::Status record_snapshot(
           " tiles");
     }
     std::vector<const sensor::YuvImage*> pictures(set.cameras.size(), nullptr);
+    std::vector<core::TimelinePoint> waits;
     for (std::size_t i = 0; i < pictures.size(); ++i) {
       if (!set.cameras[i].present) continue;
       // Its grey tile; else the decoder's picture, in colour.
-      if (set.cameras[i].tile != nullptr) {
-        pictures[i] = set.cameras[i].tile;
-      } else if (set.rgbd != nullptr && i < set.rgbd->frames.size() &&
-                 set.rgbd->frames[i] && set.rgbd->frames[i]->has_color()) {
-        pictures[i] = &set.rgbd->frames[i]->color;
+      const sensor::YuvImage* picture = set.cameras[i].tile;
+      if (picture == nullptr && set.rgbd != nullptr &&
+          i < set.rgbd->frames.size() && set.rgbd->frames[i] &&
+          set.rgbd->frames[i]->has_color()) {
+        picture = &set.rgbd->frames[i]->color;
       }
+      if (picture == nullptr) continue;
+      // A picture whose writer did not wait for its work (NVIDIA's
+      // decoders') is copied only in a frame that waits for its ready value
+      // on the device. The frame loop takes only a value already reached,
+      // and the host never waits for one, so a set with a value not reached
+      // yet waits for a later frame, with nothing recorded or held.
+      if (picture->ready != nullptr) {
+        VKC_ASSIGN(const std::uint64_t reached, picture->ready->value());
+        if (reached < picture->ready_value) return Waits();
+        sensor::add_ready_point(*picture, waits);
+      }
+      pictures[i] = picture;
     }
-    // TODO: put each decoder picture's ready value among the frame's waits
-    // (sensor's add_ready_point). The luma pass waits for it, so only a set
-    // taken while the 3D view showed, with no pass, is copied without: on
-    // NVIDIA's decoders, at the first frame back on the images.
-    // Held, not freed: the tiles and the decoder's images go back once
-    // nothing holds the set, after the GPU is done with the frame that copied
-    // them. Held before the record, whose OutOfMemory may follow copies
-    // already recorded.
+    // Held, not freed: the tiles and the decoder's images, and the timelines
+    // the frame waits on, go back once nothing holds the set, after the GPU
+    // is done with the frame that copied them. Held before the record, whose
+    // OutOfMemory may follow copies already recorded.
     retire.push(frame_number, [held = snapshot->set] { (void)held; });
-    return mosaic.record(cmd, pictures);
+    VKC_TRY(mosaic.record(cmd, pictures));
+    return Waits(std::move(waits));
+  });
+}
+
+core::Result<bool> record_fresh(
+    viz::RigMosaic& mosaic, gfx::RetireQueue& retire,
+    gfx::windowing::Frame& frame,
+    const std::shared_ptr<const LiveSnapshot>& snapshot, bool& fresh,
+    core::StageMetrics& ran) {
+  return compute::guarded("record_fresh", [&]() -> core::Result<bool> {
+    if (!fresh || snapshot == nullptr) return false;
+    core::StageMetrics timed;
+    std::optional<std::vector<core::TimelinePoint>> ready;
+    {
+      core::StageScope scope(timed, "tiles");
+      VKC_ASSIGN(ready, record_snapshot(mosaic, retire, frame.cmd, snapshot,
+                                        frame.number));
+    }
+    // Not yet: a decoder's ready value is not reached. It stays fresh, and
+    // the check is not the tiles' time.
+    if (!ready) return false;
+    // The decoders' values, reached: the copies see their writes.
+    for (const core::TimelinePoint& point : *ready) {
+      frame.waits.push_back({point, VK_PIPELINE_STAGE_TRANSFER_BIT});
+    }
+    ran.merge(timed);
+    fresh = false;
+    return true;
   });
 }
 
