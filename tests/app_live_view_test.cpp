@@ -724,6 +724,7 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
       core::TimelineSemaphore::create(two.graphics());
   ASSERT_TRUE(timeline.ok()) << timeline.status().message();
   gfx::RetireQueue retire(timeline.value());
+  const test::SetOnExit retired{timeline.value(), 1};
 
   gfx::OffscreenTargetDesc desc;
   desc.extent = {kW, kH};
