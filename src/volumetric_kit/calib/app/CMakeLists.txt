@@ -78,10 +78,11 @@ target_include_directories(calib_app SYSTEM PRIVATE "${VC_JSON_INCLUDE_DIR}")
 # The public headers name the viz tier's mosaic, overlays, board editor and
 # scene, the quality tier's metrics, lens checks and results files, the capture
 # tier's session records, the detector's board, the source tier's pictures,
-# sensor's array, frame preparation and calibration file, gfx's retire queue and
-# depth-cloud pipeline, and the core's scenario. The window, the shared device
-# and its requirements, the depth checks' kernels, the drivers (the opener's
-# arms), OpenCV's thread pool and the threads stay private.
+# sensor's array, frame preparation and calibration file, gfx's retire queue,
+# depth-cloud pipeline and frame (the window's mosaic step), and the core's
+# scenario. The window, the shared device and its requirements, the depth
+# checks' kernels, the drivers (the opener's arms), OpenCV's thread pool and the
+# threads stay private.
 target_link_libraries(
   calib_app
   PUBLIC calib_viz
@@ -92,6 +93,7 @@ target_link_libraries(
          volumetric_kit::sensor_array
          volumetric_kit::sensor_prep
          volumetric_kit::core_config
+         volumetric_kit::gfx_windowing
   PRIVATE calib_depth volumetric_kit::gfx_app volumetric_kit::gfx_glfw
           volumetric_kit::sensor_frame opencv_core Threads::Threads)
 

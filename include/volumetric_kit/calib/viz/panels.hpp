@@ -586,11 +586,10 @@ core::Result<gfx::FrameMetrics> stage_frame_metrics(
 ///
 /// @code
 /// core::StageMetrics ran;
-/// if (fresh && mosaic_shown) {
-///   core::StageScope scope(ran, "tiles");
-///   VKC_ASSIGN(const auto ready, record_snapshot(mosaic, retire, cmd, latest,
-///                                                frame_number));
-///   // ... the frame waits for `ready`, as record_snapshot says ...
+/// if (mosaic_shown) {  // a "tiles" row on a frame that records the tiles
+///   VKC_ASSIGN(const bool recorded,
+///              app::record_fresh(mosaic, retire, frame, latest, fresh, ran));
+///   // ... once recorded, say the mosaic's new refusals ...
 /// }
 /// VKC_TRY(hold_stages(ran, mosaic_shown, tiles, frame_stages));
 /// @endcode

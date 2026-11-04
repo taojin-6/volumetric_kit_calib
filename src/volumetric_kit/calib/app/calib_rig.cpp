@@ -1409,26 +1409,19 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       fitted = true;
     }
     // The tiles only while the mosaic is shown: a snapshot taken meanwhile
-    // stays fresh for the images' return.
+    // stays fresh for the images' return, as one whose decoder's ready value
+    // is not reached yet does for a later frame.
     core::StageMetrics recorded;
-    if (fresh && latest && mosaic_shown) {
-      core::StageScope scope(recorded, "tiles");
-      VKC_ASSIGN(
-          const std::optional<std::vector<core::TimelinePoint>> ready,
-          record_snapshot(*mosaic, retire, frame.cmd, latest, frame.number));
-      // Not yet: a decoder's ready value is not reached. It stays fresh.
-      if (ready) {
-        // The decoders' values, reached: the copies see their writes.
-        for (const core::TimelinePoint& point : *ready) {
-          frame.waits.push_back({point, VK_PIPELINE_STAGE_TRANSFER_BIT});
-        }
+    if (mosaic_shown) {
+      VKC_ASSIGN(const bool copied,
+                 record_fresh(*mosaic, retire, frame, latest, fresh, recorded));
+      if (copied) {
         VKC_ASSIGN(const std::vector<viz::TileRefusal> unsaid,
                    refusals_to_say(mosaic->refused(), refusals_said));
         for (const viz::TileRefusal& refusal : unsaid) {
           notices.note("camera " + ids[refusal.camera] + ": " +
                        refusal.status.message());
         }
-        fresh = false;
       }
     }
     VKC_TRY(viz::hold_stages(recorded, mosaic_shown, tiles, in.stages));

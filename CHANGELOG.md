@@ -11,18 +11,19 @@ release may break it, and each such entry says how to migrate
 
 ### Fixed
 
-- calib_rig copies a decoder's picture that carries a ready value
-  (`YuvImage::ready`, NVIDIA's) into the mosaic only in a frame that waits
-  for that value on the device, whatever view the set was taken in
-  (DECISIONS.md, 2026-10-16, amended 2026-11-03). A set taken while the 3D
-  view showed had no luma pass to wait for it, so the first frame back on
-  the images could copy its pictures unwaited. `app::record_snapshot` now
-  returns each copied picture's ready value, already reached, for the frame
-  to wait for at `VK_PIPELINE_STAGE_TRANSFER_BIT`, or nothing, with nothing
-  recorded, while a value is not reached yet, and calib_rig records that
-  snapshot at a later frame: gfx's frame loop takes only reached values,
-  and nothing waits on the host. It returned a `Status`; its header is
-  internal, outside the stable API.
+- calib_rig's copy of a decoder's NV12 images into the mosaic in the Images
+  view (`YuvImage::ready`, NVDEC's) now waits on the device for their ready
+  value; before, only the luma batch's fence
+  stood between CUDA's write and the copy (DECISIONS.md, 2026-10-16, amended
+  2026-11-03). A set taken while the 3D view showed is still refused, as
+  before. `app::record_snapshot` now returns each copied picture's ready
+  value, already reached, for the frame to wait for at
+  `VK_PIPELINE_STAGE_TRANSFER_BIT`, or nothing, with nothing recorded,
+  while a value is not reached yet: gfx's frame loop takes only reached
+  values, and nothing waits on the host. It returned a `Status`; its header
+  is internal, outside the stable API. `app::record_fresh`, new there, is
+  the window's step around it: the frame's waits, the snapshot kept fresh
+  for a later frame, and the tiles' time only when they are recorded.
 
 ### Changed
 

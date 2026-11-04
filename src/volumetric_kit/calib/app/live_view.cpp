@@ -44,10 +44,9 @@ core::Result<std::optional<std::vector<core::TimelinePoint>>> record_snapshot(
       if (picture == nullptr) continue;
       // A picture whose writer did not wait for its work (NVIDIA's
       // decoders') is copied only in a frame that waits for its ready value
-      // on the device, whatever view the set was taken in. The frame loop
-      // takes only a value already reached, and the host never waits for
-      // one, so a set with a value not reached yet waits for a later frame,
-      // with nothing recorded or held.
+      // on the device. The frame loop takes only a value already reached,
+      // and the host never waits for one, so a set with a value not reached
+      // yet waits for a later frame, with nothing recorded or held.
       if (picture->ready != nullptr) {
         VKC_ASSIGN(const std::uint64_t reached, picture->ready->value());
         if (reached < picture->ready_value) return Waits();
@@ -62,6 +61,33 @@ core::Result<std::optional<std::vector<core::TimelinePoint>>> record_snapshot(
     retire.push(frame_number, [held = snapshot->set] { (void)held; });
     VKC_TRY(mosaic.record(cmd, pictures));
     return Waits(std::move(waits));
+  });
+}
+
+core::Result<bool> record_fresh(
+    viz::RigMosaic& mosaic, gfx::RetireQueue& retire,
+    gfx::windowing::Frame& frame,
+    const std::shared_ptr<const LiveSnapshot>& snapshot, bool& fresh,
+    core::StageMetrics& ran) {
+  return compute::guarded("record_fresh", [&]() -> core::Result<bool> {
+    if (!fresh || snapshot == nullptr) return false;
+    core::StageMetrics timed;
+    std::optional<std::vector<core::TimelinePoint>> ready;
+    {
+      core::StageScope scope(timed, "tiles");
+      VKC_ASSIGN(ready, record_snapshot(mosaic, retire, frame.cmd, snapshot,
+                                        frame.number));
+    }
+    // Not yet: a decoder's ready value is not reached. It stays fresh, and
+    // the check is not the tiles' time.
+    if (!ready) return false;
+    // The decoders' values, reached: the copies see their writes.
+    for (const core::TimelinePoint& point : *ready) {
+      frame.waits.push_back({point, VK_PIPELINE_STAGE_TRANSFER_BIT});
+    }
+    ran.merge(timed);
+    fresh = false;
+    return true;
   });
 }
 

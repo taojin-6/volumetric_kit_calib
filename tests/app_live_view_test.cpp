@@ -6,18 +6,19 @@
 // last picture, and the set held until the frame that copied it retires on
 // the window's timeline; a snapshot that does not fit refused with nothing
 // held; a decoder's picture with a ready value copied only once it is
-// reached, in a frame that waits for it. Then the app's device split: the
-// live worker reads a camera's picture back on the compute library's queue
-// family while the window copies the same images into the mosaic on the
-// renderer's; and, on the compute and graphics queues, a set taken while the
-// 3D view showed, its picture's ready value set later, read by neither the
-// 3D view's worker nor the window before it. Then each camera's tile
-// refusal, said once, the marks and panels a snapshot gives each camera, the
-// origin tag's coverage of the captures kept, and the 3D view's cameras
-// before and at Calibrate's result. The GPU cases run under the validation
-// layer when the environment asks (VKC_TEST_VALIDATION) and skip without a
-// Vulkan device, the cross-family case also with one family, and the 3D
-// view's with one queue.
+// reached, in a frame that waits for it at the copies' stage, the window's
+// step keeping the snapshot fresh and its tiles untimed until then. Then the
+// app's device split: the live worker reads a camera's picture back on the
+// compute library's queue family while the window copies the same images
+// into the mosaic on the renderer's; and, on the compute and graphics
+// queues, a set taken while the 3D view showed, its picture's ready value
+// set later, read by neither the 3D view's worker nor the window before it.
+// Then each camera's tile refusal, said once, the marks and panels a
+// snapshot gives each camera, the origin tag's coverage of the captures
+// kept, and the 3D view's cameras before and at Calibrate's result. The GPU
+// cases run under the validation layer when the environment asks
+// (VKC_TEST_VALIDATION) and skip without a Vulkan device, the cross-family
+// case also with one family, and the 3D view's with one queue.
 
 #include "volumetric_kit/calib/app/live_view.hpp"
 
@@ -39,6 +40,7 @@
 #include <opencv2/core.hpp>
 
 #include "fake_sensor.hpp"
+#include "set_on_exit.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/core/testing/two_family_device.hpp"
@@ -54,6 +56,7 @@
 #include "volumetric_kit/gfx/core/device_requirements.hpp"
 #include "volumetric_kit/gfx/core/offscreen_target.hpp"
 #include "volumetric_kit/gfx/pipelines/color.hpp"
+#include "volumetric_kit/gfx/windowing/frame_loop.hpp"
 #include "volumetric_kit/sensor/frame/device_requirements.hpp"
 #include "volumetric_kit/sensor/testing/nv12_picture.hpp"
 
@@ -118,44 +121,81 @@ core::Result<sensor::YuvImage> concurrent_picture(
   return picture;
 }
 
-// Sets `timeline` to `value` as it goes, unless it is there already, so a
-// test that fails early leaves nothing waiting for it: a retire queue, or a
-// batch waiting on the device.
-struct SetOnExit {
-  core::TimelineSemaphore& timeline;
-  std::uint64_t value;
-  ~SetOnExit() {
-    const core::Result<std::uint64_t> now = timeline.value();
-    if (now.ok() && now.value() < value) (void)timeline.signal(value);
-  }
+// What the window's mosaic step (record_fresh) did in a frame, which starts
+// with its snapshot fresh.
+struct Step {
+  bool recorded = false;
+  bool fresh = true;
+  std::vector<gfx::windowing::FrameWait> waits;  // the frame's
+  core::StageMetrics ran;                        // the tiles' run
 };
 
-// What record_snapshot returns: the frame's waits, or nothing while a
-// picture's ready value is not reached.
-using FrameWaits = std::optional<std::vector<core::TimelinePoint>>;
+// Whether @p ran has a row named @p name.
+bool has_row(const core::StageMetrics& ran, const char* name) {
+  return std::any_of(ran.rows().begin(), ran.rows().end(),
+                     [name](const core::StageRow& row) {
+                       return std::string(row.name) == name;
+                     });
+}
 
-// Whether @p waits are one wait, for @p value on @p semaphore.
-bool waits_for(const FrameWaits& waits,
-               const core::TimelineSemaphore* semaphore, std::uint64_t value) {
-  return waits && waits->size() == 1 && (*waits)[0].semaphore == semaphore &&
-         (*waits)[0].value == value;
+// Whether @p step recorded its snapshot in a frame that waits for one value,
+// @p value on @p semaphore, at the copies' stage, and timed the tiles.
+::testing::AssertionResult RecordedWaitingFor(
+    const Step& step, const core::TimelineSemaphore* semaphore,
+    std::uint64_t value) {
+  if (!step.recorded || step.fresh) {
+    return ::testing::AssertionFailure()
+           << "not recorded" << (step.fresh ? "" : ", yet not fresh");
+  }
+  if (step.waits.size() != 1) {
+    return ::testing::AssertionFailure() << step.waits.size() << " waits";
+  }
+  const gfx::windowing::FrameWait& wait = step.waits[0];
+  if (wait.point.semaphore != semaphore || wait.point.value != value) {
+    return ::testing::AssertionFailure()
+           << "waits for another value: " << wait.point.value;
+  }
+  if (wait.stages != VK_PIPELINE_STAGE_TRANSFER_BIT) {
+    return ::testing::AssertionFailure()
+           << "waits at stages " << wait.stages << ", not TRANSFER";
+  }
+  if (!has_row(step.ran, "tiles")) {
+    return ::testing::AssertionFailure() << "the tiles are not timed";
+  }
+  return ::testing::AssertionSuccess();
+}
+
+// Whether @p step left its snapshot for a later frame: nothing recorded,
+// waited for or timed, and the snapshot still fresh.
+::testing::AssertionResult Deferred(const Step& step) {
+  if (step.recorded) return ::testing::AssertionFailure() << "recorded";
+  if (!step.fresh) return ::testing::AssertionFailure() << "no longer fresh";
+  if (!step.waits.empty()) {
+    return ::testing::AssertionFailure() << step.waits.size() << " waits";
+  }
+  if (!step.ran.empty()) {
+    return ::testing::AssertionFailure() << "a stage timed";
+  }
+  return ::testing::AssertionSuccess();
 }
 
 // Submits @p cmd, ended, to @p device's queue as gfx's frame loop submits a
-// frame -- after @p waits, each at the TRANSFER stage, which the loop takes
-// only once reached (core::TimelineWaits::Reached) -- and waits for it.
+// frame -- after @p waits, each at its stages, which the loop takes only once
+// reached (core::TimelineWaits::Reached) -- and waits for it.
 core::Status submit_frame(const core::Device& device, VkCommandBuffer cmd,
-                          const std::vector<core::TimelinePoint>& waits) {
-  VKC_TRY(core::check_timeline_points(device, waits, {}, "submit_frame",
-                                      core::TimelineWaits::Reached));
+                          const std::vector<gfx::windowing::FrameWait>& waits) {
+  std::vector<core::TimelinePoint> points;
   std::vector<VkSemaphore> semaphores;
   std::vector<std::uint64_t> values;
-  for (const core::TimelinePoint& wait : waits) {
-    semaphores.push_back(wait.semaphore->handle());
-    values.push_back(wait.value);
+  std::vector<VkPipelineStageFlags> stages;
+  for (const gfx::windowing::FrameWait& wait : waits) {
+    points.push_back(wait.point);
+    semaphores.push_back(wait.point.semaphore->handle());
+    values.push_back(wait.point.value);
+    stages.push_back(wait.stages);
   }
-  const std::vector<VkPipelineStageFlags> stages(
-      waits.size(), VK_PIPELINE_STAGE_TRANSFER_BIT);
+  VKC_TRY(core::check_timeline_points(device, points, {}, "submit_frame",
+                                      core::TimelineWaits::Reached));
   VkTimelineSemaphoreSubmitInfo timeline{};
   timeline.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
   timeline.waitSemaphoreValueCount = static_cast<std::uint32_t>(values.size());
@@ -240,17 +280,17 @@ std::unique_ptr<viz::RigMosaic> make_mosaic(const core::Device& device,
   return std::move(mosaic).value();
 }
 
-// Records the snapshot into the mosaic as frame `number` on `device`, draws
-// the mosaic, submits the frame after the waits the record returns
-// (submit_frame), and returns the target's pixels. `waits`, when given, gets
-// what the record returned; without it, the record must have recorded.
+// The window's frame `number` on `device`: its mosaic step records the
+// snapshot, fresh, into the mosaic (record_fresh); the mosaic is drawn; the
+// frame is submitted after the waits the step gave it (submit_frame); and the
+// target's pixels are returned. `step`, when given, gets what the step did;
+// without it, the step must have recorded.
 std::vector<std::uint8_t> render(const core::Device& device,
                                  core::Allocator& allocator,
                                  viz::RigMosaic& mosaic,
                                  gfx::RetireQueue& retire,
                                  const std::shared_ptr<const LiveSnapshot>& s,
-                                 std::uint64_t number,
-                                 FrameWaits* waits = nullptr) {
+                                 std::uint64_t number, Step* step = nullptr) {
   gfx::OffscreenTargetDesc desc;
   desc.extent = kExtent;
   desc.color_format = kFormat;
@@ -266,15 +306,19 @@ std::vector<std::uint8_t> render(const core::Device& device,
   EXPECT_TRUE(
       cmd.value().begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT).ok());
   const VkCommandBuffer raw = cmd.value().handle();
-  core::Result<FrameWaits> recorded =
-      record_snapshot(mosaic, retire, raw, s, number);
+  gfx::windowing::Frame frame;
+  frame.cmd = raw;
+  frame.number = number;
+  Step mine;
+  Step& out = step != nullptr ? *step : mine;
+  out = Step{};
+  const core::Result<bool> recorded =
+      record_fresh(mosaic, retire, frame, s, out.fresh, out.ran);
   EXPECT_TRUE(recorded.ok()) << recorded.status().message();
   if (!recorded.ok()) return {};
-  if (waits != nullptr) {
-    *waits = recorded.value();
-  } else {
-    EXPECT_TRUE(recorded->has_value()) << "not recorded";
-  }
+  out.recorded = recorded.value();
+  out.waits = frame.waits;
+  if (step == nullptr) EXPECT_TRUE(out.recorded) << "not recorded";
   target.value().prepare(raw);
   const gfx::RenderTarget rt = target.value().target();
   rt.begin(raw, gfx::RenderTargetBeginInfo{});
@@ -282,8 +326,7 @@ std::vector<std::uint8_t> render(const core::Device& device,
   rt.end(raw);
   target.value().record_readback(raw);
   EXPECT_TRUE(cmd.value().end().ok());
-  const core::Status submitted = submit_frame(
-      device, raw, recorded->value_or(std::vector<core::TimelinePoint>()));
+  const core::Status submitted = submit_frame(device, raw, frame.waits);
   EXPECT_TRUE(submitted.ok()) << submitted.message();
   if (!submitted.ok()) return {};
   const auto* px = static_cast<const std::uint8_t*>(target.value().pixels());
@@ -340,9 +383,8 @@ class AppLiveView : public core::test::VulkanDeviceTest {
   std::vector<std::uint8_t> render(viz::RigMosaic& mosaic,
                                    gfx::RetireQueue& retire,
                                    const std::shared_ptr<const LiveSnapshot>& s,
-                                   std::uint64_t number,
-                                   FrameWaits* waits = nullptr) {
-    return app::render(device(), allocator(), mosaic, retire, s, number, waits);
+                                   std::uint64_t number, Step* step = nullptr) {
+    return app::render(device(), allocator(), mosaic, retire, s, number, step);
   }
 
   std::unique_ptr<viz::RigMosaic> make_mosaic(std::size_t n) {
@@ -409,15 +451,34 @@ TEST_F(AppLiveView, RefusesASnapshotThatDoesNotFitTheMosaic) {
   EXPECT_NE(refused.message().find("a set of 3 pictures for a mosaic of 2"),
             std::string::npos);
   EXPECT_EQ(retire.pending(), 0u);
+
+  // The window's step records nothing that is not fresh, and keeps a
+  // snapshot it fails to record fresh, with nothing waited for or timed.
+  gfx::windowing::Frame frame;
+  frame.number = 1;
+  core::StageMetrics ran;
+  bool fresh = false;
+  const core::Result<bool> stale =
+      record_fresh(*mosaic, retire, frame, snapshot_of(three), fresh, ran);
+  ASSERT_TRUE(stale.ok()) << stale.status().message();
+  EXPECT_FALSE(stale.value());
+  fresh = true;
+  const core::Result<bool> failed =
+      record_fresh(*mosaic, retire, frame, snapshot_of(three), fresh, ran);
+  EXPECT_EQ(failed.status().domain(), Code::InvalidArgument);
+  EXPECT_TRUE(fresh);
+  EXPECT_TRUE(frame.waits.empty());
+  EXPECT_TRUE(ran.empty());
+  EXPECT_EQ(retire.pending(), 0u);
 }
 
 // A decoder's picture that carries a ready value, as NVIDIA's do, is copied
 // only once the value is reached, in a frame that waits for it on the device
 // at the copy's stage, as gfx's frame loop takes it: before, the snapshot is
-// not recorded, nothing is held, and every tile keeps its last picture, so
-// the window records it at a later frame and the tile shows what the decoder
-// wrote before setting the value, never what the picture held before. A
-// picture without one is copied with it.
+// not recorded, nothing is held or timed, it stays fresh, and every tile
+// keeps its last picture, so the window records it at a later frame and the
+// tile shows what the decoder wrote before setting the value, never what the
+// picture held before. A picture without one is copied with it.
 TEST_F(AppLiveView, CopiesADecodersPictureInAFrameThatWaitsForItsReadyValue) {
   std::unique_ptr<viz::RigMosaic> mosaic = make_mosaic(2);
   ASSERT_NE(mosaic, nullptr);
@@ -425,7 +486,7 @@ TEST_F(AppLiveView, CopiesADecodersPictureInAFrameThatWaitsForItsReadyValue) {
       core::TimelineSemaphore::create(device());
   ASSERT_TRUE(timeline.ok()) << timeline.status().message();
   gfx::RetireQueue retire(timeline.value());
-  const SetOnExit retired{timeline.value(), 3};
+  const test::SetOnExit retired{timeline.value(), 3};
   core::Result<core::TimelineSemaphore> made =
       core::TimelineSemaphore::create(device());
   ASSERT_TRUE(made.ok()) << made.status().message();
@@ -446,10 +507,10 @@ TEST_F(AppLiveView, CopiesADecodersPictureInAFrameThatWaitsForItsReadyValue) {
   decoded->ready_value = 1;
   const Set second = make_set({90, 200}, decoded.value());
   const std::shared_ptr<const LiveSnapshot> snapshot = snapshot_of(second);
-  FrameWaits waits;
-  pixels = render(*mosaic, retire, snapshot, 2, &waits);
+  Step step;
+  pixels = render(*mosaic, retire, snapshot, 2, &step);
   ASSERT_FALSE(pixels.empty());
-  EXPECT_FALSE(waits.has_value());  // not yet
+  EXPECT_TRUE(Deferred(step));  // not yet
   EXPECT_NEAR(tile_grey(*mosaic, pixels, 0), 40, 3);
   EXPECT_NEAR(tile_grey(*mosaic, pixels, 1), 120, 3);
   EXPECT_EQ(mosaic->sets_since_picture(0), std::optional<std::uint64_t>(0));
@@ -464,9 +525,9 @@ TEST_F(AppLiveView, CopiesADecodersPictureInAFrameThatWaitsForItsReadyValue) {
                                       VK_IMAGE_LAYOUT_GENERAL)
                   .ok());
   ASSERT_TRUE(ready->signal(1).ok());
-  pixels = render(*mosaic, retire, snapshot, 3, &waits);
+  pixels = render(*mosaic, retire, snapshot, 3, &step);
   ASSERT_FALSE(pixels.empty());
-  EXPECT_TRUE(waits_for(waits, ready.get(), 1));
+  EXPECT_TRUE(RecordedWaitingFor(step, ready.get(), 1));
   EXPECT_NEAR(tile_grey(*mosaic, pixels, 0), 150, 3);
   EXPECT_NEAR(tile_grey(*mosaic, pixels, 1), 200, 3);
   ASSERT_TRUE(timeline.value().signal(3).ok());
@@ -573,7 +634,7 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
   ASSERT_TRUE(
       cmd.value().begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT).ok());
   const VkCommandBuffer raw = cmd.value().handle();
-  const core::Result<FrameWaits> recorded =
+  const core::Result<std::optional<std::vector<core::TimelinePoint>>> recorded =
       record_snapshot(tiles, retire, raw, snapshot, 1);
   ASSERT_TRUE(recorded.ok()) << recorded.status().message();
   ASSERT_TRUE(recorded->has_value());
@@ -615,8 +676,10 @@ class AppLiveTwoQueues : public core::test::VulkanTest {
   core::DeviceRequirements requirements() const override {
     return gfx::device_requirements();
   }
+  // A cross-queue case, whose 3D-view preparation reads the picture through
+  // descriptors, which synchronization validation tracks only at this level.
   core::test::Validation validation() const override {
-    return core::test::Validation::On;
+    return core::test::Validation::ShaderAccesses;
   }
   void SetUp() override {
     core::test::VulkanTest::SetUp();
@@ -645,7 +708,9 @@ class AppLiveTwoQueues : public core::test::VulkanTest {
 // on the compute queue only once the value is set, its batch waiting on the
 // device; and the window, back on the images before then, records nothing of
 // the set, and copies it on the graphics queue after, in a frame that waits
-// for the value.
+// for the value. The picture is one the mosaic takes, standing in for any
+// decoder's: NVIDIA's own, taken with no luma pass, are still owned outside
+// Vulkan or held in a buffer, and the mosaic refuses them.
 TEST_F(AppLiveTwoQueues, ASetTakenWhileThe3DViewShowedIsReadAfterItsValue) {
   core::test::TwoFamilyDevice& two = this->two();
   // CONCURRENT across two families; one family's twice collapses.
@@ -700,8 +765,8 @@ TEST_F(AppLiveTwoQueues, ASetTakenWhileThe3DViewShowedIsReadAfterItsValue) {
       core::TimelineSemaphore::create(two.graphics());
   ASSERT_TRUE(timeline.ok()) << timeline.status().message();
   gfx::RetireQueue retire(timeline.value());
-  const SetOnExit retired{timeline.value(), 2};
-  const SetOnExit decoded_by_then{*ready, 1};  // before the workers stop
+  const test::SetOnExit retired{timeline.value(), 2};
+  const test::SetOnExit decoded_by_then{*ready, 1};  // before the workers stop
 
   auto depth = std::make_shared<std::vector<std::uint16_t>>(16 * 12, 1500);
   const auto push = [&](const sensor::YuvImage& picture, std::uint64_t tick) {
@@ -756,15 +821,15 @@ TEST_F(AppLiveTwoQueues, ASetTakenWhileThe3DViewShowedIsReadAfterItsValue) {
   std::shared_ptr<const LiveSnapshot> snapshot = next_snapshot(first->number);
   EXPECT_NE(snapshot, nullptr);
   if (snapshot != nullptr) {
-    EXPECT_EQ(snapshot->set->cameras[0].tile, nullptr);  // no luma made
+    EXPECT_FALSE(has_row(snapshot->stages, "luma"));  // no luma pass
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
     EXPECT_EQ(cloud.value()->prepared(), 1u);
-    FrameWaits waits;
+    Step step;
     const std::vector<std::uint8_t> before =
         render(two.graphics(), two.graphics_allocator(), *mosaic, retire,
-               snapshot, 1, &waits);
+               snapshot, 1, &step);
     EXPECT_FALSE(before.empty());
-    EXPECT_FALSE(waits.has_value());                          // not yet
+    EXPECT_TRUE(Deferred(step));                              // not yet
     EXPECT_FALSE(mosaic->sets_since_picture(0).has_value());  // never copied
   }
 
@@ -779,12 +844,12 @@ TEST_F(AppLiveTwoQueues, ASetTakenWhileThe3DViewShowedIsReadAfterItsValue) {
   EXPECT_TRUE(points->color);
   ASSERT_TRUE(points->frames[0].has_value());
   EXPECT_NE(points->frames[0]->color, nullptr);
-  FrameWaits waits;
+  Step step;
   const std::vector<std::uint8_t> after =
       render(two.graphics(), two.graphics_allocator(), *mosaic, retire,
-             snapshot, 2, &waits);
+             snapshot, 2, &step);
   ASSERT_FALSE(after.empty());
-  EXPECT_TRUE(waits_for(waits, ready.get(), 1));
+  EXPECT_TRUE(RecordedWaitingFor(step, ready.get(), 1));
   EXPECT_NEAR(tile_grey(*mosaic, after, 0), 90, 3);
   EXPECT_TRUE(live.value()->take_errors().empty());
 

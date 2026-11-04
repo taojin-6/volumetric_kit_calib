@@ -33,6 +33,7 @@
 #include "detect_helpers.hpp"
 #include "fake_sensor.hpp"
 #include "fake_stereo.hpp"
+#include "set_on_exit.hpp"
 #include "synthetic_rig.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/detect/board.hpp"
@@ -587,16 +588,19 @@ TEST_F(SourceArray, ReadsADecodersPictureOnlyOnceItsReadyValueIsSet) {
   ASSERT_TRUE(rig->start().ok());
   push(1);
   using Taken = core::Result<std::optional<PictureSet>>;
+  const auto give_up = std::chrono::steady_clock::now() + kPatience;
   std::future<Taken> taken = std::async(std::launch::async, [&]() -> Taken {
-    for (;;) {
+    while (std::chrono::steady_clock::now() < give_up) {
       Taken next = rig->take();
       if (!next.ok() || next.value()) return next;
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    return core::Status::not_found("no set within the test's patience");
   });
+  // A check failing before the value is set leaves no take waiting for it:
+  // the guard sets it before the future joins the take.
+  const test::SetOnExit decoded_by_then{*ready, 1};
   // The array has the frame, and the take its set; it waits on the device.
-  // Nothing returns before the value is set, so no take is left waiting.
-  const auto give_up = std::chrono::steady_clock::now() + kPatience;
   while (fakes_[0]->queued() != 0 &&
          std::chrono::steady_clock::now() < give_up) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
