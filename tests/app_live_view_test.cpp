@@ -639,6 +639,58 @@ TEST_F(AppLiveView, ShowsNoSetTakenWithoutLumaUntilOneTakenWithIt) {
   EXPECT_EQ(retire.pending(), 0u);
 }
 
+// As calib_rig opens a rig of one camera on @p two: a fake camera, SYN0, of
+// colour lens @p lens, and depth lens @p depth when given, at 25 fps; a
+// source over it on the compute queue, its pictures CONCURRENT across the
+// device's families; and a live worker over the source, looking for the
+// legacy board and offering each set to @p sets when given. @p camera gets
+// the fake camera. Null when any of them fails to open.
+std::unique_ptr<LiveWorker> open_live(
+    core::test::TwoFamilyDevice& two, const sensor::camera::CameraModel& lens,
+    test::FakeSensor** camera,
+    const std::optional<sensor::camera::CameraModel>& depth = std::nullopt,
+    SetSink* sets = nullptr) {
+  sensor::SensorInfo info;
+  info.id = "SYN0";
+  info.color = lens;
+  info.depth = depth;
+  info.fps = 25;
+  auto fake = std::make_unique<test::FakeSensor>(info);
+  *camera = fake.get();
+  std::vector<std::unique_ptr<sensor::IRgbdSensor>> sensors;
+  sensors.push_back(std::move(fake));
+  core::Result<sensor::SensorArray> array =
+      sensor::SensorArray::open(std::move(sensors), {});
+  EXPECT_TRUE(array.ok()) << array.status().message();
+  if (!array.ok()) return nullptr;
+  const std::vector<std::uint32_t> families(two.families().begin(),
+                                            two.families().end());
+  core::Result<std::unique_ptr<source::RigSource>> rig =
+      source::RigSource::open(std::move(array).value(), two.compute(),
+                              two.compute_allocator(), families);
+  EXPECT_TRUE(rig.ok()) << rig.status().message();
+  if (!rig.ok()) return nullptr;
+  core::Result<std::unique_ptr<LiveWorker>> live =
+      LiveWorker::create(std::move(rig).value(), {lens}, legacy_femto_board(),
+                         false, nullptr, sets);
+  EXPECT_TRUE(live.ok()) << live.status().message();
+  return live.ok() ? std::move(live).value() : nullptr;
+}
+
+// @p live's first snapshot numbered above @p after, polled for up to 30 s;
+// null if none comes by then.
+std::shared_ptr<const LiveSnapshot> next_snapshot(LiveWorker& live,
+                                                  std::uint64_t after = 0) {
+  const auto give_up =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (std::chrono::steady_clock::now() < give_up) {
+    std::shared_ptr<const LiveSnapshot> snapshot = live.take_snapshot();
+    if (snapshot != nullptr && snapshot->number > after) return snapshot;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return nullptr;
+}
+
 class AppLiveCrossFamily : public core::test::SharedDeviceTest {
  protected:
   core::DeviceRequirements compute_requirements() const override {
@@ -678,37 +730,17 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
   ASSERT_TRUE(made.ok()) << made.status().message();
   const sensor::YuvImage picture = std::move(made).value();
 
-  sensor::SensorInfo info;
-  info.id = "SYN0";
-  info.color = lens;
-  info.fps = 25;
-  auto fake = std::make_unique<test::FakeSensor>(info);
-  test::FakeSensor& camera = *fake;
-  std::vector<std::unique_ptr<sensor::IRgbdSensor>> sensors;
-  sensors.push_back(std::move(fake));
-  core::Result<sensor::SensorArray> array =
-      sensor::SensorArray::open(std::move(sensors), {});
-  ASSERT_TRUE(array.ok()) << array.status().message();
-  core::Result<std::unique_ptr<source::RigSource>> rig =
-      source::RigSource::open(std::move(array).value(), two.compute(),
-                              two.compute_allocator(), families);
-  ASSERT_TRUE(rig.ok()) << rig.status().message();
-  core::Result<std::unique_ptr<LiveWorker>> live = LiveWorker::create(
-      std::move(rig).value(), {lens}, legacy_femto_board(), false, nullptr);
-  ASSERT_TRUE(live.ok()) << live.status().message();
+  test::FakeSensor* camera = nullptr;
+  const std::unique_ptr<LiveWorker> live = open_live(two, lens, &camera);
+  ASSERT_NE(live, nullptr);
   sensor::RgbdFrame frame;
   frame.color = picture;
   frame.color_camera = lens;
   frame.timestamp_ns = 1'760'000'000'000'000'000ull;
-  camera.push(std::move(frame));
-  std::shared_ptr<const LiveSnapshot> snapshot;
-  const auto give_up =
-      std::chrono::steady_clock::now() + std::chrono::seconds(30);
-  while (!snapshot && std::chrono::steady_clock::now() < give_up) {
-    snapshot = live.value()->take_snapshot();
-  }
+  camera->push(std::move(frame));
+  const std::shared_ptr<const LiveSnapshot> snapshot = next_snapshot(*live);
   ASSERT_NE(snapshot, nullptr);
-  EXPECT_TRUE(live.value()->take_errors().empty());
+  EXPECT_TRUE(live->take_errors().empty());
   EXPECT_EQ(snapshot->detections[0].observation.points.size(), 8u);
   EXPECT_TRUE(is_usable(snapshot->checks[0].verdict));
 
@@ -772,7 +804,7 @@ TEST_F(AppLiveCrossFamily, TheWindowDrawsWhatTheLiveWorkerReadOnAnotherFamily) {
   }
   EXPECT_LE(worst, 3);
 
-  live.value()->stop();
+  live->stop();
   ASSERT_TRUE(timeline.value().signal(1).ok());
   retire.poll();
   EXPECT_EQ(retire.pending(), 0u);
@@ -808,6 +840,14 @@ class AppLiveTwoQueues : public core::test::VulkanTest {
   }
   core::test::TwoFamilyDevice& two() { return *two_; }
 
+  // The lens of a camera whose picture fills a tile, kTileW x kTileH.
+  static sensor::camera::CameraModel tile_lens() {
+    sensor::camera::CameraModel lens;
+    lens.size = {kTileW, kTileH};
+    lens.intrinsics = {30.0, 30.0, 16.0, 12.0};
+    return lens;
+  }
+
  private:
   std::unique_ptr<core::test::TwoFamilyDevice> two_;
 };
@@ -819,29 +859,10 @@ class AppLiveTwoQueues : public core::test::VulkanTest {
 // waits on the device for the value the source set after the pass.
 TEST_F(AppLiveTwoQueues, TheWindowCopiesAGreyTileAfterItsLumaPass) {
   core::test::TwoFamilyDevice& two = this->two();
-  const std::vector<std::uint32_t> families(two.families().begin(),
-                                            two.families().end());
-  sensor::camera::CameraModel lens;
-  lens.size = {kTileW, kTileH};
-  lens.intrinsics = {30.0, 30.0, 16.0, 12.0};
-  sensor::SensorInfo info;
-  info.id = "SYN0";
-  info.color = lens;
-  info.fps = 25;
-  auto fake = std::make_unique<test::FakeSensor>(info);
-  test::FakeSensor& camera = *fake;
-  std::vector<std::unique_ptr<sensor::IRgbdSensor>> sensors;
-  sensors.push_back(std::move(fake));
-  core::Result<sensor::SensorArray> array =
-      sensor::SensorArray::open(std::move(sensors), {});
-  ASSERT_TRUE(array.ok()) << array.status().message();
-  core::Result<std::unique_ptr<source::RigSource>> rig =
-      source::RigSource::open(std::move(array).value(), two.compute(),
-                              two.compute_allocator(), families);
-  ASSERT_TRUE(rig.ok()) << rig.status().message();
-  core::Result<std::unique_ptr<LiveWorker>> live = LiveWorker::create(
-      std::move(rig).value(), {lens}, legacy_femto_board(), false, nullptr);
-  ASSERT_TRUE(live.ok()) << live.status().message();
+  const sensor::camera::CameraModel lens = tile_lens();
+  test::FakeSensor* camera = nullptr;
+  const std::unique_ptr<LiveWorker> live = open_live(two, lens, &camera);
+  ASSERT_NE(live, nullptr);
   std::unique_ptr<viz::RigMosaic> mosaic =
       make_mosaic(two.graphics(), two.graphics_allocator(), 1);
   ASSERT_NE(mosaic, nullptr);
@@ -862,16 +883,10 @@ TEST_F(AppLiveTwoQueues, TheWindowCopiesAGreyTileAfterItsLumaPass) {
   frame.color_camera = lens;
   frame.timestamp_ns = 1'760'000'000'000'000'000ull;
   frame.pixels = luma;
-  camera.push(std::move(frame));
-  std::shared_ptr<const LiveSnapshot> snapshot;
-  const auto give_up =
-      std::chrono::steady_clock::now() + std::chrono::seconds(30);
-  while (!snapshot && std::chrono::steady_clock::now() < give_up) {
-    snapshot = live.value()->take_snapshot();
-    if (!snapshot) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
+  camera->push(std::move(frame));
+  std::shared_ptr<const LiveSnapshot> snapshot = next_snapshot(*live);
   ASSERT_NE(snapshot, nullptr);
-  EXPECT_TRUE(live.value()->take_errors().empty());
+  EXPECT_TRUE(live->take_errors().empty());
   ASSERT_NE(snapshot->set->cameras[0].tile, nullptr);  // a grey tile
   ASSERT_NE(snapshot->set->ready, nullptr);
 
@@ -883,7 +898,7 @@ TEST_F(AppLiveTwoQueues, TheWindowCopiesAGreyTileAfterItsLumaPass) {
   EXPECT_TRUE(RecordedWaitingFor(step, {pass_of(*snapshot)}));
   EXPECT_NEAR(tile_grey(*mosaic, pixels, 0), 90, 3);
 
-  live.value()->stop();
+  live->stop();
   snapshot.reset();
   ASSERT_TRUE(timeline.value().signal(1).ok());
   retire.poll();
@@ -918,37 +933,19 @@ TEST_F(AppLiveTwoQueues, TheImagesShowNoSetTakenWhileThe3DViewShowed) {
   decoded->ready = ready;
   decoded->ready_value = 1;
 
-  sensor::camera::CameraModel lens;
-  lens.size = {kTileW, kTileH};
-  lens.intrinsics = {30.0, 30.0, 16.0, 12.0};
+  const sensor::camera::CameraModel lens = tile_lens();
   sensor::camera::CameraModel depth_lens;
   depth_lens.size = {16, 12};
   depth_lens.intrinsics = {15.0, 15.0, 8.0, 6.0};
-  sensor::SensorInfo info;
-  info.id = "SYN0";
-  info.color = lens;
-  info.depth = depth_lens;
-  info.fps = 25;
-  auto fake = std::make_unique<test::FakeSensor>(info);
-  test::FakeSensor& camera = *fake;
-  std::vector<std::unique_ptr<sensor::IRgbdSensor>> sensors;
-  sensors.push_back(std::move(fake));
-  core::Result<sensor::SensorArray> array =
-      sensor::SensorArray::open(std::move(sensors), {});
-  ASSERT_TRUE(array.ok()) << array.status().message();
-  core::Result<std::unique_ptr<source::RigSource>> rig =
-      source::RigSource::open(std::move(array).value(), two.compute(),
-                              two.compute_allocator(), families);
-  ASSERT_TRUE(rig.ok()) << rig.status().message();
   CloudOptions every_set;
   every_set.live_every = 1;
   core::Result<std::unique_ptr<CloudWorker>> cloud = CloudWorker::create(
       two.compute(), two.compute_allocator(), 1, families, every_set);
   ASSERT_TRUE(cloud.ok()) << cloud.status().message();
-  core::Result<std::unique_ptr<LiveWorker>> live =
-      LiveWorker::create(std::move(rig).value(), {lens}, legacy_femto_board(),
-                         false, nullptr, cloud.value().get());
-  ASSERT_TRUE(live.ok()) << live.status().message();
+  test::FakeSensor* camera = nullptr;
+  const std::unique_ptr<LiveWorker> live =
+      open_live(two, lens, &camera, depth_lens, cloud.value().get());
+  ASSERT_NE(live, nullptr);
   std::unique_ptr<viz::RigMosaic> mosaic =
       make_mosaic(two.graphics(), two.graphics_allocator(), 1);
   ASSERT_NE(mosaic, nullptr);
@@ -972,19 +969,10 @@ TEST_F(AppLiveTwoQueues, TheImagesShowNoSetTakenWhileThe3DViewShowed) {
     frame.timestamp_ns = 1'760'000'000'000'000'000ull + tick * 40'000'000;
     frame.sequence = tick;
     frame.pixels = depth;
-    camera.push(std::move(frame));
+    camera->push(std::move(frame));
   };
   const auto give_up =
       std::chrono::steady_clock::now() + std::chrono::seconds(30);
-  const auto next_snapshot = [&](std::uint64_t after) {
-    std::shared_ptr<const LiveSnapshot> s;
-    while (std::chrono::steady_clock::now() < give_up) {
-      s = live.value()->take_snapshot();
-      if (s != nullptr && s->number > after) return s;
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return std::shared_ptr<const LiveSnapshot>();
-  };
   const auto prepared = [&](std::uint64_t count) {
     while (cloud.value()->prepared() < count &&
            std::chrono::steady_clock::now() < give_up) {
@@ -998,7 +986,7 @@ TEST_F(AppLiveTwoQueues, TheImagesShowNoSetTakenWhileThe3DViewShowed) {
       two.compute(), two.compute_allocator(), flat_grey(40), families);
   ASSERT_TRUE(earlier.ok()) << earlier.status().message();
   push(earlier.value(), 1);
-  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(0);
+  const std::shared_ptr<const LiveSnapshot> first = next_snapshot(*live);
   ASSERT_NE(first, nullptr);
   ASSERT_NE(first->set->ready, nullptr);
   ASSERT_TRUE(prepared(1));
@@ -1013,10 +1001,10 @@ TEST_F(AppLiveTwoQueues, TheImagesShowNoSetTakenWhileThe3DViewShowed) {
   // The window shows the 3D view alone: the board is not searched for. A
   // set is taken after that, whatever take was under way, so the next is
   // taken with no luma pass.
-  live.value()->set_detecting(false);
+  live->set_detecting(false);
   push(earlier.value(), 2);
   const std::shared_ptr<const LiveSnapshot> second =
-      next_snapshot(first->number);
+      next_snapshot(*live, first->number);
   ASSERT_NE(second, nullptr);
   ASSERT_TRUE(prepared(2));
   (void)cloud.value()->take_snapshot();
@@ -1024,7 +1012,8 @@ TEST_F(AppLiveTwoQueues, TheImagesShowNoSetTakenWhileThe3DViewShowed) {
 
   // Every check before the value is set is an EXPECT, so a failing one
   // leaves no batch waiting for it.
-  std::shared_ptr<const LiveSnapshot> snapshot = next_snapshot(second->number);
+  std::shared_ptr<const LiveSnapshot> snapshot =
+      next_snapshot(*live, second->number);
   EXPECT_NE(snapshot, nullptr);
   if (snapshot != nullptr) {
     EXPECT_FALSE(has_row(snapshot->stages, "luma"));  // no luma pass
@@ -1056,14 +1045,14 @@ TEST_F(AppLiveTwoQueues, TheImagesShowNoSetTakenWhileThe3DViewShowed) {
 
   // The images again: past a set that may be taken without luma, the next
   // is taken with it, and copied after its pass's value and its decoder's.
-  live.value()->set_detecting(true);
+  live->set_detecting(true);
   push(decoded.value(), 4);
   const std::shared_ptr<const LiveSnapshot> turning =
-      next_snapshot(snapshot->number);
+      next_snapshot(*live, snapshot->number);
   ASSERT_NE(turning, nullptr);
   push(decoded.value(), 5);
   const std::shared_ptr<const LiveSnapshot> back =
-      next_snapshot(turning->number);
+      next_snapshot(*live, turning->number);
   ASSERT_NE(back, nullptr);
   ASSERT_NE(back->set->ready, nullptr);
   pixels = render(two.graphics(), two.graphics_allocator(), *mosaic, retire,
@@ -1071,9 +1060,9 @@ TEST_F(AppLiveTwoQueues, TheImagesShowNoSetTakenWhileThe3DViewShowed) {
   ASSERT_FALSE(pixels.empty());
   EXPECT_TRUE(RecordedWaitingFor(step, {pass_of(*back), {ready.get(), 1}}));
   EXPECT_NEAR(tile_grey(*mosaic, pixels, 0), 90, 3);
-  EXPECT_TRUE(live.value()->take_errors().empty());
+  EXPECT_TRUE(live->take_errors().empty());
 
-  live.value()->stop();
+  live->stop();
   points.reset();
   snapshot.reset();
   cloud.value()->stop();
