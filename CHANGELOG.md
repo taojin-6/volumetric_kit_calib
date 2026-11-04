@@ -7,6 +7,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.11.0] - 2026-11-03
+
+### Fixed
+
+- calib_rig's Images view no longer says a refusal per camera on NVIDIA on
+  the first frame back from the 3D view (DECISIONS.md, 2026-10-16, amended
+  again 2026-11-03). A set taken while the 3D view showed has no luma pass,
+  so nothing took its pictures over: NVDEC's images were still owned outside
+  Vulkan, and nvJPEG's planes sat in a buffer, both of which the mosaic
+  refuses. `app::record_fresh` now skips a snapshot whose set was taken
+  without luma, and each tile keeps its last picture until the next set taken
+  with luma.
+- The window's copy of a set's pictures into the mosaic now waits on the
+  device for the set's luma pass. The pass writes the grey tiles and takes
+  the decoder's images over on sensor's queue, and the window copies them on
+  the renderer's queue; before, only the pass's fence stood between the two.
+  The source now sets a timeline value on its queue after the pass
+  (`source::PictureSet::ready` and `ready_value`, new), as the 3D view's
+  worker does after its preparation, and it is reached when the set is
+  handed out. `app::record_snapshot` returns the value among the frame's
+  waits at `VK_PIPELINE_STAGE_TRANSFER_BIT`. The validation layer, including
+  synchronization validation, reported nothing either way.
+
+### Changed
+
+- calib's version is 0.11.0, where it was 0.10.0.
+
 ## [0.10.0] - 2026-11-03
 
 ### Fixed

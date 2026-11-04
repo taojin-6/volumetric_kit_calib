@@ -14,6 +14,21 @@
 
 namespace volumetric_kit::calib::app {
 
+namespace {
+
+// Whether the value a writer sets once its work is done -- a decoder's
+// picture's (`YuvImage::ready`), a set's luma pass's (`PictureSet::ready`) --
+// is reached; true with none. Read, never waited for.
+core::Result<bool> reached(
+    const std::shared_ptr<const core::TimelineSemaphore>& ready,
+    std::uint64_t value) {
+  if (ready == nullptr) return true;
+  VKC_ASSIGN(const std::uint64_t now, ready->value());
+  return now >= value;
+}
+
+}  // namespace
+
 core::Result<std::optional<std::vector<core::TimelinePoint>>> record_snapshot(
     viz::RigMosaic& mosaic, gfx::RetireQueue& retire, VkCommandBuffer cmd,
     const std::shared_ptr<const LiveSnapshot>& snapshot,
@@ -32,6 +47,13 @@ core::Result<std::optional<std::vector<core::TimelinePoint>>> record_snapshot(
     }
     std::vector<const sensor::YuvImage*> pictures(set.cameras.size(), nullptr);
     std::vector<core::TimelinePoint> waits;
+    // The luma pass's end, on another queue: its grey tiles' writes and its
+    // hold of the decoder's images come before the copies.
+    VKC_ASSIGN(const bool passed, reached(set.ready, set.ready_value));
+    if (!passed) return Waits();
+    if (set.ready != nullptr) {
+      waits.push_back({set.ready.get(), set.ready_value});
+    }
     for (std::size_t i = 0; i < pictures.size(); ++i) {
       if (!set.cameras[i].present) continue;
       // Its grey tile; else the decoder's picture, in colour.
@@ -47,11 +69,10 @@ core::Result<std::optional<std::vector<core::TimelinePoint>>> record_snapshot(
       // on the device. The frame loop takes only a value already reached,
       // and the host never waits for one, so a set with a value not reached
       // yet waits for a later frame, with nothing recorded or held.
-      if (picture->ready != nullptr) {
-        VKC_ASSIGN(const std::uint64_t reached, picture->ready->value());
-        if (reached < picture->ready_value) return Waits();
-        sensor::add_ready_point(*picture, waits);
-      }
+      VKC_ASSIGN(const bool decoded,
+                 reached(picture->ready, picture->ready_value));
+      if (!decoded) return Waits();
+      sensor::add_ready_point(*picture, waits);
       pictures[i] = picture;
     }
     // Held, not freed: the tiles and the decoder's images, and the timelines
@@ -71,6 +92,13 @@ core::Result<bool> record_fresh(
     core::StageMetrics& ran) {
   return compute::guarded("record_fresh", [&]() -> core::Result<bool> {
     if (!fresh || snapshot == nullptr) return false;
+    // Taken without luma, while the 3D view showed: no pass took its
+    // pictures over, and NVIDIA's are ones the mosaic refuses. Not shown;
+    // each tile keeps its last picture until a set taken with luma comes.
+    if (snapshot->set != nullptr && snapshot->set->ready == nullptr) {
+      fresh = false;
+      return false;
+    }
     core::StageMetrics timed;
     std::optional<std::vector<core::TimelinePoint>> ready;
     {

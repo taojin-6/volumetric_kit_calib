@@ -4,11 +4,13 @@
 // The source tier on a device: a sensor array of fake cameras (NV12 device
 // images, host luma) and a fake stereo sensor of host luma pairs, each set's
 // luma and half made by sensor's LumaPass and read back. Each set's pictures,
-// times and spread; its tiles, held by the set past the next take; the half
-// against a host reference; newest wins; a decoder's picture read only once
-// its ready value is set; the stereo source's refusals and its skew bound; a
-// poll's failure against a picture's; the ChArUco board found in the GPU's
-// half as in the CPU's; and sample main 4 of the design, reading a source.
+// times and spread; its tiles, held by the set past the next take; its luma
+// pass's ready value, reached, and none for a set taken without luma; the
+// half against a host reference; newest wins; a decoder's picture read only
+// once its ready value is set; the stereo source's refusals and its skew
+// bound; a poll's failure against a picture's; the ChArUco board found in the
+// GPU's half as in the CPU's; and sample main 4 of the design, reading a
+// source.
 // Runs under the validation layer when the environment asks
 // (VKC_TEST_VALIDATION); skips without a Vulkan device.
 
@@ -284,9 +286,39 @@ TEST_F(SourceRig, ASetTakenWithoutLumaHasItsTimesAlone) {
     EXPECT_TRUE(picture.present);
     EXPECT_EQ(picture.tile, nullptr);
   }
+  EXPECT_EQ(taken.value()->ready, nullptr);  // no pass to wait for
   EXPECT_TRUE(rig->host().empty());
   ASSERT_EQ(stages.rows().size(), 1u);
   EXPECT_STREQ(stages.rows()[0].name, "poll");
+}
+
+// A set taken with luma carries its pass's ready value, set after the pass on
+// the device's queue and already reached when the set comes, for a reader on
+// another queue to wait for there; each set a higher value on the source's
+// one timeline, held by the set.
+TEST_F(SourceRig, ASetTakenWithLumaCarriesItsPassReadyValue) {
+  test::FakeStereo* fake = nullptr;
+  std::unique_ptr<RigSource> rig = stereo(&fake);
+  ASSERT_NE(rig, nullptr);
+  ASSERT_TRUE(rig->start().ok());
+  std::optional<PictureSet> sets[2];
+  for (std::uint64_t k = 0; k < 2; ++k) {
+    SCOPED_TRACE("set " + std::to_string(k));
+    fake->push(test::host_pair(kWidth, kHeight,
+                               pattern(kWidth, kHeight, static_cast<int>(k)),
+                               pattern(kWidth, kHeight, 1), kStartNs, 0, k));
+    core::Result<std::optional<PictureSet>> taken = rig->take();
+    ASSERT_TRUE(taken.ok()) << taken.status().message();
+    ASSERT_TRUE(taken.value().has_value());
+    sets[k] = std::move(taken).value();
+    ASSERT_NE(sets[k]->ready, nullptr);
+    const core::Result<std::uint64_t> now = sets[k]->ready->value();
+    ASSERT_TRUE(now.ok()) << now.status().message();
+    EXPECT_GE(now.value(), sets[k]->ready_value);
+  }
+  EXPECT_EQ(sets[1]->ready, sets[0]->ready);
+  EXPECT_GT(sets[1]->ready_value, sets[0]->ready_value);
+  EXPECT_GT(sets[0]->ready_value, 0u);
 }
 
 // The sensor's failure is the take's, and says so through failed(); a picture

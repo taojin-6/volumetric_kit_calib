@@ -1408,9 +1408,10 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       view.fit();
       fitted = true;
     }
-    // The tiles only while the mosaic is shown: a snapshot taken meanwhile
-    // stays fresh for the images' return, as one whose decoder's ready value
-    // is not reached yet does for a later frame.
+    // The tiles only while the mosaic is shown. A snapshot taken meanwhile,
+    // without luma, is not shown on the images' return: the tiles keep their
+    // last pictures until a set taken with luma comes. One whose ready value
+    // is not reached yet stays fresh for a later frame.
     core::StageMetrics recorded;
     if (mosaic_shown) {
       VKC_ASSIGN(const bool copied,

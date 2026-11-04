@@ -496,9 +496,10 @@ cameras' ids (a DeckLink pair).
   and the board's corners are where it put them (0 px on 48 corners at 4K).
 - **A set may be kept; host luma may not.** A `PictureSet` lives on the
   device and may be shared: each camera's presence, time and grey tile, the
-  RGB-D set, and an owner that holds the tiles. `host()` is valid until the
-  next take, as it sits in the readback's reused staging buffer, so the live
-  snapshot keeps the set and the detections, never the host views.
+  RGB-D set, an owner that holds the tiles, and, since 2026-11-03, its luma
+  pass's ready value (the entry on the live view). `host()` is valid until
+  the next take, as it sits in the readback's reused staging buffer, so the
+  live snapshot keeps the set and the detections, never the host views.
 - **One code names a driver.** The app's opener (`app/open_source.hpp`)
   opens the cameras and hands the rest a source and calib's own camera
   records. Its arms are Orbbec's and DeckLink's (the entry on intrinsic
@@ -1251,15 +1252,30 @@ The `viz` tier draws the live view (`viz/mosaic.hpp`, `overlay.hpp`,
   NVIDIA's decoders hand theirs out) is copied only in a frame whose
   submission waits for that value at the transfer stage. In the Images view
   that is NVDEC's NV12 images: before, only the luma batch's fence stood
-  between CUDA's write and the window's copy on another queue. A set taken
-  while the 3D view showed holds pictures no luma pass took over, which the
-  mosaic still refuses. gfx's frame loop takes only values already reached,
-  and no host waits on one (a host wait on a value CUDA sets wakes about
-  10 ms late), so the window reads the value, never waits on it, and records
-  a set with a value not reached yet at a later frame, every tile keeping
-  its last picture meanwhile. The live worker's luma pass and the 3D view's
-  preparation wait for it in their own batches (sensor's `LumaPass` and
-  `GpuFramePrep`); a capture copies host data alone.
+  between CUDA's write and the window's copy on another queue. gfx's frame
+  loop takes only values already reached, and no host waits on one (a host
+  wait on a value CUDA sets wakes about 10 ms late), so the window reads the
+  value, never waits on it, and records a set with a value not reached yet
+  at a later frame, every tile keeping its last picture meanwhile. The live
+  worker's luma pass and the 3D view's preparation wait for it in their own
+  batches (sensor's `LumaPass` and `GpuFramePrep`); a capture copies host
+  data alone.
+- **The luma pass's value, too** (2026-11-03, amended the same day, the
+  owner's call on #72's follow-ups). The pass writes the grey tiles and takes
+  the decoder's images over on sensor's queue, and its fence makes no device
+  write visible to the renderer's. So the source sets a timeline value on
+  its queue after the pass and its readback, waited for on the host, so it
+  is reached when the set comes (`source::PictureSet::ready`), as the 3D
+  view's worker does after its preparation. Each frame that copies the set
+  waits for it at the transfer stage, as it waits for a decoder's. The
+  validation layer, synchronization validation included, reported nothing
+  without it.
+- **A set taken without luma is not shown** (2026-11-03, the same call). A
+  set taken while the 3D view showed holds pictures no pass took over, and
+  on NVIDIA the mosaic refuses them (NVDEC's images still owned outside
+  Vulkan, nvJPEG's planes in a buffer): the first frame back said a refusal
+  per camera. The window skips such a set, and each tile keeps its last
+  picture until a set taken with luma comes, a set or two later.
 - **Marks in the detector's pixels.** Corners keep OpenCV's integer pixel
   centres, and gfx's `ImageOverlay` is the one home of the half-pixel and
   framebuffer-scale mapping onto a tile's region of the mosaic, of the clip
