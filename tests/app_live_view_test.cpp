@@ -318,7 +318,9 @@ std::vector<std::uint8_t> render(const core::Device& device,
   if (!recorded.ok()) return {};
   out.recorded = recorded.value();
   out.waits = frame.waits;
-  if (step == nullptr) EXPECT_TRUE(out.recorded) << "not recorded";
+  if (step == nullptr) {
+    EXPECT_TRUE(out.recorded) << "not recorded";
+  }
   target.value().prepare(raw);
   const gfx::RenderTarget rt = target.value().target();
   rt.begin(raw, gfx::RenderTargetBeginInfo{});
