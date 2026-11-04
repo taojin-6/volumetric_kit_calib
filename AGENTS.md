@@ -148,11 +148,15 @@ git -C "$calib_root" diff --check
 ```
 
 That `ctest` is the default suite. It leaves out the labels `slow`, the full
-statistical sweeps, and `package`, the nested configures of calib's build;
-`-L slow` and `-L package` run them, as CI does. Each test binary but the
+sweeps and the search timings, and `package`, the nested configures of
+calib's build; `-L slow` and `-L package` run them. CI runs `package` on its
+Release rig leg and no `slow` test. Each test binary but the
 out-of-memory ones is one ctest test, named for its file (`detect_charuco`);
 run one case with the binary's `--gtest_filter`, or `GTEST_FILTER` under
-ctest.
+ctest. A test binary should take about 5 s in Release and 30 s under a
+sanitizer, both on an M5 Max: each rule on the smallest case that proves it,
+full-size work and sweeps under `slow`
+([DECISIONS.md](DECISIONS.md#2026-11-03--fast-tests-in-ci)).
 
 - Use the pinned formatting tools in `.pre-commit-config.yaml`; CI runs the
   same hooks. Set the build type explicitly and report it with measurements.

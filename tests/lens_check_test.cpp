@@ -405,9 +405,12 @@ TEST(CheckLens, ALensBentAtOneEdgeIsSuspectThereAlone) {
 
 // k1 3% high: the views' poses cannot take it up, so held fixed the lens is
 // suspect, by its RMS and its cells; fitted to the same views, the lens is
-// good: they were never at fault.
+// good: they were never at fault. Boards over an 8 x 5 grid, which the refit
+// solves far sooner than the whole spread's.
 TEST(CheckLens, ALensOffItsViewsIsSuspectWhereItsRefitIsGood) {
-  const std::vector<Observation> views = spread_views(checkerboard());
+  const std::vector<Observation> views =
+      observe(checkerboard(), lab_lens(),
+              spread(checkerboard(), lab_lens(), 8, 5), 0.15);
   camera::CameraModel off = lab_lens();
   off.distortion.k1 *= 1.03;
   const LensCheck check =
@@ -1018,9 +1021,9 @@ TEST(CheckRigLens, Refuses) {
 
 // The true lens at 0.1, 0.2 and 0.3 px of corner noise, on either board: no
 // check of 300 read suspect in the sweep (DECISIONS.md), the worst cell's mean
-// at 0.61 of its limit; the default suite draws 3 seeds.
+// at 0.61 of its limit; the default suite draws 1 seed.
 TEST(CheckLensSweep, NoiseAloneDoesNotReadSuspect) {
-  const std::uint32_t seeds = test::sweep_size(3, 50);
+  const std::uint32_t seeds = test::sweep_size(1, 50);
   int checks = 0;
   double worst = 0.0;
   for (const compute::Board* board : {&checkerboard(), &charuco()}) {
