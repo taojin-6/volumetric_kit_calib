@@ -26,6 +26,7 @@
 #include "volumetric_kit/calib/source/export.hpp"
 #include "volumetric_kit/core/base/result.hpp"
 #include "volumetric_kit/core/base/stage_metrics.hpp"
+#include "volumetric_kit/core/vulkan/sync.hpp"
 #include "volumetric_kit/sensor/array/sensor_array.hpp"
 #include "volumetric_kit/sensor/camera/camera_model.hpp"
 #include "volumetric_kit/sensor/stereo/stereo_sensor.hpp"
@@ -97,6 +98,16 @@ struct PictureSet {
   /// Holds every device picture a tile points to. Let it go only once every
   /// device read of them has completed: the source writes them again after.
   std::shared_ptr<const void> owner;
+  /// Set by a take with luma: the source's timeline, at @ref ready_value
+  /// once the luma pass is done with the set's pictures on the device -- its
+  /// grey tiles written, the decoder's images taken over. The source sets it
+  /// on its device's queue after the pass, and it is reached when take()
+  /// hands the set out. A reader on another queue (the window's copy into
+  /// the mosaic) waits for it on the device, as the pass's fence makes no
+  /// device write visible there. Null for a set taken without luma, whose
+  /// pictures no pass took over.
+  std::shared_ptr<const core::TimelineSemaphore> ready;
+  std::uint64_t ready_value = 0;  ///< See @ref ready.
 
   /// @return How many cameras' pictures the set holds.
   std::size_t count() const noexcept {
@@ -147,9 +158,10 @@ struct StereoMember {
 ///
 /// Each take() polls -- the array's next set, or the stereo sensor's newest
 /// pair -- makes every picture's luma and its half in one GPU pass (sensor's
-/// `LumaPass`, any layout a driver hands out), and reads them back in one
-/// submit (`PictureReadback`'s list read). The set handed out lives on the
-/// device; @ref host has its luma on the host until the next take. Not
+/// `LumaPass`, any layout a driver hands out), reads them back in one submit
+/// (`PictureReadback`'s list read), and sets the set's ready value after them
+/// on the device's queue (@ref PictureSet::ready). The set handed out lives on
+/// the device; @ref host has its luma on the host until the next take. Not
 /// thread-safe.
 ///
 /// A camera whose picture is NV12 images (VideoToolbox's, NVDEC's) shows the
@@ -180,8 +192,9 @@ class VC_SOURCE_API RigSource {
   ///                   renderer's beside @p device's), which makes it
   ///                   CONCURRENT; empty: @p device's alone.
   /// @return The source; `InvalidArgument` for an empty array or a sensor
-  ///         without a colour camera (naming it); what `LumaPass::create`
-  ///         or `PictureReadback::create` refuses; or `OutOfMemory`.
+  ///         without a colour camera (naming it); what `LumaPass::create`,
+  ///         `PictureReadback::create` or the ready timeline's
+  ///         `TimelineSemaphore::create` refuses; or `OutOfMemory`.
   static core::Result<std::unique_ptr<RigSource>> open(
       sensor::SensorArray&& array, const core::Device& device,
       core::Allocator& allocator,
@@ -223,12 +236,13 @@ class VC_SOURCE_API RigSource {
   ///                 `"luma"` and `"readback"` rows.
   /// @param luma     Whether to make and read back its luma. False while no
   ///                 one looks at it (the live view showing the 3D view):
-  ///                 the set then has no tiles, and @ref host no pictures.
+  ///                 the set then has no tiles and no ready value, and
+  ///                 @ref host no pictures.
   /// @return The set; empty when none is new or the source is not started;
   ///         the sensors' failure (a camera disconnected), after which
-  ///         @ref failed is true; or the luma's or the readback's failure,
-  ///         the set dropped and the source going on. What a driver throws
-  ///         leaves take() as it leaves sensor's own polls.
+  ///         @ref failed is true; or the luma's, the readback's or the ready
+  ///         value's failure, the set dropped and the source going on. What a
+  ///         driver throws leaves take() as it leaves sensor's own polls.
   core::Result<std::optional<PictureSet>> take(
       core::StageMetrics* metrics = nullptr, bool luma = true);
 

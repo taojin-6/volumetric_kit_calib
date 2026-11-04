@@ -44,11 +44,13 @@ namespace volumetric_kit::calib::app {
 ///        the GPU.
 ///
 /// A picture that carries a ready value (`sensor::YuvImage::ready`, as
-/// NVIDIA's decoders hand theirs out) is copied only once that value is
-/// reached, and its value is returned for the frame to wait for on the
-/// device: gfx's frame loop takes only values already reached, and nothing
-/// here waits on the host. A snapshot with a value not reached yet is
-/// recorded at a later frame. The window records through record_fresh.
+/// NVIDIA's decoders hand theirs out), and the set's own, set after its luma
+/// pass on the source's queue (`source::PictureSet::ready`), are copied only
+/// once each value is reached, and each value is returned for the frame to
+/// wait for on the device: gfx's frame loop takes only values already
+/// reached, and nothing here waits on the host. A snapshot with a value not
+/// reached yet is recorded at a later frame. The window records through
+/// record_fresh.
 /// @param mosaic        The rig's mosaic, one tile per camera.
 /// @param retire        The window's retire queue, on its frame loop's
 ///                      timeline.
@@ -60,16 +62,16 @@ namespace volumetric_kit::calib::app {
 ///                      keeps its last.
 /// @param frame_number  The frame's number (`windowing::Frame::number`).
 /// @return What the frame's submission must wait for at
-///         `VK_PIPELINE_STAGE_TRANSFER_BIT`: the ready value of each picture
-///         handed to the mosaic, one a timeline (sensor's
+///         `VK_PIPELINE_STAGE_TRANSFER_BIT`: the set's ready value and that
+///         of each picture handed to the mosaic, one a timeline (sensor's
 ///         `add_ready_point`), every one already reached; empty when none
 ///         carries one. What the mosaic left out is in its `refused`.
-///         Nothing (`std::nullopt`) while a picture's ready value is not
-///         reached, with nothing recorded or held: record the snapshot at a
-///         later frame. `InvalidArgument` for a null snapshot or one whose
-///         set has a picture per camera missing or extra, or a ready
-///         timeline's error when its value cannot be read, with nothing
-///         recorded or held; the mosaic's `OutOfMemory`.
+///         Nothing (`std::nullopt`) while a ready value, the set's or a
+///         picture's, is not reached, with nothing recorded or held: record
+///         the snapshot at a later frame. `InvalidArgument` for a null
+///         snapshot or one whose set has a picture per camera missing or
+///         extra, or a ready timeline's error when its value cannot be read,
+///         with nothing recorded or held; the mosaic's `OutOfMemory`.
 ///
 /// @code
 /// VKC_ASSIGN(const auto ready, record_snapshot(*mosaic, retire, frame.cmd,
@@ -92,18 +94,23 @@ core::Result<std::optional<std::vector<core::TimelinePoint>>> record_snapshot(
 ///
 /// A snapshot with a ready value not reached yet stays fresh, for a later
 /// frame, with nothing recorded, held, waited for or timed, so the Stages
-/// panel keeps the last record's time (`viz::hold_stages`).
+/// panel keeps the last record's time (`viz::hold_stages`). A snapshot whose
+/// set was taken without luma (no `source::PictureSet::ready`: the 3D view
+/// showed) is not recorded at all, and @p fresh is cleared: no luma pass took
+/// its pictures over, and NVIDIA's -- NVDEC's images still owned outside
+/// Vulkan, nvJPEG's planes in a buffer -- are ones the mosaic refuses. Every
+/// tile keeps its last picture until a set taken with luma comes.
 /// @param mosaic    The rig's mosaic, one tile per camera.
 /// @param retire    The window's retire queue, on its frame loop's timeline.
 /// @param frame     The frame, recording, outside its rendering scope; its
 ///                  `waits` gain the ready values.
 /// @param snapshot  The latest snapshot; null records nothing.
 /// @param fresh     Whether @p snapshot is still to be recorded: false
-///                  records nothing, and a record clears it.
+///                  records nothing, and a record or a skip clears it.
 /// @param ran       This frame's run of the tiles; a record adds its row.
 /// @return Whether it recorded @p snapshot, after which the window says the
-///         mosaic's new refusals (refusals_to_say); record_snapshot's errors,
-///         with @p fresh kept; or `OutOfMemory`.
+///         mosaic's new refusals (refusals_to_say); false for one skipped;
+///         record_snapshot's errors, with @p fresh kept; or `OutOfMemory`.
 ///
 /// @code
 /// core::StageMetrics ran;

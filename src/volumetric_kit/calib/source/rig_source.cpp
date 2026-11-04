@@ -43,8 +43,13 @@ struct RigSource::Impl {
   std::unique_ptr<sensor::IStereoSensor> stereo;
 
   std::vector<SourceCamera> cameras;
+  const core::Device* gpu = nullptr;  // the pictures', whose queue sets ready
   std::unique_ptr<sensor::LumaPass> pass;
   std::unique_ptr<sensor::PictureReadback> readback;
+  // Each set's ready value (PictureSet::ready), set after its luma pass;
+  // shared with the sets, which keep it alive while a reader waits on it.
+  std::shared_ptr<core::TimelineSemaphore> ready;
+  std::uint64_t signalled = 0;  // the last value set on it
   std::vector<HostLuma> host;
   bool failed = false;
   std::uint64_t pairs = 0;  // a stereo source's pairs handed out since start
@@ -57,17 +62,38 @@ struct RigSource::Impl {
   core::Status make_tools(const core::Device& device,
                           core::Allocator& allocator,
                           const std::vector<std::uint32_t>& families) {
+    gpu = &device;
     VKC_ASSIGN(pass, sensor::LumaPass::create(
                          device, allocator,
                          families.empty() ? nullptr : families.data(),
                          static_cast<std::uint32_t>(families.size())));
     VKC_ASSIGN(readback, sensor::PictureReadback::create(device, allocator));
+    VKC_ASSIGN(core::TimelineSemaphore timeline,
+               core::TimelineSemaphore::create(device, 0));
+    ready = std::make_shared<core::TimelineSemaphore>(std::move(timeline));
+    return {};
+  }
+
+  // The pass's and the read's fences make no device write visible to another
+  // queue: a value set after them on this queue gives a reader there -- the
+  // window's copy of the tiles and of the images the pass took over -- a
+  // semaphore to wait on that does, as the 3D view's worker sets one after
+  // its preparation. Waited for, so it is reached when the set is handed out.
+  core::Status set_ready(PictureSet& set) {
+    const std::uint64_t value = signalled + 1;
+    VKC_ASSIGN(core::Device::PendingSubmit done,
+               gpu->submit_pending([](VkCommandBuffer) {}, {},
+                                   {{ready.get(), value}}));
+    signalled = value;
+    VKC_TRY(done.wait());
+    set.ready = ready;
+    set.ready_value = value;
     return {};
   }
 
   // `pictures[k]`'s luma made and read back: camera `camera[k]`'s. The host
   // pictures in `host`, by camera; each grey tile's device luma held by the
-  // set's owner, its picture in `set`.
+  // set's owner, its picture in `set`; the set's ready value set after both.
   // Two submits (the pass, then the read) stay: one submit, and NV12 luma
   // images read in place, were measured on 2026-11-03 at under 0.5 ms and 5%
   // a set on the M5 Max and the lab box, below the bar for a change.
@@ -89,6 +115,11 @@ struct RigSource::Impl {
     if (!read.ok()) {
       host.assign(cameras.size(), HostLuma{});
       return read.status();
+    }
+    const core::Status ready_set = set_ready(set);
+    if (!ready_set.ok()) {
+      host.assign(cameras.size(), HostLuma{});
+      return ready_set;
     }
     const std::vector<sensor::PictureView>& views = read.value();
     auto tiles = std::make_shared<Tiles>();
