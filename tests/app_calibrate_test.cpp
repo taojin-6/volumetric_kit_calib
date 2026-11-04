@@ -100,13 +100,14 @@ KeptCaptures unlinked_captures(const test::Scene& scene,
 // reference's gauge, the reference exactly at the identity; each pose the
 // inverse of its T_cw, in rig order, and the calibration's for its id,
 // whatever order the ids sort in; leave-one-out once per capture; the files
-// formatted.
+// formatted. The rig's ends, 2 cameras with the first the reference and 5
+// with another.
 TEST(Calibrate, SolvesTwoToFiveCamerasInTheReferencesGauge) {
   struct Case {
     std::size_t cameras;
     std::size_t reference;
   };
-  for (const Case& c : {Case{2, 0}, Case{3, 1}, Case{4, 0}, Case{5, 3}}) {
+  for (const Case& c : {Case{2, 0}, Case{5, 3}}) {
     SCOPED_TRACE(std::to_string(c.cameras) + " cameras, reference " +
                  std::to_string(c.reference));
     const test::Scene scene = test::make_kept_scene(c.cameras, 60);

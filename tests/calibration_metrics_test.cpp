@@ -842,8 +842,8 @@ TEST(LeaveOneOut, ReturnsWhatProgressThrows) {
 
 // The A/B tests' plans and draws: make_scene's 60 placements at 0.3 px of
 // noise, the rig's own level, each seed both the plan's and the noise's;
-// seeds 1 to 4, or to 16 in the sweep, DECISIONS.md's (test::sweep_size).
-std::uint32_t ab_seeds() { return test::sweep_size(4, 16); }
+// seeds 1 and 2, or 1 to 16 in the sweep, DECISIONS.md's (test::sweep_size).
+std::uint32_t ab_seeds() { return test::sweep_size(2, 16); }
 
 Scene ab_scene(std::uint32_t seed) { return make_scene(60, 0.3, seed, seed); }
 
@@ -907,14 +907,14 @@ TEST(PrincipalPointABSweep, PrefersTheShiftWhenTheTruthHasIt) {
 
 // The truth's principal points midway, 1.25 px above the lenses given and
 // 1.25 px below the shifted: neither side is right, and over the same plans
-// and draws the verdict names a side on at most one.
+// and draws the verdict names a side on at most one in 16.
 TEST(PrincipalPointABSweep, MidwayTruthIsInconclusive) {
   std::uint32_t decisive = 0;
   for (std::uint32_t seed = 1; seed <= ab_seeds(); ++seed) {
     const PrincipalPointAB ab = ab_of(truth_above(ab_scene(seed), 1.25));
     decisive += ab.verdict != PrincipalPointVerdict::Inconclusive ? 1 : 0;
   }
-  EXPECT_LE(decisive, 1u);
+  EXPECT_LE(16 * decisive, ab_seeds());
 }
 
 // The sides' RMS is over the corners the solution kept, without its

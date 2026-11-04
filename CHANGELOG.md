@@ -7,6 +7,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [Unreleased]
+
+### Changed
+
+- **Fast tests in CI** (DECISIONS.md, 2026-11-03): the detect, lens,
+  source, metrics and app tests prove each rule on the fewest pictures,
+  captures and fits that show it, sharing what their cases make;
+  `detect_board.sweeps` (label `slow`) runs every scene, seed and state of
+  detect_board's cases. The library and its API are unchanged.
+- CI runs no `slow` test, and its deps caches hash the pins rather than the
+  root CMakeLists.txt and restore by prefix, so a version bump no longer
+  misses them. The sanitizer job compiles through ccache.
+
 ## [0.9.0] - 2026-11-03
 
 ### Added

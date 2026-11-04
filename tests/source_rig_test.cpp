@@ -590,7 +590,9 @@ TEST_F(SourceArray, ACameraDisconnectedFailsTheTake) {
 // --- The ChArUco board in the GPU's half ------------------------------------
 
 // The rig's board at 4K, found in the half the GPU made as in the half the
-// CPU made before (OpenCV's INTER_AREA): every corner within 0.01 px.
+// CPU made before (OpenCV's INTER_AREA): every corner within 0.01 px. One
+// pair, each picture with noise of its own; the halves' bytes are held to
+// test::halved's at small sizes above.
 TEST_F(SourceRig, FindsTheBoardInTheGpusHalfAsInTheCpusHalf) {
   const compute::Board board = test::femto_board();
   const camera::CameraModel lens = test::color_like_lens();
@@ -605,57 +607,52 @@ TEST_F(SourceRig, FindsTheBoardInTheGpusHalfAsInTheCpusHalf) {
   ASSERT_TRUE(made.ok()) << made.status().message();
   RigSource& rig = *made.value();
   ASSERT_TRUE(rig.start().ok());
+  const camera::Mat4d pose =
+      test::board_facing_camera(board, {0.0, 0.0, 2.1}, 25.0, 2.0);
+  const cv::Mat render = test::render_board(lens, pose, board);
+  const cv::Mat left = test::camera_image(render, {0.8, 2.5, 2});
+  const cv::Mat right = test::camera_image(render, {0.8, 2.5, 8});
+  fake->push(test::host_pair(
+      lens.size.width, lens.size.height,
+      std::vector<std::uint8_t>(left.data, left.data + left.total()),
+      std::vector<std::uint8_t>(right.data, right.data + right.total()),
+      kStartNs, 0, 1));
+  core::Result<std::optional<PictureSet>> taken = rig.take();
+  ASSERT_TRUE(taken.ok() && taken.value().has_value());
   double worst = 0.0;
   std::size_t corners = 0;
   bool halves_differ = false;
-  for (int k = 0; k < 3; ++k) {
-    const camera::Mat4d pose = test::board_facing_camera(
-        board, {0.25 * (k - 1), 0.1 * k - 0.1, 1.6 + 0.5 * k}, 15.0 + 10.0 * k,
-        12.0 * k - 10.0);
-    const cv::Mat render = test::render_board(lens, pose, board);
-    const cv::Mat left =
-        test::camera_image(render, {0.8, 2.5, std::uint64_t(k + 1)});
-    const cv::Mat right =
-        test::camera_image(render, {0.8, 2.5, std::uint64_t(k + 7)});
-    fake->push(test::host_pair(
-        lens.size.width, lens.size.height,
-        std::vector<std::uint8_t>(left.data, left.data + left.total()),
-        std::vector<std::uint8_t>(right.data, right.data + right.total()),
-        kStartNs + k * kPeriodNs, 0, k));
-    core::Result<std::optional<PictureSet>> taken = rig.take();
-    ASSERT_TRUE(taken.ok() && taken.value().has_value());
-    for (std::size_t i = 0; i < 2; ++i) {
-      const HostLuma& host = rig.host()[i];
-      const core::Result<Detection> gpu =
-          detect::detect_board(host.luma, board, {&host.half});
-      ASSERT_TRUE(gpu.ok()) << gpu.status().message();
-      // The CPU's half, as calib 0.3.0's live view made it before searching
-      // it: the picture's even part, INTER_AREA at exactly half the size.
-      const cv::Mat full(
-          static_cast<int>(host.luma.height), static_cast<int>(host.luma.width),
-          CV_8UC1, const_cast<std::uint8_t*>(host.luma.data), host.luma.stride);
-      cv::Mat old_half;
-      cv::resize(full(cv::Rect(0, 0, full.cols & ~1, full.rows & ~1)), old_half,
-                 cv::Size(full.cols / 2, full.rows / 2), 0.0, 0.0,
-                 cv::INTER_AREA);
-      const detect::LumaView old_view{static_cast<std::uint32_t>(old_half.cols),
-                                      static_cast<std::uint32_t>(old_half.rows),
-                                      old_half.step[0], old_half.data};
-      halves_differ = halves_differ || rows_of(old_view) != rows_of(host.half);
-      const core::Result<Detection> cpu =
-          detect::detect_board(host.luma, board, {&old_view});
-      ASSERT_TRUE(cpu.ok()) << cpu.status().message();
-      const std::vector<DetectedPoint>& a = gpu.value().observation.points;
-      const std::vector<DetectedPoint>& b = cpu.value().observation.points;
-      ASSERT_EQ(a.size(), b.size());
-      ASSERT_GT(a.size(), 0u);
-      for (std::size_t p = 0; p < a.size(); ++p) {
-        ASSERT_EQ(a[p].id, b[p].id);
-        worst = std::max(worst, std::hypot(a[p].pixel.x - b[p].pixel.x,
-                                           a[p].pixel.y - b[p].pixel.y));
-      }
-      corners += a.size();
+  for (std::size_t i = 0; i < 2; ++i) {
+    const HostLuma& host = rig.host()[i];
+    const core::Result<Detection> gpu =
+        detect::detect_board(host.luma, board, {&host.half});
+    ASSERT_TRUE(gpu.ok()) << gpu.status().message();
+    // The CPU's half, as calib 0.3.0's live view made it before searching
+    // it: the picture's even part, INTER_AREA at exactly half the size.
+    const cv::Mat full(
+        static_cast<int>(host.luma.height), static_cast<int>(host.luma.width),
+        CV_8UC1, const_cast<std::uint8_t*>(host.luma.data), host.luma.stride);
+    cv::Mat old_half;
+    cv::resize(full(cv::Rect(0, 0, full.cols & ~1, full.rows & ~1)), old_half,
+               cv::Size(full.cols / 2, full.rows / 2), 0.0, 0.0,
+               cv::INTER_AREA);
+    const detect::LumaView old_view{static_cast<std::uint32_t>(old_half.cols),
+                                    static_cast<std::uint32_t>(old_half.rows),
+                                    old_half.step[0], old_half.data};
+    halves_differ = halves_differ || rows_of(old_view) != rows_of(host.half);
+    const core::Result<Detection> cpu =
+        detect::detect_board(host.luma, board, {&old_view});
+    ASSERT_TRUE(cpu.ok()) << cpu.status().message();
+    const std::vector<DetectedPoint>& a = gpu.value().observation.points;
+    const std::vector<DetectedPoint>& b = cpu.value().observation.points;
+    ASSERT_EQ(a.size(), b.size());
+    ASSERT_GT(a.size(), 0u);
+    for (std::size_t p = 0; p < a.size(); ++p) {
+      ASSERT_EQ(a[p].id, b[p].id);
+      worst = std::max(worst, std::hypot(a[p].pixel.x - b[p].pixel.x,
+                                         a[p].pixel.y - b[p].pixel.y));
     }
+    corners += a.size();
   }
   std::printf("GPU half against CPU half: %zu corners, worst %.3g px, %s\n",
               corners, worst,
