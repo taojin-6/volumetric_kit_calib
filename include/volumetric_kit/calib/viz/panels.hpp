@@ -7,7 +7,8 @@
 /// @brief The live view's panels: what each camera sees, how the latest set
 ///        arrived, what the captures kept add up to and how much of the
 ///        origin tag they hold, how far each lens's views are, where a
-///        capture stands, and the stage timings; and Calibrate's: how far it
+///        capture or a scan stands, and the stage timings; and Calibrate's:
+///        how far it
 ///        has got, what its result and its depth checks are worth, where its
 ///        world is, what each stereo pair's rows, each lens fitted and each
 ///        lens checked on a pose solve are worth, and the notices it posts.
@@ -280,6 +281,60 @@ struct CaptureStatus {
 /// VKC_ASSIGN(const std::vector<PanelLine> lines, capture_panel(status));
 /// @endcode
 core::Result<std::vector<PanelLine>> capture_panel(const CaptureStatus& status);
+
+/// @brief One camera's still in a scan's capture: the file the session
+///        wrote.
+///
+/// @code
+/// const StillFile still{"bm-5", "images/bm-5/scan_bm-5_012.png", 17009738};
+/// @endcode
+struct StillFile {
+  std::string camera;  ///< Its id.
+  /// Its path, relative to the session's directory.
+  std::string file;
+  std::uint64_t bytes = 0;  ///< Its size.
+};
+
+/// @brief Where a scan stands: the capture rule's latest answer, the
+///        session, and the last capture written.
+///
+/// @code
+/// ScanStatus status;
+/// status.decision = live->decision();
+/// status.directory = captures->directory();
+/// status.captures = kept ? kept->captures.size() : 0;
+/// status.writing = captures->pending();
+/// @endcode
+struct ScanStatus {
+  quality::CaptureDecision decision;  ///< The capture rule's latest answer.
+  /// The session's directory; empty before its first capture.
+  std::string directory;
+  std::size_t captures = 0;  ///< The captures kept: written, not dropped.
+  /// The captures queued, being encoded or written: on disk once they are
+  /// 0, as the app writes them before it quits.
+  std::size_t writing = 0;
+  std::optional<int> last;   ///< The last capture written, by index.
+  int last_tag_cameras = 0;  ///< Its cameras that found the origin tag.
+  std::vector<StillFile> last_files;  ///< Its files, in rig order.
+  std::string error;  ///< Why the last capture failed; empty when none did.
+};
+
+/// @brief The Scan panel.
+///
+/// Lines, in order: `capture`, the rule's state as @ref capture_panel words
+/// it, the waiting a camera missing; `session`, the directory, or `none yet:
+/// the first capture starts one` (muted); `captures`, those kept; `writing`,
+/// those still being written (amber while any is); `last`, the last capture
+/// written and the cameras that found the origin tag in it, then a line per
+/// camera, its id and its file with its size in MB; and `save`, a capture's
+/// failure (red).
+/// @param status  Where the scan stands.
+/// @return The lines; or `OutOfMemory`.
+///
+/// @code
+/// VKC_ASSIGN(const std::vector<PanelLine> lines, scan_panel(status));
+/// @endcode
+core::Result<std::vector<PanelLine>> scan_panel(const ScanStatus& status);
 
 /// @brief The line that stands for the Calibrate button while Calibrate
 ///        runs.

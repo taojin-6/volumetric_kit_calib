@@ -30,6 +30,7 @@ namespace volumetric_kit::calib {
 /// meta.spread_ms = 1.4;
 /// meta.stillness_px = 0.08;
 /// meta.live_vs_full_px = 0.12;
+/// meta.skew_ns = 2'400'000;  // a stereo pair's
 /// @endcode
 struct CaptureMeta {
   int index = 0;  ///< The capture's number in its session, as its files are.
@@ -49,6 +50,10 @@ struct CaptureMeta {
   /// The median distance between the live detection's corners and the full
   /// detection's (pixels); empty when no camera has both.
   std::optional<double> live_vs_full_px;
+  /// A stereo pair's right picture's time less its left's (nanoseconds), as
+  /// its sensor measured it (`StereoFrame::skew_ns`); empty for an array's
+  /// set, whose cameras are each given their own time.
+  std::optional<std::int64_t> skew_ns;
 };
 
 }  // namespace volumetric_kit::calib

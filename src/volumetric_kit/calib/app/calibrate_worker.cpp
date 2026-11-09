@@ -401,6 +401,10 @@ core::Result<CalibrateResult> calibrate(const KeptCaptures& kept,
     const auto in = [&](const core::Status& status) {
       return status.with_context(kWhat);
     };
+    if (kept.mode == capture::SessionMode::Scan) {
+      return in(core::Status::unsupported(
+          "a scan session's captures are stills: it calibrates nothing"));
+    }
     if (kept.mode == capture::SessionMode::Intrinsics) {
       core::Result<CalibrateResult> lenses =
           calibrate_lenses(kept, [&](std::size_t done) {
@@ -796,6 +800,10 @@ core::Result<bool> CalibrateWorker::request(
         if (kept == nullptr) {
           return core::Status::invalid_argument(
               "CalibrateWorker::request: no captures kept");
+        }
+        if (kept->mode == capture::SessionMode::Scan) {
+          return core::Status::unsupported(
+              "CalibrateWorker::request: Scan mode has no Calibrate");
         }
         {
           const std::lock_guard<std::mutex> lock(state_->mutex);

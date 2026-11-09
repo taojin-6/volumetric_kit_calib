@@ -38,8 +38,9 @@ endif()
 # on for sensor or gfx keeps it. Only the examples and calib_rig opt into
 # core_config.
 #
-# The pin is core main at #97's merge (3f48e14, 0.44.2), at or past the 0.41.0
-# sensor's tiers need, as are the core's actions in .github/workflows.
+# The pin is core 0.51.0 (8ab8809), whose config tier takes CalibRig's scan, at
+# or past the 0.49.0 sensor's tiers need, as are the core's actions in
+# .github/workflows.
 if(VC_WITH_RIG)
   set(VKC_WITH_VULKAN ON)
 endif()
@@ -51,7 +52,7 @@ endif()
 FetchContent_Declare(
   volumetric_kit_core
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_core.git
-  GIT_TAG 3f48e1423084139b4a7ea46b4205f670bbfe2141)
+  GIT_TAG 8ab88093438ec62c086dab2efe27e88e4a8b194d)
 FetchContent_MakeAvailable(volumetric_kit_core)
 # The set() above is lost when the application made the core available first.
 if(VC_WITH_RIG)
@@ -78,13 +79,13 @@ endif()
 # and VS_WITH_CUDA apply. Work on both checkouts at once with
 # -DFETCHCONTENT_SOURCE_DIR_VOLUMETRIC_KIT_SENSOR=<sensor checkout>.
 #
-# The pin is sensor main at #51's merge (1c5dd48, 0.43.0), whose NV12 test
-# pictures may be CONCURRENT across queue families, as is its Orbbec SDK action
-# in .github/workflows/_build.yml.
+# The pin is sensor 0.49.0 (97eeb76), whose PictureReadback reads a V210
+# picture's words whole, v210_to_rgb8 makes them R'G'B' and encode_png_rgb8 a
+# still, as is its Orbbec SDK action in .github/workflows/_build.yml.
 FetchContent_Declare(
   volumetric_kit_sensor
   GIT_REPOSITORY https://github.com/taojin-6/volumetric_kit_sensor.git
-  GIT_TAG 1c5dd4855995c5168477ffc7322f0ad6dad81e2d)
+  GIT_TAG 97eeb7699355c74753cf50b0347d0975a57dbabd)
 if(VC_WITH_RIG)
   set(VS_CAMERA_ONLY OFF)
 elseif(NOT DEFINED VS_CAMERA_ONLY)

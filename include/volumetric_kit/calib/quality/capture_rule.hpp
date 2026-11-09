@@ -5,7 +5,8 @@
 
 /// @file capture_rule.hpp
 /// @brief Which set a capture takes: a press arms the rule, which then takes
-///        the first set that is complete and still, or fails after a timeout
+///        the first set that is complete and still (or, without the
+///        stillness rule, the first complete one), or fails after a timeout
 ///        with the reason it waited.
 
 #include <chrono>
@@ -37,6 +38,10 @@ struct CaptureRuleOptions {
   /// A set with fewer usable views than this is warned of: it adds nothing
   /// to the extrinsics; never refused.
   int min_views = 2;
+  /// Whether a set must be still to be taken: the board seen in it and the
+  /// set before, moved less than @ref still_px. False takes the first set
+  /// that has every camera's frame, board or none (calib_rig's Scan mode).
+  bool still = true;
 };
 
 /// @brief What the live view knows of one set.
@@ -55,7 +60,8 @@ struct LiveSet {
   /// For each camera: its view's live check; a default one without a frame.
   std::vector<ViewCheck> checks;
   /// How far the board's corners moved since the set before
-  /// (@ref CornerShift::median_px); empty when no corner is in both.
+  /// (@ref CornerShift::median_px); empty when no corner is in both, or the
+  /// board was not searched for.
   std::optional<double> motion_px;
   double spread_ms = 0.0;  ///< The latest frame's time less the earliest's.
   // TODO: the example's `pending() >= capacity` becomes the writer's own
@@ -76,8 +82,12 @@ enum class Hold {
   None,        ///< Nothing: the set is taken, or the rule is idle.
   NoSet,       ///< No set has come since the press.
   Incomplete,  ///< A camera's frame is missing.
-  NoBoard,     ///< No corner of the board is in both this set and the last.
-  Moving,      ///< The board moved `still_px` or more since the last set.
+  /// No corner of the board is in both this set and the last (only with
+  /// `still`).
+  NoBoard,
+  /// The board moved `still_px` or more since the last set (only with
+  /// `still`).
+  Moving,
   /// The writer is full when the set to take comes: the capture is refused
   /// at once.
   SaverFull,
@@ -103,10 +113,12 @@ struct CaptureDecision {
   /// px)"` or `"CL2A14100A4 missing"`. `Take`: its warnings, `"; "` apart,
   /// or empty.
   std::string message;
-  double stillness_px = 0.0;  ///< `Take`: the set's motion, for its record.
-  int usable_views = 0;       ///< `Take`: the set's usable live views.
-  bool spread_high = false;   ///< `Take`: spread above `spread_warn_ms`.
-  bool few_views = false;     ///< `Take`: fewer usable views than `min_views`.
+  /// `Take`: the set's motion, for its record; 0 without `still` when the
+  /// set has none.
+  double stillness_px = 0.0;
+  int usable_views = 0;      ///< `Take`: the set's usable live views.
+  bool spread_high = false;  ///< `Take`: spread above `spread_warn_ms`.
+  bool few_views = false;    ///< `Take`: fewer usable views than `min_views`.
 };
 
 /// @brief The capture rule, as a state machine the caller drives: @ref arm
@@ -115,7 +127,8 @@ struct CaptureDecision {
 ///
 /// Armed, it takes the first set, at or after the press and before the
 /// timeout, that has every camera's frame and moved less than `still_px`
-/// since the set before. The whole set is taken however many cameras see the
+/// since the set before; without `still`, the first that has every camera's
+/// frame. The whole set is taken however many cameras see the
 /// board; fewer than `min_views` usable views, or frames spread over
 /// `spread_warn_ms`, are warned of, never refused. The capture fails when the
 /// timeout passes, naming what held the last set, or at once when the set it

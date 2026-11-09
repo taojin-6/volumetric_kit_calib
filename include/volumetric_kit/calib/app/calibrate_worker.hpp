@@ -221,7 +221,8 @@ class CalibrateDepth;
 ///         `min_shared`, naming them); `Numerical` for a solve that fails;
 ///         or another error of the solve's, the metrics', the tag's, a pair
 ///         check's (a pair naming a camera the rig lacks), the formatter's
-///         or @p progress's. Each message starts `calibrate: `.
+///         or @p progress's; `Unsupported` for a scan session's captures,
+///         which calibrate nothing. Each message starts `calibrate: `.
 ///
 /// @code
 /// VKC_ASSIGN(const CalibrateResult result,
@@ -433,8 +434,9 @@ class CalibrateWorker final {
   /// @return `true` once the run is started; `false`, starting nothing,
   ///         while a run is @ref busy or the worker is stopping; `IoError`
   ///         once its thread has ended, stopped (@ref stop) or failed
-  ///         (@ref take_errors); `InvalidArgument` for a null snapshot; or
-  ///         `OutOfMemory`.
+  ///         (@ref take_errors); `InvalidArgument` for a null snapshot;
+  ///         `Unsupported` for a scan session's (`capture::SessionMode::Scan`),
+  ///         which calibrates nothing; or `OutOfMemory`.
   core::Result<bool> request(std::shared_ptr<const KeptCaptures> kept,
                              std::chrono::system_clock::time_point pressed =
                                  std::chrono::system_clock::now());

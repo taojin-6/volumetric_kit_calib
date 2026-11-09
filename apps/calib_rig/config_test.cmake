@@ -113,6 +113,29 @@ file(
 expect_run(missing_lenses "--config;missing_lenses.json" FALSE stderr
            "NotFound: source\\.calibration: .*no-such-lenses\\.json")
 
+# A scan (core 0.51.0's "operation": "scan"): check_scenario runs it as the
+# calibrations, refusing a missing lens file before anything opens, and a
+# DeckLink pair's scan without the arm, saying how to build it.
+file(
+  WRITE "${WORK_DIR}/scan_missing_lenses.json"
+  "{\"version\":1,\"operation\":\"scan\",\"source\":{"
+  "\"kind\":\"live\",\"sync_config\":\"rig.json\","
+  "\"calibration\":\"no-such-lenses.json\"},\"output\":{\"path\":\"sessions\"}}\n"
+)
+expect_run(scan_missing_lenses "--config;scan_missing_lenses.json" FALSE stderr
+           "NotFound: source\\.calibration: .*no-such-lenses\\.json")
+file(
+  WRITE "${WORK_DIR}/decklink_scan.json"
+  "{\"version\":1,\"operation\":\"scan\",\"source\":{\"kind\":\"live\","
+  "\"driver\":\"decklink\",\"cameras\":[{\"id\":\"bm-5\",\"input\":\"SDI 2\"},"
+  "{\"id\":\"bm-6\",\"input\":\"SDI 1\"}],"
+  "\"pairs\":[{\"left\":\"bm-5\",\"right\":\"bm-6\"}]},"
+  "\"output\":{\"path\":\"sessions\"}}\n")
+if(NOT DECKLINK_ARM)
+  expect_run(decklink_scan "--config;decklink_scan.json" FALSE stderr
+             "source\\.driver: decklink: this calib_rig was built without")
+endif()
+
 # The core's refusals reach the user: H.265 colour, and a setting calib_rig does
 # not use.
 write_scenario(hevc rig.json ",\"color_codec\":\"hevc\"" "sessions" "")

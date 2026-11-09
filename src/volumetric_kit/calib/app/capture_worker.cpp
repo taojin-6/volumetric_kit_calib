@@ -24,6 +24,8 @@
 #include "volumetric_kit/calib/detect/board.hpp"
 #include "volumetric_kit/calib/detect/tag.hpp"
 #include "volumetric_kit/calib/solve/initialise.hpp"
+#include "volumetric_kit/sensor/io/image_io.hpp"
+#include "volumetric_kit/sensor/v210_rgb.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -64,6 +66,22 @@ TagSearch search_tag(const CameraFrameCopy& part) {
     return {};
   });
   return out;
+}
+
+// A V210 picture's words as an 8-bit RGB PNG file's bytes: converted as
+// GpuFramePrep's colour pass converts it (v210_to_rgb8), then encoded at the
+// encoder's default, with no setting shared, so cameras encode at once.
+core::Result<std::vector<std::uint8_t>> colour_png(const ColourCopy& copy) {
+  return compute::guarded(
+      "still", [&]() -> core::Result<std::vector<std::uint8_t>> {
+        sensor::YuvImage picture = copy.picture;
+        picture.host = copy.words.data();
+        std::vector<std::uint8_t> rgb(std::size_t{picture.width} *
+                                      picture.height * 3);
+        VKC_TRY(sensor::v210_to_rgb8(picture, rgb.data(), rgb.size()));
+        return sensor::io::encode_png_rgb8(rgb.data(), rgb.size(),
+                                           picture.width, picture.height);
+      });
 }
 
 // A capture, a drop of the last one, or the next session.
@@ -213,17 +231,24 @@ struct CaptureWorker::State {
     return 0.0f;
   }
 
-  // The session's writer and checks, at its first capture, for its board.
+  // The session's writer and checks, at its first capture, for its board;
+  // a scan's writer alone, as it searches for no board.
   core::Status open_session(const CaptureRequest& request) {
-    VKC_ASSIGN(compute::Board made, compute::Board::create(request.board));
+    const bool scan = setup.mode == capture::SessionMode::Scan;
+    std::optional<compute::Board> made;
+    if (!scan) {
+      VKC_ASSIGN(made, compute::Board::create(request.board));
+    }
     std::vector<solve::RigCamera> rig;
     for (std::size_t i = 0; i < setup.cameras.size(); ++i) {
       rig.push_back({setup.cameras[i].id, setup.lenses[i],
                      lens_source(setup.cameras[i], setup.calibration.get())});
     }
-    VKC_ASSIGN(quality::SessionChecks session,
-               quality::SessionChecks::create(rig, made, setup.reference,
-                                              setup.session));
+    std::optional<quality::SessionChecks> session;
+    if (!scan) {
+      VKC_ASSIGN(session, quality::SessionChecks::create(
+                              rig, *made, setup.reference, setup.session));
+    }
     KeptCaptures base;
     base.mode = setup.mode;
     base.calibration = setup.calibration;
@@ -276,8 +301,39 @@ struct CaptureWorker::State {
     return {};
   }
 
+  // Camera `who`'s origin tag search's failure, or its tag in more than one
+  // print, posted into `failures`: neither fails the capture.
+  static void tag_failure(const std::string& who, const TagSearch& search,
+                          std::vector<core::Status>& failures) {
+    if (!search.error.ok()) {
+      failures.push_back(search.error.with_context(who));
+    } else if (search.matches > 1) {
+      failures.push_back(core::Status::invalid_argument(
+          who + ": " + std::to_string(search.matches) +
+          " prints of the origin tag in view: none is kept"));
+    }
+  }
+
+  // `job` queued on the writer, awaiting its outcome as `waiting`; or the
+  // capture failed, saying why.
+  void submit_job(capture::CaptureJob job, Written waiting) {
+    const core::Result<bool> queued = writer->submit(std::move(job));
+    if (!queued.ok()) {
+      fail_capture(waiting.event.meta, queued.status().with_context("capture"));
+      return;
+    }
+    if (!queued.value()) {
+      fail_capture(waiting.event.meta,
+                   core::Status::io_error(
+                       "capture refused: the session writer is full"));
+      return;
+    }
+    written.push_back(std::move(waiting));
+  }
+
   // One capture: its board detected at full resolution and checked, and the
-  // origin tag searched for, in each camera's luma; queued on the writer.
+  // origin tag searched for, in each camera's luma; or a scan's stills.
+  // Queued on the writer.
   void capture(CaptureRequest request) {
     if (writer == nullptr) {
       const core::Status opened = open_session(request);
@@ -289,6 +345,10 @@ struct CaptureWorker::State {
       fail_capture(request.meta,
                    core::Status::invalid_argument(
                        "capture: its depth unit is not the session's"));
+      return;
+    }
+    if (setup.mode == capture::SessionMode::Scan) {
+      capture_scan(std::move(request));
       return;
     }
     const std::size_t n = request.cameras.size();
@@ -318,13 +378,7 @@ struct CaptureWorker::State {
       } else if (!check_errors[i].ok()) {
         failures.push_back(check_errors[i].with_context(who));
       }
-      if (!searches[i].error.ok()) {
-        failures.push_back(searches[i].error.with_context(who));
-      } else if (searches[i].matches > 1) {
-        failures.push_back(core::Status::invalid_argument(
-            who + ": " + std::to_string(searches[i].matches) +
-            " prints of the origin tag in view: none is kept"));
-      }
+      tag_failure(who, searches[i], failures);
     }
 
     std::vector<Detection> live(n);
@@ -372,20 +426,85 @@ struct CaptureWorker::State {
       out.origin_tag = tags[i];
     }
     if (!failures.empty()) resolve({}, 0, 0, std::move(failures));
-    const core::Result<bool> queued = writer->submit(std::move(job));
-    if (!queued.ok()) {
-      fail_capture(event.meta, queued.status().with_context("capture"));
+    submit_job(
+        std::move(job),
+        {std::move(full), std::move(depth), std::move(tags),
+         std::vector<bool>(frontal.begin(), frontal.end()), std::move(event)});
+  }
+
+  // A scan's capture: no board searched or judged; each camera's origin tag
+  // searched for in its luma, and each V210 picture made a PNG still, every
+  // search and still at once (2n tasks of one loop, the stills the longest:
+  // a 2160p pair about 0.77 s on an M5 Max, DECISIONS.md). A camera with a JPEG
+  // keeps it; one with neither, its luma. A still that cannot be made fails
+  // the capture, so none is saved grey by mistake.
+  void capture_scan(CaptureRequest request) {
+    const std::size_t n = request.cameras.size();
+    std::vector<TagSearch> searches(n);
+    std::vector<std::vector<std::uint8_t>> stills(n);
+    std::vector<core::Status> still_errors(n);
+    cv::parallel_for_(
+        cv::Range(0, static_cast<int>(2 * n)), [&](const cv::Range& range) {
+          for (int t = range.start; t < range.end; ++t) {
+            const auto task = static_cast<std::size_t>(t);
+            if (task < n) {
+              searches[task] = search_tag(request.cameras[task]);
+              continue;
+            }
+            const std::size_t i = task - n;
+            std::optional<ColourCopy>& colour = request.cameras[i].colour;
+            if (!colour || !request.cameras[i].jpeg.empty()) continue;
+            core::Result<std::vector<std::uint8_t>> png = colour_png(*colour);
+            colour.reset();  // its 22 MB of words go at once
+            if (png.ok()) {
+              stills[i] = std::move(png).value();
+            } else {
+              still_errors[i] = png.status().with_context("still");
+            }
+          }
+        });
+    for (std::size_t i = 0; i < n; ++i) {
+      if (still_errors[i].ok()) continue;
+      fail_capture(request.meta, still_errors[i].with_context(
+                                     "capture: camera " + setup.cameras[i].id));
       return;
     }
-    if (!queued.value()) {
-      fail_capture(event.meta,
-                   core::Status::io_error(
-                       "capture refused: the session writer is full"));
-      return;
+    CaptureEvent event;
+    event.kind = CaptureEvent::Kind::Saved;
+    event.meta = request.meta;
+    capture::CaptureJob job;
+    job.meta = request.meta;
+    job.cameras.resize(n);
+    std::vector<Tag> tags(n);
+    std::vector<Detection> none(n);
+    for (std::size_t i = 0; i < n; ++i) {
+      CameraFrameCopy& part = request.cameras[i];
+      capture::CameraCapture& out = job.cameras[i];
+      out.jpeg = std::move(part.jpeg);
+      if (out.jpeg.empty()) out.png = std::move(stills[i]);
+      if (out.jpeg.empty() && out.png.empty()) out.luma = std::move(part.luma);
+      if (setup.cameras[i].depth) {
+        out.depth = std::make_shared<const std::vector<std::uint16_t>>(
+            std::move(part.depth));
+      }
+      out.timestamp_ns = part.timestamp_ns;
+      out.sequence = part.sequence;
+      none[i].image_size = setup.cameras[i].size;
+      out.detection = none[i];
+      tags[i] = searches[i].found;
+      out.origin_tag = tags[i];
+      if (tags[i]) ++event.tag_cameras;
     }
-    written.push_back({std::move(full), std::move(depth), std::move(tags),
-                       std::vector<bool>(frontal.begin(), frontal.end()),
-                       std::move(event)});
+    std::vector<core::Status> failures;
+    for (std::size_t i = 0; i < n; ++i) {
+      tag_failure("capture: camera " + setup.cameras[i].id, searches[i],
+                  failures);
+    }
+    if (!failures.empty()) resolve({}, 0, 0, std::move(failures));
+    // Nothing is kept for Calibrate, which takes no scan: no depth.
+    submit_job(std::move(job),
+               {std::move(none), std::vector<DepthSamples>(n), std::move(tags),
+                std::vector<bool>(n, false), std::move(event)});
   }
 
   void detect_one(std::size_t i, const CameraFrameCopy& part, Detection& found,
@@ -491,14 +610,18 @@ struct CaptureWorker::State {
           done.event.meta.index = -1;
         } else {
           done.event.meta.index = result.index;
+          done.event.pictures = std::move(result.pictures);
           // Every view names its camera, one whose detection failed too.
           for (std::size_t c = 0; c < done.full.size(); ++c) {
             Observation& view = done.full[c].observation;
             view.camera_id = setup.cameras[c].id;
             view.frame_id = result.index;
           }
-          const core::Status added = checks->add(result.index, done.full);
-          if (!added.ok()) failures.push_back(added.with_context("session"));
+          // A scan has no checks.
+          if (checks) {
+            const core::Status added = checks->add(result.index, done.full);
+            if (!added.ok()) failures.push_back(added.with_context("session"));
+          }
           auto kept_capture = std::make_shared<KeptCapture>();
           kept_capture->index = result.index;
           kept_capture->views = std::move(done.full);
@@ -518,8 +641,12 @@ struct CaptureWorker::State {
         event.status = std::move(result.status).with_context("drop");
       } else {
         event.kind = CaptureEvent::Kind::Dropped;
-        const core::Status dropped = checks->drop(result.index);
-        if (!dropped.ok()) failures.push_back(dropped.with_context("session"));
+        if (checks) {
+          const core::Status dropped = checks->drop(result.index);
+          if (!dropped.ok()) {
+            failures.push_back(dropped.with_context("session"));
+          }
+        }
         const auto taken = std::find_if(
             now.begin(), now.end(),
             [&](const std::shared_ptr<const KeptCapture>& capture) {
@@ -530,12 +657,14 @@ struct CaptureWorker::State {
       }
       outcomes.push_back(std::move(event));
     }
-    core::Result<quality::SessionSummary> latest = checks->summary();
     std::optional<quality::SessionSummary> summary_now;
-    if (latest.ok()) {
-      summary_now = std::move(latest).value();
-    } else {
-      failures.push_back(latest.status().with_context("session"));
+    if (checks) {
+      core::Result<quality::SessionSummary> latest = checks->summary();
+      if (latest.ok()) {
+        summary_now = std::move(latest).value();
+      } else {
+        failures.push_back(latest.status().with_context("session"));
+      }
     }
     std::shared_ptr<const KeptCaptures> kept_now;
     std::optional<std::vector<quality::LensReadiness>> lenses_now;
@@ -668,6 +797,14 @@ core::Result<bool> CaptureWorker::submit(CaptureRequest request) {
             "capture: camera " + cameras[i].id +
             "'s luma is not its pictures' size");
       }
+      if (part.colour &&
+          (part.colour->picture.layout != sensor::YuvLayout::V210 ||
+           part.colour->picture.width != size.width ||
+           part.colour->picture.height != size.height)) {
+        return core::Status::invalid_argument(
+            "capture: camera " + cameras[i].id +
+            "'s colour is not V210 at its pictures' size");
+      }
       if (!cameras[i].depth) {
         if (!part.depth.empty()) {
           return core::Status::invalid_argument(
@@ -690,10 +827,12 @@ core::Result<bool> CaptureWorker::submit(CaptureRequest request) {
       }
     }
     const std::size_t max_kept = state_->setup.max_kept;
+    // A scan keeps no depth and is never calibrated: no bound.
+    const bool scan = state_->setup.mode == capture::SessionMode::Scan;
     if (state_->ended) return stopped();
     const std::size_t kept =
         state_->kept != nullptr ? state_->kept->captures.size() : 0;
-    if (kept + state_->captures >= max_kept) {
+    if (!scan && kept + state_->captures >= max_kept) {
       return core::Status::unsupported(
           "capture: drop a capture first: one Calibrate adjusts at most " +
           std::to_string(max_kept));

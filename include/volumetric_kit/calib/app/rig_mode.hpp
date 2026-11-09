@@ -22,7 +22,8 @@
 ///   neither drawn nor recorded.
 ///
 /// A capture or a drop pressed in the 3D view only goes back to the images,
-/// so nothing is captured or dropped unseen.
+/// so nothing is captured or dropped unseen. A scan (`RigMode::scan`) has
+/// the images alone, and no Calibrate.
 
 #include <cstddef>
 #include <cstdint>
@@ -56,6 +57,9 @@ struct RigMode {
   /// The session fits lenses (intrinsic mode, Lenses in the Setup panel): no
   /// 3D view, and Calibrate waits for a camera's views (the Lenses panel).
   bool intrinsic = false;
+  /// The session scans (Scan in the Setup panel): stills at a press, no 3D
+  /// view and no Calibrate.
+  bool scan = false;
 };
 
 /// @brief What the window does for a key's request.
@@ -87,11 +91,14 @@ struct RigStep {
 ///   "press again to capture".
 /// - `DropLast`: `DropLast` in the images; `ShowImages` in the 3D view, with
 ///   "press again to drop the last capture".
-/// - `Calibrate`: `Calibrate` in both.
+/// - `Calibrate`: `Calibrate` in both; in a scan `Ignore` with "Scan mode
+///   has no Calibrate".
 /// - `SwitchView`: `ShowScene` in the images once calibrated, else `Ignore`
 ///   with "calibrate first"; `ShowImages` in the 3D view; in intrinsic mode
-///   `Ignore` with "Lenses mode has no 3D view".
-/// - `Cancel`: `Cancel` while calibrating, else `Ignore`, in both.
+///   `Ignore` with "Lenses mode has no 3D view", and in a scan with "Scan
+///   mode has no 3D view".
+/// - `Cancel`: `Cancel` while calibrating, else `Ignore`, in both: a scan
+///   has nothing to cancel.
 /// - `None`: `Ignore`.
 ///
 /// Capturing and dropping go on while Calibrate runs: what is captured then
@@ -134,7 +141,8 @@ struct CalibrateGate {
 ///         capture, a drop or a session switch is under way" and "the
 ///         session is not ready: press C to see why", in intrinsic mode "no
 ///         camera is ready: press C to see why", that holds: a press held
-///         back opens the Calibration window, which says why per camera.
+///         back opens the Calibration window, which says why per camera. In
+///         a scan, never, "Scan mode has no Calibrate".
 ///
 /// @code
 /// const std::size_t unresolved = captures->unresolved();  // first

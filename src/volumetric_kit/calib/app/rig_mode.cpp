@@ -17,9 +17,11 @@ RigStep rig_action(const RigMode& mode, KeyRequest request) noexcept {
       }
       return {RigAction::DropLast, {}};
     case KeyRequest::Calibrate:
+      if (mode.scan) return {RigAction::Ignore, "Scan mode has no Calibrate"};
       return {RigAction::Calibrate, {}};
     case KeyRequest::SwitchView:
       if (scene) return {RigAction::ShowImages, {}};
+      if (mode.scan) return {RigAction::Ignore, "Scan mode has no 3D view"};
       if (mode.intrinsic) {
         return {RigAction::Ignore, "Lenses mode has no 3D view"};
       }
@@ -36,6 +38,7 @@ RigStep rig_action(const RigMode& mode, KeyRequest request) noexcept {
 
 CalibrateGate calibrate_gate(const RigMode& mode, bool ready,
                              std::size_t unresolved) noexcept {
+  if (mode.scan) return {false, "Scan mode has no Calibrate"};
   if (mode.calibrating) return {false, "already running"};
   if (unresolved > 0) {
     return {false, "a capture, a drop or a session switch is under way"};

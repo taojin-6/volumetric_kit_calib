@@ -2,20 +2,23 @@
 # Copyright (c) 2026 Tao Jin
 
 # --- calib_app: Tier 5 -------------------------------------------------------
-# calib_rig's live view, 3D view, capture and Calibrate: the opener, the one
-# code that names a driver, with an arm per driver built (Orbbec's preset check,
-# DeckLink's pair); the per-mode table and the Setup panel's switch of mode and
-# lens file; the key map, the window's mode, the acquisition and live-detection
-# worker (T1) on the source tier, the 3D view's frame preparation worker (T2),
-# the capture worker (T3), the Calibrate worker (T4) and the window loop (T0) on
-# gfx's GLFW glue, ImGui overlay and the viz tier's mosaic and scene. Built with
-# VC_BUILD_APPS and the viz tier when gfx_glfw (an installed GLFW) and a sensor
-# driver tier exist: Orbbec's (VS_WITH_ORBBEC) or DeckLink's (VS_WITH_DECKLINK)
+# calib_rig's live view, 3D view, capture, Calibrate and Scan's stills (V210
+# made R'G'B' and PNG on the capture worker, with sensor's interface and image
+# I/O tiers): the opener, the one code that names a driver, with an arm per
+# driver built (Orbbec's preset check, DeckLink's pair); the per-mode table and
+# the Setup panel's switch of mode and lens file; the key map, the window's
+# mode, the acquisition and live-detection worker (T1) on the source tier, the
+# 3D view's frame preparation worker (T2), the capture worker (T3), the
+# Calibrate worker (T4) and the window loop (T0) on gfx's GLFW glue, ImGui
+# overlay and the viz tier's mosaic and scene. Built with VC_BUILD_APPS and the
+# viz tier when gfx_glfw (an installed GLFW) and a sensor driver tier exist:
+# Orbbec's (VS_WITH_ORBBEC) or DeckLink's (VS_WITH_DECKLINK)
 # (src/CMakeLists.txt). A static library, as calib_viz is.
 
 # calib_rig loads its scenario as config::Application::CalibRig, whose operation
 # (calibrate or calibrate_intrinsics) and DeckLink cameras the core has from
-# 0.40.0, in its config tier (third_party/CMakeLists.txt turns it on).
+# 0.40.0, and its scan from 0.51.0, in its config tier
+# (third_party/CMakeLists.txt turns it on).
 vkc_require_core(${VC_APP_CORE_MIN_VERSION} CONFIG)
 
 # What a session records it was captured with (capture::Software): calib's and
@@ -94,8 +97,14 @@ target_link_libraries(
          volumetric_kit::sensor_prep
          volumetric_kit::core_config
          volumetric_kit::gfx_windowing
-  PRIVATE calib_depth volumetric_kit::gfx_app volumetric_kit::gfx_glfw
-          volumetric_kit::sensor_frame opencv_core Threads::Threads)
+  PRIVATE calib_depth
+          volumetric_kit::gfx_app
+          volumetric_kit::gfx_glfw
+          volumetric_kit::sensor_frame
+          volumetric_kit::sensor_interface
+          volumetric_kit::sensor_image_io
+          opencv_core
+          Threads::Threads)
 
 # An arm per driver tier sensor built (src/CMakeLists.txt asks for one). The
 # definitions are public, so a program or a test knows which scenarios

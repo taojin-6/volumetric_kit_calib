@@ -368,32 +368,39 @@ core::Result<PanelLine> origin_tag_line(const TagCoverage& coverage) {
   });
 }
 
+namespace {
+
+// The capture rule's state, and its warnings once a set is taken.
+void decision_lines(const quality::CaptureDecision& decision,
+                    std::vector<PanelLine>& lines) {
+  switch (decision.state) {
+    case quality::CaptureState::Waiting:
+      lines.push_back({"capture", "waiting: " + decision.message, Tone::Warn});
+      break;
+    case quality::CaptureState::Take:
+      lines.push_back({"capture", "taken", Tone::Good});
+      if (!decision.message.empty()) {
+        lines.push_back({"warning", decision.message, Tone::Warn});
+      }
+      break;
+    case quality::CaptureState::Failed:
+      lines.push_back({"capture", "failed: " + decision.message, Tone::Bad});
+      break;
+    case quality::CaptureState::Idle:
+    default:
+      lines.push_back({"capture", "idle", Tone::Muted});
+      break;
+  }
+}
+
+}  // namespace
+
 core::Result<std::vector<PanelLine>> capture_panel(
     const CaptureStatus& status) {
   return compute::guarded(
       "capture_panel", [&]() -> core::Result<std::vector<PanelLine>> {
-        const quality::CaptureDecision& decision = status.decision;
         std::vector<PanelLine> lines;
-        switch (decision.state) {
-          case quality::CaptureState::Waiting:
-            lines.push_back(
-                {"capture", "waiting: " + decision.message, Tone::Warn});
-            break;
-          case quality::CaptureState::Take:
-            lines.push_back({"capture", "taken", Tone::Good});
-            if (!decision.message.empty()) {
-              lines.push_back({"warning", decision.message, Tone::Warn});
-            }
-            break;
-          case quality::CaptureState::Failed:
-            lines.push_back(
-                {"capture", "failed: " + decision.message, Tone::Bad});
-            break;
-          case quality::CaptureState::Idle:
-          default:
-            lines.push_back({"capture", "idle", Tone::Muted});
-            break;
-        }
+        decision_lines(status.decision, lines);
         if (status.last) {
           const CaptureMeta& last = *status.last;
           lines.push_back({"last",
@@ -410,6 +417,42 @@ core::Result<std::vector<PanelLine>> capture_panel(
                                ? fixed(*last.live_vs_full_px, 2) + " px"
                                : std::string("-"),
                            status.last_flagged ? Tone::Warn : Tone::Normal});
+        }
+        if (!status.error.empty()) {
+          lines.push_back({"save", "failed: " + status.error, Tone::Bad});
+        }
+        return lines;
+      });
+}
+
+core::Result<std::vector<PanelLine>> scan_panel(const ScanStatus& status) {
+  return compute::guarded(
+      "scan_panel", [&]() -> core::Result<std::vector<PanelLine>> {
+        std::vector<PanelLine> lines;
+        decision_lines(status.decision, lines);
+        if (status.directory.empty()) {
+          lines.push_back({"session", "none yet: the first capture starts one",
+                           Tone::Muted});
+        } else {
+          lines.push_back({"session", status.directory, Tone::Normal});
+        }
+        lines.push_back(
+            {"captures", std::to_string(status.captures), Tone::Normal});
+        lines.push_back({"writing", std::to_string(status.writing),
+                         status.writing > 0 ? Tone::Warn : Tone::Normal});
+        if (status.last) {
+          lines.push_back({"last",
+                           "#" + std::to_string(*status.last) +
+                               ", the origin tag in " +
+                               std::to_string(status.last_tag_cameras),
+                           Tone::Normal});
+          for (const StillFile& still : status.last_files) {
+            lines.push_back(
+                {still.camera,
+                 still.file + ", " +
+                     fixed(static_cast<double>(still.bytes) / 1e6, 1) + " MB",
+                 Tone::Normal});
+          }
         }
         if (!status.error.empty()) {
           lines.push_back({"save", "failed: " + status.error, Tone::Bad});

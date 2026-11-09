@@ -91,6 +91,9 @@ struct PictureSet {
   std::uint64_t timestamp_ns = 0;
   /// The latest picture's time less the earliest's.
   std::uint64_t spread_ns = 0;
+  /// A stereo pair's right picture's time less its left's, as its sensor
+  /// measured it (`StereoFrame::skew_ns`); empty for an array's set.
+  std::optional<std::int64_t> skew_ns;
   std::vector<CameraPicture> cameras;  ///< In `RigSource::cameras` order.
   /// The RGB-D set it came from (JPEG, depth, the decoder's pictures); null
   /// for a stereo source.
@@ -135,6 +138,15 @@ struct HostLuma {
   /// its pixel u at 2u + 0.5 there (`detect::DetectOptions::half`).
   detect::LumaView half;
   bool full_range = true;  ///< Y in 0..255; false: 16..235 (V210).
+  /// From a take asked for colour (@ref RigSource::take), the camera's
+  /// picture itself when it is V210 in a buffer on the device (a DeckLink
+  /// pair's): its words read back whole, as the camera sent them, described
+  /// as the picture is, on the host
+  /// (`YuvImage::host` into the readback's memory, `stride[0]`, the size,
+  /// matrix, range and siting), as `sensor::v210_to_rgb8` converts a copy of
+  /// them. No planes (`host` null) otherwise, and for a picture in any other
+  /// layout, whose colour a still takes from elsewhere (a JPEG).
+  sensor::YuvImage colour;
 };
 
 /// @brief A stereo sensor and its two cameras' ids, left then right, as the
@@ -161,8 +173,8 @@ struct StereoMember {
 /// `LumaPass`, any layout a driver hands out), reads them back in one submit
 /// (`PictureReadback`'s list read), and sets the set's ready value after them
 /// on the device's queue (@ref PictureSet::ready). The set handed out lives on
-/// the device; @ref host has its luma on the host until the next take. Not
-/// thread-safe.
+/// the device; @ref host has its luma on the host until the next take, and,
+/// from a take asked for colour, each V210 picture's words. Not thread-safe.
 ///
 /// A camera whose picture is NV12 images (VideoToolbox's, NVDEC's) shows the
 /// decoder's picture as a colour tile; any other picture -- nvJPEG's planes
@@ -238,13 +250,21 @@ class VC_SOURCE_API RigSource {
   ///                 one looks at it (the live view showing the 3D view):
   ///                 the set then has no tiles and no ready value, and
   ///                 @ref host no pictures.
+  /// @param colour   With @p luma, whether to read each V210 picture in a
+  ///                 buffer back whole too, in the luma's submit
+  ///                 (`PictureReadback::Planes::All`), for a still in colour
+  ///                 (@ref HostLuma::colour): a stereo sensor's pictures go
+  ///                 back to its driver as take() returns, so they are read
+  ///                 now. A DeckLink pair's two 2160p pictures are 44 MB; a
+  ///                 picture in any other layout reads nothing more.
   /// @return The set; empty when none is new or the source is not started;
   ///         the sensors' failure (a camera disconnected), after which
   ///         @ref failed is true; or the luma's, the readback's or the ready
   ///         value's failure, the set dropped and the source going on. What a
   ///         driver throws leaves take() as it leaves sensor's own polls.
   core::Result<std::optional<PictureSet>> take(
-      core::StageMetrics* metrics = nullptr, bool luma = true);
+      core::StageMetrics* metrics = nullptr, bool luma = true,
+      bool colour = false);
 
   /// @return Whether the last take() failed to poll the sensors, rather
   ///         than to make or read back a set's luma.

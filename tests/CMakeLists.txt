@@ -355,6 +355,15 @@ if(TARGET calib_app)
               volumetric_kit::core_test_support)
   target_include_directories(vc_app_setup_test SYSTEM
                              PRIVATE "${VC_JSON_INCLUDE_DIR}")
+  # app: Scan mode, every camera's picture saved at a press with no board: from
+  # host data, a pair's V210 words made colour PNGs, a JPEG camera's JPEG and
+  # depth, the origin tag, a still that cannot be made, the drain at quit; end
+  # to end on a device, a fake DeckLink pair of V210 pictures in buffers: a
+  # press, a drop, and the switch to Poses and back.
+  vc_add_test(app_scan volumetric_kit::calib_app vc_synthetic_rig
+              volumetric_kit::core_test_support volumetric_kit::sensor_image_io)
+  target_include_directories(vc_app_scan_test SYSTEM
+                             PRIVATE "${VC_JSON_INCLUDE_DIR}")
   # About 9 and 13 s alone on an M5 Max, and app_setup 36 s on CI's loaded Mac:
   # a minute is too near.
   set_tests_properties(app_intrinsic app_setup PROPERTIES TIMEOUT 120)

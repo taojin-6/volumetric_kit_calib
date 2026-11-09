@@ -4,9 +4,9 @@
 #pragma once
 
 /// @file rig_setup.hpp
-/// @brief calib_rig's Setup panel: the mode, Lenses or Poses, and the lens
-///        file each camera's lens comes from, chosen in the app; a change
-///        starts a new session with the cameras left open
+/// @brief calib_rig's Setup panel: the mode, Lenses, Poses or Scan, and the
+///        lens file each camera's lens comes from, chosen in the app; a
+///        change starts a new session with the cameras left open
 ///        (@ref switch_session).
 ///
 /// The scenario's `operation` and `source.calibration` are where it starts.
@@ -152,7 +152,8 @@ core::Result<std::vector<viz::PanelLine>> setup_lines(
 ///    parts by @ref apply_mode; the window back to the images, uncalibrated.
 ///    The Board window's board is @p board, or the mode's seed.
 /// 2. The live worker restarts first (`LiveWorker::restart`): from then on
-///    it hands no capture on until it takes the new board, lenses and rule.
+///    it hands no capture on until it takes the new board, lenses, rule and
+///    whether it scans.
 /// 3. Then the capture worker (`CaptureWorker::restart`): what was queued
 ///    before goes to the session it closes, whose captures stay on disk; the
 ///    next capture opens the new session. It is queued before the caller's

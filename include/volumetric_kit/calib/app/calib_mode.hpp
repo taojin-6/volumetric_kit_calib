@@ -5,13 +5,14 @@
 
 /// @file calib_mode.hpp
 /// @brief What calib_rig does in each mode, the scenario's `operation`:
-///        intrinsic (`calibrate_intrinsics`), each camera's lens; or
-///        extrinsic (`calibrate`), the rig's poses. The workers read the
-///        mode, never the driver.
+///        intrinsic (`calibrate_intrinsics`), each camera's lens; extrinsic
+///        (`calibrate`), the rig's poses; or a scan (`scan`), every camera's
+///        picture as a still at a key press, nothing calibrated. The workers
+///        read the mode, never the driver.
 ///
-/// README.md's "Lenses and Poses" table says how the modes differ; each
-/// difference has its one home here. The Setup panel switches them
-/// (`rig_setup.hpp`).
+/// README.md's "Lenses and Poses" table and its "Scan" section say how the
+/// modes differ; each difference has its one home here. The Setup panel
+/// switches them (`rig_setup.hpp`).
 
 #include <cstdint>
 #include <optional>
@@ -38,9 +39,9 @@ namespace volumetric_kit::calib::app {
 /// @brief The mode @p operation asks for.
 /// @param operation  The scenario's operation.
 /// @return `Intrinsics` for `calibrate_intrinsics`, `Extrinsics` for
-///         `calibrate`; `InvalidArgument` for any other, by its number
-///         ("operation: 0 is not ..."): core's `load` refuses them for
-///         calib_rig, so only a scenario made in code gets one.
+///         `calibrate`, `Scan` for `scan`; `InvalidArgument` for any other,
+///         by its number ("operation: 0 is not ..."): core's `load` refuses
+///         them for calib_rig, so only a scenario made in code gets one.
 ///
 /// @code
 /// VKC_ASSIGN(const capture::SessionMode mode, session_mode(config.operation));
@@ -50,7 +51,8 @@ core::Result<capture::SessionMode> session_mode(
 
 /// @brief The board a session of @p mode starts from, as the Board window
 ///        shows it: `legacy_checkerboard()` for lenses, `legacy_femto_board()`
-///        for poses.
+///        for poses, and for a scan, which hides the window and searches for
+///        no board.
 /// @param mode  The mode.
 /// @return The board.
 ///
@@ -72,7 +74,9 @@ viz::BoardRule board_rule(capture::SessionMode mode) noexcept;
 
 /// @brief The capture rule's thresholds in @p mode: for lenses one view is
 ///        a capture (`min_views` 1), as each camera is fitted alone; for
-///        poses the rule's defaults.
+///        poses the rule's defaults; for a scan no stillness (`still` false)
+///        and no view counted (`min_views` 0), so a press takes the next set
+///        with every camera's picture, within the timeout.
 /// @param mode  The mode.
 /// @return The thresholds.
 ///
@@ -109,7 +113,8 @@ sensor::camera::CameraModel stand_in_lens(
 ///        2. @p factory, the driver's own (a Femto's colour lens);
 ///        3. @ref stand_in_lens: for lenses, a fit's views go through it; for
 ///           poses, the live view alone does, and Calibrate waits for a real
-///           lens (@ref lens_status: `Missing`).
+///           lens (@ref lens_status: `Missing`); a scan judges no view
+///           through it, and records only where it came from.
 ///
 /// For poses a factory camera with a calibrated lens in @p file, at any
 /// size, is refused: the runtime would read its factory lens and leave the
@@ -152,8 +157,10 @@ core::Result<sensor::camera::CameraModel> take_lens(
 enum class LensStatus : std::uint8_t {
   Calibrated,  ///< A lens file's, marked calibrated.
   Factory,     ///< The driver's, or a lens file's marked factory.
-  StandIn,     ///< None, for lenses: the fit's views go through a stand-in.
-  Missing,     ///< None, for poses: Calibrate waits for one.
+  /// None, for lenses: the fit's views go through a stand-in; and for a
+  /// scan, which needs none.
+  StandIn,
+  Missing,  ///< None, for poses: Calibrate waits for one.
 };
 
 /// @return @p status's name: `"calibrated"`, `"factory"`, `"stand-in"` or
@@ -162,7 +169,7 @@ const char* to_string(LensStatus status) noexcept;
 
 /// @brief Where @p camera's lens comes from in @p mode: a file's keeps its
 ///        mark (@ref lens_source), the driver's is `Factory`, and the
-///        stand-in is `StandIn` for lenses, `Missing` for poses.
+///        stand-in is `Missing` for poses, `StandIn` for lenses and a scan.
 /// @param mode    The mode.
 /// @param camera  The camera's record (@ref take_lens).
 /// @param file    The lens file its lens came from; null for none.
@@ -206,7 +213,8 @@ sensor::camera::IntrinsicsSource lens_source(
 /// @brief A camera's `lens` line in its panel (`viz::CameraLive::lens`): for
 ///        poses, its @ref lens_status, then ` (file)` when the lens is
 ///        @p file's, as `calibrated (file)` or `missing`; for lenses none, as
-///        the Lenses panel says where each came from.
+///        the Lenses panel says where each came from; for a scan none, as it
+///        shows no camera panel.
 /// @param mode    The mode.
 /// @param camera  The camera's record: its id, size and lens origin.
 /// @param file    The scenario's calibration file; null for none.
@@ -260,7 +268,8 @@ core::Result<std::vector<quality::LensReadiness>> lens_states(
 
 /// @brief Whether Calibrate may run in @p mode: for lenses, once a camera is
 ///        ready; for poses, once the session is (`SessionSummary::ready`)
-///        and every camera has a real lens, calibrated or factory.
+///        and every camera has a real lens, calibrated or factory; for a
+///        scan, never.
 /// @param mode      The mode.
 /// @param summary   The session's checks; empty before the first capture.
 /// @param lenses    Each camera's lens readiness (@ref lens_states).
@@ -311,6 +320,8 @@ struct NotReady {
 ///   (`LensReadiness::unmet`), as `reach 0.83 toward the top-left corner,
 ///   needs 0.9: capture there`; before the first capture, `no captures yet`
 ///   for the session.
+/// - Scan: `Scan mode has no Calibrate: switch to Lenses or Poses in Setup`
+///   for the session.
 /// - Poses: each camera without a real lens (`Missing`), `no lens at
 ///   3840x2160 in <path>: load a lens file in Setup, or fit it in Lenses
 ///   mode`; then, before the first capture, `no captures yet` for the
@@ -348,14 +359,15 @@ core::Result<std::vector<NotReady>> calibrate_blockers(
 ///        the capture worker's session (`setup.mode`, the lens file as
 ///        `setup.calibration`, and the pairs and how their rows are checked,
 ///        `setup.pairs` and `setup.pair_rows`), the live view's capture rule
-///        (@ref capture_rule), the window's mode (`RigMode::intrinsic`), and
-///        the Board window's board and the boards it takes (@ref board_seed,
+///        (@ref capture_rule) and whether it scans (`LiveOptions::scan`), the
+///        window's mode (`RigMode::intrinsic`, `RigMode::scan`), and the
+///        Board window's board and the boards it takes (@ref board_seed,
 ///        @ref board_rule). Each camera's lens is @ref take_lens's.
 /// @param scenario  The scenario, checked (`check_scenario`).
 /// @param setup     The capture worker's setup: its mode, file and pairs are
 ///                  set.
-/// @param live      The live worker's options: its rule is set.
-/// @param window    The window's mode: `intrinsic` is set.
+/// @param live      The live worker's options: its rule and `scan` are set.
+/// @param window    The window's mode: `intrinsic` and `scan` are set.
 /// @return The Board window's editor; or `OutOfMemory`.
 ///
 /// @code

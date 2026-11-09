@@ -5,7 +5,8 @@
 // 3D view, calibrated or not and calibrating or not, a capture or a drop in
 // the 3D view only going back to the images; when Calibrate may run, and why
 // not; where the 3D view sits, and so whether its worker prepares; the step
-// at a result; and when a result's view is framed afresh. Host-only.
+// at a result; when a result's view is framed afresh; and a scan's keys, a
+// capture and a drop alone. Host-only.
 
 #include "volumetric_kit/calib/app/rig_mode.hpp"
 
@@ -206,6 +207,37 @@ TEST(AppRigMode, IntrinsicModeStaysOnTheImages) {
   EXPECT_FALSE(gate.enabled);
   EXPECT_EQ(gate.reason, "no camera is ready: press C to see why");
   EXPECT_TRUE(calibrate_gate(mode, true, 0).enabled);
+}
+
+// A scan captures and drops, its clicker's "next" and "back" as Space and
+// Backspace (keys.hpp maps them); Calibrate and the 3D view's keys say why
+// they do nothing, and Escape does nothing. Calibrate's buttons stay shut.
+TEST(AppRigMode, AScanCapturesAndDropsAndNothingElse) {
+  RigMode mode;
+  mode.scan = true;
+  const auto step_of = [&mode](KeyRequest request) {
+    return rig_action(mode, request);
+  };
+  EXPECT_EQ(step_of(KeyRequest::Capture).action, RigAction::Arm);
+  EXPECT_TRUE(step_of(KeyRequest::Capture).hint.empty());
+  EXPECT_EQ(step_of(KeyRequest::DropLast).action, RigAction::DropLast);
+  EXPECT_TRUE(step_of(KeyRequest::DropLast).hint.empty());
+  EXPECT_EQ(step_of(KeyRequest::Calibrate).action, RigAction::Ignore);
+  EXPECT_EQ(step_of(KeyRequest::Calibrate).hint, "Scan mode has no Calibrate");
+  EXPECT_EQ(step_of(KeyRequest::SwitchView).action, RigAction::Ignore);
+  EXPECT_EQ(step_of(KeyRequest::SwitchView).hint, "Scan mode has no 3D view");
+  EXPECT_EQ(step_of(KeyRequest::Cancel).action, RigAction::Ignore);
+  EXPECT_TRUE(step_of(KeyRequest::Cancel).hint.empty());
+  EXPECT_EQ(step_of(KeyRequest::None).action, RigAction::Ignore);
+  for (const bool ready : {false, true}) {
+    for (const std::size_t unresolved : {0u, 2u}) {
+      const CalibrateGate gate = calibrate_gate(mode, ready, unresolved);
+      EXPECT_FALSE(gate.enabled);
+      EXPECT_EQ(gate.reason, "Scan mode has no Calibrate");
+    }
+  }
+  EXPECT_EQ(scene_placement(mode), ScenePlacement::Hidden);
+  EXPECT_FALSE(search_paused(mode));
 }
 
 // The live view's search pauses while Calibrate runs, in either view and

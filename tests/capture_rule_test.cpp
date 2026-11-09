@@ -4,7 +4,8 @@
 // The capture rule: a press arms it; it takes the first complete, still set,
 // warning of a wide spread or too few views but never refusing for them; it
 // refuses at once when the writer is full, and fails after its timeout,
-// naming what held the last set.
+// naming what held the last set. Without its stillness rule (a scan), the
+// first complete set, board or none, within the same timeout.
 
 #include "volumetric_kit/calib/quality/capture_rule.hpp"
 
@@ -102,6 +103,57 @@ TEST(CaptureRule, TakesTheFirstCompleteStillSet) {
   EXPECT_FALSE(rule.armed());
   EXPECT_EQ(update(rule, still_set(), kPress + milliseconds(200)).state,
             CaptureState::Idle);
+}
+
+// Without `still` (a scan's rule), the first set with every camera's frame
+// is taken at once, board or none, moving or not; a camera missing still
+// waits, and fails at the timeout as with `still`; a full writer refuses.
+TEST(CaptureRule, WithoutStillnessTakesTheFirstCompleteSet) {
+  CaptureRuleOptions options;
+  options.still = false;
+  options.min_views = 0;
+  CaptureRule rule = rig_rule(options);
+  rule.arm(kPress);
+  LiveSet incomplete = still_set(std::nullopt);
+  incomplete.present[0] = false;
+  incomplete.checks.assign(4, ViewCheck{});
+  CaptureDecision decision =
+      update(rule, incomplete, kPress + milliseconds(40));
+  EXPECT_EQ(decision.state, CaptureState::Waiting);
+  EXPECT_EQ(decision.hold, Hold::Incomplete);
+  EXPECT_EQ(decision.message, "SYN0 missing");
+  LiveSet blank = still_set(std::nullopt);
+  blank.checks.assign(4, ViewCheck{});  // no board anywhere
+  decision = update(rule, blank, kPress + milliseconds(80));
+  EXPECT_EQ(decision.state, CaptureState::Take);
+  EXPECT_EQ(decision.hold, Hold::None);
+  EXPECT_EQ(decision.stillness_px, 0.0);
+  EXPECT_EQ(decision.usable_views, 0);
+  EXPECT_FALSE(decision.few_views);
+  EXPECT_EQ(decision.message, "");
+  EXPECT_FALSE(rule.armed());
+
+  // Moving is no hold either; its motion is recorded as given.
+  rule.arm(kPress);
+  decision = update(rule, still_set(4.5), kPress + milliseconds(10));
+  EXPECT_EQ(decision.state, CaptureState::Take);
+  EXPECT_EQ(decision.stillness_px, 4.5);
+
+  // A camera missing to the end fails, naming it.
+  rule.arm(kPress);
+  update(rule, incomplete, kPress + milliseconds(10));
+  decision = tick(rule, kPress + options.timeout);
+  EXPECT_EQ(decision.state, CaptureState::Failed);
+  EXPECT_EQ(decision.message, "SYN0 missing");
+
+  // A full writer refuses the set it would take.
+  rule.arm(kPress);
+  LiveSet full = blank;
+  full.saver_full = true;
+  decision = update(rule, full, kPress + milliseconds(10));
+  EXPECT_EQ(decision.state, CaptureState::Failed);
+  EXPECT_EQ(decision.hold, Hold::SaverFull);
+  EXPECT_TRUE(CaptureRuleOptions{}.still);
 }
 
 TEST(CaptureRule, FailsAfterItsTimeoutNamingTheLastHold) {

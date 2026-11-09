@@ -52,11 +52,13 @@ core::Result<capture::SessionMode> session_mode(Operation operation) {
         if (operation == Operation::Calibrate) {
           return capture::SessionMode::Extrinsics;
         }
+        if (operation == Operation::Scan) return capture::SessionMode::Scan;
         // By its number: core's load refuses these for calib_rig, so only a
         // scenario made in code gets here, and core spells no operation.
         return core::Status::invalid_argument(
             "operation: " + std::to_string(static_cast<int>(operation)) +
-            " is not one calib_rig runs (calibrate, calibrate_intrinsics)");
+            " is not one calib_rig runs (calibrate, calibrate_intrinsics, "
+            "scan)");
       });
 }
 
@@ -77,6 +79,10 @@ viz::BoardRule board_rule(capture::SessionMode mode) noexcept {
 quality::CaptureRuleOptions capture_rule(capture::SessionMode mode) noexcept {
   quality::CaptureRuleOptions rule;
   if (mode == capture::SessionMode::Intrinsics) rule.min_views = 1;
+  if (mode == capture::SessionMode::Scan) {
+    rule.still = false;
+    rule.min_views = 0;
+  }
   return rule;
 }
 
@@ -144,8 +150,8 @@ LensStatus lens_status(capture::SessionMode mode,
                        const capture::SessionCamera& camera,
                        const camera::ArrayCalibration* file) {
   if (camera.lens == capture::LensOrigin::StandIn) {
-    return mode == capture::SessionMode::Intrinsics ? LensStatus::StandIn
-                                                    : LensStatus::Missing;
+    return mode == capture::SessionMode::Extrinsics ? LensStatus::Missing
+                                                    : LensStatus::StandIn;
   }
   return lens_source(camera, file) == camera::IntrinsicsSource::Calibrated
              ? LensStatus::Calibrated
@@ -179,7 +185,7 @@ core::Result<std::string> lens_line(capture::SessionMode mode,
                                     const capture::SessionCamera& camera,
                                     const camera::ArrayCalibration* file) {
   return compute::guarded("lens_line", [&]() -> core::Result<std::string> {
-    if (mode == capture::SessionMode::Intrinsics) return std::string();
+    if (mode != capture::SessionMode::Extrinsics) return std::string();
     std::string line = to_string(lens_status(mode, camera, file));
     if (camera.lens == capture::LensOrigin::File) line += " (file)";
     return line;
@@ -247,6 +253,7 @@ bool session_ready(capture::SessionMode mode,
                    const std::optional<quality::SessionSummary>& summary,
                    const std::vector<quality::LensReadiness>& lenses,
                    const std::vector<LensStatus>& statuses) noexcept {
+  if (mode == capture::SessionMode::Scan) return false;
   if (mode == capture::SessionMode::Intrinsics) {
     return std::any_of(
         lenses.begin(), lenses.end(),
@@ -307,6 +314,12 @@ core::Result<std::vector<NotReady>> calibrate_blockers(
         }
         std::vector<NotReady> out;
         const NotReady none_yet{std::string(), "no captures yet"};
+        if (mode == capture::SessionMode::Scan) {
+          return std::vector<NotReady>{
+              {std::string(),
+               "Scan mode has no Calibrate: switch to Lenses or "
+               "Poses in Setup"}};
+        }
         if (mode == capture::SessionMode::Intrinsics) {
           if (session_ready(mode, summary, lenses, statuses)) return out;
           if (lenses.empty()) return std::vector<NotReady>{none_yet};
@@ -375,7 +388,9 @@ core::Result<viz::BoardEditor> apply_mode(const RigScenario& scenario,
         setup.pairs = scenario.pairs;
         setup.pair_rows = scenario.pair_rows;
         live.rule = capture_rule(scenario.mode);
+        live.scan = scenario.mode == capture::SessionMode::Scan;
         window.intrinsic = scenario.mode == capture::SessionMode::Intrinsics;
+        window.scan = live.scan;
         return editor;
       });
 }

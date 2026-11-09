@@ -45,9 +45,18 @@ bool is_plain_serial(const std::string& id) noexcept;
 // `directory`/`name`, with one separator.
 std::string join(const std::string& directory, const std::string& name);
 
+// What a camera's picture is written as: its JPEG, a PNG still, or its luma
+// as a PGM.
+enum class PictureKind { Jpeg, Png, Pgm };
+
+// The kind `part` is written as: its JPEG, else its PNG, else its luma.
+PictureKind picture_kind(const CameraCapture& part) noexcept;
+
 // A capture's files, relative to the session's directory: the camera's
-// picture, a JPEG or else a PGM, and its depth.
-std::string color_file(const std::string& id, int index, bool jpeg);
+// picture, named for a calibration's images or, in a scan session, a still's,
+// and its depth.
+std::string color_file(const std::string& id, int index, PictureKind kind,
+                       SessionMode mode);
 std::string depth_file(const std::string& id, int index);
 std::string capture_file(int index);
 
@@ -55,6 +64,11 @@ std::string capture_file(int index);
 // 255, a newline after each, then the rows.
 std::string pgm(const std::vector<std::uint8_t>& luma,
                 sensor::camera::ImageSize size);
+
+// The bytes `part`'s picture file takes, as `kind` writes it for a camera of
+// `size`.
+std::size_t picture_bytes(const CameraCapture& part, PictureKind kind,
+                          sensor::camera::ImageSize size);
 
 // `ns` since the epoch as ISO 8601 UTC to the millisecond, e.g.
 // "2026-10-13T09:41:07.250Z".
