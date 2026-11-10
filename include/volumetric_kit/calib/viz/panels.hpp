@@ -313,7 +313,9 @@ struct ScanStatus {
   /// The captures queued, being encoded or written: on disk once they are
   /// 0, as the app writes them before it quits.
   std::size_t writing = 0;
-  std::optional<int> last;   ///< The last capture written, by index.
+  /// The last capture written, by index; none once it is dropped, or in a
+  /// new session before its first.
+  std::optional<int> last;
   int last_tag_cameras = 0;  ///< Its cameras that found the origin tag.
   std::vector<StillFile> last_files;  ///< Its files, in rig order.
   std::string error;  ///< Why the last capture failed; empty when none did.

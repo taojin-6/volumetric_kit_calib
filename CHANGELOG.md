@@ -22,8 +22,9 @@ release may break it, and each such entry says how to migrate
   capture. C, F5 and the 3D view's keys say why they do nothing; Escape does
   nothing. The live view shows each camera in grey with no marks, and the
   Scan window the session, its captures, those still being written and the
-  last capture's files (`viz::scan_panel`, `viz::ScanStatus`). README,
-  "Scan", has a DeckLink pair's scenario.
+  last capture's files, until it is dropped or the session switched
+  (`viz::scan_panel`, `viz::ScanStatus`). README, "Scan", has a DeckLink
+  pair's scenario.
 - Each V210 camera's picture is read back whole at the press
   (`source::RigSource::take`'s `colour`, `source::HostLuma::colour`), copied
   out by the live worker (`app::ColourCopy`,

@@ -867,6 +867,12 @@ void take_reports(const Workers& workers, CloudWorker& cloud,
         break;
       }
       case CaptureEvent::Kind::Dropped:
+        // The Scan window's last capture is the one written last, not dropped.
+        if (notices.scan.last == event.meta.index) {
+          notices.scan.last.reset();
+          notices.scan.last_tag_cameras = 0;
+          notices.scan.last_files.clear();
+        }
         notices.note("capture " + std::to_string(event.meta.index) +
                      " dropped");
         break;
@@ -1365,6 +1371,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     const core::Status refreshed = now.refresh();
     if (!refreshed.ok()) notices.note(refreshed.message());
     calibration = CalibrationShown{};
+    notices.scan = viz::ScanStatus{};  // the next session has no last capture
     view3d.cameras = scene_cameras(now.setup);
     view3d.lines_stale = true;
     framed.reset();
