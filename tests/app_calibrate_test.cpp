@@ -5,9 +5,10 @@
 // for 2 to 5 cameras whose ids sort in another order than the rig's, in the
 // reference camera's gauge, and its world at the origin tag when the cameras
 // see it; the same snapshot gives the same files, and a recalibration owes
-// nothing to the last; each results directory numbered once, each session's
-// from 0, its calibration file written last, its name read back; and the
-// worker's runs, refusals, cancels and stops.
+// nothing to the last; a scan session's captures refused; each results
+// directory numbered once, each session's from 0, its calibration file
+// written last, its name read back; and the worker's runs, refusals, cancels
+// and stops.
 // Synthetic detections, no device, so no depth checks
 // (app_calibrate_depth_test has them).
 
@@ -444,6 +445,31 @@ TEST(Calibrate, RefusesWhatTheSolveCannotTake) {
   const std::string why = refusal(unlinked);
   EXPECT_EQ(why.rfind("calibrate: initialise: ", 0), 0u) << why;
   EXPECT_NE(why.find("CL0B"), std::string::npos) << why;
+}
+
+// A scan session's captures are stills: Calibrate, run or requested, refuses
+// them before it looks at a view, and the worker starts nothing.
+TEST(Calibrate, RefusesAScansCaptures) {
+  const test::Scene scene = test::make_kept_scene(2, 10);
+  KeptCaptures scan = test::kept_captures(scene, 0, "unwritten");
+  scan.mode = capture::SessionMode::Scan;
+  const core::Result<CalibrateResult> made = calibrate(scan);
+  ASSERT_FALSE(made.ok());
+  EXPECT_EQ(made.status().domain(), Code::Unsupported);
+  EXPECT_EQ(made.status().message(),
+            "calibrate: a scan session's captures are stills: it calibrates "
+            "nothing");
+
+  const std::unique_ptr<CalibrateWorker> worker = make_worker();
+  ASSERT_NE(worker, nullptr);
+  const core::Result<bool> requested = worker->request(shared(scan), kPressed);
+  ASSERT_FALSE(requested.ok());
+  EXPECT_EQ(requested.status().domain(), Code::Unsupported);
+  EXPECT_EQ(requested.status().message(),
+            "CalibrateWorker::request: Scan mode has no Calibrate");
+  EXPECT_FALSE(worker->busy());
+  EXPECT_EQ(worker->take_result(), nullptr);
+  EXPECT_TRUE(worker->take_errors().empty());
 }
 
 // The session's thresholds are the solve's: initialise judges each view by

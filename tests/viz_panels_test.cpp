@@ -3,7 +3,8 @@
 
 // The panels' models: each line's text and tone, from the live checks, the
 // array's counters, the session's summary and origin tag, the capture rule
-// and the capture records, judged by the quality tier's thresholds;
+// and the capture records, judged by the quality tier's thresholds; a scan's
+// session, captures, writes and last stills;
 // Calibrate's progress, its result's metrics, depth checks and world; and the
 // stage timings as gfx's metrics panel takes them. No device or ImGui frame
 // needed (viz_render_test draws them).
@@ -448,6 +449,48 @@ TEST(CapturePanel, ShowsTheLastCaptureAndAFailedWrite) {
   EXPECT_EQ(line(unflagged, "live vs full").value, "-");
   EXPECT_EQ(line(unflagged, "live vs full").tone, Tone::Normal);
   EXPECT_TRUE(labelled(unflagged, "save").empty());
+}
+
+// A scan's panel: where the press stands, the session, its captures, those
+// still being written, and the last capture's files with their sizes.
+TEST(ScanPanel, ShowsTheSessionTheWritesAndTheLastStills) {
+  ScanStatus status;
+  std::vector<PanelLine> l = scan_panel(status).value();
+  ASSERT_EQ(l.size(), 4u);
+  EXPECT_EQ(line(l, "capture").value, "idle");
+  EXPECT_EQ(line(l, "session").value, "none yet: the first capture starts one");
+  EXPECT_EQ(line(l, "session").tone, Tone::Muted);
+  EXPECT_EQ(line(l, "captures").value, "0");
+  EXPECT_EQ(line(l, "writing").value, "0");
+  EXPECT_EQ(line(l, "writing").tone, Tone::Normal);
+
+  status.decision.state = quality::CaptureState::Waiting;
+  status.decision.message = "bm-6 missing";
+  status.directory = "sessions/2026-11-09_140251";
+  status.captures = 12;
+  status.writing = 2;
+  status.last = 13;
+  status.last_tag_cameras = 1;
+  status.last_files = {{"bm-5", "images/bm-5/scan_bm-5_013.png", 17009738},
+                       {"bm-6", "images/bm-6/scan_bm-6_013.png", 20659374}};
+  status.error = "disk full";
+  l = scan_panel(status).value();
+  EXPECT_EQ(line(l, "capture").value, "waiting: bm-6 missing");
+  EXPECT_EQ(line(l, "capture").tone, Tone::Warn);
+  EXPECT_EQ(line(l, "session").value, "sessions/2026-11-09_140251");
+  EXPECT_EQ(line(l, "captures").value, "12");
+  EXPECT_EQ(line(l, "writing").value, "2");
+  EXPECT_EQ(line(l, "writing").tone, Tone::Warn);
+  EXPECT_EQ(line(l, "last").value, "#13, the origin tag in 1");
+  EXPECT_EQ(line(l, "bm-5").value, "images/bm-5/scan_bm-5_013.png, 17.0 MB");
+  EXPECT_EQ(line(l, "bm-6").value, "images/bm-6/scan_bm-6_013.png, 20.7 MB");
+  EXPECT_EQ(line(l, "save").value, "failed: disk full");
+  EXPECT_EQ(line(l, "save").tone, Tone::Bad);
+  // In that order.
+  ASSERT_EQ(l.size(), 8u);
+  EXPECT_EQ(l[4].label, "last");
+  EXPECT_EQ(l[5].label, "bm-5");
+  EXPECT_EQ(l[7].label, "save");
 }
 
 TEST(CalibrateProgressLine, ShowsTheStageItsCountAndTheSeconds) {

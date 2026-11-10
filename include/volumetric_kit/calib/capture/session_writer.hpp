@@ -6,7 +6,7 @@
 /// @file session_writer.hpp
 /// @brief A calibration session on disk: the rig, and each capture's
 ///        pictures, depth, detections and checks, written on a thread of its
-///        own and never overwritten.
+///        own and never overwritten; or a scan session's stills.
 ///
 /// A session is a directory, created at its first capture:
 ///
@@ -14,8 +14,10 @@
 /// session.json                 the rig, the board, the captures
 /// factory_calibration.json     sensor's calibration file, unposed
 /// images/<id>/calib_img_<id>_<NNN>.jpg
-///                              the camera's JPEG, byte for byte; or .pgm,
-///                              its 8-bit luma, for a camera with no JPEG
+///                              the camera's JPEG, byte for byte; or .png,
+///                              a still in colour the caller encoded; or
+///                              .pgm, its 8-bit luma, for a camera with
+///                              neither
 /// depth/<id>/calib_depth_<id>_<NNN>.png
 ///                              16-bit grey, the sensor's units
 /// captures/<NNN>.json          times, detections and checks
@@ -23,7 +25,12 @@
 ///
 /// - `<NNN>` is the capture's index, zero-padded to three digits. The image
 ///   names are the ones the legacy `camera_calibration` scripts glob for.
+/// - A scan session (@ref SessionMode::Scan) calibrates nothing: its pictures
+///   are stills, `images/<id>/scan_<id>_<NNN>.jpg`, `.png` or `.pgm`, as
+///   above, for photogrammetry or NeRF, say; its depth is as above.
 /// - A PGM is the luma as read: `P5`, the size, `255`, then the rows.
+/// - A PNG is the caller's bytes, as `sensor::io::encode_png_rgb8` made them:
+///   8-bit R'G'B', a V210 camera's picture converted by `v210_to_rgb8`.
 /// - `factory_calibration.json` is sensor's version-2 calibration file
 ///   (`sensor/camera/array_calibration.hpp`): the factory colour and depth
 ///   models at the streamed mode, and `depth_to_color`, with no pose, of
@@ -82,7 +89,8 @@
 /// from: `factory`, `stand-in`, or `file` with the calibration file's `path`
 /// and `sha256`. A checkerboard's `board` has no marker keys
 /// (`"type": "checkerboard"`, its squares, square and tolerances); an
-/// intrinsic session's `mode` is `"intrinsics"`.
+/// intrinsic session's `mode` is `"intrinsics"`. A scan session's `mode` is
+/// `"scan"`, and it has no `board`: it searches for none.
 ///
 /// `captures/<NNN>.json`, with `null` for a measure that is empty, for an
 /// origin tag the camera did not find and for the depth of a camera without
@@ -112,6 +120,23 @@
 ///                   "corners_px": [[1904.3, 1201.7], [2010.6, 1203.2],
 ///                                  [2008.9, 1287.4], [1902.1, 1285.0]]}}},
 ///  "usable_views": 1}
+/// @endcode
+///
+/// A scan session's capture has no board to judge: no `stillness_px`,
+/// `live_vs_full_px`, `detection`, `check` or `usable_views`; a stereo
+/// pair's has its `skew_ns`, the right picture's time less the left's
+/// (@ref CaptureMeta::skew_ns), and an array's none; and each camera's
+/// `origin_tag` is as above:
+///
+/// @code{.json}
+/// {"format": "volumetric_kit_calib.capture", "version": 1,
+///  "index": 0, "time": "2026-11-09T14:02:51.118Z",
+///  "trigger_ns": 1762696971117904000, "sequence": 5521, "spread_ms": 2.4,
+///  "skew_ns": 2400000,
+///  "cameras": {"bm-5": {
+///    "color": "images/bm-5/scan_bm-5_000.png", "depth": null,
+///    "color_bytes": 17009738, "timestamp_ns": 1762696971117904000,
+///    "sequence": 5521, "origin_tag": null}}}
 /// @endcode
 
 #include <chrono>
@@ -241,7 +266,14 @@ struct SessionCamera {
 enum class SessionMode : std::uint8_t {
   Extrinsics,  ///< The rig's poses: `"extrinsics"`.
   Intrinsics,  ///< Each camera's lens: `"intrinsics"`.
+  /// Nothing: every camera's picture at a key press, a still each, with no
+  /// board searched or judged: `"scan"`.
+  Scan,
 };
+
+/// @return @p mode's name in `session.json`: `"extrinsics"`, `"intrinsics"`
+///         or `"scan"`; `"unknown"` for a value that is none of them.
+VC_CAPTURE_API const char* to_string(SessionMode mode) noexcept;
 
 /// @brief A session: where it goes, and what it records once.
 ///
@@ -270,7 +302,8 @@ struct SessionInfo {
   /// The reference camera's id: the rig's primary, whose colour camera is
   /// the solve's world.
   std::string reference;
-  /// The board: a ChArUco board or a checkerboard @ref check_target accepts.
+  /// The board: a ChArUco board or a checkerboard @ref check_target accepts;
+  /// ignored, and not recorded, in a scan session, which searches for none.
   Target board;
   /// Whether `board.square_size_m` was measured, rather than the print's
   /// nominal size.
@@ -297,7 +330,7 @@ struct SessionInfo {
 ///
 /// @code
 /// CameraCapture part;
-/// part.luma = std::move(host_luma);  // written as a PGM: no JPEG
+/// part.luma = std::move(host_luma);  // written as a PGM: no JPEG or PNG
 /// part.timestamp_ns = picture.timestamp_ns;
 /// part.detection = std::move(full_detection);
 /// part.check = check;
@@ -306,10 +339,15 @@ struct SessionInfo {
 struct CameraCapture {
   /// The camera's JPEG (`RgbdFrame::color_bitstream`), copied out of the
   /// frame so the driver's buffers go back to it; empty for a camera that
-  /// sent none, whose @ref luma is written.
+  /// sent none, whose @ref png or @ref luma is written.
   std::vector<std::uint8_t> jpeg;
+  /// A still in colour, as an 8-bit RGB PNG file's bytes
+  /// (`sensor::io::encode_png_rgb8`), written byte for byte: a V210 camera's
+  /// picture in a scan session, which the caller converted and encoded off
+  /// its thread. Empty for none; never with a @ref jpeg.
+  std::vector<std::uint8_t> png;
   /// The picture's 8-bit luma, its rows packed: written as a PGM when there
-  /// is no @ref jpeg; ignored otherwise.
+  /// is neither a @ref jpeg nor a @ref png; ignored otherwise.
   std::vector<std::uint8_t> luma;
   /// The depth, a sample for each of the depth model's pixels, row-major, in
   /// the sensor's units, as `RgbdFrame::depth`: from a camera with depth, and
@@ -322,9 +360,10 @@ struct CameraCapture {
   /// The board found in the picture at full resolution: what the solver
   /// takes. Its `image_size` is the camera's. The observation's own camera
   /// and frame are not written: the capture's file holds the detection under
-  /// the camera's id.
+  /// the camera's id. Ignored, and not written, in a scan session.
   Detection detection;
-  ViewCheck check;  ///< What the view is worth.
+  /// What the view is worth; ignored, and not written, in a scan session.
+  ViewCheck check;
   /// The origin tag (@ref SessionInfo::origin_tag) found in the picture at
   /// full resolution, in its pixels; empty when the camera found none, or
   /// more than one print of it.
@@ -348,6 +387,20 @@ struct CaptureJob {
   std::vector<CameraCapture> cameras;
 };
 
+/// @brief A camera's picture file, as a capture wrote it.
+///
+/// @code
+/// for (const PictureFile& picture : done.pictures) {
+///   list(picture.file, picture.bytes);  // a caller's own
+/// }
+/// @endcode
+struct PictureFile {
+  /// Its path, relative to the session's directory
+  /// (`images/bm-5/scan_bm-5_012.png`).
+  std::string file;
+  std::uint64_t bytes = 0;  ///< Its size.
+};
+
 /// @brief What became of a request made of a @ref SessionWriter.
 ///
 /// @code
@@ -369,6 +422,9 @@ struct WriteResult {
   /// The capture written or dropped; -1 when none was.
   int index = -1;
   core::Status status;  ///< OK, or why it failed.
+  /// A capture written: each camera's picture file, in
+  /// @ref SessionInfo::cameras order; empty for a drop or a failure.
+  std::vector<PictureFile> pictures;
 };
 
 /// @brief How a @ref SessionWriter queues.
@@ -407,9 +463,10 @@ class VC_CAPTURE_API SessionWriter {
   /// @brief Check @p info and start the writer's thread. Nothing is written
   ///        until the first capture.
   /// @param info     The session. Refused unless: the directory, the driver
-  ///                 and the reference are non-empty; the board is a ChArUco
-  ///                 board or a checkerboard @ref check_target accepts, and
-  ///                 the origin tag one
+  ///                 and the reference are non-empty; the mode is a
+  ///                 @ref SessionMode; the board, but in a scan session, is
+  ///                 a ChArUco board or a checkerboard @ref check_target
+  ///                 accepts, and the origin tag one
   ///                 @ref check_origin_tag accepts; there is a depth mode,
   ///                 with a finite, positive `metres_per_unit` and finite
   ///                 `0 < min_m < max_m`, exactly when a camera has depth;
@@ -442,20 +499,23 @@ class VC_CAPTURE_API SessionWriter {
   ///
   /// The capture is written in the order of the requests: at the first, the
   /// session's directory and `factory_calibration.json` first; then each
-  /// camera's JPEG or PGM and depth, `captures/<NNN>.json`, and
-  /// `session.json` listing it. Its @ref WriteResult has its index, or why
+  /// camera's JPEG, PNG or PGM and depth, `captures/<NNN>.json`, and
+  /// `session.json` listing it. Its @ref WriteResult has its index and its
+  /// picture files, or why
   /// it failed: `InvalidArgument` when a file it would write is already there
   /// (the session's directory included), `NotFound` when the directory's
   /// parent, the sync file or a lens file is missing, `IoError` for a write
   /// that fails (a full disk), and `OutOfMemory`.
   /// @param job  The capture. Refused unless it has one part per camera,
-  ///             each with a JPEG (starting with its SOI marker) or the
+  ///             each with a JPEG (starting with its SOI marker), a PNG
+  ///             (starting with its signature), not both, or else the
   ///             camera's luma, depth with a sample per depth pixel from a
   ///             camera with depth and none from another, a detection in an
   ///             image of the camera's size, an origin tag, if any, with the
   ///             session's tag's id, and finite pixels, weights and
   ///             measures; the same for the set's measures; and a
-  ///             @ref ViewVerdict for each check.
+  ///             @ref ViewVerdict for each check. A scan session's
+  ///             detections, checks and stillness are not looked at.
   /// @return `true` once queued; `false`, with nothing queued, when
   ///         `queue_capacity` captures are already queued or being written;
   ///         `InvalidArgument` naming the camera and what @p job gets wrong;

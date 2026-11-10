@@ -19,6 +19,7 @@
 #include "volumetric_kit/calib/compute/cv_camera.hpp"
 #include "volumetric_kit/calib/compute/guarded.hpp"
 #include "volumetric_kit/calib/detect/board.hpp"
+#include "volumetric_kit/sensor/v210_rgb.hpp"
 
 namespace volumetric_kit::calib::app {
 
@@ -34,12 +35,13 @@ core::Status with_camera(const std::string& id, const core::Status& status) {
   return status.with_context("camera " + id);
 }
 
-// What restart() hands the thread: the next session's lenses, board and
-// capture rule, made and checked on the caller's thread.
+// What restart() hands the thread: the next session's lenses, board,
+// capture rule and whether it scans, made and checked on the caller's thread.
 struct Restart {
   std::vector<compute::CvCamera> cameras;
   compute::Board board;
   quality::CaptureRule rule;
+  bool scan = false;
 };
 
 // Each camera's lens, in the source's order, as compute's bridge takes it;
@@ -92,6 +94,7 @@ struct LiveWorker::State {
   std::optional<quality::CaptureRule> rule;
   std::vector<Detection> previous;  // the last set's live detections
   bool have_previous = false;
+  bool scan = false;    // nothing searched; a capture reads V210 whole
   LiveOptions options;  // the rule's spread warning is the source's
   // The source's sync bound, read once at create: restart() raises a rule's
   // spread warning to it on the window's thread.
@@ -147,6 +150,7 @@ struct LiveWorker::State {
       cameras = std::move(next->cameras);
       detector_board = std::move(next->board);
       rule = std::move(next->rule);
+      scan = next->scan;
       have_previous = false;
     }
     if (board_change && captures.load() == 0) {
@@ -243,6 +247,7 @@ struct LiveWorker::State {
     request.meta.trigger_ns = set.timestamp_ns;
     request.meta.sequence = set.sequence;
     request.meta.spread_ms = static_cast<double>(set.spread_ns) / 1e6;
+    request.meta.skew_ns = set.skew_ns;
     request.meta.stillness_px = taken.stillness_px;
     const std::vector<source::SourceCamera>& sourced = source->cameras();
     request.cameras.resize(set.cameras.size());
@@ -264,6 +269,18 @@ struct LiveWorker::State {
       part.timestamp_ns = set.cameras[i].timestamp_ns;
       part.sequence = set.sequence;
       part.live = live.detections[i];
+      // A V210 picture read whole with the set (Scan): its words copied out
+      // of the readback's memory, which the next take reuses.
+      const sensor::YuvImage& colour = host[i].colour;
+      if (colour.host != nullptr) {
+        ColourCopy& copy = part.colour.emplace();
+        const std::size_t bytes =
+            static_cast<std::size_t>(colour.height - 1) * colour.stride[0] +
+            static_cast<std::size_t>(sensor::v210_row_bytes(colour.width));
+        copy.words.assign(colour.host, colour.host + bytes);
+        copy.picture = colour;
+        copy.picture.host = nullptr;
+      }
       const sensor::RgbdFrame* frame = set.rgbd != nullptr &&
                                                i < set.rgbd->frames.size() &&
                                                set.rgbd->frames[i]
@@ -301,8 +318,9 @@ struct LiveWorker::State {
     out->stages = std::move(stages);
     out->set = std::make_shared<const source::PictureSet>(std::move(taken));
     const source::PictureSet& set = *out->set;
-    // Decided before the offer, so a pause waits the offer out too.
-    const bool searched = pictures && begin_search();
+    // Decided before the offer, so a pause waits the offer out too. A scan
+    // searches nothing.
+    const bool searched = !scan && pictures && begin_search();
     if (sets != nullptr && set.rgbd != nullptr) sets->offer(set.rgbd);
     if (!searched) {
       out->detections.assign(ids.size(), Detection{});
@@ -310,6 +328,9 @@ struct LiveWorker::State {
       out->errors.assign(ids.size(), core::Status{});
       out->stillness_px.assign(ids.size(), std::nullopt);
       have_previous = false;  // no stillness across sets not searched
+      // A scan's rule needs no board: a set with its luma, which a capture
+      // copies, is ruled on.
+      if (scan && pictures) VKC_TRY(rule_on(set, *out, ids));
       publish(std::move(out));
       return {};
     }
@@ -339,21 +360,31 @@ struct LiveWorker::State {
     previous = out->detections;
     have_previous = true;
 
+    VKC_TRY(rule_on(set, *out, ids, motion));
+    publish(std::move(out));
+    return {};
+  }
+
+  // The capture rule's answer to a set with its luma, and the set taken when
+  // it says so: `out`'s checks, and the board's motion since the last set
+  // (none in a scan).
+  core::Status rule_on(const source::PictureSet& set, LiveSnapshot& out,
+                       const std::vector<std::string>& ids,
+                       std::optional<double> motion = std::nullopt) {
     quality::LiveSet live_set;
     live_set.present.resize(ids.size());
     for (std::size_t i = 0; i < ids.size(); ++i) {
       live_set.present[i] = set.cameras[i].present;
     }
-    live_set.checks = out->checks;
+    live_set.checks = out.checks;
     live_set.motion_px = motion;
     live_set.spread_ms = static_cast<double>(set.spread_ns) / 1e6;
     live_set.saver_full = sink != nullptr && sink->full();
-    VKC_ASSIGN(out->decision, rule->update(live_set, Clock::now()));
-    if (out->decision.state == quality::CaptureState::Take) {
-      take(set, host, *out, ids);
+    VKC_ASSIGN(out.decision, rule->update(live_set, Clock::now()));
+    if (out.decision.state == quality::CaptureState::Take) {
+      take(set, source->host(), out, ids);
     }
-    publish_decision(out->decision);
-    publish(std::move(out));
+    publish_decision(out.decision);
     return {};
   }
 
@@ -421,10 +452,12 @@ struct LiveWorker::State {
       core::StageMetrics stages;
       // Pictures while they are shown, or a capture is armed; whether the
       // board is searched for in them is decided as each set comes
-      // (begin_search).
+      // (begin_search). A scan's armed capture reads each V210 picture whole
+      // with its set, as the set's frames go back to the driver after.
       const bool pictures = detecting.load() || rule->armed();
+      const bool colour = scan && rule->armed();
       core::Result<std::optional<source::PictureSet>> taken =
-          source->take(&stages, pictures);
+          source->take(&stages, pictures, colour);
       if (!taken.ok()) {
         // The sensors' failure ends the thread; a set's luma, that set.
         if (source->failed()) return taken.status();
@@ -472,6 +505,7 @@ core::Result<std::unique_ptr<LiveWorker>> LiveWorker::create(
         VKC_ASSIGN(compute::Board made, compute::Board::create(board));
         state->detector_board = std::move(made);
         state->options = options;
+        state->scan = options.scan;
         state->skew_bound_ns = state->source->max_skew_ns();
         state->options.rule = source_rule(state->skew_bound_ns, options.rule);
         state->rule_options = state->options.rule;
@@ -543,7 +577,7 @@ void LiveWorker::pause_search(bool paused) {
 
 core::Status LiveWorker::restart(
     const std::vector<sensor::camera::CameraModel>& lenses, const Target& board,
-    bool square_measured, const quality::CaptureRuleOptions& rule) {
+    bool square_measured, const quality::CaptureRuleOptions& rule, bool scan) {
   return compute::guarded("LiveWorker::restart", [&]() -> core::Status {
     // The source's camera list is fixed once open, so any thread may read it.
     VKC_ASSIGN(std::vector<compute::CvCamera> cameras,
@@ -555,7 +589,7 @@ core::Status LiveWorker::restart(
                quality::CaptureRule::create(ids_, options));
     const std::lock_guard<std::mutex> lock(state_->mutex);
     state_->restart =
-        Restart{std::move(cameras), std::move(made), std::move(fresh)};
+        Restart{std::move(cameras), std::move(made), std::move(fresh), scan};
     state_->rule_options = options;
     state_->board = board;
     state_->square_measured = square_measured;

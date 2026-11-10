@@ -3,12 +3,12 @@
 
 #include "volumetric_kit/calib/capture/session_writer.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <ctime>
-#include <deque>
 #include <iterator>
 #include <list>
 #include <mutex>
@@ -161,22 +161,24 @@ core::Result<std::optional<ArrayCalibration>> check_info(
     VKC_TRY(core::check_path("SessionWriter: sync_path", info.sync_path));
   }
   if (info.driver.empty()) return invalid("no driver named");
-  if (core::Status board = check_target(info.board); !board.ok()) {
-    return std::move(board).with_context("SessionWriter: board");
+  if (std::string_view(to_string(info.mode)) == "unknown") {
+    return invalid("mode is not a SessionMode");
   }
-  if (info.board.kind != TargetKind::ChArUco &&
-      info.board.kind != TargetKind::Checkerboard) {
-    return core::Status::unsupported(
-        std::string("SessionWriter: a session's board is ChArUco or a "
-                    "checkerboard, not ") +
-        to_string(info.board.kind));
+  // A scan searches for no board, and records none.
+  if (info.mode != SessionMode::Scan) {
+    if (core::Status board = check_target(info.board); !board.ok()) {
+      return std::move(board).with_context("SessionWriter: board");
+    }
+    if (info.board.kind != TargetKind::ChArUco &&
+        info.board.kind != TargetKind::Checkerboard) {
+      return core::Status::unsupported(
+          std::string("SessionWriter: a session's board is ChArUco or a "
+                      "checkerboard, not ") +
+          to_string(info.board.kind));
+    }
   }
   if (core::Status tag = check_origin_tag(info.origin_tag); !tag.ok()) {
     return std::move(tag).with_context("SessionWriter");
-  }
-  if (info.mode != SessionMode::Extrinsics &&
-      info.mode != SessionMode::Intrinsics) {
-    return invalid("mode is not a SessionMode");
   }
   if (info.cameras.empty()) return invalid("no cameras");
   const SessionCamera& first = info.cameras.front();
@@ -218,20 +220,47 @@ core::Result<std::optional<ArrayCalibration>> check_info(
   return factory_calibration(info);
 }
 
+// `part`'s origin tag, if any: the session's, its corners finite.
+core::Status check_tag(const SessionInfo& info, const std::string& where,
+                       const CameraCapture& part) {
+  if (!part.origin_tag) return {};
+  if (part.origin_tag->id != info.origin_tag.id) {
+    return invalid(where + "origin tag " + std::to_string(part.origin_tag->id) +
+                   " is not the session's " +
+                   std::to_string(info.origin_tag.id));
+  }
+  for (const sensor::camera::Vec2d& corner : part.origin_tag->corners) {
+    if (!finite(corner)) return invalid(where + "the origin tag is not finite");
+  }
+  return {};
+}
+
 // @pre `info` passed check_info.
 core::Status check_part(const SessionInfo& info, std::size_t i,
                         const CameraCapture& part) {
   const SessionCamera& camera = info.cameras[i];
   const std::string where = "capture: camera " + camera.id + ": ";
+  if (!part.jpeg.empty() && !part.png.empty()) {
+    return invalid(where + "a JPEG and a PNG: its picture is one of them");
+  }
   if (!part.jpeg.empty()) {
     // A JPEG starts with its SOI marker.
     if (part.jpeg.size() < 2 || part.jpeg[0] != 0xFF || part.jpeg[1] != 0xD8) {
       return invalid(where + "the colour is not a JPEG");
     }
+  } else if (!part.png.empty()) {
+    // A PNG starts with its eight-byte signature.
+    constexpr std::uint8_t kSignature[8] = {0x89, 'P',  'N',  'G',
+                                            '\r', '\n', 0x1A, '\n'};
+    if (part.png.size() < sizeof kSignature ||
+        !std::equal(std::begin(kSignature), std::end(kSignature),
+                    part.png.begin())) {
+      return invalid(where + "the still is not a PNG");
+    }
   } else if (part.luma.size() !=
              static_cast<std::size_t>(camera.size.width) * camera.size.height) {
-    return invalid(where + "neither a JPEG nor its " + size_text(camera.size) +
-                   " luma");
+    return invalid(where + "neither a JPEG, a PNG nor its " +
+                   size_text(camera.size) + " luma");
   }
   if (!camera.depth) {
     if (part.depth != nullptr) {
@@ -247,6 +276,10 @@ core::Status check_part(const SessionInfo& info, std::size_t i,
                      " depth samples for a " + size_text(depth) +
                      " depth image");
     }
+  }
+  if (info.mode == SessionMode::Scan) {
+    // A scan writes no detection or check: only its origin tag is read.
+    return check_tag(info, where, part);
   }
   const sensor::camera::ImageSize& size = part.detection.image_size;
   if (!same_size(size, camera.size)) {
@@ -267,18 +300,7 @@ core::Status check_part(const SessionInfo& info, std::size_t i,
       }
     }
   }
-  if (part.origin_tag) {
-    if (part.origin_tag->id != info.origin_tag.id) {
-      return invalid(
-          where + "origin tag " + std::to_string(part.origin_tag->id) +
-          " is not the session's " + std::to_string(info.origin_tag.id));
-    }
-    for (const sensor::camera::Vec2d& corner : part.origin_tag->corners) {
-      if (!finite(corner)) {
-        return invalid(where + "the origin tag is not finite");
-      }
-    }
-  }
+  VKC_TRY(check_tag(info, where, part));
   const ViewCheck& check = part.check;
   if (!finite(check.distance_m) || !finite(check.tilt_deg) ||
       !finite(check.pnp_rms_px)) {
@@ -300,8 +322,11 @@ core::Status check_job(const SessionInfo& info, const CaptureJob& job) {
     VKC_TRY(check_part(info, i, job.cameras[i]));
   }
   const CaptureMeta& meta = job.meta;
-  if (!std::isfinite(meta.spread_ms) || !std::isfinite(meta.stillness_px) ||
-      !finite(meta.live_vs_full_px)) {
+  // A scan writes no stillness or live-vs-full shift.
+  const bool scan = info.mode == SessionMode::Scan;
+  if (!std::isfinite(meta.spread_ms) ||
+      (!scan &&
+       (!std::isfinite(meta.stillness_px) || !finite(meta.live_vs_full_px)))) {
     return invalid("capture: a set's measure is not finite");
   }
   return {};
@@ -332,7 +357,6 @@ struct SessionWriter::State {
     std::list<Outcome> outcome;
   };
 
-  // May throw: a deque may allocate as it is made (libstdc++'s does).
   State(SessionInfo session, std::optional<ArrayCalibration> factory_record,
         std::size_t queue_capacity)
       : info(std::move(session)),
@@ -429,26 +453,39 @@ struct SessionWriter::State {
     return written;
   }
 
-  core::Result<int> write_capture(CaptureJob& job) {
+  // `pictures` gets each camera's picture file, once all are written.
+  core::Result<int> write_capture(CaptureJob& job,
+                                  std::vector<PictureFile>& pictures) {
     VKC_TRY(prepare());
     // Used from here on, whatever happens: files of it may exist.
     const int index = next_index++;
     job.meta.index = index;
+    std::vector<PictureFile> written;
+    written.reserve(info.cameras.size());
     // TODO: encode and write each camera's files as a task of its own if the
     // rig's write time per capture (hand check H4) asks for it.
     for (std::size_t i = 0; i < info.cameras.size(); ++i) {
       const SessionCamera& camera = info.cameras[i];
       const CameraCapture& part = job.cameras[i];
-      const bool jpeg = !part.jpeg.empty();
-      const std::string color = detail::join(
-          info.directory, detail::color_file(camera.id, index, jpeg));
-      if (jpeg) {
-        VKC_TRY(core::write_file(color, bytes_of(part.jpeg),
-                                 core::WriteMode::CreateNew));
-      } else {
-        VKC_TRY(core::write_file(color, detail::pgm(part.luma, camera.size),
-                                 core::WriteMode::CreateNew));
+      const detail::PictureKind kind = detail::picture_kind(part);
+      std::string file = detail::color_file(camera.id, index, kind, info.mode);
+      const std::string color = detail::join(info.directory, file);
+      switch (kind) {
+        case detail::PictureKind::Jpeg:
+          VKC_TRY(core::write_file(color, bytes_of(part.jpeg),
+                                   core::WriteMode::CreateNew));
+          break;
+        case detail::PictureKind::Png:
+          VKC_TRY(core::write_file(color, bytes_of(part.png),
+                                   core::WriteMode::CreateNew));
+          break;
+        case detail::PictureKind::Pgm:
+          VKC_TRY(core::write_file(color, detail::pgm(part.luma, camera.size),
+                                   core::WriteMode::CreateNew));
+          break;
       }
+      written.push_back(
+          {std::move(file), detail::picture_bytes(part, kind, camera.size)});
       if (!camera.depth) continue;
       const sensor::camera::ImageSize& depth = camera.depth->size;
       const std::vector<std::uint16_t>& samples = *part.depth;
@@ -463,6 +500,7 @@ struct SessionWriter::State {
         detail::join(info.directory, detail::capture_file(index)),
         detail::format_capture(info, job), core::WriteMode::CreateNew));
     VKC_TRY(list({index, false}));
+    pictures = std::move(written);
     return index;
   }
 
@@ -502,7 +540,7 @@ struct SessionWriter::State {
     const bool capture = request.kind == WriteResult::Kind::Capture;
     try {
       core::Result<int> done =
-          capture ? write_capture(request.job) : drop_last();
+          capture ? write_capture(request.job, result.pictures) : drop_last();
       if (done.ok()) {
         result.index = *done;
       } else {
@@ -528,15 +566,15 @@ struct SessionWriter::State {
       std::unique_lock<std::mutex> lock(mutex);
       wake.wait(lock, [this] { return stopping || !queue.empty(); });
       if (queue.empty()) return;  // stopping, with every request carried out
-      std::optional<Request> request(std::move(queue.front()));
-      queue.pop_front();
+      std::list<Request> taken;   // the next request, its node and all
+      taken.splice(taken.end(), queue, queue.begin());
       lock.unlock();
 
-      WriteResult result = carry_out(*request);
+      WriteResult result = carry_out(taken.front());
       // The capture's frames go before its slot is freed, so the capacity
       // bounds the memory held.
-      const bool capture = request->kind == WriteResult::Kind::Capture;
-      request.reset();
+      const bool capture = taken.front().kind == WriteResult::Kind::Capture;
+      taken.clear();
 
       lock.lock();
       try {
@@ -568,7 +606,9 @@ struct SessionWriter::State {
   std::condition_variable wake;  // the thread: a request, or stopping
   std::condition_variable idle;  // flush: a request carried out
   // Guarded by `mutex`.
-  std::deque<Request> queue;
+  // Each request comes in a node of its own, made before the lock is taken
+  // (submit, drop_last), so what a submit allocates hangs on nothing queued.
+  std::list<Request> queue;
   std::size_t held = 0;       // captures queued or being written
   std::size_t in_flight = 0;  // requests queued or being carried out
   bool stopping = false;
@@ -618,12 +658,12 @@ SessionWriter::~SessionWriter() {
 core::Result<bool> SessionWriter::submit(CaptureJob job) {
   try {
     VKC_TRY(check_job(state_->info, job));
-    State::Request request;
-    request.job = std::move(job);
-    request.outcome.emplace_back();
+    std::list<State::Request> request(1);
+    request.front().job = std::move(job);
+    request.front().outcome.emplace_back();
     std::lock_guard<std::mutex> lock(state_->mutex);
     if (state_->held >= state_->capacity) return false;
-    state_->queue.push_back(std::move(request));
+    state_->queue.splice(state_->queue.end(), request);
     ++state_->held;
     ++state_->in_flight;
     state_->wake.notify_one();
@@ -636,10 +676,10 @@ core::Result<bool> SessionWriter::submit(CaptureJob job) {
 
 core::Status SessionWriter::drop_last() {
   try {
-    State::Request request;
-    request.kind = WriteResult::Kind::Drop;
+    std::list<State::Request> request(1);
+    request.front().kind = WriteResult::Kind::Drop;
     std::lock_guard<std::mutex> lock(state_->mutex);
-    state_->queue.push_back(std::move(request));
+    state_->queue.splice(state_->queue.end(), request);
     ++state_->in_flight;
     state_->wake.notify_one();
     return {};
@@ -664,6 +704,18 @@ std::size_t SessionWriter::pending() const {
 void SessionWriter::flush() {
   std::unique_lock<std::mutex> lock(state_->mutex);
   state_->idle.wait(lock, [this] { return state_->in_flight == 0; });
+}
+
+const char* to_string(SessionMode mode) noexcept {
+  switch (mode) {
+    case SessionMode::Extrinsics:
+      return "extrinsics";
+    case SessionMode::Intrinsics:
+      return "intrinsics";
+    case SessionMode::Scan:
+      return "scan";
+  }
+  return "unknown";
 }
 
 const char* to_string(LensOrigin origin) noexcept {

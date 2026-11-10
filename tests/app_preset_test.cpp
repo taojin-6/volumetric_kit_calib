@@ -4,8 +4,9 @@
 // calib_rig's preset: the Femto Mega's depth modes, the preset a scenario asks
 // for, what calib_rig refuses of a scenario before it opens anything (an
 // operation or a driver it does not run, its calibration file, its session
-// root and sync file), and the check that every camera of a rig of any size
-// opened at the preset, naming the first that did not. Host-only.
+// root and sync file), the scan it takes on either driver, and the check that
+// every camera of a rig of any size opened at the preset, naming the first
+// that did not. Host-only.
 
 #include "volumetric_kit/calib/app/preset.hpp"
 
@@ -175,9 +176,10 @@ core::config::Config scenario(const ScratchDir& dir,
   return config;
 }
 
-// core 0.40.0 gives every scenario an operation and a driver: calib_rig runs
-// what calib supports and refuses the rest before anything opens, naming the
-// field and its value, so no scenario runs another solve than it asks for.
+// core 0.40.0 gives every scenario an operation and a driver, and 0.51.0 the
+// scan: calib_rig runs what calib supports and refuses the rest before
+// anything opens, naming the field and its value, so no scenario runs another
+// solve than it asks for.
 TEST(AppPreset, RunsOnlyTheOperationsAndDriversItSupports) {
   using Operation = core::config::Operation;
   const ScratchDir dir;
@@ -192,31 +194,37 @@ TEST(AppPreset, RunsOnlyTheOperationsAndDriversItSupports) {
           Code::InvalidArgument,
           "operation: " + std::to_string(static_cast<int>(operation)) +
               " is not one calib_rig runs (calibrate, "
-              "calibrate_intrinsics)");
+              "calibrate_intrinsics, scan)");
     }
   }
   for (const char* driver : {"", "realsense", "arkit", "Orbbec"}) {
     for (const Operation operation :
-         {Operation::Calibrate, Operation::CalibrateIntrinsics}) {
+         {Operation::Calibrate, Operation::CalibrateIntrinsics,
+          Operation::Scan}) {
       expect_refused(check_scenario(scenario(dir, operation, driver)).status(),
                      Code::InvalidArgument,
                      std::string("source.driver: \"") + driver +
                          "\" is not one calib_rig opens (orbbec, decklink)");
     }
   }
-  // A DeckLink pair's lenses and its poses, its pair's rows checked at the
-  // size its runtime rectifies to, the scenario's depth size (FFS's).
+  // A DeckLink pair's lenses, its poses and its scan, its pair's rows
+  // checked at the size its runtime rectifies to, the scenario's depth size
+  // (FFS's).
+  const auto mode_of = [](Operation operation) {
+    return operation == Operation::Calibrate ? capture::SessionMode::Extrinsics
+           : operation == Operation::Scan    ? capture::SessionMode::Scan
+                                             : capture::SessionMode::Intrinsics;
+  };
   for (const Operation operation :
-       {Operation::Calibrate, Operation::CalibrateIntrinsics}) {
+       {Operation::Calibrate, Operation::CalibrateIntrinsics,
+        Operation::Scan}) {
     core::config::Config config = scenario(dir, operation, "decklink");
     config.source.depth_width = 1024;  // not FFS's own, read as given
     config.source.depth_height = 576;
     const core::Result<RigScenario> pair = check_scenario(config);
 #if defined(VC_WITH_DECKLINK)
     ASSERT_TRUE(pair.ok()) << pair.status().message();
-    EXPECT_EQ(pair->mode, operation == Operation::Calibrate
-                              ? capture::SessionMode::Extrinsics
-                              : capture::SessionMode::Intrinsics);
+    EXPECT_EQ(pair->mode, mode_of(operation));
     EXPECT_EQ(pair->driver, "decklink");
     ASSERT_EQ(pair->pairs.size(), 1u);
     EXPECT_EQ(pair->pairs[0].left, "bm-1");
@@ -231,14 +239,13 @@ TEST(AppPreset, RunsOnlyTheOperationsAndDriversItSupports) {
 #endif
   }
   for (const Operation operation :
-       {Operation::Calibrate, Operation::CalibrateIntrinsics}) {
+       {Operation::Calibrate, Operation::CalibrateIntrinsics,
+        Operation::Scan}) {
     const core::Result<RigScenario> rig =
         check_scenario(scenario(dir, operation, "orbbec"));
 #if defined(VC_WITH_ORBBEC)
     ASSERT_TRUE(rig.ok()) << rig.status().message();
-    EXPECT_EQ(rig->mode, operation == Operation::Calibrate
-                             ? capture::SessionMode::Extrinsics
-                             : capture::SessionMode::Intrinsics);
+    EXPECT_EQ(rig->mode, mode_of(operation));
     EXPECT_EQ(rig->driver, "orbbec");
     // The Femto rig has no pair whose rows to check.
     EXPECT_TRUE(rig->pairs.empty());

@@ -9,8 +9,9 @@
 // half against a host reference; newest wins; a decoder's picture read only
 // once its ready value is set, and the set's own value set only after the
 // pass; the stereo source's refusals and its skew bound; a poll's failure
-// against a picture's; the ChArUco board found in the GPU's half as in the
-// CPU's; and sample main 4 of the design, reading a source.
+// against a picture's; a take asked for colour reading each V210 picture's
+// words whole, and no other layout's; the ChArUco board found in the GPU's
+// half as in the CPU's; and sample main 4 of the design, reading a source.
 // Runs under the validation layer when the environment asks
 // (VKC_TEST_VALIDATION); skips without a Vulkan device.
 
@@ -21,6 +22,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <future>
 #include <memory>
 #include <optional>
@@ -37,6 +39,7 @@
 #include "fake_stereo.hpp"
 #include "set_on_exit.hpp"
 #include "synthetic_rig.hpp"
+#include "v210_pair.hpp"
 #include "volumetric_kit/calib/compute/board.hpp"
 #include "volumetric_kit/calib/detect/board.hpp"
 #include "volumetric_kit/calib/source/rig_source.hpp"
@@ -117,14 +120,15 @@ class SourceRig : public core::test::VulkanDeviceTest {
     return rows_of({view->width, view->height, view->stride, view->luma});
   }
 
-  // A stereo source over a fake pair of `kWidth` x `kHeight` cameras.
+  // A stereo source over a fake pair of `size` cameras.
   std::unique_ptr<RigSource> stereo(
       test::FakeStereo** fake = nullptr,
-      sensor::StereoInfo info = test::uncalibrated_pair_info()) {
+      sensor::StereoInfo info = test::uncalibrated_pair_info(),
+      camera::ImageSize size = {kWidth, kHeight}) {
     auto sensor = std::make_unique<test::FakeStereo>(std::move(info));
     if (fake != nullptr) *fake = sensor.get();
     StereoMember member{std::move(sensor), {"bm-1", "bm-2"}};
-    member.sizes = {{{kWidth, kHeight}, {kWidth, kHeight}}};
+    member.sizes = {{size, size}};
     core::Result<std::unique_ptr<RigSource>> rig =
         RigSource::open(std::move(member), device(), allocator());
     EXPECT_TRUE(rig.ok()) << rig.status().message();
@@ -204,6 +208,96 @@ TEST_F(SourceRig, AStereoPairComesAsTwoGreyPictures) {
   EXPECT_EQ(stats.sensors[1].delivered, 1u);
   rig->stop();
   EXPECT_FALSE(fake->started());
+}
+
+// A take asked for colour reads each V210 picture whole with the luma, as a
+// DeckLink pair's: its words, row for row at its padded stride, described as
+// the picture is (V210 on the host, BT.709, limited range, co-sited), and the
+// pair's skew; its luma as always. A take not asked reads none, and a
+// picture in another layout has none to read.
+TEST_F(SourceRig, ATakeAskedForColourReadsEachV210PictureWhole) {
+  constexpr std::uint32_t kW = 96;  // 16 groups of six
+  constexpr std::uint32_t kH = 10;
+  constexpr std::size_t kStride = 384;  // 256 of words, padded as a card does
+  test::FakeStereo* fake = nullptr;
+  std::unique_ptr<RigSource> rig =
+      stereo(&fake, test::uncalibrated_pair_info(), {kW, kH});
+  ASSERT_NE(rig, nullptr);
+  ASSERT_TRUE(rig->start().ok());
+  std::vector<std::uint8_t> bytes[2];
+  sensor::YuvImage pictures[2];
+  for (std::size_t i = 0; i < 2; ++i) {
+    const test::V210Samples samples = test::v210_samples(
+        kW, kH,
+        [i](std::uint32_t x, std::uint32_t y) {
+          return static_cast<std::uint16_t>(64 +
+                                            (x * 9 + y * 5 + i * 101) % 876);
+        },
+        [i](std::uint32_t c, std::uint32_t y) {
+          return std::make_pair(
+              static_cast<std::uint16_t>(64 + (c * 23 + y * 3 + i) % 896),
+              static_cast<std::uint16_t>(64 + (c * 11 + y * 7) % 896));
+        });
+    bytes[i] = test::pack_v210(samples, kStride);
+    core::Result<sensor::YuvImage> made =
+        test::device_v210(device(), allocator(), bytes[i], kW, kH, kStride);
+    ASSERT_TRUE(made.ok()) << made.status().message();
+    pictures[i] = std::move(made).value();
+  }
+  for (const bool colour : {true, false}) {
+    SCOPED_TRACE(colour ? "colour" : "luma alone");
+    fake->push(test::v210_pair(pictures[0], pictures[1], kStartNs,
+                               colour ? -2'400'000 : 1'000, 5));
+    core::Result<std::optional<PictureSet>> taken =
+        rig->take(nullptr, true, colour);
+    ASSERT_TRUE(taken.ok()) << taken.status().message();
+    ASSERT_TRUE(taken.value().has_value());
+    EXPECT_EQ(taken.value()->skew_ns,
+              std::optional<std::int64_t>(colour ? -2'400'000 : 1'000));
+    ASSERT_EQ(rig->host().size(), 2u);
+    for (std::size_t i = 0; i < 2; ++i) {
+      const HostLuma& host = rig->host()[i];
+      EXPECT_EQ(host.luma.width, kW);
+      EXPECT_FALSE(host.full_range);
+      const sensor::YuvImage& words = host.colour;
+      if (!colour) {
+        EXPECT_EQ(words.host, nullptr);
+        continue;
+      }
+      ASSERT_NE(words.host, nullptr);
+      EXPECT_EQ(words.layout, sensor::YuvLayout::V210);
+      EXPECT_EQ(words.device, nullptr);
+      EXPECT_EQ(words.width, kW);
+      EXPECT_EQ(words.height, kH);
+      EXPECT_EQ(words.stride[0], kStride);
+      EXPECT_EQ(words.offset[0], 0u);
+      EXPECT_EQ(words.kr, pictures[i].kr);
+      EXPECT_EQ(words.kb, pictures[i].kb);
+      EXPECT_FALSE(words.full_range);
+      EXPECT_EQ(words.chroma_location, sensor::ChromaLocation::Left);
+      const std::size_t row = sensor::v210_row_bytes(kW);
+      for (std::uint32_t r = 0; r < kH; ++r) {
+        EXPECT_EQ(std::memcmp(words.host + r * kStride,
+                              bytes[i].data() + r * kStride, row),
+                  0)
+            << "camera " << i << " row " << r;
+      }
+    }
+  }
+  // A luma pair has no V210 picture to read whole.
+  std::unique_ptr<RigSource> grey = stereo(&fake);
+  ASSERT_NE(grey, nullptr);
+  ASSERT_TRUE(grey->start().ok());
+  fake->push(test::host_pair(kWidth, kHeight, pattern(kWidth, kHeight, 1),
+                             pattern(kWidth, kHeight, 2), kStartNs, 0, 1));
+  core::Result<std::optional<PictureSet>> taken =
+      grey->take(nullptr, true, true);
+  ASSERT_TRUE(taken.ok()) << taken.status().message();
+  ASSERT_TRUE(taken.value().has_value());
+  for (const HostLuma& host : grey->host()) {
+    EXPECT_NE(host.luma.data, nullptr);
+    EXPECT_EQ(host.colour.host, nullptr);
+  }
 }
 
 // A set kept past the next take still holds its own tiles, on the device:

@@ -2,7 +2,8 @@
 // Copyright (c) 2026 Tao Jin
 
 // Sessions on disk: the tree and its names, the files' bytes and JSON, what is
-// refused, the queue, I/O failures, drops and shutdown. Synthetic cameras and
+// refused, the queue, I/O failures, drops and shutdown; a scan session's
+// stills, PNG and JPEG, and its board-free files. Synthetic cameras and
 // frames: small images, a few corners, numbers with long binary expansions.
 
 #include "volumetric_kit/calib/capture/session_writer.hpp"
@@ -709,6 +710,217 @@ TEST(SessionWriter, AnIntrinsicSessionTakesACheckerboard) {
     "square_measured": true, "square_tolerance_m": null,
     "planarity_bow_m": null})"))
       << doc["board"].dump(2);
+}
+
+// A still of camera `seed`'s, as the app's capture worker encodes a V210
+// picture: an RGB PNG of a pattern.
+std::vector<std::uint8_t> still_png(int seed) {
+  std::vector<std::uint8_t> rgb(std::size_t{kColorW} * kColorH * 3);
+  for (std::size_t k = 0; k < rgb.size(); ++k) {
+    rgb[k] = static_cast<std::uint8_t>(k * 13 + static_cast<std::size_t>(seed));
+  }
+  vkc::Result<std::vector<std::uint8_t>> png =
+      sensor::io::encode_png_rgb8(rgb.data(), rgb.size(), kColorW, kColorH);
+  EXPECT_TRUE(png.ok()) << png.status().message();
+  return png.ok() ? std::move(png).value() : std::vector<std::uint8_t>{};
+}
+
+// A pair's scan session: no board (its own refused, unread), each camera's
+// still a PNG.
+SessionInfo scan_info(const ScratchDir& dir) {
+  SessionInfo info = pair_info(dir);
+  info.directory = dir / "2026-11-09_140251";
+  info.mode = SessionMode::Scan;
+  info.board = Target{};
+  return info;
+}
+
+// A scan's capture of the pair: each camera's still and luma, the pair's
+// skew; no board found, judged or still.
+CaptureJob scan_job(int seed = 0) {
+  CaptureJob job = pair_job(seed);
+  job.meta.skew_ns = -2'400'000;
+  job.meta.stillness_px = kNaN;  // unread
+  for (std::size_t i = 0; i < job.cameras.size(); ++i) {
+    CameraCapture& part = job.cameras[i];
+    part.png = still_png(seed + static_cast<int>(i));
+    part.detection = Detection{};  // no image size: unread
+    part.check = ViewCheck{};
+    part.check.tilt_deg = kNaN;
+  }
+  return job;
+}
+
+// A scan session of a pair: each still written byte for byte as
+// images/<id>/scan_<id>_<NNN>.png, its file and size in the outcome;
+// session.json's mode "scan" and no board; each capture with the pair's skew
+// and none of a board's keys.
+TEST(SessionWriter, AScanWritesEachStillAndNoBoard) {
+  const ScratchDir dir;
+  const SessionInfo info = scan_info(dir);
+  auto writer = make_writer(info);
+  ASSERT_TRUE(writer);
+  const CaptureJob first = scan_job(0);
+  CaptureJob second = scan_job(5);
+  second.meta.skew_ns.reset();  // a set with no skew has no key
+  submit(*writer, first);
+  submit(*writer, second);
+  const std::vector<WriteResult> results = finish(*writer);
+  ASSERT_EQ(results.size(), 2u);
+  expect_written(results[0], WriteResult::Kind::Capture, 0);
+  expect_written(results[1], WriteResult::Kind::Capture, 1);
+  EXPECT_EQ(
+      files_under(info.directory),
+      (std::set<std::string>{"session.json", "images/bm-1/scan_bm-1_000.png",
+                             "images/bm-2/scan_bm-2_000.png",
+                             "images/bm-1/scan_bm-1_001.png",
+                             "images/bm-2/scan_bm-2_001.png",
+                             "captures/000.json", "captures/001.json"}));
+  for (std::size_t i = 0; i < 2; ++i) {
+    const std::string& id = info.cameras[i].id;
+    const std::string file = "images/" + id + "/scan_" + id + "_000.png";
+    const std::string bytes = read(info.directory + "/" + file);
+    const std::vector<std::uint8_t>& png = first.cameras[i].png;
+    EXPECT_TRUE(bytes.size() == png.size() &&
+                std::equal(png.begin(), png.end(), bytes.begin(),
+                           [](std::uint8_t a, char b) {
+                             return a == static_cast<std::uint8_t>(b);
+                           }))
+        << file;
+    ASSERT_EQ(results[0].pictures.size(), 2u);
+    EXPECT_EQ(results[0].pictures[i].file, file);
+    EXPECT_EQ(results[0].pictures[i].bytes, png.size());
+  }
+  const json session = parse(info.directory + "/session.json");
+  EXPECT_EQ(session["mode"], "scan");
+  EXPECT_FALSE(session.contains("board")) << session.dump(2);
+  EXPECT_EQ(session["origin_tag"]["id"], 0);
+  EXPECT_EQ(session["cameras"][0]["lens"]["origin"], "file");
+  EXPECT_EQ(session["captures"].size(), 2u);
+  json capture = parse(info.directory + "/captures/000.json");
+  EXPECT_EQ(capture["time"].get<std::string>().size(), 24u);
+  capture.erase("time");
+  json expected = json::parse(R"({
+    "format": "volumetric_kit_calib.capture", "version": 1, "index": 0,
+    "trigger_ns": 18446744073709551614, "sequence": 1234,
+    "spread_ms": 1.4000000000000001, "skew_ns": -2400000,
+    "cameras": {
+      "bm-1": {"color": "images/bm-1/scan_bm-1_000.png", "depth": null,
+               "color_bytes": 0, "timestamp_ns": 1760348472003911000,
+               "sequence": 1234, "origin_tag": null},
+      "bm-2": {"color": "images/bm-2/scan_bm-2_000.png", "depth": null,
+               "color_bytes": 0, "timestamp_ns": 1760348472003911001,
+               "sequence": 1235, "origin_tag": null}}})");
+  expected["cameras"]["bm-1"]["color_bytes"] = first.cameras[0].png.size();
+  expected["cameras"]["bm-2"]["color_bytes"] = first.cameras[1].png.size();
+  EXPECT_EQ(capture, expected) << capture.dump(2);
+  EXPECT_FALSE(
+      parse(info.directory + "/captures/001.json").contains("skew_ns"));
+}
+
+// A Femto rig's scan: each camera's JPEG byte for byte as
+// images/<id>/scan_<id>_<NNN>.jpg, its depth as in any session, no skew (an
+// array's set has none); a camera with neither a JPEG nor a still saves its
+// luma as scan_<id>_<NNN>.pgm.
+TEST(SessionWriter, AScanKeepsEachJpegItsDepthAndElseTheLuma) {
+  const ScratchDir dir;
+  SessionInfo info = make_info(dir);
+  info.mode = SessionMode::Scan;
+  auto writer = make_writer(info);
+  ASSERT_TRUE(writer);
+  CaptureJob job = make_job(3);
+  job.meta.live_vs_full_px = kNaN;  // unread
+  job.cameras[1].jpeg.clear();
+  job.cameras[1].luma.assign(std::size_t{kColorW} * kColorH, 77);
+  submit(*writer, job);
+  const std::vector<WriteResult> results = finish(*writer);
+  ASSERT_EQ(results.size(), 1u);
+  expect_written(results[0], WriteResult::Kind::Capture, 0);
+  EXPECT_EQ(files_under(info.directory),
+            (std::set<std::string>{
+                "session.json", "factory_calibration.json",
+                "images/CL2A14100A4/scan_CL2A14100A4_000.jpg",
+                "images/CL2A141000N/scan_CL2A141000N_000.pgm",
+                "depth/CL2A14100A4/calib_depth_CL2A14100A4_000.png",
+                "depth/CL2A141000N/calib_depth_CL2A141000N_000.png",
+                "captures/000.json"}));
+  const std::string jpeg =
+      read(info.directory + "/images/CL2A14100A4/scan_CL2A14100A4_000.jpg");
+  EXPECT_EQ(jpeg, std::string(job.cameras[0].jpeg.begin(),
+                              job.cameras[0].jpeg.end()));
+  ASSERT_EQ(results[0].pictures.size(), 2u);
+  EXPECT_EQ(results[0].pictures[0].bytes, job.cameras[0].jpeg.size());
+  EXPECT_EQ(results[0].pictures[1].file,
+            "images/CL2A141000N/scan_CL2A141000N_000.pgm");
+  EXPECT_EQ(results[0].pictures[1].bytes,
+            std::string("P5\n64 48\n255\n").size() + kColorW * kColorH);
+  const json capture = parse(info.directory + "/captures/000.json");
+  EXPECT_FALSE(capture.contains("skew_ns"));
+  EXPECT_FALSE(capture.contains("stillness_px"));
+  EXPECT_FALSE(capture.contains("usable_views"));
+  const json& camera = capture["cameras"]["CL2A14100A4"];
+  EXPECT_EQ(camera["depth"],
+            "depth/CL2A14100A4/calib_depth_CL2A14100A4_000.png");
+  EXPECT_FALSE(camera.contains("detection"));
+  EXPECT_FALSE(camera.contains("check"));
+  EXPECT_EQ(parse(info.directory + "/session.json")["mode"], "scan");
+}
+
+// A scan's still is a PNG, never beside a JPEG; its origin tag is checked as
+// any session's.
+TEST(SessionWriter, AScanRefusesAStillThatIsNoPng) {
+  const ScratchDir dir;
+  const SessionInfo info = scan_info(dir);
+  auto writer = make_writer(info);
+  ASSERT_TRUE(writer);
+  const auto refused = [&writer](CaptureJob job, const std::string& why) {
+    vkc::Result<bool> queued = writer->submit(std::move(job));
+    ASSERT_FALSE(queued.ok()) << why;
+    EXPECT_EQ(queued.status().domain(), Code::InvalidArgument);
+    EXPECT_EQ(queued.status().message(), "SessionWriter: capture: " + why);
+  };
+  {
+    CaptureJob job = scan_job();
+    job.cameras[1].png[1] = 'p';
+    refused(std::move(job), "camera bm-2: the still is not a PNG");
+  }
+  {
+    CaptureJob job = scan_job();
+    job.cameras[0].png.resize(7);
+    refused(std::move(job), "camera bm-1: the still is not a PNG");
+  }
+  {
+    CaptureJob job = scan_job();
+    job.cameras[0].jpeg = make_part(0).jpeg;
+    refused(std::move(job),
+            "camera bm-1: a JPEG and a PNG: its picture is one of them");
+  }
+  {
+    CaptureJob job = scan_job();
+    job.cameras[1].origin_tag = DetectedMarker{4, {}};
+    refused(std::move(job), "camera bm-2: origin tag 4 is not the session's 0");
+  }
+  {
+    CaptureJob job = scan_job();
+    job.meta.spread_ms = kNaN;
+    refused(std::move(job), "a set's measure is not finite");
+  }
+  EXPECT_FALSE(fs::exists(info.directory));
+  // A session that is no scan reads its board.
+  SessionInfo board_needed = scan_info(dir);
+  board_needed.mode = SessionMode::Extrinsics;
+  EXPECT_FALSE(SessionWriter::create(board_needed).ok());
+  SessionInfo unknown = scan_info(dir);
+  unknown.mode = static_cast<SessionMode>(7);
+  vkc::Result<std::unique_ptr<SessionWriter>> made =
+      SessionWriter::create(unknown);
+  ASSERT_FALSE(made.ok());
+  EXPECT_EQ(made.status().message(),
+            "SessionWriter: mode is not a SessionMode");
+  EXPECT_STREQ(to_string(SessionMode::Scan), "scan");
+  EXPECT_STREQ(to_string(SessionMode::Intrinsics), "intrinsics");
+  EXPECT_STREQ(to_string(SessionMode::Extrinsics), "extrinsics");
+  EXPECT_STREQ(to_string(static_cast<SessionMode>(7)), "unknown");
 }
 
 // A camera's luma, with no JPEG, is a PGM that reads back byte for byte; its
@@ -1479,7 +1691,7 @@ TEST(SessionWriter, RefusesACaptureThatDoesNotFitTheSession) {
     CaptureJob job = make_job();
     job.cameras[1].jpeg.clear();
     refused(std::move(job),
-            "camera CL2A141000N: neither a JPEG nor its 64x48 luma");
+            "camera CL2A141000N: neither a JPEG, a PNG nor its 64x48 luma");
   }
   {
     CaptureJob job = make_job();
@@ -1602,8 +1814,8 @@ TEST(SessionWriter, RefusesACaptureThatDoesNotFitTheSession) {
     vkc::Result<bool> queued = pair_writer->submit(std::move(job));
     ASSERT_FALSE(queued.ok());
     EXPECT_EQ(queued.status().message(),
-              "SessionWriter: capture: camera bm-1: neither a JPEG nor its "
-              "64x48 luma");
+              "SessionWriter: capture: camera bm-1: neither a JPEG, a PNG nor "
+              "its 64x48 luma");
   }
 }
 

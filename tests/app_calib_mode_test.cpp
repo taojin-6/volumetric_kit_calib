@@ -6,10 +6,10 @@
 // what extrinsic mode refuses; where each lens comes from, as the Setup panel
 // says it; the mark a lens carries into the file the solve writes; where a
 // lens fit starts, never the stand-in; the board each mode seeds and takes, a
-// board too small for a lens view refused, saying why; the capture rule; when
-// Calibrate may run, and why not, per camera; a stereo pair's camera records
-// and lenses; and every part of the window a mode sets, set from one place.
-// Host-only.
+// board too small for a lens view refused, saying why; the capture rule, a
+// scan's without stillness; when Calibrate may run, and why not, per camera,
+// never in a scan; a stereo pair's camera records and lenses; and every part
+// of the window a mode sets, set from one place. Host-only.
 
 #include "volumetric_kit/calib/app/calib_mode.hpp"
 
@@ -65,10 +65,12 @@ TEST(AppCalibMode, TheOperationIsTheMode) {
             SessionMode::Intrinsics);
   EXPECT_EQ(session_mode(Operation::Calibrate).value(),
             SessionMode::Extrinsics);
+  EXPECT_EQ(session_mode(Operation::Scan).value(), SessionMode::Scan);
   expect_refused(
       session_mode(Operation::Fuse).status(), Code::InvalidArgument,
       "operation: " + std::to_string(static_cast<int>(Operation::Fuse)) +
-          " is not one calib_rig runs (calibrate, calibrate_intrinsics)");
+          " is not one calib_rig runs (calibrate, calibrate_intrinsics, "
+          "scan)");
   expect_refused(session_mode(static_cast<Operation>(99)).status(),
                  Code::InvalidArgument,
                  "operation: 99 is not one calib_rig runs");
@@ -229,10 +231,16 @@ TEST(AppCalibMode, EachLensSaysWhereItComesFrom) {
        LensStatus::StandIn, 1920.0},
       {SessionMode::Extrinsics, "bm-2", false, LensOrigin::StandIn,
        LensStatus::Missing, 1920.0},
+      // A scan records where each lens came from, and needs none.
+      {SessionMode::Scan, "bm-1", false, LensOrigin::File,
+       LensStatus::Calibrated, 1702.0},
+      {SessionMode::Scan, "bm-1", true, LensOrigin::File,
+       LensStatus::Calibrated, 1702.0},
+      {SessionMode::Scan, "bm-2", false, LensOrigin::StandIn,
+       LensStatus::StandIn, 1920.0},
   };
   for (const Case& c : cases) {
-    SCOPED_TRACE(std::string(c.id) +
-                 (c.mode == SessionMode::Intrinsics ? " lenses" : " poses"));
+    SCOPED_TRACE(std::string(c.id) + " " + capture::to_string(c.mode));
     capture::SessionCamera camera = record(c.id, c.factory);
     const camera::CameraModel taken =
         take_lens(c.mode, &file, path, camera).value();
@@ -288,6 +296,8 @@ TEST(AppCalibMode, AFitStartsFromARealLensNeverTheStandIn) {
 TEST(AppCalibMode, EachModeSeedsAndTakesItsBoards) {
   EXPECT_EQ(board_seed(SessionMode::Intrinsics), legacy_checkerboard());
   EXPECT_EQ(board_seed(SessionMode::Extrinsics), legacy_femto_board());
+  // A scan's board is never shown or searched for: the poses' stands.
+  EXPECT_EQ(board_seed(SessionMode::Scan), legacy_femto_board());
   const viz::BoardRule lenses = board_rule(SessionMode::Intrinsics);
   EXPECT_TRUE(lenses.checkerboard);
   EXPECT_EQ(lenses.min_corners, solve::LensOptions{}.min_corners);
@@ -325,7 +335,14 @@ TEST(AppCalibMode, OneViewIsALensCapture) {
   EXPECT_EQ(lenses.min_views, 1);
   EXPECT_EQ(poses.min_views, defaults.min_views);
   EXPECT_EQ(poses.min_views, 2);
-  for (const quality::CaptureRuleOptions& rule : {lenses, poses}) {
+  // A scan takes the next set with every camera's picture: no stillness,
+  // no view counted, the same wait for a complete set.
+  const quality::CaptureRuleOptions scan = capture_rule(SessionMode::Scan);
+  EXPECT_FALSE(scan.still);
+  EXPECT_EQ(scan.min_views, 0);
+  EXPECT_TRUE(lenses.still);
+  EXPECT_TRUE(poses.still);
+  for (const quality::CaptureRuleOptions& rule : {lenses, poses, scan}) {
     EXPECT_EQ(rule.still_px, defaults.still_px);
     EXPECT_EQ(rule.timeout, defaults.timeout);
     EXPECT_EQ(rule.spread_warn_ms, defaults.spread_warn_ms);
@@ -358,10 +375,12 @@ TEST(AppCalibMode, CalibrateWaitsForItsModesReadiness) {
                              {S::Calibrated, S::Missing}));
   EXPECT_FALSE(session_ready(SessionMode::Extrinsics, linked, {},
                              {S::StandIn, S::Calibrated}));
+  // A scan never calibrates.
+  EXPECT_FALSE(session_ready(SessionMode::Scan, linked, {ready, ready}, real));
 }
 
 // Calibrate is never silent: pressed with nothing ready, each camera says
-// what it lacks and what to do, in either mode.
+// what it lacks and what to do, in either mode; a scan says it has none.
 TEST(AppCalibMode, SaysPerCameraWhyCalibrateIsHeldBack) {
   const auto record = [](const std::string& id) {
     capture::SessionCamera camera;
@@ -448,6 +467,16 @@ TEST(AppCalibMode, SaysPerCameraWhyCalibrateIsHeldBack) {
   EXPECT_TRUE(calibrate_blockers(SessionMode::Extrinsics, pair, real, path,
                                  summary, {}, options)
                   ->empty());
+  // A scan: never, saying where Calibrate is, whatever is ready.
+  EXPECT_EQ(said(calibrate_blockers(SessionMode::Scan, pair, real, path,
+                                    summary, {ready, ready}, options)
+                     .value()),
+            (std::vector<std::string>{": Scan mode has no Calibrate: switch "
+                                      "to Lenses or Poses in Setup"}));
+  // Its lenses refuse no capture, and its cameras show no lens line.
+  EXPECT_TRUE(capture_refusal(SessionMode::Scan, pair, {S::StandIn, S::StandIn})
+                  ->empty());
+  EXPECT_EQ(lens_line(SessionMode::Scan, pair[0], nullptr).value(), "");
   expect_refused(calibrate_blockers(SessionMode::Extrinsics, pair, {S::Missing},
                                     path, summary, {}, options)
                      .status(),
@@ -500,8 +529,10 @@ TEST(AppCalibMode, RecordsEachStereoCameraWithItsLens) {
 // the boards it takes. Each part starts at the other mode's.
 TEST(AppCalibMode, SetsEveryPartToTheScenariosMode) {
   for (const SessionMode mode :
-       {SessionMode::Intrinsics, SessionMode::Extrinsics}) {
+       {SessionMode::Intrinsics, SessionMode::Extrinsics, SessionMode::Scan}) {
+    SCOPED_TRACE(capture::to_string(mode));
     const bool lenses = mode == SessionMode::Intrinsics;
+    const bool scan = mode == SessionMode::Scan;
     RigScenario scenario;
     scenario.mode = mode;
     scenario.driver = "decklink";
@@ -513,8 +544,11 @@ TEST(AppCalibMode, SetsEveryPartToTheScenariosMode) {
     setup.mode = lenses ? SessionMode::Extrinsics : SessionMode::Intrinsics;
     LiveOptions live;
     live.rule.min_views = 7;
+    live.rule.still = scan;
+    live.scan = !scan;
     RigMode window;
     window.intrinsic = !lenses;
+    window.scan = !scan;
     const viz::BoardEditor editor =
         apply_mode(scenario, setup, live, window).value();
     EXPECT_EQ(setup.mode, mode);
@@ -525,7 +559,10 @@ TEST(AppCalibMode, SetsEveryPartToTheScenariosMode) {
     EXPECT_EQ(setup.pair_rows.rectified.width, 960u);
     EXPECT_EQ(setup.pair_rows.rectified.height, 544u);
     EXPECT_EQ(live.rule.min_views, capture_rule(mode).min_views);
+    EXPECT_EQ(live.rule.still, !scan);
+    EXPECT_EQ(live.scan, scan);
     EXPECT_EQ(window.intrinsic, lenses);
+    EXPECT_EQ(window.scan, scan);
     EXPECT_EQ(editor.board(), board_seed(mode));
     EXPECT_EQ(editor.rule().checkerboard, lenses);
     EXPECT_EQ(editor.rule().min_corners, board_rule(mode).min_corners);

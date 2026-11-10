@@ -247,6 +247,7 @@ std::uint32_t tint_of(const float rgb[3]) {
 struct Notices {
   std::deque<std::string> messages;  // newest last
   viz::CaptureStatus capture;
+  viz::ScanStatus scan;  // a scan's last capture; the rest is set each frame
   Clock::time_point flash_until{};
   int flashed = -1;
 
@@ -469,6 +470,27 @@ void calibrate_controls(const Workers& workers, RigMode& mode,
   }
 }
 
+// The Scan window: the capture's buttons, then where the scan stands: the
+// session, its captures, those still being written, and the last one's
+// files. No Calibrate.
+void scan_window(const Workers& workers, Notices& notices,
+                 const FrameInputs& in) {
+  ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+  ImGui::Begin("Scan");
+  if (ImGui::Button("Capture")) arm(workers.live, *in.now, notices);
+  ImGui::SameLine();
+  if (ImGui::Button("Drop last")) drop_last(workers.captures, notices);
+  viz::ScanStatus status = notices.scan;
+  status.decision = workers.live.decision();
+  status.directory = in.directory;
+  status.captures = in.kept != nullptr ? in.kept->captures.size() : 0;
+  status.writing = in.saver.pending;
+  const core::Result<std::vector<viz::PanelLine>> lines =
+      viz::scan_panel(status);
+  if (lines.ok()) viz::draw_panel_lines("scan", lines.value());
+  ImGui::End();
+}
+
 // The capture's window: its buttons and Calibrate's, then where it stands.
 void capture_window(const Workers& workers, RigMode& mode,
                     CalibrationShown& shown, Notices& notices,
@@ -501,6 +523,8 @@ void rig_windows(const LiveSnapshot& snapshot, const viz::BoardEditor& editor,
           : core::Result<std::vector<viz::PanelLine>>(set.status());
   if (set_lines.ok()) viz::draw_panel_lines("set", set_lines.value());
   ImGui::End();
+  // A scan judges no camera's view: the Scan window says the rest.
+  if (in.session() == capture::SessionMode::Scan) return;
 
   ImGui::SetNextWindowPos(ImVec2(10, 420), ImGuiCond_FirstUseEver);
   ImGui::Begin("Cameras");
@@ -639,6 +663,19 @@ bool calibration_window(const Workers& workers, RigMode& mode,
   return use;
 }
 
+// A mode as the Setup panel names it.
+const char* mode_name(capture::SessionMode mode) {
+  switch (mode) {
+    case capture::SessionMode::Intrinsics:
+      return "Lenses";
+    case capture::SessionMode::Extrinsics:
+      return "Poses";
+    case capture::SessionMode::Scan:
+      return "Scan";
+  }
+  return "?";
+}
+
 // A change the Setup panel or "Use these lenses" asks for: the mode, or a
 // lens file.
 struct SetupRequest {
@@ -684,9 +721,12 @@ SetupRequest setup_window(SetupPanel& panel, const RigNow& now,
   ImGui::Begin("Setup");
   ImGui::BeginDisabled(mode.calibrating);
   if (panel.confirm) {
+    // A scan's captures were never Calibrate's.
     ImGui::TextWrapped(
-        "Start a new session? This one's %zu captures stay in %s, but "
-        "Calibrate can no longer take them.",
+        now.setup.mode == capture::SessionMode::Scan
+            ? "Start a new session? This one's %zu captures stay in %s."
+            : "Start a new session? This one's %zu captures stay in %s, but "
+              "Calibrate can no longer take them.",
         in.kept != nullptr ? in.kept->captures.size() : 0,
         in.directory.c_str());
     if (ImGui::Button("Start it")) {
@@ -697,13 +737,15 @@ SetupRequest setup_window(SetupPanel& panel, const RigNow& now,
     ImGui::SameLine();
     if (ImGui::Button("Keep this one")) panel.confirm.reset();
   }
-  const bool lenses = now.setup.mode == capture::SessionMode::Intrinsics;
-  if (ImGui::RadioButton("Lenses", lenses) && !lenses) {
-    request.mode = capture::SessionMode::Intrinsics;
-  }
-  ImGui::SameLine();
-  if (ImGui::RadioButton("Poses", !lenses) && lenses) {
-    request.mode = capture::SessionMode::Extrinsics;
+  const capture::SessionMode current = now.setup.mode;
+  for (const capture::SessionMode choice :
+       {capture::SessionMode::Intrinsics, capture::SessionMode::Extrinsics,
+        capture::SessionMode::Scan}) {
+    if (choice != capture::SessionMode::Intrinsics) ImGui::SameLine();
+    if (ImGui::RadioButton(mode_name(choice), current == choice) &&
+        current != choice) {
+      request.mode = choice;
+    }
   }
   if (mode.calibrating) {
     ImGui::SameLine();
@@ -804,21 +846,39 @@ void take_reports(const Workers& workers, CloudWorker& cloud,
   }
   for (const CaptureEvent& event : captures.take_events()) {
     switch (event.kind) {
-      case CaptureEvent::Kind::Saved:
+      case CaptureEvent::Kind::Saved: {
         notices.capture.last = event.meta;
         notices.capture.last_usable_views = event.usable_views;
         notices.capture.last_tag_cameras = event.tag_cameras;
         notices.capture.last_flagged = event.flagged;
         notices.capture.error.clear();
+        notices.scan.last = event.meta.index;
+        notices.scan.last_tag_cameras = event.tag_cameras;
+        notices.scan.last_files.clear();
+        const std::vector<std::string>& ids = workers.live.ids();
+        for (std::size_t i = 0; i < event.pictures.size(); ++i) {
+          notices.scan.last_files.push_back(
+              {i < ids.size() ? ids[i] : std::string("?"),
+               event.pictures[i].file, event.pictures[i].bytes});
+        }
+        notices.scan.error.clear();
         notices.flash_until = Clock::now() + kFlash;
         notices.flashed = event.meta.index;
         break;
+      }
       case CaptureEvent::Kind::Dropped:
+        // The Scan window's last capture is the one written last, not dropped.
+        if (notices.scan.last == event.meta.index) {
+          notices.scan.last.reset();
+          notices.scan.last_tag_cameras = 0;
+          notices.scan.last_files.clear();
+        }
         notices.note("capture " + std::to_string(event.meta.index) +
                      " dropped");
         break;
       case CaptureEvent::Kind::Failed:
         notices.capture.error = event.status.message();
+        notices.scan.error = event.status.message();
         notices.note(event.status.message());
         break;
     }
@@ -1286,7 +1346,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
   SetupPanel setup_panel;
   // Each mode's board as it last had it (by capture::SessionMode), so a
   // switch back finds the board entered there.
-  std::array<std::optional<std::pair<Target, bool>>, 2> boards;
+  std::array<std::optional<std::pair<Target, bool>>, 3> boards;
   // A new session of `next`'s mode and lens file, the cameras left open; said
   // when refused.
   const auto start_session = [&](const RigScenario& next) {
@@ -1311,6 +1371,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     const core::Status refreshed = now.refresh();
     if (!refreshed.ok()) notices.note(refreshed.message());
     calibration = CalibrationShown{};
+    notices.scan = viz::ScanStatus{};  // the next session has no last capture
     view3d.cameras = scene_cameras(now.setup);
     view3d.lines_stale = true;
     framed.reset();
@@ -1319,9 +1380,7 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
                    std::to_string(closing->captures.size()) +
                    " captures, kept on disk");
     }
-    notices.note(std::string(next.mode == capture::SessionMode::Intrinsics
-                                 ? "Lenses"
-                                 : "Poses") +
+    notices.note(std::string(mode_name(next.mode)) +
                  ": a new session starts at the next capture");
   };
   // A lens file for the next session, its notes said.
@@ -1433,15 +1492,20 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
     // at the next frame's inputs.
     SetupRequest request;
     if (mode.view == RigView::Images) {
-      capture_window(workers, mode, calibration, notices, in);
-      board_window(editor, *live, notices);
+      // A scan has no board, Calibrate or Calibration window.
+      if (mode.scan) {
+        scan_window(workers, notices, in);
+      } else {
+        capture_window(workers, mode, calibration, notices, in);
+        board_window(editor, *live, notices);
+      }
       request =
           setup_window(setup_panel, now, mode, in, config.output.path, notices);
     } else {
       view_window(view3d, ids, notices);
     }
-    if (calibration_window(workers, mode, view_changed, calibration, in,
-                           notices)) {
+    if (!mode.scan && calibration_window(workers, mode, view_changed,
+                                         calibration, in, notices)) {
       request = SetupRequest{};
       request.lenses = use_lens_run(*calibration.lens_run, now, notices);
     }
@@ -1452,7 +1516,11 @@ core::Status run_window(GLFWwindow* window, const core::config::Config& config,
       report_view(view3d, refresh_lines(view3d, app, retire, frame.number),
                   notices);
     }
-    if (latest && mosaic_shown) draw_marks(*mosaic, *latest, in);
+    // No marks in a scan: nothing is searched for. Its tiles are grey too.
+    // TODO: a colour tile for a V210 camera in Scan (its words through
+    // sensor's colour pass into the mosaic), should a scan want its colour
+    // judged live; the stills are colour already.
+    if (latest && mosaic_shown && !mode.scan) draw_marks(*mosaic, *latest, in);
 
     gfx::RenderTargetBeginInfo begin;
     frame.target->begin(frame.cmd, begin);

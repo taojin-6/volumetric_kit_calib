@@ -117,10 +117,10 @@ core::Result<CaptureDecision> CaptureRule::update(const LiveSet& set,
         if (!missing.empty()) {
           decision.hold = Hold::Incomplete;
           decision.message = missing + " missing";
-        } else if (!set.motion_px) {
+        } else if (options_.still && !set.motion_px) {
           decision.hold = Hold::NoBoard;
           decision.message = "board not seen in two sets running";
-        } else if (*set.motion_px >= options_.still_px) {
+        } else if (options_.still && *set.motion_px >= options_.still_px) {
           decision.hold = Hold::Moving;
           decision.message = "board moving (" + format(*set.motion_px) + " px)";
         } else if (set.saver_full) {
@@ -139,7 +139,7 @@ core::Result<CaptureDecision> CaptureRule::update(const LiveSet& set,
         }
 
         decision.state = CaptureState::Take;
-        decision.stillness_px = *set.motion_px;
+        decision.stillness_px = set.motion_px.value_or(0.0);
         for (const ViewCheck& check : set.checks) {
           if (is_usable(check.verdict)) ++decision.usable_views;
         }

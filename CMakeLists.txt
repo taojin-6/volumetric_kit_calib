@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(
   volumetric_kit_calib
-  VERSION 0.12.0
+  VERSION 0.13.0
   DESCRIPTION
     "Calibration companion for volumetric_kit: diagnostics, acquisition guidance, and a requirements solver"
   HOMEPAGE_URL "https://github.com/taojin-6/volumetric_kit_calib"
@@ -63,15 +63,18 @@ include(vc_sanitizers)
 # --- Dependencies + library --------------------------------------------------
 # The oldest volumetric_kit_core and volumetric_kit_sensor calib builds with
 # (DECISIONS.md, 2026-10-29), checked in the ones that arrive (third_party/):
-# sensor 0.43.0's NV12 test pictures CONCURRENT across queue families
-# (testing/nv12_picture.hpp), which the app tests make, past 0.41.0's tracked
-# stills the solve tier's register_tracked reads (camera/tracked_stills.hpp) and
-# 0.21.0's LumaPass and list read (DECISIONS.md, 2026-11-02).
+# sensor 0.49.0's V210 words read whole (prep/picture_readback.hpp), their
+# R'G'B' (v210_rgb.hpp) and its RGB PNGs (io/image_io.hpp), Scan's stills
+# (DECISIONS.md, 2026-11-09), past 0.43.0's NV12 test pictures CONCURRENT across
+# queue families (testing/nv12_picture.hpp), 0.41.0's tracked stills the solve
+# tier's register_tracked reads (camera/tracked_stills.hpp) and 0.21.0's
+# LumaPass and list read (DECISIONS.md, 2026-11-02).
 set(VC_CORE_MIN_VERSION 0.29.0)
-set(VC_SENSOR_MIN_VERSION 0.43.0)
+set(VC_SENSOR_MIN_VERSION 0.49.0)
 # calib_app's: CalibRig's operation and DeckLink cameras (DECISIONS.md,
-# 2026-11-02, intrinsic mode).
-set(VC_APP_CORE_MIN_VERSION 0.40.0)
+# 2026-11-02, intrinsic mode), and its scan (core 0.51.0; DECISIONS.md,
+# 2026-11-09).
+set(VC_APP_CORE_MIN_VERSION 0.51.0)
 # OpenCV 5, a prerequisite of the compute tier and those built on it
 # (DECISIONS.md, 2026-10-17): Homebrew's on macOS, tools/install-opencv.sh's on
 # Linux (README, "Prerequisites"). Found here so its imported targets reach

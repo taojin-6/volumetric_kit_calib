@@ -183,7 +183,7 @@ jobs:
       # Keep the ref at calib's sensor pin (third_party/CMakeLists.txt).
       - name: Install the Orbbec SDK
         if: inputs.rig
-        uses: taojin-6/volumetric_kit_sensor/.github/actions/install-orbbec-sdk@1c5dd4855995c5168477ffc7322f0ad6dad81e2d
+        uses: taojin-6/volumetric_kit_sensor/.github/actions/install-orbbec-sdk@97eeb7699355c74753cf50b0347d0975a57dbabd
 
       # The installed versions of the leg's formulae and of their dependencies,
       # so the first run after a brew upgrade builds the dependency tree afresh
@@ -194,7 +194,7 @@ jobs:
       - name: Homebrew key
         id: brew
         if: runner.os == 'macOS'
-        uses: taojin-6/volumetric_kit_core/.github/actions/homebrew-key@3f48e1423084139b4a7ea46b4205f670bbfe2141
+        uses: taojin-6/volumetric_kit_core/.github/actions/homebrew-key@8ab88093438ec62c086dab2efe27e88e4a8b194d
         with:
           formulae: ${{ steps.formulae.outputs.formulae }}
 
@@ -323,7 +323,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: taojin-6/volumetric_kit_core
-          ref: 3f48e1423084139b4a7ea46b4205f670bbfe2141
+          ref: 8ab88093438ec62c086dab2efe27e88e4a8b194d
           path: _decklink_sdk
           persist-credentials: false
           sparse-checkout: tools/ci/decklink-sdk-16.0

@@ -35,6 +35,23 @@ detect::LumaView luma_view(const sensor::PictureView& view) {
   return {view.width, view.height, view.stride, view.luma};
 }
 
+// A V210 picture's words as read (`view`), described as `picture` is, on the
+// host: what `v210_to_rgb8` takes.
+sensor::YuvImage colour_view(const sensor::PictureView& view,
+                             const sensor::YuvImage& picture) {
+  sensor::YuvImage out;
+  out.layout = sensor::YuvLayout::V210;
+  out.host = view.luma;
+  out.stride[0] = view.stride;
+  out.width = view.width;
+  out.height = view.height;
+  out.kr = picture.kr;
+  out.kb = picture.kb;
+  out.full_range = view.full_range;
+  out.chroma_location = picture.chroma_location;
+  return out;
+}
+
 }  // namespace
 
 struct RigSource::Impl {
@@ -96,22 +113,41 @@ struct RigSource::Impl {
   // set's owner, its picture in `set`; the set's ready value set after both.
   // Two submits (the pass, then the read) stay: one submit, and NV12 luma
   // images read in place, were measured on 2026-11-03 at under 0.5 ms and 5%
-  // a set on the M5 Max and the lab box, below the bar for a change.
+  // a set on the M5 Max and the lab box, below the bar for a change. With
+  // `colour`, each V210 picture's words are read whole in the same read:
+  // every plane of a luma picture is its luma, so the list reads the same.
   core::Status make_luma(const std::vector<sensor::YuvImage*>& pictures,
                          const std::vector<std::size_t>& camera,
-                         const std::vector<bool>& grey, PictureSet& set,
-                         core::StageMetrics* metrics) {
+                         const std::vector<bool>& grey, bool colour,
+                         PictureSet& set, core::StageMetrics* metrics) {
     host.assign(cameras.size(), HostLuma{});
     VKC_ASSIGN(std::vector<sensor::DeviceLuma> made,
                pass->run(pictures, metrics));
     std::vector<sensor::YuvImage*> list;
-    list.reserve(2 * made.size());
+    list.reserve(3 * made.size());
     for (sensor::DeviceLuma& luma : made) {
       list.push_back(&luma.full);
       list.push_back(&luma.half);
     }
+    // Keyed on the layout, not the driver: a V210 picture's colour is its
+    // words, read now while the frame is the driver's. One on the host has
+    // none the readback copies, and none is read.
+    std::vector<std::size_t> coloured;  // by index into `pictures`
+    if (colour) {
+      for (std::size_t k = 0; k < pictures.size(); ++k) {
+        if (pictures[k]->layout != sensor::YuvLayout::V210 ||
+            pictures[k]->device == nullptr) {
+          continue;
+        }
+        list.push_back(pictures[k]);
+        coloured.push_back(k);
+      }
+    }
     core::Result<std::vector<sensor::PictureView>> read =
-        readback->read(list, sensor::PictureReadback::Planes::Luma, metrics);
+        readback->read(list,
+                       coloured.empty() ? sensor::PictureReadback::Planes::Luma
+                                        : sensor::PictureReadback::Planes::All,
+                       metrics);
     if (!read.ok()) {
       host.assign(cameras.size(), HostLuma{});
       return read.status();
@@ -133,12 +169,17 @@ struct RigSource::Impl {
       tiles->luma.push_back(std::move(made[k]));
       set.cameras[camera[k]].tile = &tiles->luma.back().full;
     }
+    for (std::size_t c = 0; c < coloured.size(); ++c) {
+      const std::size_t k = coloured[c];
+      host[camera[k]].colour =
+          colour_view(views[2 * made.size() + c], *pictures[k]);
+    }
     if (!tiles->luma.empty()) set.owner = std::move(tiles);
     return {};
   }
 
   core::Result<std::optional<PictureSet>> take_array(
-      core::StageMetrics* metrics, bool luma) {
+      core::StageMetrics* metrics, bool luma, bool colour) {
     std::optional<sensor::FrameSet> polled;
     {
       const core::StageScope scope(metrics, "poll");
@@ -179,7 +220,7 @@ struct RigSource::Impl {
           if (luma) {
             // The pass takes each picture's queue family over; the set keeps
             // the pictures as it left them, for the tiles and the 3D view.
-            VKC_TRY(make_luma(pictures, camera, grey, set, metrics));
+            VKC_TRY(make_luma(pictures, camera, grey, colour, set, metrics));
           } else {
             host.clear();
           }
@@ -190,7 +231,7 @@ struct RigSource::Impl {
   }
 
   core::Result<std::optional<PictureSet>> take_stereo(
-      core::StageMetrics* metrics, bool luma) {
+      core::StageMetrics* metrics, bool luma, bool colour) {
     std::optional<sensor::StereoFrame> polled;
     {
       const core::StageScope scope(metrics, "poll");
@@ -219,6 +260,7 @@ struct RigSource::Impl {
               true, nullptr,
               frame.timestamp_ns + static_cast<std::uint64_t>(skew)};
           set.spread_ns = magnitude;
+          set.skew_ns = skew;
           if (!luma) {
             host.clear();
             ++pairs;
@@ -235,8 +277,8 @@ struct RigSource::Impl {
                   " picture, not its " + size_text(size.width, size.height));
             }
           }
-          VKC_TRY(make_luma({sides[0], sides[1]}, {0, 1}, {true, true}, set,
-                            metrics));
+          VKC_TRY(make_luma({sides[0], sides[1]}, {0, 1}, {true, true}, colour,
+                            set, metrics));
           ++pairs;
           return std::optional<PictureSet>(std::move(set));
         });
@@ -337,9 +379,9 @@ void RigSource::stop() noexcept {
 }
 
 core::Result<std::optional<PictureSet>> RigSource::take(
-    core::StageMetrics* metrics, bool luma) {
-  if (impl_->array) return impl_->take_array(metrics, luma);
-  return impl_->take_stereo(metrics, luma);
+    core::StageMetrics* metrics, bool luma, bool colour) {
+  if (impl_->array) return impl_->take_array(metrics, luma, colour);
+  return impl_->take_stereo(metrics, luma, colour);
 }
 
 bool RigSource::failed() const noexcept { return impl_->failed; }

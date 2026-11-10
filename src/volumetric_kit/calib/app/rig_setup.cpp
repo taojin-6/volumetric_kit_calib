@@ -303,7 +303,8 @@ core::Result<viz::BoardEditor> switch_session(
         // comes after all of them.
         VKC_TRY(captures.accepts(next_setup));
         VKC_TRY(live.restart(next_setup.lenses, editor.board(),
-                             editor.square_measured(), next_live.rule));
+                             editor.square_measured(), next_live.rule,
+                             next_live.scan));
         VKC_TRY(captures.restart(next_setup));
         setup = std::move(next_setup);
         live_options = std::move(next_live);

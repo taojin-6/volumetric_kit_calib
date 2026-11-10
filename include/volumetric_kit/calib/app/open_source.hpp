@@ -52,7 +52,8 @@ namespace volumetric_kit::calib::app {
 /// @endcode
 struct RigScenario {
   /// What it calibrates, by `operation`: `calibrate_intrinsics` each
-  /// camera's lens, `calibrate` the rig's poses.
+  /// camera's lens, `calibrate` the rig's poses; `scan` nothing, each
+  /// camera's picture a still at a press.
   capture::SessionMode mode = capture::SessionMode::Extrinsics;
   std::string driver;  ///< `source.driver`: `"orbbec"` or `"decklink"`.
   /// `source.calibration`, read: the lenses the cameras start from; null
@@ -75,7 +76,7 @@ struct RigScenario {
 ///        a camera: that it runs what calib supports, so no scenario runs
 ///        another solve than it asks for.
 ///
-/// 1. `operation` is `calibrate` or `calibrate_intrinsics`.
+/// 1. `operation` is `calibrate`, `calibrate_intrinsics` or `scan`.
 /// 2. `source.driver` is `orbbec` or `decklink`, and this build has the
 ///    driver's arm.
 /// 3. `output.path` is an existing directory.

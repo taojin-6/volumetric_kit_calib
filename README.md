@@ -22,7 +22,7 @@ are in `DESIGN.md`, a design doc kept local: it is gitignored, as in
 > board-plane fit and pairwise depth agreement; and, with GLFW and a sensor
 > driver too, Orbbec's or DeckLink's, the `app` tier's `calib_rig`, live view,
 > 3D view, capture and Calibrate, of each camera's lens or the rig's poses,
-> the mode chosen in the app.
+> or a scan's colour stills, the mode chosen in the app.
 > The color tier is not yet implemented; the legacy `camera_calibration` Python
 > scripts (a separate checkout beside the `volumetric_kit/` folder) remain
 > the reference oracle.
@@ -54,10 +54,12 @@ renderer.
   luma and its half are made on the GPU, from any layout a driver hands out,
   and read back in one submit; the set itself stays on the device
   ([DECISIONS.md](DECISIONS.md#2026-11-02--every-camera-through-one-source)).
-  It is public, but outside the stable API.
+  At a scan's capture each V210 picture is read back whole with its luma,
+  for a still in colour. It is public, but outside the stable API.
 - **Capture:** the `capture` tier writes a calibration session to disk on a
   thread of its own and never overwrites: each camera's JPEG as the camera
-  coded it, or its luma as a PGM, raw 16-bit depth from cameras with depth,
+  coded it, a PNG still the app made of its picture (a scan's), or its luma
+  as a PGM, raw 16-bit depth from cameras with depth,
   the factory models in sensor's calibration file, and the detections of the
   board and the origin tag, and the checks
   ([DECISIONS.md](DECISIONS.md#2026-10-13--sessions-on-disk)). It takes
@@ -176,6 +178,9 @@ renderer.
   directory; the mode and the lens file are chosen in the app, the cameras
   left open ([its modes](#lenses-and-poses);
   [DECISIONS.md](DECISIONS.md#2026-11-03--one-calib_rig-the-mode-chosen-in-it)).
+  In Scan mode it calibrates nothing: a press saves every camera's picture
+  at once, in colour, with no board searched for ([Scan](#scan);
+  [DECISIONS.md](DECISIONS.md#2026-11-09--scan-every-cameras-picture-at-a-press)).
 - **Mobile (Android + iOS):** a first-class, fully on-device target — the
   board-constrained solve is small enough to run on an ARM CPU.
 
@@ -292,22 +297,25 @@ The core's
 [CONFIG.md](https://github.com/taojin-6/volumetric_kit_core/blob/main/CONFIG.md)
 has every field, the modes and the window among them.
 
-Its keys, on a press (none while a text field has the keyboard):
+Its keys, on a press (none while a text field has the keyboard); a
+presentation clicker's "next" and "back" are Page Down and Page Up, or →
+and ←:
 
-| Key | Camera images | 3D view |
-| --- | --- | --- |
-| Space, →, Page Down, S | capture | to the images, "press again" |
-| Backspace, ←, Page Up | drop the last capture | to the images |
-| C, F5 | Calibrate | Calibrate |
-| V, B, `.` | to the 3D view, once calibrated (Poses) | to the images |
-| Escape | cancel Calibrate | cancel Calibrate |
+| Key | Camera images | 3D view | Scan |
+| --- | --- | --- | --- |
+| Space, →, Page Down, S | capture | to the images, "press again" | capture, at once |
+| Backspace, ←, Page Up | drop the last capture | to the images | drop the last capture |
+| C, F5 | Calibrate | Calibrate | nothing: "Scan mode has no Calibrate" |
+| V, B, `.` | to the 3D view, once calibrated (Poses) | to the images | nothing: "Scan mode has no 3D view" |
+| Escape | cancel Calibrate | cancel Calibrate | nothing |
 
 ### Lenses and Poses
 
-calib_rig is one app with two modes, chosen in its Setup panel: Lenses
-(intrinsic) fits each camera's lens, Poses (extrinsic) the rig's poses. The
-scenario's `operation` is the mode it starts in, and `source.calibration` the
-lens file it starts from:
+calib_rig is one app with three modes, chosen in its Setup panel: Lenses
+(intrinsic) fits each camera's lens, Poses (extrinsic) the rig's poses, and
+[Scan](#scan) saves stills and calibrates nothing. The scenario's
+`operation` is the mode it starts in, and `source.calibration` the lens file
+it starts from:
 
 | | Lenses (`calibrate_intrinsics`) | Poses (`calibrate`) |
 | --- | --- | --- |
@@ -389,6 +397,51 @@ A pair, in the lab, in one run of calib_rig:
    - `refused` (one camera above the other, or both at one place): check
      the cameras and the scenario's pair.
 
+### Scan
+
+Scan (`"operation": "scan"`, or Scan in the Setup panel) saves every camera's
+picture at each press, for photogrammetry or NeRF, say: no board, no
+stillness rule, no frame averaging and no checks. A press takes the next set
+that has every camera's picture, waiting at most the capture rule's timeout
+(3 s) for one; Backspace (or the clicker's "back") drops the last capture,
+which stays on disk marked dropped. Calibrate's and the 3D view's keys say
+why they do nothing there, and a switch of mode after the first capture
+closes the session, as in the other modes.
+
+Each capture writes, under `output.path`'s new session directory:
+
+- `images/<id>/scan_<id>_<NNN>.png`: a V210 camera's picture (a DeckLink
+  pair's), read back whole at the press and converted to 8-bit R'G'B' as
+  sensor's colour pass converts it (`sensor::v210_to_rgb8`: BT.709, limited
+  range, chroma co-sited), then PNG-encoded. A Femto's is its JPEG, byte for
+  byte (`scan_<id>_<NNN>.jpg`), with its raw depth as in a calibration
+  session; any other camera's, its luma as a PGM.
+- `captures/<NNN>.json`: each camera's file, its size, time and sequence, the
+  origin tag where its luma shows it, and the set's spread, with a pair's
+  skew (right less left).
+- `session.json`: mode `"scan"`, the cameras with their inputs and lenses,
+  the lens file and the software; no board.
+
+The live view shows each camera's luma in grey, with no board marks; the
+Scan window shows the session, its captures, those still being written, and
+the last capture's files. The stills are made off the window and the live
+view, on the capture worker's thread, both cameras at once: a 2160p pair is
+on disk about 0.8 s after its press on an M5 Max (Release), most of it the
+PNGs' encoding (12-21 MB a still). Quitting writes every capture still
+queued first. A DeckLink pair's scan:
+
+```json
+{"version": 1, "operation": "scan",
+ "source": {"kind": "live", "driver": "decklink",
+   "cameras": [{"id": "bm-5", "input": "SDI 2"}, {"id": "bm-6", "input": "SDI 1"}],
+   "pairs": [{"left": "bm-5", "right": "bm-6"}],
+   "calibration": "bm_pair/array_calibration.json"},
+ "output": {"path": "sessions"}}
+```
+
+`source.calibration` is optional: a scan records the lens file it ran with,
+and needs no lens.
+
 ## Use it in your project
 
 ```cmake
@@ -417,8 +470,8 @@ above, and installs nothing: it has no install rules or package config
 ([DECISIONS.md](DECISIONS.md#2026-10-22--consumed-by-commit-never-installed)).
 
 calib needs `volumetric_kit_core` 0.29.0 or newer, with its vulkan tier for
-`VC_WITH_RIG`, and 0.40.0 or newer with its config tier for `calib_app`; and
-`volumetric_kit_sensor` 0.43.0 or newer. An application that declares either
+`VC_WITH_RIG`, and 0.51.0 or newer with its config tier for `calib_app`; and
+`volumetric_kit_sensor` 0.49.0 or newer. An application that declares either
 before calib, to share it with another sibling, pins at least that: on an
 older one, calib's configure fails at `vkc_require_core` or
 `vkc_require_sibling`. Without `VC_WITH_RIG`,

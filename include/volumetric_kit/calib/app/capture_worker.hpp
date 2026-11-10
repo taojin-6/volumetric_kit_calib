@@ -21,6 +21,14 @@
 /// out in the order they come, and each capture's and drop's outcome is
 /// reported (@ref take_events), with the session's checks once it is written
 /// (@ref summary) and the captures kept for Calibrate (@ref kept).
+///
+/// A scan session (`capture::SessionMode::Scan`) searches for no board and
+/// checks nothing: each camera's origin tag is searched for in its luma, and
+/// its V210 picture (@ref CameraFrameCopy::colour) is converted to 8-bit
+/// R'G'B' (`sensor::v210_to_rgb8`) and encoded as a PNG
+/// (`sensor::io::encode_png_rgb8`), every camera's search and still at once,
+/// on this thread's OpenCV loop; a camera with a JPEG keeps it, and one with
+/// neither its luma. The writer then writes the files.
 
 #include <cstddef>
 #include <cstdint>
@@ -78,7 +86,8 @@ struct CaptureSetup {
   /// after it when a session of that second is there) is created in.
   std::string root;
   capture::Software software;  ///< What the session was captured with.
-  /// What the session calibrates: each camera's lens, or the rig's poses.
+  /// What the session calibrates: each camera's lens, or the rig's poses;
+  /// or nothing, a scan's stills.
   capture::SessionMode mode = capture::SessionMode::Extrinsics;
   /// The scenario's calibration file (`source.calibration`), read; null for
   /// none. A lens run's file carries its other cameras' lenses
@@ -114,7 +123,8 @@ struct CaptureSetup {
   /// Captures kept and pending at once, at most: what one Calibrate adjusts,
   /// which also bounds the raw depth held (@ref KeptCapture::depth), 2 bytes
   /// per depth pixel per camera and capture (0.74 MB at nfov_unbinned,
-  /// 2.1 MB at wfov_unbinned); at least 1.
+  /// 2.1 MB at wfov_unbinned); at least 1. A scan session, which keeps no
+  /// depth and is never calibrated, has no bound.
   // TODO: more than 150 captures, should a session ever need them.
   std::size_t max_kept = solve::BundleAdjustOptions{}.max_captures;
 };
@@ -135,11 +145,12 @@ struct KeptCapture {
   /// Each camera's board found at full resolution, in rig order: the
   /// detection its file holds, with `observation.camera_id` the camera's id
   /// and `observation.frame_id` the capture's index. A camera that found no
-  /// board, or whose detection failed, has no corners.
+  /// board, or whose detection failed, has no corners, as has every camera
+  /// in a scan session, which searches for none.
   std::vector<Detection> views;
   /// Each camera's raw depth, in rig order: the very samples the session
   /// wrote as its PNG, shared with the writer, never copied; null for a
-  /// camera without depth.
+  /// camera without depth, and in a scan session, which keeps none.
   std::vector<std::shared_ptr<const std::vector<std::uint16_t>>> depth;
   /// Each camera's origin tag (`kOriginTag`), in rig order, in its colour
   /// image's pixels: the corners its file holds; empty where the camera
@@ -217,6 +228,9 @@ struct CaptureEvent {
   bool flagged = false;
   /// Saved: its cameras that found the origin tag (@ref KeptCapture::tags).
   int tag_cameras = 0;
+  /// Saved: each camera's picture file and its size, in rig order
+  /// (`capture::WriteResult::pictures`).
+  std::vector<capture::PictureFile> pictures;
 };
 
 /// @brief The capture worker: a thread that detects each capture at full
@@ -262,15 +276,18 @@ class CaptureWorker final : public CaptureSink {
   /// @param request  The capture, one part per camera, each with its luma
   ///                 (`width * height` bytes); a camera with depth's part
   ///                 with its depth in the one depth unit, another's with
-  ///                 none. A part without a JPEG saves its luma.
+  ///                 none. A part without a JPEG saves its luma, or in a
+  ///                 scan session its colour, when it has a copy of it.
   /// @return `true` once queued; `false`, with nothing queued, when
   ///         @ref full; `Unsupported`, with nothing queued, while the
   ///         captures kept and pending add up to `max_kept` (a drop makes
-  ///         room); `InvalidArgument` for a request with a part per camera
-  ///         missing or extra, a part's luma not its size, a camera with
-  ///         depth's part without a depth unit or in another unit than the
-  ///         first such part, or depth from a camera without it; `IoError`
-  ///         once the thread has ended; or `OutOfMemory`.
+  ///         room), but in a scan session; `InvalidArgument` for a request
+  ///         with a part per camera missing or extra, a part's luma not its
+  ///         size, a colour copy that is not V210 at its size or whose words
+  ///         do not hold its rows (@ref ColourCopy::words), a camera
+  ///         with depth's part without a depth unit or in another unit than
+  ///         the first such part, or depth from a camera without it;
+  ///         `IoError` once the thread has ended; or `OutOfMemory`.
   core::Result<bool> submit(CaptureRequest request) override;
 
   /// @brief Queue a drop of the latest capture requested before it that no
@@ -349,6 +366,7 @@ class CaptureWorker final : public CaptureSink {
   ///        image holding more than one print of the origin tag
   ///        (`InvalidArgument`, none of them kept), none of which fails the
   ///        capture; a session check that failed; and why the thread ended.
+  ///        (A scan's still that cannot be made fails its capture.)
   /// @return The failures, oldest first.
   std::vector<core::Status> take_errors();
 

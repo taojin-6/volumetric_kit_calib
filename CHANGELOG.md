@@ -7,6 +7,76 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). From
 release may break it, and each such entry says how to migrate
 (DECISIONS.md, 2026-11-01).
 
+## [0.13.0] - 2026-11-09
+
+### Added
+
+- **Scan, calib_rig's third mode** (DECISIONS.md, 2026-11-09): every
+  camera's picture saved at a press, for colour stills from a DeckLink pair
+  (photogrammetry or NeRF, say), with no board, no stillness rule, no
+  averaging and no checks. A scenario's `"operation": "scan"` starts in it,
+  and the Setup panel picks it beside Lenses and Poses; a switch after the
+  first capture closes the session, as before. Space (or →, Page Down, S, a
+  clicker's "next") takes the next set with every camera's picture, within
+  the capture rule's timeout; Backspace (or ←, Page Up) drops the last
+  capture. C, F5 and the 3D view's keys say why they do nothing; Escape does
+  nothing. The live view shows each camera in grey with no marks, and the
+  Scan window the session, its captures, those still being written and the
+  last capture's files, until it is dropped or the session switched
+  (`viz::scan_panel`, `viz::ScanStatus`). README, "Scan", has a DeckLink
+  pair's scenario.
+- Each V210 camera's picture is read back whole at the press
+  (`source::RigSource::take`'s `colour`, `source::HostLuma::colour`), copied
+  out by the live worker (`app::ColourCopy`,
+  `app::CameraFrameCopy::colour`; `CaptureWorker::submit` refuses a copy
+  whose words do not hold its rows), converted to 8-bit R'G'B' and
+  PNG-encoded on the capture worker, every camera at once, and written as
+  `images/<id>/scan_<id>_<NNN>.png`; a JPEG camera's JPEG is written byte
+  for byte as `scan_<id>_<NNN>.jpg`, its depth as ever. Each capture's
+  `captures/<NNN>.json` has each file, its size, time and sequence, the
+  set's spread, a pair's `skew_ns` and each camera's origin tag, and no
+  board's keys; `session.json` has mode `"scan"` and no board.
+- `capture::SessionMode::Scan`, `capture::to_string(SessionMode)`,
+  `capture::CameraCapture::png`, `capture::PictureFile` and
+  `capture::WriteResult::pictures` (each camera's picture file and size);
+  `app::CaptureEvent::pictures`; `CaptureMeta::skew_ns` and
+  `source::PictureSet::skew_ns`; `quality::CaptureRuleOptions::still`;
+  `app::LiveOptions::scan`, `app::RigMode::scan`, and
+  `LiveWorker::restart`'s `scan`.
+
+### Changed
+
+- `session_mode` takes `Operation::Scan`; another operation's refusal now
+  reads `operation: N is not one calib_rig runs (calibrate,
+  calibrate_intrinsics, scan)`. `check_scenario` takes `scan` on either
+  driver, with `calibrate_intrinsics`'s rules (the core's).
+- `CalibrateWorker::request` and `calibrate` refuse a scan's captures
+  (`Unsupported`); `calibrate_gate` and `session_ready` never let a scan
+  calibrate.
+- A session writer's refusal of a part with no picture reads `neither a
+  JPEG, a PNG nor its WxH luma`.
+- `SessionWriter::submit` and `drop_last` make their request's queue node
+  before they take the queue's lock, so what a submit allocates no longer
+  hangs on how many captures came before it: a deque's next block came
+  every 30th request with libc++ and, once `CaptureMeta` grew, every 3rd
+  with libstdc++, which `capture_oom`'s sweep met on Linux.
+- build: **calib pins core 0.51.0** (8ab8809), where it was at #97's merge
+  (3f48e14, 0.44.2), **and sensor 0.49.0** (97eeb76), where it was at #51's
+  merge (1c5dd48, 0.43.0), as are the core's and sensor's actions in CI.
+  `calib_app` needs core 0.51.0 (`VC_APP_CORE_MIN_VERSION`, was 0.40.0), for
+  `scan`, and calib sensor 0.49.0 (`VC_SENSOR_MIN_VERSION`, was 0.43.0), for
+  the V210 words read whole, `v210_to_rgb8` and `encode_png_rgb8`. The
+  core's 0.45-0.50 and sensor's 0.44-0.48 changes asked nothing of calib:
+  its other code builds and passes unchanged on the new pins.
+- calib's version is 0.13.0, where it was 0.12.0.
+
+### Migration
+
+- None for a program on the stable API: no header in README's table
+  changed. An application that pins an older core or sensor than calib now
+  needs is refused at configure (`vkc_require_core`,
+  `vkc_require_sibling`).
+
 ## [0.12.0] - 2026-11-03
 
 ### Changed

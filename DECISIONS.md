@@ -106,6 +106,74 @@ solve, the second camera pair) assemble the brain, and a rule that shows in
 review costs little. Freezing everything would stall the app; an ABI promise
 means nothing for a library nobody installs.
 
+## 2026-11-09 — Scan: every camera's picture at a press
+
+calib_rig's third mode, Scan (`"operation": "scan"`, core 0.51.0), saves
+every camera's picture at a press and calibrates nothing: colour stills from
+a DeckLink pair, for photogrammetry or NeRF, say, or a Femto rig's JPEGs.
+The owner's ask was "press a key and capture", the simplest flow there is.
+
+- **No board, no stillness, no checks.** The live view searches nothing
+  (`LiveOptions::scan`), and the capture rule without `still` takes the next
+  set with every camera's picture: only its wait for a complete set, with
+  its timeout, stays, so a camera that drops out fails the press, naming it.
+  A still is one picture, never an average. The Board window, the camera
+  panels, the Lenses panel and the Calibration window are hidden; C, F5 and
+  the 3D view's keys say why they do nothing, and Escape does nothing. The
+  capture keys are calib_rig's own, a clicker's "next" and "back" among
+  them. Why: a room has no board to wait for.
+- **The origin tag is still searched for** in each capture's full luma
+  (`detect::detect_tag`) and recorded where found: no press waits for it,
+  and it places the stills later.
+- **A V210 picture is read whole at the press, by the live worker.** A take
+  for a scan's armed capture reads each V210 picture's words in the luma's
+  readback submit (`RigSource::take`'s `colour`), keyed on the picture's
+  layout, not the driver. A DeckLink pair's pictures are the driver's
+  buffers, back to it once the take returns, so they are read then or never;
+  the live worker copies the words (44 MB a pair at 2160p) before its next
+  take reuses the readback's memory. A take not armed reads nothing more. A
+  Femto's JPEG is in its frame already.
+- **The still is made off the window and the live view.** The capture worker
+  converts each V210 picture to 8-bit R'G'B' as the colour pass does
+  (`sensor::v210_to_rgb8`) and encodes it (`encode_png_rgb8`, stb's default
+  level), every camera's still and origin-tag search in one OpenCV loop, and
+  the writer writes the PNG's bytes as it writes a JPEG. Sensor measured a
+  2160p still at about 18 ms to convert and 0.64 s to encode on one M5 Max
+  core (17-21 MB a still). On the M5 Max (Release, two noisy 2160p
+  pictures, 12 MB PNGs) a pair's capture took 770 ms from its submit to its
+  files written (median of 5); the take that reads both pictures' words
+  took 2.1 ms against 1.6 without (median of 20), and the live worker's copy
+  of them 0.7 ms, on unified memory (the lab's RTX 5090 reads over PCIe, not
+  measured here). A still that cannot be made fails its capture, so none is
+  saved grey by mistake. Why not the writer's thread: the capture tier stays
+  a writer of bytes, without sensor's colour code, and the encodes overlap
+  the writes.
+- **Files.** `images/<id>/scan_<id>_<NNN>.png`, `.jpg` for a Femto's JPEG
+  byte for byte, or `.pgm` for a camera with neither; `scan_`, so the legacy
+  scripts' `calib_img_*` glob leaves them out. A Femto's depth is written as
+  ever. `session.json` stays version 2, with mode `"scan"` and no board;
+  each `captures/<NNN>.json` stays version 1, without a board's keys
+  (stillness, live-vs-full, detection, check, usable views) and with a
+  pair's `skew_ns`, right less left. Nothing reads a session back (the
+  2026-10-13 entry), and the mode says which keys a capture has, as a
+  session without a sync file or depth leaves theirs out.
+- **Nothing is kept for Calibrate.** A scan keeps each capture's index and
+  origin tags, for its count, and no depth, with no `max_kept` bound: a room
+  takes hundreds of stills. Calibrate refuses a scan's captures
+  (`Unsupported`).
+- **Quitting loses no capture.** The capture worker and the writer carry
+  out every request queued before their threads stop, as they did, and
+  calib_rig destroys the capture worker after the live worker has stopped,
+  so a press handed on is written; a test holds it.
+- **The live tiles stay grey.** A V210 picture's colour tile would need
+  sensor's colour pass into the mosaic at every set; the stills are colour
+  already (a `TODO` in calib_rig).
+- **calib needs core 0.51.0 for `calib_app`** (`VC_APP_CORE_MIN_VERSION`),
+  whose config takes `scan`, and **sensor 0.49.0** (`VC_SENSOR_MIN_VERSION`),
+  for the words read whole, `v210_to_rgb8` and `encode_png_rgb8`. It pins
+  core 0.51.0 (8ab8809) and sensor 0.49.0 (97eeb76), and CI's actions at
+  them.
+
 ## 2026-11-03 — Fast tests in CI
 
 CI's tests prove each rule on the smallest case that shows it; full-size
@@ -190,10 +258,11 @@ sensor's registration file of it (`solve/tracked_world.hpp` has the method).
 
 ## 2026-11-03 — One calib_rig, the mode chosen in it
 
-calib_rig is one app: its Setup panel picks the mode, Lenses or Poses, and
-the lens file, and the scenario's `operation` and `source.calibration` are
-only where it starts (the owner's: "if we already have intrinsics, we just
-need to load it and do extrinsics").
+calib_rig is one app: its Setup panel picks the mode, Lenses or Poses (or
+Scan, amended 2026-11-09; see the dated entry), and the lens file, and the
+scenario's `operation` and `source.calibration` are only where it starts (the
+owner's: "if we already have intrinsics, we just need to load it and do
+extrinsics").
 
 - **A switch is a new session, the cameras left open** (`switch_session`).
   After the first capture a switch of mode or lens file closes the session,
@@ -438,14 +507,15 @@ calib_rig's mode is its scenario's `operation` (the one it starts in, since
 2026-11-03): `calibrate_intrinsics` fits
 each camera's lens, `calibrate` solves the rig's poses as before. One table
 holds what differs (`app/calib_mode.hpp`); the workers read the mode, never
-the driver. `calib_app` needs core 0.40.0 (`VC_APP_CORE_MIN_VERSION`), the
-rest of calib still 0.29.0.
+the driver. `calib_app` needs core 0.40.0 (`VC_APP_CORE_MIN_VERSION`; 0.51.0
+since 2026-11-09, for Scan), the rest of calib still 0.29.0.
 
-- **Only what calib runs.** `check_scenario` takes those two operations, and
-  the drivers `orbbec` and `decklink` (its poses from the entry above), each
-  where the build has its arm; anything else is refused, naming the field
-  and its value. Why: the core's config carries both from 0.40.0, and no
-  scenario may run another solve than it asks for.
+- **Only what calib runs.** `check_scenario` takes those two operations (and
+  `scan`, amended 2026-11-09), and the drivers `orbbec` and `decklink` (its
+  poses from the entry above), each where the build has its arm; anything
+  else is refused, naming the field and its value. Why: the core's config
+  carries both from 0.40.0, and no scenario may run another solve than it
+  asks for.
 - **Each camera's live lens** (`rig_lens`): the scenario's file's
   (`source.calibration`) at exactly the stream's size, else the driver's
   factory lens, else, for lenses alone, a stand-in (fx = fy = width / 2,
@@ -1357,10 +1427,11 @@ The `capture` tier writes the rig application's calibration sessions
 
 - **What is kept.** Each camera's JPEG byte for byte, as the camera coded it
   (recon's `RgbdFrame::color_bitstream`), or, without one, its luma as a PGM
-  (2026-11-02); raw 16-bit depth from a camera with depth, through recon's
-  `encode_png_u16`; the factory models at the streamed mode, in recon's
-  calibration file, unposed; and the full-resolution detections, the solver's
-  input, in numbers that read back exactly.
+  (2026-11-02), or in a scan the PNG still the app made (2026-11-09); raw
+  16-bit depth from a camera with depth, through recon's `encode_png_u16`;
+  the factory models at the streamed mode, in recon's calibration file,
+  unposed; and the full-resolution detections, the solver's input, in
+  numbers that read back exactly.
 - **Never overwritten.** The session's directory is created at the first
   capture, refusing one already there, and every file in it once, through the
   core's `write_file(CreateNew)`, except `session.json`: it lists the captures

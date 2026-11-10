@@ -144,9 +144,22 @@ std::string join(const std::string& directory, const std::string& name) {
   return directory + "/" + name;
 }
 
-std::string color_file(const std::string& id, int index, bool jpeg) {
-  return std::string(kImagesDir) + "/" + id + "/calib_img_" + id + "_" +
-         padded(index) + (jpeg ? ".jpg" : ".pgm");
+PictureKind picture_kind(const CameraCapture& part) noexcept {
+  if (!part.jpeg.empty()) return PictureKind::Jpeg;
+  if (!part.png.empty()) return PictureKind::Png;
+  return PictureKind::Pgm;
+}
+
+std::string color_file(const std::string& id, int index, PictureKind kind,
+                       SessionMode mode) {
+  const char* extension = kind == PictureKind::Jpeg  ? ".jpg"
+                          : kind == PictureKind::Png ? ".png"
+                                                     : ".pgm";
+  // A scan's stills are no calibration images: the legacy scripts' glob
+  // (calib_img_*) leaves them out.
+  const char* prefix = mode == SessionMode::Scan ? "/scan_" : "/calib_img_";
+  return std::string(kImagesDir) + "/" + id + prefix + id + "_" +
+         padded(index) + extension;
 }
 
 std::string depth_file(const std::string& id, int index) {
@@ -163,6 +176,19 @@ std::string pgm(const std::vector<std::uint8_t>& luma,
   std::string bytes = pgm_header(size);
   bytes.append(reinterpret_cast<const char*>(luma.data()), luma.size());
   return bytes;
+}
+
+std::size_t picture_bytes(const CameraCapture& part, PictureKind kind,
+                          sensor::camera::ImageSize size) {
+  switch (kind) {
+    case PictureKind::Jpeg:
+      return part.jpeg.size();
+    case PictureKind::Png:
+      return part.png.size();
+    case PictureKind::Pgm:
+      break;
+  }
+  return pgm_bytes(part.luma.size(), size);
 }
 
 std::string iso_time(std::int64_t ns) {
@@ -191,8 +217,7 @@ std::string format_session(const SessionInfo& info, const SessionFacts& facts,
   doc["format"] = "volumetric_kit_calib.session";
   doc["version"] = 2;
   doc["created"] = facts.created;
-  doc["mode"] =
-      info.mode == SessionMode::Intrinsics ? "intrinsics" : "extrinsics";
+  doc["mode"] = to_string(info.mode);
 
   json& software = doc["software"];
   software["calib"] = info.software.calib;
@@ -212,22 +237,25 @@ std::string format_session(const SessionInfo& info, const SessionFacts& facts,
   }
   rig["reference"] = info.reference;
 
-  const Target& board = info.board;
-  json& b = doc["board"];
-  b["type"] = to_string(board.kind);
-  // OpenCV's CharucoBoard counts squares, x then y: one more than corners.
-  b["squares"] = json::array({board.cols + 1, board.rows + 1});
-  b["square_m"] = board.square_size_m;
-  // A checkerboard has no markers.
-  if (board.kind == TargetKind::ChArUco) {
-    b["marker_m"] = board.marker_size_m;
-    b["dictionary"] = to_string(board.dictionary);
-    b["first_marker_id"] = board.first_marker_id;
-    b["legacy_pattern"] = board.legacy_pattern;
+  // A scan searches for no board.
+  if (info.mode != SessionMode::Scan) {
+    const Target& board = info.board;
+    json& b = doc["board"];
+    b["type"] = to_string(board.kind);
+    // OpenCV's CharucoBoard counts squares, x then y: one more than corners.
+    b["squares"] = json::array({board.cols + 1, board.rows + 1});
+    b["square_m"] = board.square_size_m;
+    // A checkerboard has no markers.
+    if (board.kind == TargetKind::ChArUco) {
+      b["marker_m"] = board.marker_size_m;
+      b["dictionary"] = to_string(board.dictionary);
+      b["first_marker_id"] = board.first_marker_id;
+      b["legacy_pattern"] = board.legacy_pattern;
+    }
+    b["square_measured"] = info.square_measured;
+    b["square_tolerance_m"] = optional_number(board.square_size_tolerance_m);
+    b["planarity_bow_m"] = optional_number(board.planarity_bow_m);
   }
-  b["square_measured"] = info.square_measured;
-  b["square_tolerance_m"] = optional_number(board.square_size_tolerance_m);
-  b["planarity_bow_m"] = optional_number(board.planarity_bow_m);
 
   json& tag = doc["origin_tag"];
   tag["dictionary"] = to_string(info.origin_tag.dictionary);
@@ -303,6 +331,8 @@ std::string format_session(const SessionInfo& info, const SessionFacts& facts,
 
 std::string format_capture(const SessionInfo& info, const CaptureJob& job) {
   const CaptureMeta& meta = job.meta;
+  // A scan judges no board: no stillness, detections, checks or views.
+  const bool scan = info.mode == SessionMode::Scan;
   json doc;
   doc["format"] = "volumetric_kit_calib.capture";
   doc["version"] = 1;
@@ -311,8 +341,12 @@ std::string format_capture(const SessionInfo& info, const CaptureJob& job) {
   doc["trigger_ns"] = meta.trigger_ns;
   doc["sequence"] = meta.sequence;
   doc["spread_ms"] = meta.spread_ms;
-  doc["stillness_px"] = meta.stillness_px;
-  doc["live_vs_full_px"] = optional_number(meta.live_vs_full_px);
+  if (scan) {
+    if (meta.skew_ns) doc["skew_ns"] = *meta.skew_ns;
+  } else {
+    doc["stillness_px"] = meta.stillness_px;
+    doc["live_vs_full_px"] = optional_number(meta.live_vs_full_px);
+  }
 
   json cameras = json::object();
   int usable_views = 0;
@@ -320,23 +354,24 @@ std::string format_capture(const SessionInfo& info, const CaptureJob& job) {
     const SessionCamera& camera = info.cameras[i];
     const std::string& id = camera.id;
     const CameraCapture& part = job.cameras[i];
-    const bool jpeg = !part.jpeg.empty();
+    const PictureKind kind = picture_kind(part);
     json c;
-    c["color"] = color_file(id, meta.index, jpeg);
+    c["color"] = color_file(id, meta.index, kind, info.mode);
     c["depth"] =
         camera.depth ? json(depth_file(id, meta.index)) : json(nullptr);
-    c["color_bytes"] =
-        jpeg ? part.jpeg.size() : pgm_bytes(part.luma.size(), camera.size);
+    c["color_bytes"] = picture_bytes(part, kind, camera.size);
     c["timestamp_ns"] = part.timestamp_ns;
     c["sequence"] = part.sequence;
-    c["detection"] = detection_json(part.detection);
-    c["check"] = check_json(part.check);
+    if (!scan) {
+      c["detection"] = detection_json(part.detection);
+      c["check"] = check_json(part.check);
+    }
     c["origin_tag"] = origin_tag_json(info.origin_tag, part.origin_tag);
     cameras[id] = std::move(c);
     if (is_usable(part.check.verdict)) ++usable_views;
   }
   doc["cameras"] = std::move(cameras);
-  doc["usable_views"] = usable_views;
+  if (!scan) doc["usable_views"] = usable_views;
   return text_of(doc);
 }
 

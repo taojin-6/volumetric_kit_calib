@@ -21,6 +21,11 @@
 /// set's frames go back to the driver at once. Each set with RGB-D frames is
 /// also offered, before it is searched (@ref LiveWorker::set_detecting), to a
 /// @ref SetSink: the 3D view's worker, which prepares its depth.
+///
+/// In Scan mode (@ref LiveOptions::scan) nothing is searched for: a press
+/// takes the next set that has every camera's picture, and each V210
+/// picture is read back whole with it, for a still in colour
+/// (@ref ColourCopy).
 
 #include <chrono>
 #include <cstddef>
@@ -41,8 +46,32 @@
 #include "volumetric_kit/core/base/stage_metrics.hpp"
 #include "volumetric_kit/sensor/array/sensor_array.hpp"
 #include "volumetric_kit/sensor/camera/camera_model.hpp"
+#include "volumetric_kit/sensor/yuv_image.hpp"
 
 namespace volumetric_kit::calib::app {
+
+/// @brief A camera's picture in colour at full size, copied out of its set
+///        at a capture for a still: a V210 picture's words, as the camera
+///        sent them (`source::HostLuma::colour`).
+///
+/// @code
+/// sensor::YuvImage picture = copy.picture;
+/// picture.host = copy.words.data();
+/// std::vector<std::uint8_t> rgb(std::size_t{picture.width} *
+///                               picture.height * 3);
+/// VKC_TRY(sensor::v210_to_rgb8(picture, rgb.data(), rgb.size()));
+/// @endcode
+struct ColourCopy {
+  /// The words: `picture.height` rows, from the first byte
+  /// (`picture.offset[0]` is 0) and `picture.stride[0]` bytes apart, each
+  /// `sensor::v210_row_bytes(picture.width)` long, which the stride is at
+  /// least.
+  std::vector<std::uint8_t> words;
+  /// How they read: `YuvLayout::V210` on the host, its size, stride, matrix,
+  /// range and siting. Its `host` is null, as @ref words may move: point it
+  /// at them to convert.
+  sensor::YuvImage picture;
+};
 
 /// @brief One camera's part of a capture, copied out of its set.
 ///
@@ -72,6 +101,10 @@ struct CameraFrameCopy {
   std::uint64_t sequence = 0;
   /// The live detection (in the half, refined), for the live-vs-full flag.
   Detection live;
+  /// In Scan mode (@ref LiveOptions::scan), a V210 camera's picture at full
+  /// size, for its still; empty otherwise, and for a picture in any other
+  /// layout, whose still is its @ref jpeg (or its luma).
+  std::optional<ColourCopy> colour;
 };
 
 /// @brief A capture the rule took: every camera's frame of one set, copied
@@ -228,6 +261,13 @@ struct LiveOptions {
   quality::CaptureRuleOptions rule;
   /// How long the worker waits before it polls again when no set is ready.
   std::chrono::milliseconds idle{2};
+  /// Scan mode (calib_rig's Scan): the board is never searched for, and a
+  /// press takes the next set with every camera's picture, as a rule without
+  /// `still` does (`capture_rule` gives Scan's), each V210 picture read back
+  /// whole with it (`source::RigSource::take`'s colour,
+  /// @ref CameraFrameCopy::colour). Its luma is still read, for the live
+  /// view's tiles and the capture's origin tag search.
+  bool scan = false;
 };
 
 /// @brief The live worker: a thread that owns the rig's
@@ -309,7 +349,8 @@ class LiveWorker {
 
   /// @brief Whether to search each set for the board: on, the default,
   ///        while the window shows the camera images; off while it shows the
-  ///        3D view alone.
+  ///        3D view alone. In Scan mode no set is searched either way, and
+  ///        on reads each set's luma, for the tiles.
   ///
   /// Off, each set is still polled, offered to the set sink and published
   /// with the rig's counters, but no luma is made or read back, and nothing
@@ -345,11 +386,14 @@ class LiveWorker {
   /// @param square_measured  Whether its square size was measured.
   /// @param rule             The capture rule's thresholds; its
   ///                         `spread_warn_ms` raised as @ref create raises it.
+  /// @param scan             Whether the next session is a scan
+  ///                         (@ref LiveOptions::scan).
   /// @return OK; `InvalidArgument` for what @ref create refuses of them; or
   ///         `OutOfMemory`. Refused, nothing changes.
   core::Status restart(const std::vector<sensor::camera::CameraModel>& lenses,
                        const Target& board, bool square_measured,
-                       const quality::CaptureRuleOptions& rule);
+                       const quality::CaptureRuleOptions& rule,
+                       bool scan = false);
 
   /// @brief Arm a capture: a press, at this moment.
   /// @return `true` once the worker will arm its rule; `false` with no

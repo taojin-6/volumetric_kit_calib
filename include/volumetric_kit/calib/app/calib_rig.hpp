@@ -8,7 +8,8 @@
 ///        every camera of the rig live, with the board found in each,
 ///        captures saved to a session on disk, and Calibrate, whose result
 ///        is each camera's lens (intrinsic mode) or the rig's poses, the live
-///        points shown at them (extrinsic mode).
+///        points shown at them (extrinsic mode); or, in Scan mode, every
+///        camera's picture saved as a still at each press.
 ///
 /// Five threads. The window's (T0) draws the rig mosaic and its marks and
 /// panels, or the 3D view (@ref RigMode), and turns the keys and buttons into
@@ -17,8 +18,9 @@
 /// source, its luma and half made on the GPU and read back, finds the board
 /// and drives the capture rule. The 3D-view worker (T2, @ref CloudWorker)
 /// prepares each sampled RGB-D set's depth and colour on the GPU. The capture
-/// worker (T3, @ref CaptureWorker) detects each capture at full resolution
-/// and queues it on the session writer. Calibrate's worker (T4,
+/// worker (T3, @ref CaptureWorker) detects each capture at full resolution,
+/// or makes a scan's stills, and queues it on the session writer.
+/// Calibrate's worker (T4,
 /// @ref CalibrateWorker) solves the captures kept and writes the results
 /// directory. The rig's cameras decode onto the compute library's side of one
 /// `VkDevice` that gfx shares, so the window copies each picture into its
@@ -69,7 +71,9 @@ core::Result<RigRequirements> rig_requirements(bool large_points = true);
 /// sensor's tiers share, and the scenario's cameras by its driver
 /// (@ref open_source), starting in its mode (calib_mode.hpp): intrinsic mode
 /// (Lenses) fits each camera's lens and has no 3D view; extrinsic mode
-/// (Poses) solves the rig. The Setup window switches the mode and the lens
+/// (Poses) solves the rig; Scan saves every camera's picture at a press, in
+/// colour, with no board, no Calibrate and no 3D view. The Setup window
+/// switches the mode and the lens
 /// file, the cameras left open (@ref switch_session). Ctrl+C or
 /// SIGTERM closes the window while it runs; the handlers it replaced are put
 /// back when it returns. The camera images come first: there the keys
