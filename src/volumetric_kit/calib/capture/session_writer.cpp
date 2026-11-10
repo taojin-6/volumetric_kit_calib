@@ -9,7 +9,6 @@
 #include <condition_variable>
 #include <cstdint>
 #include <ctime>
-#include <deque>
 #include <iterator>
 #include <list>
 #include <mutex>
@@ -358,7 +357,6 @@ struct SessionWriter::State {
     std::list<Outcome> outcome;
   };
 
-  // May throw: a deque may allocate as it is made (libstdc++'s does).
   State(SessionInfo session, std::optional<ArrayCalibration> factory_record,
         std::size_t queue_capacity)
       : info(std::move(session)),
@@ -568,15 +566,15 @@ struct SessionWriter::State {
       std::unique_lock<std::mutex> lock(mutex);
       wake.wait(lock, [this] { return stopping || !queue.empty(); });
       if (queue.empty()) return;  // stopping, with every request carried out
-      std::optional<Request> request(std::move(queue.front()));
-      queue.pop_front();
+      std::list<Request> taken;   // the next request, its node and all
+      taken.splice(taken.end(), queue, queue.begin());
       lock.unlock();
 
-      WriteResult result = carry_out(*request);
+      WriteResult result = carry_out(taken.front());
       // The capture's frames go before its slot is freed, so the capacity
       // bounds the memory held.
-      const bool capture = request->kind == WriteResult::Kind::Capture;
-      request.reset();
+      const bool capture = taken.front().kind == WriteResult::Kind::Capture;
+      taken.clear();
 
       lock.lock();
       try {
@@ -608,7 +606,9 @@ struct SessionWriter::State {
   std::condition_variable wake;  // the thread: a request, or stopping
   std::condition_variable idle;  // flush: a request carried out
   // Guarded by `mutex`.
-  std::deque<Request> queue;
+  // Each request comes in a node of its own, made before the lock is taken
+  // (submit, drop_last), so what a submit allocates hangs on nothing queued.
+  std::list<Request> queue;
   std::size_t held = 0;       // captures queued or being written
   std::size_t in_flight = 0;  // requests queued or being carried out
   bool stopping = false;
@@ -658,12 +658,12 @@ SessionWriter::~SessionWriter() {
 core::Result<bool> SessionWriter::submit(CaptureJob job) {
   try {
     VKC_TRY(check_job(state_->info, job));
-    State::Request request;
-    request.job = std::move(job);
-    request.outcome.emplace_back();
+    std::list<State::Request> request(1);
+    request.front().job = std::move(job);
+    request.front().outcome.emplace_back();
     std::lock_guard<std::mutex> lock(state_->mutex);
     if (state_->held >= state_->capacity) return false;
-    state_->queue.push_back(std::move(request));
+    state_->queue.splice(state_->queue.end(), request);
     ++state_->held;
     ++state_->in_flight;
     state_->wake.notify_one();
@@ -676,10 +676,10 @@ core::Result<bool> SessionWriter::submit(CaptureJob job) {
 
 core::Status SessionWriter::drop_last() {
   try {
-    State::Request request;
-    request.kind = WriteResult::Kind::Drop;
+    std::list<State::Request> request(1);
+    request.front().kind = WriteResult::Kind::Drop;
     std::lock_guard<std::mutex> lock(state_->mutex);
-    state_->queue.push_back(std::move(request));
+    state_->queue.splice(state_->queue.end(), request);
     ++state_->in_flight;
     state_->wake.notify_one();
     return {};

@@ -134,13 +134,25 @@ TEST(CaptureOom, CreateRefusingWhatSensorRefuses) {
       Code::InvalidArgument);
 }
 
+// What a submit allocates does not hang on where in the queue its capture
+// lands: a sweep after each count of captures before it, past a libc++
+// deque's block of 30 requests (a libstdc++ one's 512-byte node holds 3).
 TEST(CaptureOom, SubmitQueuingACapture) {
-  vkc::Result<std::unique_ptr<SessionWriter>> writer =
-      SessionWriter::create(make_info(), {2 * kCalls});
-  ASSERT_TRUE(writer.ok()) << writer.status().message();
-  Supply<CaptureJob> jobs(make_job());
-  expect_oom_when_reporting([&] { return (*writer)->submit(jobs.take()); },
-                            Code::Ok);
+  constexpr std::size_t kBefore = 32;
+  for (std::size_t before = 0; before <= kBefore; ++before) {
+    SCOPED_TRACE(before);
+    vkc::Result<std::unique_ptr<SessionWriter>> writer =
+        SessionWriter::create(make_info(), {kBefore + kCalls});
+    ASSERT_TRUE(writer.ok()) << writer.status().message();
+    for (std::size_t i = 0; i < before; ++i) {
+      const vkc::Result<bool> queued = (*writer)->submit(make_job());
+      ASSERT_TRUE(queued.ok() && queued.value());
+    }
+    Supply<CaptureJob> jobs(make_job());
+    expect_oom_when_reporting([&] { return (*writer)->submit(jobs.take()); },
+                              Code::Ok);
+    if (HasFailure()) return;
+  }
 }
 
 TEST(CaptureOom, SubmitRefusingACapture) {

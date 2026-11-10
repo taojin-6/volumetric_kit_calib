@@ -53,6 +53,11 @@ release may break it, and each such entry says how to migrate
   calibrate.
 - A session writer's refusal of a part with no picture reads `neither a
   JPEG, a PNG nor its WxH luma`.
+- `SessionWriter::submit` and `drop_last` make their request's queue node
+  before they take the queue's lock, so what a submit allocates no longer
+  hangs on how many captures came before it: a deque's next block came
+  every 30th request with libc++ and, once `CaptureMeta` grew, every 3rd
+  with libstdc++, which `capture_oom`'s sweep met on Linux.
 - build: **calib pins core 0.51.0** (8ab8809), where it was at #97's merge
   (3f48e14, 0.44.2), **and sensor 0.49.0** (97eeb76), where it was at #51's
   merge (1c5dd48, 0.43.0), as are the core's and sensor's actions in CI.
