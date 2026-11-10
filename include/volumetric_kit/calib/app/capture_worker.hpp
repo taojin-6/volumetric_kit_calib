@@ -283,7 +283,8 @@ class CaptureWorker final : public CaptureSink {
   ///         captures kept and pending add up to `max_kept` (a drop makes
   ///         room), but in a scan session; `InvalidArgument` for a request
   ///         with a part per camera missing or extra, a part's luma not its
-  ///         size, a colour copy that is not V210 at its size, a camera
+  ///         size, a colour copy that is not V210 at its size or whose words
+  ///         do not hold its rows (@ref ColourCopy::words), a camera
   ///         with depth's part without a depth unit or in another unit than
   ///         the first such part, or depth from a camera without it;
   ///         `IoError` once the thread has ended; or `OutOfMemory`.

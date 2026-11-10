@@ -62,8 +62,10 @@ namespace volumetric_kit::calib::app {
 /// VKC_TRY(sensor::v210_to_rgb8(picture, rgb.data(), rgb.size()));
 /// @endcode
 struct ColourCopy {
-  /// The words: `picture.height` rows, `picture.stride[0]` bytes apart, the
-  /// last `sensor::v210_row_bytes(picture.width)` long.
+  /// The words: `picture.height` rows, from the first byte
+  /// (`picture.offset[0]` is 0) and `picture.stride[0]` bytes apart, each
+  /// `sensor::v210_row_bytes(picture.width)` long, which the stride is at
+  /// least.
   std::vector<std::uint8_t> words;
   /// How they read: `YuvLayout::V210` on the host, its size, stride, matrix,
   /// range and siting. Its `host` is null, as @ref words may move: point it

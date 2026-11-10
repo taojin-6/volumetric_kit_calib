@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -66,6 +67,19 @@ TagSearch search_tag(const CameraFrameCopy& part) {
     return {};
   });
   return out;
+}
+
+// Whether `copy`'s words hold the rows its picture says, from the first
+// word: v210_to_rgb8 reads them through a pointer, which knows no end.
+bool holds_rows(const ColourCopy& copy) {
+  const sensor::YuvImage& picture = copy.picture;
+  const std::uint64_t row = sensor::v210_row_bytes(picture.width);
+  if (picture.offset[0] != 0 || picture.stride[0] < row) return false;
+  if (picture.height == 0) return true;  // nothing to read; sensor refuses it
+  const std::size_t bytes = copy.words.size();
+  if (bytes < row) return false;
+  return picture.height == 1 ||
+         picture.stride[0] <= (bytes - row) / (picture.height - 1);
 }
 
 // A V210 picture's words as an 8-bit RGB PNG file's bytes: converted as
@@ -804,6 +818,11 @@ core::Result<bool> CaptureWorker::submit(CaptureRequest request) {
         return core::Status::invalid_argument(
             "capture: camera " + cameras[i].id +
             "'s colour is not V210 at its pictures' size");
+      }
+      if (part.colour && !holds_rows(*part.colour)) {
+        return core::Status::invalid_argument(
+            "capture: camera " + cameras[i].id +
+            "'s colour words do not hold its rows");
       }
       if (!cameras[i].depth) {
         if (!part.depth.empty()) {

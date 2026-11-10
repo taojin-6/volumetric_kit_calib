@@ -8,14 +8,14 @@
 // origin tag found in its luma and recorded, and the capture's file with no
 // board's keys; a JPEG camera's JPEG byte for byte, its depth beside it, and
 // no cap on the captures; a still that cannot be made failing its capture; a
-// colour copy refused for its layout or size; and every capture queued
-// written when the app quits. Then end to end on a device, through a fake
-// DeckLink pair of V210 pictures in buffers: a press takes the next pair at
-// once with nothing searched, its stills in colour; the clicker's "back"
-// drops it; a switch to Poses after it closes the scan's session, and one
-// back to Scan opens another. The device part runs under the validation
-// layer when the environment asks (VKC_TEST_VALIDATION) and skips without a
-// device.
+// colour copy refused for its layout, its size or words short of its rows;
+// and every capture queued written when the app quits. Then end to end on a
+// device, through a fake DeckLink pair of V210 pictures in buffers: a press
+// takes the next pair at once with nothing searched, its stills in colour;
+// the clicker's "back" drops it; a switch to Poses after it closes the scan's
+// session, and one back to Scan opens another. The device part runs under
+// the validation layer when the environment asks (VKC_TEST_VALIDATION) and
+// skips without a device.
 
 #include <algorithm>
 #include <array>
@@ -396,8 +396,8 @@ TEST(AppScanHost, AJpegCameraKeepsItsJpegAndItsDepth) {
 }
 
 // A still that cannot be made fails its capture, naming the camera, and
-// writes nothing of it; a colour copy that is not V210 at the camera's size
-// is refused at once.
+// writes nothing of it; a colour copy that is not V210 at the camera's size,
+// or whose words do not hold its rows, is refused at once.
 TEST(AppScanHost, AStillThatCannotBeMadeFailsItsCapture) {
   const ScratchDir root;
   ScanRig rig = scan_rig(root.path());
@@ -406,8 +406,7 @@ TEST(AppScanHost, AStillThatCannotBeMadeFailsItsCapture) {
   const std::vector<std::uint8_t> words =
       test::pack_v210(colour_wash(1), kStride);
   CaptureRequest r = pair_request(words, words);
-  r.cameras[1].colour->words.resize(100);      // short of its rows
-  r.cameras[1].colour->picture.stride[0] = 8;  // shorter than its row
+  r.cameras[1].colour->picture.full_range = true;  // V210 is limited range
   ASSERT_TRUE(submit(*worker, std::move(r)));
   std::vector<CaptureEvent> events = settle(*worker);
   ASSERT_EQ(events.size(), 1u);
@@ -428,6 +427,32 @@ TEST(AppScanHost, AStillThatCannotBeMadeFailsItsCapture) {
   CaptureRequest small = pair_request(words, words);
   small.cameras[1].colour->picture.width = kWidth / 2;
   EXPECT_FALSE(worker->submit(std::move(small)).ok());
+
+  // The conversion reads the words through a pointer: rows past their end,
+  // or a stride or offset that would put them there, are refused here.
+  const auto refusal = [&](CaptureRequest request) {
+    const core::Result<bool> queued = worker->submit(std::move(request));
+    EXPECT_FALSE(queued.ok());
+    return queued.status().message();
+  };
+  const std::string short_of =
+      "capture: camera bm-6's colour words do not hold its rows";
+  CaptureRequest cut = pair_request(words, words);
+  cut.cameras[1].colour->words.resize(100);  // its stride a card's
+  EXPECT_EQ(refusal(std::move(cut)), short_of);
+  CaptureRequest last_row = pair_request(words, words);
+  last_row.cameras[1].colour->words.pop_back();
+  EXPECT_EQ(refusal(std::move(last_row)), short_of);
+  CaptureRequest narrow = pair_request(words, words);
+  narrow.cameras[1].colour->picture.stride[0] = 8;  // shorter than a row
+  EXPECT_EQ(refusal(std::move(narrow)), short_of);
+  CaptureRequest wide = pair_request(words, words);
+  wide.cameras[1].colour->picture.stride[0] = kStride + 4;
+  EXPECT_EQ(refusal(std::move(wide)), short_of);
+  CaptureRequest offset = pair_request(words, words);
+  offset.cameras[1].colour->picture.offset[0] = 4;
+  EXPECT_EQ(refusal(std::move(offset)), short_of);
+  EXPECT_EQ(worker->pending(), 0u);
 }
 
 // Quitting the app destroys the capture worker: every capture queued is

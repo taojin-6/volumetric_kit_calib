@@ -27,7 +27,8 @@ release may break it, and each such entry says how to migrate
 - Each V210 camera's picture is read back whole at the press
   (`source::RigSource::take`'s `colour`, `source::HostLuma::colour`), copied
   out by the live worker (`app::ColourCopy`,
-  `app::CameraFrameCopy::colour`), converted to 8-bit R'G'B' and
+  `app::CameraFrameCopy::colour`; `CaptureWorker::submit` refuses a copy
+  whose words do not hold its rows), converted to 8-bit R'G'B' and
   PNG-encoded on the capture worker, every camera at once, and written as
   `images/<id>/scan_<id>_<NNN>.png`; a JPEG camera's JPEG is written byte
   for byte as `scan_<id>_<NNN>.jpg`, its depth as ever. Each capture's
