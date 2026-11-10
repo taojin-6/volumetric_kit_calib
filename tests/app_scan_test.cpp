@@ -13,9 +13,9 @@
 // device, through a fake DeckLink pair of V210 pictures in buffers: a press
 // takes the next pair at once with nothing searched, its stills in colour;
 // the clicker's "back" drops it; a switch to Poses after it closes the scan's
-// session, and one back to Scan opens another. The device part runs under
-// the validation layer when the environment asks (VKC_TEST_VALIDATION) and
-// skips without a device.
+// session and searches again, and one back to Scan opens another. The device
+// part runs under the validation layer when the environment asks
+// (VKC_TEST_VALIDATION) and skips without a device.
 
 #include <algorithm>
 #include <array>
@@ -46,6 +46,7 @@
 #include "volumetric_kit/calib/app/rig_setup.hpp"
 #include "volumetric_kit/calib/source/rig_source.hpp"
 #include "volumetric_kit/core/base/file_io.hpp"
+#include "volumetric_kit/core/base/stage_metrics.hpp"
 #include "volumetric_kit/core/testing/vulkan_fixture.hpp"
 #include "volumetric_kit/sensor/frame/device_requirements.hpp"
 #include "volumetric_kit/sensor/io/image_io.hpp"
@@ -222,6 +223,14 @@ std::vector<CaptureEvent> settle(CaptureWorker& worker) {
 }
 
 using Corners = std::array<cv::Point2d, 4>;
+
+// Whether `stages` has a row named `name`: "detect", the board's search.
+bool has_row(const core::StageMetrics& stages, const char* name) {
+  return std::any_of(stages.rows().begin(), stages.rows().end(),
+                     [name](const core::StageRow& row) {
+                       return std::string(row.name) == name;
+                     });
+}
 
 // The origin tag drawn into camera `i`'s luma in `r`, a print 60 px across.
 Corners draw_origin_tag(CaptureRequest& r, std::size_t i) {
@@ -505,10 +514,10 @@ class AppScan : public core::test::VulkanDeviceTest {
 };
 
 // The owner's flow: a press, with no board anywhere, takes the next pair at
-// once -- nothing searched, no stillness waited for -- and saves both
-// pictures in colour; "back" drops it, kept on disk. A switch to Poses after
-// it closes the scan's session; one back to Scan opens a new one at the next
-// press.
+// once -- nothing searched (no "detect" stage), no stillness waited for --
+// and saves both pictures in colour; "back" drops it, kept on disk. A switch
+// to Poses after it closes the scan's session and searches each set again;
+// one back to Scan opens a new one at the next press.
 TEST_F(AppScan, APressTakesTheNextPairInColour) {
   const ScratchDir root;
   ScanRig rig = scan_rig(root.path());
@@ -556,6 +565,7 @@ TEST_F(AppScan, APressTakesTheNextPairInColour) {
   ASSERT_NE(idle, nullptr);
   ASSERT_EQ(idle->detections.size(), 2u);
   EXPECT_TRUE(idle->detections[0].observation.empty());
+  EXPECT_FALSE(has_row(idle->stages, "detect"));
   EXPECT_EQ(idle->decision.state, quality::CaptureState::Idle);
   ASSERT_NE(idle->set->cameras[0].tile, nullptr);
   EXPECT_EQ(idle->set->skew_ns, std::optional<std::int64_t>(-1'700'000));
@@ -567,6 +577,7 @@ TEST_F(AppScan, APressTakesTheNextPairInColour) {
       << taken->decision.message;
   EXPECT_EQ(taken->decision.message, "");
   EXPECT_FALSE(taken->stages.rows().empty());
+  EXPECT_FALSE(has_row(taken->stages, "detect"));
   std::vector<CaptureEvent> events = settle(*captures);
   ASSERT_EQ(events.size(), 1u);
   ASSERT_EQ(events[0].kind, CaptureEvent::Kind::Saved)
@@ -606,6 +617,12 @@ TEST_F(AppScan, APressTakesTheNextPairInColour) {
   captures->flush();
   EXPECT_EQ(captures->kept(), nullptr);
   EXPECT_TRUE(captures->directory().empty());
+  // The worker takes the switch before its next take; a set it was already
+  // taking is the scan's, so the one after it is searched for sure.
+  ASSERT_NE(show(), nullptr);
+  const std::shared_ptr<const LiveSnapshot> searched = show();
+  ASSERT_NE(searched, nullptr);
+  EXPECT_TRUE(has_row(searched->stages, "detect"));
 
   // Back to Scan: the next press opens a new session.
   next.mode = capture::SessionMode::Scan;
